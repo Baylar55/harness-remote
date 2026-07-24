@@ -111,6 +111,8 @@ export type DiffFile = {
   file: string
   additions: number
   deletions: number
+  patch?: string
+  status?: "added" | "deleted" | "modified"
 }
 
 export type ProjectCurrent = Record<string, unknown> & {

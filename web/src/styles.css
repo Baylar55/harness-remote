@@ -990,6 +990,78 @@ p {
   background: var(--surface-strong);
 }
 
+.message-diff {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.message-diff summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  cursor: pointer;
+  padding: 0.35rem 0.6rem;
+  background: var(--surface-strong);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+
+.message-diff-file {
+  overflow-wrap: anywhere;
+}
+
+.message-diff-stats {
+  display: flex;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.diff-stat-add {
+  color: #2da44e;
+}
+
+.diff-stat-del {
+  color: #cf222e;
+}
+
+.message-diff-patch {
+  margin: 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.message-diff-patch div {
+  padding: 0 0.6rem;
+  white-space: pre;
+}
+
+.diff-line-add {
+  background: rgba(45, 164, 78, 0.15);
+  color: #2da44e;
+}
+
+.diff-line-del {
+  background: rgba(207, 34, 46, 0.15);
+  color: #cf222e;
+}
+
+.diff-line-hunk {
+  color: var(--muted);
+  background: var(--surface-subtle);
+}
+
+.diff-line-meta {
+  color: var(--muted);
+}
+
+.diff-line-context {
+  color: var(--text);
+}
+
 .message code,
 .help code,
 .command-name {

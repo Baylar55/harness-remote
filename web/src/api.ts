@@ -306,6 +306,10 @@ export const api = {
     return request<DiffFile[]>(config, withDirectory(`/session/${sessionID}/diff`, directory))
   },
 
+  loadMessageDiff(config: ServerConfig, sessionID: string, messageID: string, directory?: string) {
+    return request<DiffFile[]>(config, withDirectory(`/session/${sessionID}/diff?messageID=${encodeURIComponent(messageID)}`, directory))
+  },
+
   loadProjectCurrent(config: ServerConfig, directory?: string) {
     return request<ProjectCurrent>(config, withDirectory("/project/current", directory))
   },

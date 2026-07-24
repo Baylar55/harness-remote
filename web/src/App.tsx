@@ -77,7 +77,71 @@ function toolCommandLabel(part: MessagePart): string {
   return `${part.tool}(${JSON.stringify(input)})`
 }
 
-function MessagePartView({ part }: { part: MessagePart }) {
+function DiffLines({ patch }: { patch: string }) {
+  return (
+    <pre className="message-diff-patch">
+      {patch.split("\n").map((line, index) => {
+        let className = "diff-line-context"
+        if (line.startsWith("+++") || line.startsWith("---")) className = "diff-line-meta"
+        else if (line.startsWith("+")) className = "diff-line-add"
+        else if (line.startsWith("-")) className = "diff-line-del"
+        else if (line.startsWith("@@")) className = "diff-line-hunk"
+        return (
+          <div key={index} className={className}>
+            {line}
+          </div>
+        )
+      })}
+    </pre>
+  )
+}
+
+function PatchPartView({ config, sessionID, messageID, files }: { config: ServerConfig; sessionID: string; messageID: string; files: string[] }) {
+  const [diffs, setDiffs] = useState<DiffFile[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.loadMessageDiff(config, sessionID, messageID).then((result) => {
+      if (!cancelled) setDiffs(result)
+    }).catch(() => {
+      if (!cancelled) setDiffs([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [config.host, config.port, config.username, config.password, sessionID, messageID])
+
+  if (diffs === null) {
+    return (
+      <div className="message-patch">
+        {files.map((file) => (
+          <div key={file} className="message-patch-file">{file}</div>
+        ))}
+      </div>
+    )
+  }
+
+  if (diffs.length === 0) return null
+
+  return (
+    <div className="message-patch">
+      {diffs.map((diff) => (
+        <details key={diff.file} className="message-diff" open>
+          <summary>
+            <span className="message-diff-file">{diff.file}</span>
+            <span className="message-diff-stats">
+              <span className="diff-stat-add">+{diff.additions}</span>
+              <span className="diff-stat-del">-{diff.deletions}</span>
+            </span>
+          </summary>
+          {diff.patch && <DiffLines patch={diff.patch} />}
+        </details>
+      ))}
+    </div>
+  )
+}
+
+function MessagePartView({ part, config, sessionID }: { part: MessagePart; config: ServerConfig; sessionID: string }) {
   if (part.type === "text") {
     if (!part.text) return null
     return (
@@ -113,14 +177,8 @@ function MessagePartView({ part }: { part: MessagePart }) {
   }
 
   if (part.type === "patch") {
-    if (!part.files || part.files.length === 0) return null
-    return (
-      <div className="message-patch">
-        {part.files.map((file) => (
-          <div key={file} className="message-patch-file">{file}</div>
-        ))}
-      </div>
-    )
+    if (!part.files || part.files.length === 0 || !part.messageID) return null
+    return <PatchPartView config={config} sessionID={sessionID} messageID={part.messageID} files={part.files} />
   }
 
   return null
@@ -1742,7 +1800,7 @@ function App() {
                       <small>{formatTime(message.info.time.created)}</small>
                     </header>
                     {message.parts.map((part) => (
-                      <MessagePartView key={part.id} part={part} />
+                      <MessagePartView key={part.id} part={part} config={config} sessionID={message.info.sessionID} />
                     ))}
                   </article>
                 ))}
