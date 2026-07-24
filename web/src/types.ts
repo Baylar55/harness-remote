@@ -77,6 +77,7 @@ export type ToolState = {
 
 export type MessagePart = {
   id: string
+  messageID?: string
   type: string
   text?: string
   tool?: string

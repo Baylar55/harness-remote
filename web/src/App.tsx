@@ -7,6 +7,7 @@ import { api } from "./api"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
+  eventPayload,
   eventType,
   isNativeEventTransport,
   type EventStreamStatus
@@ -246,6 +247,43 @@ function createLocalAssistantMessage(sessionID: string, text: string): MessageEn
       }
     ]
   }
+}
+
+function applyStreamedPartUpdate(messages: MessageEnvelope[], sessionID: string, part: MessagePart): MessageEnvelope[] {
+  let changed = false
+  const next = messages.map((message) => {
+    if (message.info.sessionID !== sessionID || message.info.id !== part.messageID) return message
+    changed = true
+    const exists = message.parts.some((existing) => existing.id === part.id)
+    const parts = exists
+      ? message.parts.map((existing) => (existing.id === part.id ? part : existing))
+      : [...message.parts, part]
+    return { ...message, parts }
+  })
+  return changed ? next : messages
+}
+
+function applyStreamedPartDelta(
+  messages: MessageEnvelope[],
+  sessionID: string,
+  messageID: string,
+  partID: string,
+  field: string,
+  delta: string
+): MessageEnvelope[] {
+  let changed = false
+  const next = messages.map((message) => {
+    if (message.info.sessionID !== sessionID || message.info.id !== messageID) return message
+    const parts = message.parts.map((existing) => {
+      if (existing.id !== partID) return existing
+      changed = true
+      const current = (existing as Record<string, unknown>)[field]
+      const nextValue = (typeof current === "string" ? current : "") + delta
+      return { ...existing, [field]: nextValue }
+    })
+    return changed ? { ...message, parts } : message
+  })
+  return changed ? next : messages
 }
 
 function hasMatchingUserMessage(messages: MessageEnvelope[], optimistic: MessageEnvelope): boolean {
@@ -1049,6 +1087,24 @@ function App() {
     }
     const onEvent = (event: { data: unknown; name: string }) => {
       const type = eventType(event.data) ?? event.name
+      const payload = eventPayload(event.data)
+      const body = (payload?.properties ?? payload?.data) as
+        | { sessionID?: string; part?: MessagePart; messageID?: string; partID?: string; field?: string; delta?: string }
+        | undefined
+      if (type === "message.part.updated" && body?.sessionID && body.part) {
+        setMessages((current) => applyStreamedPartUpdate(current, body.sessionID!, body.part!))
+      } else if (
+        type === "message.part.delta" &&
+        body?.sessionID &&
+        body.messageID &&
+        body.partID &&
+        body.field &&
+        typeof body.delta === "string"
+      ) {
+        setMessages((current) =>
+          applyStreamedPartDelta(current, body.sessionID!, body.messageID!, body.partID!, body.field!, body.delta!)
+        )
+      }
       if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.")) {
         setLiveEventCount((count) => count + 1)
         scheduleRefresh()
