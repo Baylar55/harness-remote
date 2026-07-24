@@ -980,7 +980,7 @@ p {
 .message-tool-command,
 .message-tool-output {
   margin: 0;
-  white-space: pre-wrap;
+  white-space: pre;
   font-family: var(--font-mono);
   font-size: 0.82rem;
   overflow-x: auto;
