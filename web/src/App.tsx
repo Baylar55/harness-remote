@@ -1452,9 +1452,23 @@ function App() {
         return [createdView, ...current].sort((a, b) => b.updated - a.updated)
       })
       setSelectedID(created.id)
+      setMessages([])
+      setOptimisticUserMessages([])
+      setTodos([])
+      setDiffFiles([])
+      setProjectDashboard(null)
+      setDashboardError(null)
+      setAwaitingAssistantReply(false)
       setView("detail")
-      await loadSelected(created.id, created.directory)
-      await refreshSessions(false, createdView)
+      setLoadingSessionID(created.id)
+      try {
+        await loadSelected(created.id, created.directory)
+        await Promise.all([loadAgents(), loadModels()])
+      } catch (err) {
+        setRuntimeError((err as Error).message)
+      } finally {
+        setLoadingSessionID((activeID) => (activeID === created.id ? null : activeID))
+      }
     } catch (err) {
       setPickerError((err as Error).message)
       setRuntimeError((err as Error).message)
