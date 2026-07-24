@@ -77,10 +77,15 @@ function toolCommandLabel(part: MessagePart): string {
   return `${part.tool}(${JSON.stringify(input)})`
 }
 
-function DiffLines({ patch }: { patch: string }) {
+const DIFF_PREVIEW_LINES = 6
+
+function DiffLines({ patch, limit }: { patch: string; limit?: number }) {
+  const lines = patch.split("\n")
+  const shown = limit ? lines.slice(0, limit) : lines
+  const hiddenCount = lines.length - shown.length
   return (
     <pre className="message-diff-patch">
-      {patch.split("\n").map((line, index) => {
+      {shown.map((line, index) => {
         let className = "diff-line-context"
         if (line.startsWith("+++") || line.startsWith("---")) className = "diff-line-meta"
         else if (line.startsWith("+")) className = "diff-line-add"
@@ -92,12 +97,14 @@ function DiffLines({ patch }: { patch: string }) {
           </div>
         )
       })}
+      {hiddenCount > 0 && <div className="diff-line-more">+{hiddenCount} more lines</div>}
     </pre>
   )
 }
 
 function PatchPartView({ config, sessionID, messageID, files }: { config: ServerConfig; sessionID: string; messageID: string; files: string[] }) {
   const [diffs, setDiffs] = useState<DiffFile[] | null>(null)
+  const [expandedDiff, setExpandedDiff] = useState<DiffFile | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -134,9 +141,40 @@ function PatchPartView({ config, sessionID, messageID, files }: { config: Server
               <span className="diff-stat-del">-{diff.deletions}</span>
             </span>
           </summary>
-          {diff.patch && <DiffLines patch={diff.patch} />}
+          {diff.patch && (
+            <button
+              type="button"
+              className="message-diff-preview"
+              onClick={() => setExpandedDiff(diff)}
+              aria-label={`Expand full diff for ${diff.file}`}
+            >
+              <DiffLines patch={diff.patch} limit={DIFF_PREVIEW_LINES} />
+            </button>
+          )}
         </details>
       ))}
+
+      {expandedDiff && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setExpandedDiff(null)}>
+          <section
+            className="modal-card diff-modal fade-in"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="diff-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="diff-modal-header">
+              <h2 id="diff-modal-title">{expandedDiff.file}</h2>
+              <button type="button" className="btn-secondary" onClick={() => setExpandedDiff(null)}>
+                Close
+              </button>
+            </div>
+            <div className="diff-modal-body">
+              {expandedDiff.patch && <DiffLines patch={expandedDiff.patch} />}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

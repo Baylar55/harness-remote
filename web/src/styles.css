@@ -1026,6 +1026,59 @@ p {
   color: #cf222e;
 }
 
+.message-diff-preview {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.message-diff-preview:hover .message-diff-patch {
+  background: var(--surface-strong);
+}
+
+.diff-line-more {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.diff-modal {
+  width: min(92vw, 900px);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.diff-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-modal-header h2 {
+  font-size: 0.9rem;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.diff-modal-body {
+  overflow: auto;
+  padding: 0 var(--space-2);
+}
+
+.diff-modal-body .message-diff-patch {
+  padding-bottom: var(--space-4);
+}
+
 .message-diff-patch {
   margin: 0;
   overflow-x: auto;
