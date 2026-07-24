@@ -517,16 +517,26 @@ function createLocalAssistantMessage(sessionID: string, text: string): MessageEn
   }
 }
 
+/** Reasoning text should only ever grow while streaming — if an incoming snapshot is shorter than what's already shown, a reset/truncated event landed; keep the longer text instead of visibly erasing it. */
+function reconcileReasoningPart(previous: MessagePart | undefined, incoming: MessagePart): MessagePart {
+  if (incoming.type !== "reasoning" || !previous || previous.type !== "reasoning") return incoming
+  const previousText = previous.text ?? ""
+  const incomingText = incoming.text ?? ""
+  return incomingText.length >= previousText.length ? incoming : { ...incoming, text: previousText }
+}
+
 /** GET /session/{id}/message doesn't return reasoning parts, only the live event stream does — keep any streamed-in reasoning the refetch would otherwise silently drop. */
 function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelope[]): MessageEnvelope[] {
   const currentByID = new Map(current.map((message) => [message.info.id, message]))
   return fetched.map((message) => {
     const previous = currentByID.get(message.info.id)
     if (!previous) return message
+    const previousPartsByID = new Map(previous.parts.map((part) => [part.id, part]))
+    const parts = message.parts.map((part) => reconcileReasoningPart(previousPartsByID.get(part.id), part))
     const fetchedPartIDs = new Set(message.parts.map((part) => part.id))
     const missingReasoning = previous.parts.filter((part) => part.type === "reasoning" && !fetchedPartIDs.has(part.id))
-    if (missingReasoning.length === 0) return message
-    return { ...message, parts: [...missingReasoning, ...message.parts] }
+    if (missingReasoning.length === 0) return { ...message, parts }
+    return { ...message, parts: [...missingReasoning, ...parts] }
   })
 }
 
@@ -537,7 +547,7 @@ function applyStreamedPartUpdate(messages: MessageEnvelope[], sessionID: string,
     changed = true
     const exists = message.parts.some((existing) => existing.id === part.id)
     const parts = exists
-      ? message.parts.map((existing) => (existing.id === part.id ? part : existing))
+      ? message.parts.map((existing) => (existing.id === part.id ? reconcileReasoningPart(existing, part) : existing))
       : [...message.parts, part]
     return { ...message, parts }
   })
