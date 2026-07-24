@@ -179,6 +179,73 @@ function PatchPartView({ config, sessionID, messageID, files }: { config: Server
   )
 }
 
+const TEXT_PREVIEW_LINES = 6
+
+function truncatedText(text: string, limit: number): { shown: string; hiddenCount: number } {
+  const lines = text.split("\n")
+  if (lines.length <= limit) return { shown: text, hiddenCount: 0 }
+  return { shown: lines.slice(0, limit).join("\n"), hiddenCount: lines.length - limit }
+}
+
+function ExpandableOutput({ text, className, modalTitle }: { text: string; className: string; modalTitle: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const { shown, hiddenCount } = truncatedText(text, TEXT_PREVIEW_LINES)
+  return (
+    <>
+      <button type="button" className="message-tool-preview" onClick={() => setExpanded(true)} aria-label={`Expand ${modalTitle}`}>
+        <pre className={className}>{shown}</pre>
+        {hiddenCount > 0 && <div className="diff-line-more">+{hiddenCount} more lines</div>}
+      </button>
+
+      {expanded && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setExpanded(false)}>
+          <section
+            className="modal-card diff-modal fade-in"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tool-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="diff-modal-header">
+              <h2 id="tool-modal-title">{modalTitle}</h2>
+              <button type="button" className="btn-secondary" onClick={() => setExpanded(false)}>
+                Close
+              </button>
+            </div>
+            <div className="diff-modal-body">
+              <pre className={className}>{text}</pre>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  )
+}
+
+function ToolPartView({ part }: { part: MessagePart }) {
+  const status = part.state?.status || "pending"
+  const command = toolCommandLabel(part)
+  return (
+    <div className={`message-tool message-tool-${status}`}>
+      <div className="message-tool-header">
+        <span className="message-tool-name">{part.tool}</span>
+        <span className="message-tool-status">{status}</span>
+      </div>
+      <ExpandableOutput text={command} className="message-tool-command" modalTitle={`${part.tool} — command`} />
+      {part.state?.output && (
+        <ExpandableOutput text={part.state.output} className="message-tool-output" modalTitle={`${part.tool} — output`} />
+      )}
+      {part.state?.error && (
+        <ExpandableOutput
+          text={part.state.error}
+          className="message-tool-output message-tool-error"
+          modalTitle={`${part.tool} — error`}
+        />
+      )}
+    </div>
+  )
+}
+
 function MessagePartView({ part, config, sessionID }: { part: MessagePart; config: ServerConfig; sessionID: string }) {
   if (part.type === "text") {
     if (!part.text) return null
@@ -200,18 +267,7 @@ function MessagePartView({ part, config, sessionID }: { part: MessagePart; confi
   }
 
   if (part.type === "tool") {
-    const status = part.state?.status || "pending"
-    return (
-      <div className={`message-tool message-tool-${status}`}>
-        <div className="message-tool-header">
-          <span className="message-tool-name">{part.tool}</span>
-          <span className="message-tool-status">{status}</span>
-        </div>
-        <pre className="message-tool-command">{toolCommandLabel(part)}</pre>
-        {part.state?.output && <pre className="message-tool-output">{part.state.output}</pre>}
-        {part.state?.error && <pre className="message-tool-output message-tool-error">{part.state.error}</pre>}
-      </div>
-    )
+    return <ToolPartView part={part} />
   }
 
   if (part.type === "patch") {
