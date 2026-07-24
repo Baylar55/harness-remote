@@ -13,7 +13,7 @@ import {
   type EventStreamStatus
 } from "./opencode-events"
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
-import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
+import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
   FolderIcon,
@@ -219,6 +219,122 @@ function ExpandableOutput({ text, className, modalTitle }: { text: string; class
         </div>
       )}
     </>
+  )
+}
+
+function QuestionCard({
+  config,
+  directory,
+  request,
+  onResolved
+}: {
+  config: ServerConfig
+  directory: string
+  request: QuestionRequest
+  onResolved: (id: string) => void
+}) {
+  const [selections, setSelections] = useState<string[][]>(() => request.questions.map(() => []))
+  const [customValues, setCustomValues] = useState<string[]>(() => request.questions.map(() => ""))
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function toggleOption(questionIndex: number, label: string, multiple: boolean) {
+    setSelections((current) => {
+      const next = [...current]
+      const existing = next[questionIndex]
+      next[questionIndex] = multiple
+        ? existing.includes(label)
+          ? existing.filter((value) => value !== label)
+          : [...existing, label]
+        : existing.includes(label)
+          ? []
+          : [label]
+      return next
+    })
+  }
+
+  function setCustomValue(questionIndex: number, value: string) {
+    setCustomValues((current) => {
+      const next = [...current]
+      next[questionIndex] = value
+      return next
+    })
+  }
+
+  const canSubmit = request.questions.every((question, index) => {
+    return selections[index].length > 0 || (question.custom && customValues[index].trim().length > 0)
+  })
+
+  async function submit() {
+    setSubmitting(true)
+    setError(null)
+    try {
+      const answers = request.questions.map((_, index) => {
+        const customValue = customValues[index].trim()
+        return customValue ? [...selections[index], customValue] : selections[index]
+      })
+      await api.replyQuestion(config, request.id, answers, directory)
+      onResolved(request.id)
+    } catch (err) {
+      setError((err as Error).message)
+      setSubmitting(false)
+    }
+  }
+
+  async function reject() {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api.rejectQuestion(config, request.id, directory)
+      onResolved(request.id)
+    } catch (err) {
+      setError((err as Error).message)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <article className="message assistant question-card fade-in" aria-label="Question from OpenCode">
+      {request.questions.map((question, index) => (
+        <div key={index} className="question-block">
+          <div className="question-header">{question.header}</div>
+          <p className="question-text">{question.question}</p>
+          <div className="question-options">
+            {question.options.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className={`question-option ${selections[index].includes(option.label) ? "selected" : ""}`}
+                onClick={() => toggleOption(index, option.label, Boolean(question.multiple))}
+                disabled={submitting}
+              >
+                <span className="question-option-label">{option.label}</span>
+                {option.description && <span className="question-option-description">{option.description}</span>}
+              </button>
+            ))}
+          </div>
+          {question.custom && (
+            <input
+              type="text"
+              className="question-custom-input"
+              placeholder="Other…"
+              value={customValues[index]}
+              onChange={(event) => setCustomValue(index, event.target.value)}
+              disabled={submitting}
+            />
+          )}
+        </div>
+      ))}
+      {error && <p className="question-error">{error}</p>}
+      <div className="question-actions">
+        <button type="button" className="btn-secondary" onClick={reject} disabled={submitting}>
+          Skip
+        </button>
+        <button type="button" className="btn-primary" onClick={submit} disabled={submitting || !canSubmit}>
+          Send answer
+        </button>
+      </div>
+    </article>
   )
 }
 
@@ -499,6 +615,7 @@ function App() {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<MessageEnvelope[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [diffFiles, setDiffFiles] = useState<DiffFile[]>([])
+  const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([])
 
   const [projectDashboard, setProjectDashboard] = useState<ProjectDashboard | null>(null)
 
@@ -653,6 +770,7 @@ function App() {
     setOptimisticUserMessages([])
     setTodos([])
     setDiffFiles([])
+    setPendingQuestions([])
     setProjectDashboard(null)
     setDashboardError(null)
     setAwaitingAssistantReply(false)
@@ -847,10 +965,11 @@ function App() {
 
   async function loadSelected(sessionID: string, directory: string) {
     const requestID = ++loadSelectedRequestRef.current
-    const [msg, todo, diff] = await Promise.all([
+    const [msg, todo, diff, questions] = await Promise.all([
       api.loadMessages(config, sessionID, directory),
       api.loadTodo(config, sessionID, directory),
-      api.loadDiff(config, sessionID, directory).catch(() => [])
+      api.loadDiff(config, sessionID, directory).catch(() => []),
+      api.loadQuestions(config, directory).catch(() => [])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
     setMessages((current) => {
@@ -860,6 +979,7 @@ function App() {
     setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
     setTodos(todo)
     setDiffFiles(diff)
+    setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
     await loadProjectDashboard(directory)
   }
 
@@ -1257,7 +1377,7 @@ function App() {
           applyStreamedPartDelta(current, body.sessionID!, body.messageID!, body.partID!, body.field!, body.delta!)
         )
       }
-      if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.")) {
+      if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.") || type.startsWith("question.")) {
         setLiveEventCount((count) => count + 1)
         scheduleRefresh()
       }
@@ -1297,7 +1417,7 @@ function App() {
   useEffect(() => {
     if (view !== "detail") return
     scrollMessagesToBottom("auto")
-  }, [view, messageScrollSignature, isWorking, showTypingBubble])
+  }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions])
 
   useEffect(() => {
     if (view !== "detail" || !selectedID) return
@@ -1893,7 +2013,7 @@ function App() {
                 <LoadingIcon size={32} />
                 <p>{t('detail.loading')}</p>
               </div>
-            ) : renderedMessages.length === 0 && !showTypingBubble ? (
+            ) : renderedMessages.length === 0 && !showTypingBubble && pendingQuestions.length === 0 ? (
               <div className="empty-state compact">
                 <ChatIcon size={40} className="icon-empty-state" />
                 <p>{t('detail.emptyTitle')}</p>
@@ -1914,6 +2034,16 @@ function App() {
                     ))}
                   </article>
                 ))}
+                {selectedSession &&
+                  pendingQuestions.map((request) => (
+                    <QuestionCard
+                      key={request.id}
+                      config={config}
+                      directory={selectedSession.directory}
+                      request={request}
+                      onResolved={(id) => setPendingQuestions((current) => current.filter((item) => item.id !== id))}
+                    />
+                  ))}
                 {showTypingBubble && (
                   <article className="message assistant typing-bubble fade-in" aria-label={t('detail.waiting')}>
                     <div className="typing-dots" aria-hidden="true">
