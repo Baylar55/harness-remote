@@ -67,6 +67,25 @@ export type SessionStatus = {
   next?: number
 }
 
+export type ToolState = {
+  status: string
+  input?: Record<string, unknown>
+  title?: string
+  output?: string
+  error?: string
+}
+
+export type MessagePart = {
+  id: string
+  type: string
+  text?: string
+  tool?: string
+  callID?: string
+  state?: ToolState
+  hash?: string
+  files?: string[]
+}
+
 export type MessageEnvelope = {
   info: {
     id: string
@@ -77,11 +96,7 @@ export type MessageEnvelope = {
       completed?: number
     }
   }
-  parts: Array<{
-    id: string
-    type: string
-    text?: string
-  }>
+  parts: MessagePart[]
 }
 
 export type TodoItem = {

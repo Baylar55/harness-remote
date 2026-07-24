@@ -12,7 +12,7 @@ import {
   type EventStreamStatus
 } from "./opencode-events"
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
-import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, ModelOption, ModelSelection, PathInfo, ProjectDashboard, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
+import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
   FolderIcon,
@@ -66,6 +66,63 @@ function assistantPayloadLength(items: MessageEnvelope[]): number {
 
 function normalizeMessageMarkdown(text: string): string {
   return text.includes("\n") ? text : text.replace(/\s-\s(?=\S)/g, "\n- ")
+}
+
+function toolCommandLabel(part: MessagePart): string {
+  const input = part.state?.input
+  if (!input) return part.tool || "tool"
+  if (typeof input.command === "string") return input.command
+  if (typeof input.filePath === "string") return `${part.tool}: ${input.filePath}`
+  return `${part.tool}(${JSON.stringify(input)})`
+}
+
+function MessagePartView({ part }: { part: MessagePart }) {
+  if (part.type === "text") {
+    if (!part.text) return null
+    return (
+      <div className="message-content">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMessageMarkdown(part.text)}</ReactMarkdown>
+      </div>
+    )
+  }
+
+  if (part.type === "reasoning") {
+    if (!part.text) return null
+    return (
+      <details className="message-reasoning">
+        <summary>Thinking</summary>
+        <pre>{part.text}</pre>
+      </details>
+    )
+  }
+
+  if (part.type === "tool") {
+    const status = part.state?.status || "pending"
+    return (
+      <div className={`message-tool message-tool-${status}`}>
+        <div className="message-tool-header">
+          <span className="message-tool-name">{part.tool}</span>
+          <span className="message-tool-status">{status}</span>
+        </div>
+        <pre className="message-tool-command">{toolCommandLabel(part)}</pre>
+        {part.state?.output && <pre className="message-tool-output">{part.state.output}</pre>}
+        {part.state?.error && <pre className="message-tool-output message-tool-error">{part.state.error}</pre>}
+      </div>
+    )
+  }
+
+  if (part.type === "patch") {
+    if (!part.files || part.files.length === 0) return null
+    return (
+      <div className="message-patch">
+        {part.files.map((file) => (
+          <div key={file} className="message-patch-file">{file}</div>
+        ))}
+      </div>
+    )
+  }
+
+  return null
 }
 
 function toFileStatusList(input: FileStatusEntry[] | Record<string, FileStatusEntry>): FileStatusEntry[] {
@@ -350,7 +407,7 @@ function App() {
   const renderedMessages = useMemo(() => {
     return [...messages, ...optimisticUserMessages]
       .map((message) => ({ ...message, text: extractText(message) }))
-      .filter((message) => message.text)
+      .filter((message) => message.text || message.parts.some((part) => part.type !== "step-start" && part.type !== "step-finish"))
   }, [messages, optimisticUserMessages])
 
   const messageScrollSignature = useMemo(() => {
@@ -1628,11 +1685,9 @@ function App() {
                       </strong>
                       <small>{formatTime(message.info.time.created)}</small>
                     </header>
-                    <div className="message-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {normalizeMessageMarkdown(message.text)}
-                      </ReactMarkdown>
-                    </div>
+                    {message.parts.map((part) => (
+                      <MessagePartView key={part.id} part={part} />
+                    ))}
                   </article>
                 ))}
                 {showTypingBubble && (

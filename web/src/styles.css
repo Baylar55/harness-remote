@@ -912,6 +912,84 @@ p {
   color: inherit;
 }
 
+.message-reasoning {
+  margin-top: var(--space-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+}
+
+.message-reasoning summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.message-reasoning pre {
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+}
+
+.message-tool {
+  margin-top: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: var(--space-3);
+}
+
+.message-tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.message-tool-name {
+  font-weight: 600;
+}
+
+.message-tool-status {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.message-tool-command,
+.message-tool-output {
+  margin-top: var(--space-2);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  overflow-x: auto;
+}
+
+.message-tool-error {
+  color: var(--danger, #d33);
+}
+
+.message-patch {
+  margin-top: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.message-patch-file {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.5rem;
+  background: var(--surface-strong);
+}
+
 .message code,
 .help code,
 .command-name {
@@ -1315,9 +1393,7 @@ button.compact {
   }
 
   .message header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: var(--space-1);
+    align-items: baseline;
   }
 
   .composer {
