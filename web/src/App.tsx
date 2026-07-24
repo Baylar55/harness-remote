@@ -1300,6 +1300,22 @@ function App() {
   }, [view, messageScrollSignature, isWorking, showTypingBubble])
 
   useEffect(() => {
+    if (view !== "detail" || !selectedID) return
+    const container = messagesRef.current
+    if (!container) return
+    scrollMessagesToBottom("auto")
+    // Tool/diff parts fetch their content asynchronously and grow after the
+    // initial layout, so keep pinning to the bottom while that settles.
+    const observer = new ResizeObserver(() => scrollMessagesToBottom("auto"))
+    observer.observe(container)
+    const timeout = setTimeout(() => observer.disconnect(), 2000)
+    return () => {
+      observer.disconnect()
+      clearTimeout(timeout)
+    }
+  }, [view, selectedID])
+
+  useEffect(() => {
     if (!awaitingAssistantReply) return
     if (assistantResponseSignature && assistantResponseSignature !== awaitingAssistantBaselineRef.current) {
       setAwaitingAssistantReply(false)
