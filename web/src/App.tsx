@@ -517,6 +517,19 @@ function createLocalAssistantMessage(sessionID: string, text: string): MessageEn
   }
 }
 
+/** GET /session/{id}/message doesn't return reasoning parts, only the live event stream does — keep any streamed-in reasoning the refetch would otherwise silently drop. */
+function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelope[]): MessageEnvelope[] {
+  const currentByID = new Map(current.map((message) => [message.info.id, message]))
+  return fetched.map((message) => {
+    const previous = currentByID.get(message.info.id)
+    if (!previous) return message
+    const fetchedPartIDs = new Set(message.parts.map((part) => part.id))
+    const missingReasoning = previous.parts.filter((part) => part.type === "reasoning" && !fetchedPartIDs.has(part.id))
+    if (missingReasoning.length === 0) return message
+    return { ...message, parts: [...missingReasoning, ...message.parts] }
+  })
+}
+
 function applyStreamedPartUpdate(messages: MessageEnvelope[], sessionID: string, part: MessagePart): MessageEnvelope[] {
   let changed = false
   const next = messages.map((message) => {
@@ -974,7 +987,7 @@ function App() {
     if (requestID !== loadSelectedRequestRef.current) return
     setMessages((current) => {
       if (assistantPayloadLength(current) > assistantPayloadLength(msg)) return current
-      return msg
+      return mergeFetchedMessages(current, msg)
     })
     setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
     setTodos(todo)
