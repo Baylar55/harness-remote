@@ -20,7 +20,6 @@ import {
   ChatIcon,
   HelpIcon,
   PlusIcon,
-  PlayIcon,
   TrashIcon,
   StopCircleIcon,
   SendIcon,
@@ -2156,16 +2155,6 @@ function App() {
                   </div>
                   <div className="inline-actions">
                     <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        openSession(session.id, session.directory).catch(() => undefined)
-                      }}
-                      className="btn-primary"
-                    >
-                      <PlayIcon size={16} />
-                      {t('sessions.open')}
-                    </button>
-                    <button
                       className="btn-secondary"
                       onClick={(event) => {
                         event.stopPropagation()
@@ -2174,6 +2163,7 @@ function App() {
                       title={t('session.renameTitle')}
                     >
                       <PencilIcon size={16} />
+                      {t('session.renameConfirm')}
                     </button>
                     <button
                       className="btn-danger"
