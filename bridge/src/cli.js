@@ -17,20 +17,20 @@ if (config?.help) {
 }
 
 if (config) {
-  const acp = new AcpClient({ ompBin: config.ompBin })
+  const acp = new AcpClient({ command: config.acpCommand, args: config.acpArgs })
   const server = createBridgeServer({ config, acp })
   let shuttingDown = false
 
-  acp.on("stderr", (line) => process.stderr.write(`[omp] ${line}`))
+  acp.on("stderr", (line) => process.stderr.write(`[${config.backend}] ${line}`))
   acp.on("agent-request", (message) => {
-    process.stderr.write(`[omp] declined unsupported agent request: ${message.method}\n`)
+    process.stderr.write(`[${config.backend}] declined unsupported agent request: ${message.method}\n`)
   })
   acp.on("exit", (error) => {
-    if (!shuttingDown) process.stderr.write(`[omp] ${error.message}\n`)
+    if (!shuttingDown) process.stderr.write(`[${config.backend}] ${error.message}\n`)
   })
 
   server.listen(config.port, config.host, () => {
-    process.stdout.write(`OMP bridge listening on http://${config.host}:${config.port}\n`)
+    process.stdout.write(`${config.backend.toUpperCase()} bridge listening on http://${config.host}:${config.port}\n`)
   })
 
   const shutdown = () => {

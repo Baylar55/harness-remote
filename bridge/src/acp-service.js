@@ -6,7 +6,7 @@ function toEpoch(value) {
   return Number.isFinite(epoch) ? epoch : Date.now()
 }
 
-/** OMP reports native paths; the app may send them in either separator form. */
+/** ACP agents report native paths; the app may send them in either separator form. */
 export function sameDirectory(left, right) {
   if (!left || !right) return false
   const normalize = (value) => {
@@ -19,7 +19,7 @@ export function sameDirectory(left, right) {
 function sessionView(session, status = "idle", title = session.title) {
   return {
     id: session.sessionId,
-    title: title || `OMP session ${session.sessionId.slice(0, 8)}`,
+    title: title || `Session ${session.sessionId.slice(0, 8)}`,
     directory: session.cwd,
     time: { created: toEpoch(session.updatedAt), updated: toEpoch(session.updatedAt) },
     summary: { additions: 0, deletions: 0, files: 0 },
@@ -28,7 +28,7 @@ function sessionView(session, status = "idle", title = session.title) {
   }
 }
 
-export class OmpService {
+export class AcpService {
   #acp
   #sessions = new Map()
   #messages = new Map()
@@ -103,7 +103,7 @@ export class OmpService {
     await this.#load(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
     if (!option?.options?.some((candidate) => candidate.value === model)) {
-      throw new Error(`OMP model is not available: ${model}`)
+      throw new Error(`Model is not available: ${model}`)
     }
     await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value: model })
     option.currentValue = model
@@ -189,7 +189,7 @@ export class OmpService {
   async #load(sessionID, force = false) {
     if (!this.#sessions.has(sessionID)) await this.listSessions()
     const session = this.#sessions.get(sessionID)
-    if (!session) throw new Error("OMP session not found")
+    if (!session) throw new Error("Session not found")
     if (!force && this.#loaded.has(sessionID)) return
     let loading = this.#loads.get(sessionID)
     if (!loading) {
@@ -205,7 +205,7 @@ export class OmpService {
 
   async #loadSession(sessionID) {
     const session = this.#sessions.get(sessionID)
-    if (!session) throw new Error("OMP session not found")
+    if (!session) throw new Error("Session not found")
     this.#replaying.add(sessionID)
     this.#messages.set(sessionID, [])
     this.#todos.set(sessionID, [])
@@ -247,7 +247,7 @@ export class OmpService {
     return messageID
   }
 
-  /** OMP session listings carry no title, so keep the creation title or derive one from the first prompt. */
+  /** ACP session listings may carry no title, so keep the creation title or derive one from the first prompt. */
   #titleFor(sessionID) {
     const known = this.#titles.get(sessionID)
     if (known) return known

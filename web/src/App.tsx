@@ -38,12 +38,22 @@ const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
+function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
+  return backend === "omp" || backend === "pi"
+}
+
+function backendDisplayName(backend: ServerConfig["backend"]): string {
+  if (backend === "omp") return "Oh My Pi"
+  if (backend === "pi") return "PI"
+  return "OpenCode"
+}
+
 function defaultConfig(backend: ServerConfig["backend"]): ServerConfig {
   return {
     backend,
     host: "",
-    port: backend === "omp" ? 4097 : 4096,
-    username: backend === "omp" ? "omp" : "opencode",
+    port: backend === "opencode" ? 4096 : 4097,
+    username: backend === "opencode" ? "opencode" : backend,
     password: ""
   }
 }
@@ -52,7 +62,7 @@ function parseStoredConfig(value: string | null, backend: ServerConfig["backend"
   if (!value) return null
   try {
     const parsed = JSON.parse(value) as Partial<ServerConfig>
-    const storedBackend = parsed.backend === "omp" || parsed.backend === "opencode" ? parsed.backend : backend
+    const storedBackend = parsed.backend === "omp" || parsed.backend === "opencode" || parsed.backend === "pi" ? parsed.backend : backend
     return { ...defaultConfig(storedBackend), ...parsed, backend: storedBackend }
   } catch {
     return null
@@ -69,7 +79,7 @@ function readConfig(backend: ServerConfig["backend"]): ServerConfig {
 function initialConfig(): ServerConfig {
   const legacy = parseStoredConfig(localStorage.getItem(LEGACY_STORAGE_KEY), "opencode")
   const storedBackend = localStorage.getItem(ACTIVE_BACKEND_STORAGE_KEY)
-  const backend = storedBackend === "omp" || storedBackend === "opencode" ? storedBackend : legacy?.backend ?? "opencode"
+  const backend = storedBackend === "omp" || storedBackend === "opencode" || storedBackend === "pi" ? storedBackend : legacy?.backend ?? "opencode"
   const config = readConfig(backend)
   localStorage.setItem(BACKEND_STORAGE_KEYS[backend], JSON.stringify(config))
   localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, backend)
@@ -434,7 +444,7 @@ function App() {
   ).length
   const totalDiffAdditions = diffFiles.reduce((sum, file) => sum + file.additions, 0)
   const totalDiffDeletions = diffFiles.reduce((sum, file) => sum + file.deletions, 0)
-  const assistantDisplayName = config.backend === "omp" ? "Oh My Pi" : t('detail.opencode')
+  const assistantDisplayName = backendDisplayName(config.backend)
   const showModelChip = modelOptions.length > 1 || Boolean(activeModelOption) || primaryAgentOptions.length > 0
 
   async function openSession(sessionID: string, directory: string) {
@@ -488,7 +498,6 @@ function App() {
     backgroundFailureCountRef.current = 0
     initialSessionLoadRef.current = true
   }
-
   async function testConnection(configToTest: ServerConfig) {
     setTestingConnection(true)
     setSettingsNotice({ type: "info", text: t('settings.testingConnection') })
@@ -497,6 +506,9 @@ function App() {
         api.health(configToTest),
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Connection timed out")), 12000))
       ])
+      if (health.backend && health.backend !== configToTest.backend) {
+        throw new Error(`Expected ${backendDisplayName(configToTest.backend)} but reached ${backendDisplayName(health.backend)}`)
+      }
       setConnectedVersion(health.version)
       setLastTestedConfigKey(configKey(configToTest))
       setSettingsNotice({ type: "success", text: t('settings.testedNotSaved', { version: health.version }) })
@@ -607,7 +619,7 @@ function App() {
   async function loadModels(sessionID = selectedSession?.id, directory = selectedSession?.directory ?? selectedNewSessionDirectory) {
     if (!isValidServerConfig(config)) return
     try {
-      const list = await api.listModels(config, directory, config.backend === "omp" ? sessionID : undefined)
+      const list = await api.listModels(config, directory, isBridgeBackend(config.backend) ? sessionID : undefined)
       setModelOptions(list)
       setModelLoadError(null)
       const sessionModel = selectedSession && selectedSession.id === sessionID ? selectedSession.model : undefined
@@ -632,7 +644,7 @@ function App() {
   }
 
   async function loadSessionActivityTimes(items: Session[]): Promise<Map<string, number>> {
-    if (config.backend === "omp") {
+    if (isBridgeBackend(config.backend)) {
       return new Map(items.map((session) => [session.id, session.time.updated]))
     }
     const results = await Promise.all(items.map(async (session) => {
@@ -1080,7 +1092,7 @@ function App() {
     refreshSessions(true).catch(() => undefined)
     loadCommands().catch(() => undefined)
     loadAgents().catch(() => undefined)
-    if (config.backend !== "omp") loadModels().catch(() => undefined)
+    if (isBridgeBackend(config.backend)) loadModels().catch(() => undefined)
     const timer = setInterval(() => {
       refreshSessions(true).catch(() => undefined)
       if (selectedSession) {
@@ -1285,6 +1297,7 @@ function App() {
             >
               <option value="opencode">OpenCode</option>
               <option value="omp">Oh My Pi (bridge)</option>
+              <option value="pi">PI (ACP bridge)</option>
             </select>
           </label>
 
@@ -1529,7 +1542,7 @@ function App() {
                       <PlayIcon size={16} />
                       {t('sessions.open')}
                     </button>
-                    {config.backend !== "omp" && (
+                    {config.backend === "opencode" && (
                       <>
                         <button
                           className="btn-secondary"
@@ -1680,7 +1693,7 @@ function App() {
                     ) : (
                       <>
                         {selectedSession.title}
-                        {config.backend !== "omp" && (
+                        {config.backend === "opencode" && (
                           <button
                             className="btn-icon btn-secondary compact"
                             onClick={() => startRename(selectedSession)}
@@ -1711,7 +1724,7 @@ function App() {
               {showModelChip && (
                 <button type="button" className="context-chip" onClick={() => setActiveDetailSheet("ai")}>
                   <span>{t('detail.aiChip')}</span>
-                  <strong>{config.backend === "omp" ? activeModelOption?.modelName ?? t('detail.modelLoading') : `${agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })} · ${activeModelOption?.modelName ?? t('detail.modelLoading')}`}</strong>
+                  <strong>{isBridgeBackend(config.backend) ? activeModelOption?.modelName ?? t('detail.modelLoading') : `${agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })} · ${activeModelOption?.modelName ?? t('detail.modelLoading')}`}</strong>
                 </button>
               )}
 
@@ -1878,7 +1891,7 @@ function App() {
                   <RefreshIcon size={16} />
                   {t('detail.refreshAi')}
                 </button>
-                {config.backend !== "omp" && (primaryAgentOptions.length > 0 ? (
+                {config.backend === "opencode" && (primaryAgentOptions.length > 0 ? (
                   <div className="agent-controls">
                     <label htmlFor="agent-select">
                       {t('detail.agentSelectLabel')}
@@ -2096,7 +2109,7 @@ function App() {
 
           {helpPage === "server" && (
             <div className="help-content fade-in">
-              <h3>{config.backend === "omp" ? "Oh My Pi bridge" : "OpenCode server"}</h3>
+              <h3>{isBridgeBackend(config.backend) ? `${backendDisplayName(config.backend)} bridge` : "OpenCode server"}</h3>
               <p>
                 This page keeps setup brief. Full, versioned backend guides live in the Harness Remote repository so new
                 backends do not make the app help unwieldy.
@@ -2105,7 +2118,12 @@ function App() {
                 {config.backend === "omp" ? (
                   <>
                     <h4>OMP bridge (macOS / Linux)</h4>
-                    <pre>npx --yes ./bridge --host 0.0.0.0 --port 4097 --username omp --password your-password --root "$PWD"</pre>
+                    <pre>npx --yes ./bridge --backend omp --host 0.0.0.0 --port 4097 --username omp --password your-password --root "$PWD"</pre>
+                  </>
+                ) : config.backend === "pi" ? (
+                  <>
+                    <h4>PI bridge (macOS / Linux)</h4>
+                    <pre>npx --yes ./bridge --backend pi --host 0.0.0.0 --port 4097 --username pi --password your-password --root "$PWD"</pre>
                   </>
                 ) : (
                   <>
@@ -2116,11 +2134,11 @@ function App() {
               </div>
               <p>
                 <a
-                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "omp" ? "oh-my-pi-bridge-setup" : "opencode-server-setup"}`}
+                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "opencode" ? "opencode-server-setup" : config.backend === "pi" ? "pi-bridge-setup" : "oh-my-pi-bridge-setup"}`}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Open the complete {config.backend === "omp" ? "OMP bridge" : "OpenCode server"} guide in the repository
+                  Open the complete {isBridgeBackend(config.backend) ? `${backendDisplayName(config.backend)} bridge` : "OpenCode server"} guide in the repository
                 </a>
               </p>
             </div>

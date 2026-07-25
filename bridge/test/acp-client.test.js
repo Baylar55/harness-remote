@@ -41,18 +41,21 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function fakeSpawn(handler) {
-  return () => new FakeChild(handler)
+function fakeSpawn(handler, calls = []) {
+  return (command, args) => {
+    calls.push({ command, args })
+    return new FakeChild(handler)
+  }
 }
 
-function respondToHandshake(child, request) {
+function respondToHandshake(child, request, authMethods = [{ id: "agent" }]) {
   if (request.method === "initialize") {
     child.respond({
       jsonrpc: "2.0",
       id: request.id,
       result: {
         agentInfo: { name: "oh-my-pi", version: "17.0.7" },
-        authMethods: [{ id: "agent" }]
+        authMethods
       }
     }, 12)
   }
@@ -72,6 +75,38 @@ test("initializes, authenticates, and lists ACP sessions", async () => {
   assert.deepEqual(await client.listSessions(), [{ sessionId: "session-1" }])
   assert.deepEqual(client.agentInfo, { name: "oh-my-pi", version: "17.0.7" })
   client.close()
+})
+
+test("launches an ACP adapter with the configured command and arguments", async () => {
+  const calls = []
+  const client = new AcpClient({
+    command: "npx",
+    args: ["-y", "@victor-software-house/pi-acp"],
+    spawnProcess: fakeSpawn((child, request) => respondToHandshake(child, request), calls)
+  })
+
+  await client.start()
+  assert.deepEqual(calls, [{ command: "npx", args: ["-y", "@victor-software-house/pi-acp"] }])
+  client.close()
+})
+
+test("accepts alternate or absent ACP authentication methods", async () => {
+  let authenticatedMethod
+  const alternate = new AcpClient({
+    spawnProcess: fakeSpawn((child, request) => {
+      respondToHandshake(child, request, [{ id: "pi_terminal_login" }])
+      if (request.method === "authenticate") authenticatedMethod = request.params.methodId
+    })
+  })
+  await alternate.start()
+  assert.equal(authenticatedMethod, "pi_terminal_login")
+  alternate.close()
+
+  const unauthenticated = new AcpClient({
+    spawnProcess: fakeSpawn((child, request) => respondToHandshake(child, request, []))
+  })
+  await unauthenticated.start()
+  unauthenticated.close()
 })
 
 test("forwards ACP notifications and request errors", async () => {
@@ -120,5 +155,5 @@ test("rejects an in-flight request when ACP exits", async () => {
   })
   const client = new AcpClient({ spawnProcess: () => child })
   await client.start()
-  await assert.rejects(client.request("session/hang", {}), /OMP ACP exited \(1\)/)
+  await assert.rejects(client.request("session/hang", {}), /ACP adapter exited \(1\)/)
 })

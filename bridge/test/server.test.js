@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events"
 import path from "node:path"
 import test from "node:test"
 import { createBridgeServer } from "../src/server.js"
-import { OmpService } from "../src/omp-service.js"
+import { AcpService } from "../src/acp-service.js"
 
 class FakeAcp extends EventEmitter {
   agentInfo = { version: "17.0.7" }
@@ -490,7 +490,7 @@ test("requires Basic Auth before exposing bridge endpoints", async () => {
   try {
     const response = await fetch(`${bridge.baseURL}/global/health`)
     assert.equal(response.status, 401)
-    assert.equal(response.headers.get("www-authenticate"), 'Basic realm="OMP Bridge"')
+    assert.equal(response.headers.get("www-authenticate"), 'Basic realm="Harness Remote Bridge"')
   } finally {
     await bridge.close()
   }
@@ -506,6 +506,16 @@ test("serves health and OpenCode-compatible sessions with authentication", async
     assert.equal(body.length, 1)
     assert.equal(body[0].id, "session-1")
     assert.equal(body[0].status, "idle")
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("reports the configured ACP backend", async () => {
+  const bridge = await startServer({ backend: "pi" })
+  try {
+    const health = await fetch(`${bridge.baseURL}/global/health`, { headers: authHeaders() })
+    assert.deepEqual(await health.json(), { healthy: true, backend: "pi", version: "17.0.7" })
   } finally {
     await bridge.close()
   }
@@ -625,7 +635,7 @@ test("replays persistent user and assistant history when reopening an OMP sessio
 
 test("does not publish replay notifications as live session activity", async () => {
   const acp = new ReplayAcp()
-  const omp = new OmpService(acp)
+  const omp = new AcpService(acp)
   const events = []
   omp.subscribe((event) => events.push(event))
   const originalUpdatedAt = acp.session.updatedAt

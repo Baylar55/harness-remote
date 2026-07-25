@@ -1,4 +1,4 @@
-export type BackendKind = "opencode" | "omp"
+export type BackendKind = "opencode" | "omp" | "pi"
 
 export type ServerConfig = {
   backend: BackendKind
@@ -11,6 +11,7 @@ export type ServerConfig = {
 export type HealthResponse = {
   healthy: boolean
   version: string
+  backend?: BackendKind
 }
 
 export type ModelSelection = {
