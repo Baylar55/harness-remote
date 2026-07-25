@@ -60,6 +60,20 @@ function extractText(msg: MessageEnvelope): string {
     .trim()
 }
 
+/** Wraps a message with its extracted text, reusing the previous wrapper when the underlying message object is
+ *  unchanged. applyStreamedPartUpdate/applyStreamedPartDelta already keep unrelated messages referentially
+ *  identical across streamed updates — without this cache, mapping over the whole array would create a brand
+ *  new wrapper object for every message on every token, defeating memoization of per-message rendering. */
+const renderedMessageCache = new WeakMap<MessageEnvelope, MessageEnvelope & { text: string }>()
+
+function toRenderedMessage(message: MessageEnvelope): MessageEnvelope & { text: string } {
+  const cached = renderedMessageCache.get(message)
+  if (cached) return cached
+  const wrapped = { ...message, text: extractText(message) }
+  renderedMessageCache.set(message, wrapped)
+  return wrapped
+}
+
 function assistantPayloadLength(items: MessageEnvelope[]): number {
   return items
     .filter((message) => message.info.role !== "user")
@@ -1039,6 +1053,49 @@ function hasMatchingUserMessage(messages: MessageEnvelope[], optimistic: Message
   ))
 }
 
+/** One message's parts. Memoized on the message object identity so that streaming a token into one message
+ *  (which necessarily re-renders MessagesPane) doesn't re-run timeline/diff formatting for every other message
+ *  in the conversation — toRenderedMessage keeps unrelated messages referentially stable across updates. */
+const MessageArticle = memo(function MessageArticle({
+  message,
+  config,
+  directory,
+  t
+}: {
+  message: MessageEnvelope & { text: string }
+  config: ServerConfig
+  directory: string | undefined
+  t: Translator
+}) {
+  return (
+    <article className={`message ${message.info.role} fade-in`}>
+      {buildMessageTimeline(message.parts).map((item) =>
+        item.kind === "action-group" ? (
+          <ActionGroupView
+            key={`group-${item.parts[0].id}`}
+            parts={item.parts}
+            config={config}
+            sessionID={message.info.sessionID}
+            directory={directory}
+            timestamp={formatTime(message.info.time.created)}
+            t={t}
+          />
+        ) : (
+          <MessagePartView
+            key={item.part.id}
+            part={item.part}
+            config={config}
+            sessionID={message.info.sessionID}
+            directory={directory}
+            timestamp={formatTime(message.info.time.created)}
+            t={t}
+          />
+        )
+      )}
+    </article>
+  )
+})
+
 /** Renders the message list, pending questions, and typing bubble. Memoized so that unrelated state changes in
  *  the parent (most importantly typing into the composer) don't re-run the per-message formatting/diffing work
  *  on every keystroke. */
@@ -1086,31 +1143,7 @@ const MessagesPane = memo(function MessagesPane({
         ) : (
           <>
             {renderedMessages.map((message) => (
-              <article key={message.info.id} className={`message ${message.info.role} fade-in`}>
-                {buildMessageTimeline(message.parts).map((item) =>
-                  item.kind === "action-group" ? (
-                    <ActionGroupView
-                      key={`group-${item.parts[0].id}`}
-                      parts={item.parts}
-                      config={config}
-                      sessionID={message.info.sessionID}
-                      directory={directory}
-                      timestamp={formatTime(message.info.time.created)}
-                      t={t}
-                    />
-                  ) : (
-                    <MessagePartView
-                      key={item.part.id}
-                      part={item.part}
-                      config={config}
-                      sessionID={message.info.sessionID}
-                      directory={directory}
-                      timestamp={formatTime(message.info.time.created)}
-                      t={t}
-                    />
-                  )
-                )}
-              </article>
+              <MessageArticle key={message.info.id} message={message} config={config} directory={directory} t={t} />
             ))}
             {directory !== undefined &&
               pendingQuestions.map((request) => (
@@ -1291,7 +1324,7 @@ function App() {
 
   const renderedMessages = useMemo(() => {
     return [...messages, ...optimisticUserMessages]
-      .map((message) => ({ ...message, text: extractText(message) }))
+      .map(toRenderedMessage)
       .filter((message) => message.text || message.parts.some((part) => part.type !== "step-start" && part.type !== "step-finish"))
   }, [messages, optimisticUserMessages])
 
