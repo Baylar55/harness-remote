@@ -1278,6 +1278,7 @@ function App() {
   const initialSessionLoadRef = useRef(true)
   const latestMessageTimesRef = useRef(new Map<string, { sessionUpdated: number; activityTime: number }>())
   const selectedSessionRef = useRef<SessionView | null>(null)
+  const eventStreamStateRef = useRef<"idle" | "connecting" | "live" | "reconnecting" | "fallback">("idle")
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedID) ?? null,
@@ -1973,6 +1974,10 @@ function App() {
   }, [selectedSession])
 
   useEffect(() => {
+    eventStreamStateRef.current = eventStreamState
+  }, [eventStreamState])
+
+  useEffect(() => {
     if (!config.host || config.port <= 0) {
       setConnectionState("idle")
       setConnectionMessage("")
@@ -1987,6 +1992,10 @@ function App() {
     loadAgents().catch(() => undefined)
     loadModels().catch(() => undefined)
     const timer = setInterval(() => {
+      // Live SSE events already keep sessions and the open session's messages/todos/diffs in sync
+      // (via applyStreamedPartUpdate/scheduleRefresh); this poll is only a fallback for when the
+      // stream isn't actually connected, so skip the redundant full refetch while it's live.
+      if (eventStreamStateRef.current === "live") return
       refreshSessions(true).catch(() => undefined)
       if (selectedSession) {
         loadSelected(selectedSession.id, selectedSession.directory).catch(() => undefined)
