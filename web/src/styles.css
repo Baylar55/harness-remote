@@ -300,6 +300,18 @@ p {
   flex-wrap: wrap;
 }
 
+.sessions-header-actions {
+  display: flex;
+}
+
+.sessions-header-actions button {
+  flex: 1 1 0;
+}
+
+.sessions-header-actions button:first-child {
+  flex-grow: 0.6;
+}
+
 .btn-primary {
   background: var(--primary);
   border-color: var(--primary);
@@ -1612,6 +1624,10 @@ button.compact {
     grid-template-columns: 1fr 1fr;
   }
 
+  .sessions-header-actions {
+    display: flex;
+  }
+
   .form-grid,
   .actions,
   .connection-help,
@@ -1728,10 +1744,6 @@ button.compact {
   .app-icon {
     width: 32px;
     height: 32px;
-  }
-
-  .inline-actions {
-    grid-template-columns: 1fr;
   }
 
   .session-card .inline-actions {

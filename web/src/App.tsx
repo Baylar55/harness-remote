@@ -29,8 +29,7 @@ import {
   LoadingIcon,
   RefreshIcon,
   PencilIcon,
-  CloseIcon,
-  PlayIcon
+  CloseIcon
 } from "./Icons"
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -2489,7 +2488,7 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="inline-actions">
+            <div className="inline-actions sessions-header-actions">
               <button onClick={refreshSessionsWithIndicator} className="btn-secondary" disabled={refreshingSessions}>
                 {refreshingSessions ? <LoadingIcon size={18} /> : <RefreshIcon size={18} />}
                 {t('sessions.refresh')}
@@ -2611,16 +2610,6 @@ function App() {
                     <span className={`pill ${session.status}`}>{session.status}</span>
                   </div>
                   <div className="inline-actions">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        openSession(session.id, session.directory).catch(() => undefined)
-                      }}
-                      className="btn-primary"
-                    >
-                      <PlayIcon size={16} />
-                      {t('sessions.open')}
-                    </button>
                     {config.backend !== "omp" && (
                       <>
                         <button
@@ -2892,10 +2881,7 @@ function App() {
               className={showStopAction ? "btn-danger" : "btn-primary"}
             >
               {showStopAction ? (
-                <>
-                  <StopCircleIcon size={18} />
-                  {t('detail.waiting')}
-                </>
+                <StopCircleIcon size={18} />
               ) : (
                 <SendIcon size={18} />
               )}
