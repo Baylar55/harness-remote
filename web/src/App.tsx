@@ -2308,6 +2308,7 @@ function App() {
                       title={t('sessions.delete')}
                     >
                       <TrashIcon size={16} />
+                      {t('sessions.delete')}
                     </button>
                   </div>
                 </article>
