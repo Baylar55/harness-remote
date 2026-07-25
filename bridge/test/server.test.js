@@ -147,6 +147,59 @@ class FreshnessAcp extends EventEmitter {
   notify() {}
 }
 
+/** Mirrors observed OMP 17.1.3 behaviour: listings carry no title and prompts are never echoed back. */
+class RealisticOmpAcp extends EventEmitter {
+  agentInfo = { version: "17.1.3" }
+  #sessions = []
+  #history = new Map()
+
+  async start() {}
+
+  async listSessions() {
+    return this.#sessions.map(({ sessionId, cwd, updatedAt }) => ({ sessionId, cwd, updatedAt }))
+  }
+
+  async request(method, params) {
+    if (method === "session/new") {
+      const sessionId = `omp-${this.#sessions.length + 1}`
+      this.#sessions.push({ sessionId, cwd: params.cwd, updatedAt: "2026-07-25T00:00:00.000Z" })
+      this.#history.set(sessionId, [])
+      return { sessionId, configOptions: [] }
+    }
+    if (method === "session/prompt") {
+      const history = this.#history.get(params.sessionId) ?? []
+      const index = history.length
+      history.push({ role: "user", id: `u${index}`, text: params.prompt[0].text })
+      const reply = { role: "assistant", id: `a${index}`, text: "Bridge reply" }
+      history.push(reply)
+      this.#history.set(params.sessionId, history)
+      this.#emitChunk(params.sessionId, reply)
+      return { stopReason: "end_turn" }
+    }
+    if (method === "session/load") {
+      for (const message of this.#history.get(params.sessionId) ?? []) this.#emitChunk(params.sessionId, message)
+      return { configOptions: [] }
+    }
+    return {}
+  }
+
+  #emitChunk(sessionId, message) {
+    this.emit("notification", {
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: message.role === "assistant" ? "agent_message_chunk" : "user_message_chunk",
+          messageId: message.id,
+          content: { type: "text", text: message.text }
+        }
+      }
+    })
+  }
+
+  notify() {}
+}
+
 async function startServer({ acp = new FakeAcp(), ...options } = {}) {
   const server = createBridgeServer({
     acp,
@@ -171,6 +224,131 @@ async function startServer({ acp = new FakeAcp(), ...options } = {}) {
 function authHeaders() {
   return { authorization: `Basic ${Buffer.from("omp:secret").toString("base64")}` }
 }
+
+function jsonHeaders() {
+  return { ...authHeaders(), "content-type": "application/json" }
+}
+
+async function readJSON(baseURL, path, init) {
+  const response = await fetch(`${baseURL}${path}`, { headers: authHeaders(), ...init })
+  return response.json()
+}
+
+function conversation(messages) {
+  return messages.map((message) => `${message.info.role}: ${message.parts[0].text}`)
+}
+
+async function waitForIdle(baseURL, sessionID) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const statuses = await readJSON(baseURL, "/session/status")
+    if (statuses[sessionID]?.type === "idle") return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error("the session never returned to idle")
+}
+
+test("keeps the submitted prompt in history when the session is reopened", async () => {
+  const bridge = await startServer({ acp: new RealisticOmpAcp() })
+  try {
+    const created = await readJSON(bridge.baseURL, "/session", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Reopen check" })
+    })
+    await readJSON(bridge.baseURL, `/session/${created.id}/prompt_async`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ parts: [{ type: "text", text: "Explain the bridge" }] })
+    })
+    await waitForIdle(bridge.baseURL, created.id)
+
+    const live = conversation(await readJSON(bridge.baseURL, `/session/${created.id}/message`))
+    assert.deepEqual(live, ["user: Explain the bridge", "assistant: Bridge reply"])
+
+    const reopened = conversation(await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`))
+    assert.deepEqual(reopened, live, "reopening must not drop the prompt the user just sent")
+
+    const reopenedAgain = conversation(await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`))
+    assert.deepEqual(reopenedAgain, live)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("gives every OMP session a distinguishable title", async () => {
+  const bridge = await startServer({ acp: new RealisticOmpAcp() })
+  try {
+    const named = await readJSON(bridge.baseURL, "/session", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Named by the app" })
+    })
+    const unnamed = await readJSON(bridge.baseURL, "/session", { method: "POST", headers: jsonHeaders(), body: "{}" })
+    await readJSON(bridge.baseURL, `/session/${unnamed.id}/prompt_async`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ parts: [{ type: "text", text: "Refactor the parser\nsecond line" }] })
+    })
+    await waitForIdle(bridge.baseURL, unnamed.id)
+
+    const titles = (await readJSON(bridge.baseURL, "/session")).map((session) => session.title)
+    assert.deepEqual(titles, ["Named by the app", "Refactor the parser"])
+    assert.equal(new Set(titles).size, titles.length, "OMP sessions must not all share one placeholder title")
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("matches session directories across path separator forms", async () => {
+  const bridge = await startServer({ acp: new RealisticOmpAcp() })
+  try {
+    await readJSON(bridge.baseURL, "/session", { method: "POST", headers: jsonHeaders(), body: "{}" })
+    const posixStyle = process.cwd().replaceAll("\\", "/")
+    const listed = await readJSON(bridge.baseURL, `/session?directory=${encodeURIComponent(posixStyle)}`)
+    assert.equal(listed.length, 1, "a directory written with forward slashes must still match")
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("allows only explicitly configured browser origins", async () => {
+  const bridge = await startServer({ corsOrigins: ["http://192.168.1.64:5199"] })
+  try {
+    const preflight = await fetch(`${bridge.baseURL}/session`, {
+      method: "OPTIONS",
+      headers: { origin: "http://192.168.1.64:5199", "access-control-request-method": "GET" }
+    })
+    assert.equal(preflight.status, 204, "the preflight must succeed without credentials")
+    assert.equal(preflight.headers.get("access-control-allow-origin"), "http://192.168.1.64:5199")
+    assert.equal(preflight.headers.get("access-control-allow-credentials"), "true")
+    assert.equal(preflight.headers.get("vary"), "Origin")
+
+    const allowed = await fetch(`${bridge.baseURL}/global/health`, {
+      headers: { ...authHeaders(), origin: "http://192.168.1.64:5199" }
+    })
+    assert.equal(allowed.headers.get("access-control-allow-origin"), "http://192.168.1.64:5199")
+
+    const foreign = await fetch(`${bridge.baseURL}/global/health`, {
+      headers: { ...authHeaders(), origin: "http://evil.example" }
+    })
+    assert.equal(foreign.headers.get("access-control-allow-origin"), null, "unlisted origins must not be granted access")
+    assert.equal(foreign.status, 200)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("keeps browser origins blocked until --cors is configured", async () => {
+  const bridge = await startServer()
+  try {
+    const response = await fetch(`${bridge.baseURL}/global/health`, {
+      headers: { ...authHeaders(), origin: "http://192.168.1.64:5199" }
+    })
+    assert.equal(response.headers.get("access-control-allow-origin"), null)
+  } finally {
+    await bridge.close()
+  }
+})
 
 test("requires Basic Auth before exposing bridge endpoints", async () => {
   const bridge = await startServer()

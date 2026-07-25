@@ -10,8 +10,16 @@ test("defaults to a loopback-only unauthenticated listener", () => {
     password: "",
     ompBin: "omp",
     roots: [],
+    corsOrigins: [],
     logRequests: false
   })
+})
+
+test("shares the bridge with browser origins only when asked", () => {
+  assert.deepEqual(parseConfig([], {}).corsOrigins, [])
+  const config = parseConfig(["--cors", "http://localhost:5173", "--cors", "http://192.168.1.64:5199"], {})
+  assert.deepEqual(config.corsOrigins, ["http://localhost:5173", "http://192.168.1.64:5199"])
+  assert.deepEqual(parseConfig([], { OMP_BRIDGE_CORS: "http://localhost:5173" }).corsOrigins, ["http://localhost:5173"])
 })
 
 test("requires credentials outside loopback", () => {

@@ -22,6 +22,9 @@ if (config) {
   let shuttingDown = false
 
   acp.on("stderr", (line) => process.stderr.write(`[omp] ${line}`))
+  acp.on("agent-request", (message) => {
+    process.stderr.write(`[omp] declined unsupported agent request: ${message.method}\n`)
+  })
   acp.on("exit", (error) => {
     if (!shuttingDown) process.stderr.write(`[omp] ${error.message}\n`)
   })

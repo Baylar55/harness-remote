@@ -130,6 +130,14 @@ export class AcpClient extends EventEmitter {
       this.emit("protocol-error", new Error("OMP ACP emitted invalid JSON"))
       return
     }
+    // A JSON-RPC message carrying both an id and a method is an agent-initiated
+    // request. OMP does not send any today, but an unanswered one would stall the
+    // agent until the prompt timeout, so always reply.
+    if (message.id !== undefined && message.method) {
+      this.emit("agent-request", message)
+      this.#respondUnsupported(message.id, message.method)
+      return
+    }
     if (message.id !== undefined) {
       const pending = this.#pending.get(message.id)
       if (!pending) return
@@ -140,6 +148,12 @@ export class AcpClient extends EventEmitter {
       return
     }
     if (message.method) this.emit("notification", message)
+  }
+
+  #respondUnsupported(id, method) {
+    if (!this.#child?.stdin.writable) return
+    const error = { code: -32_601, message: `Harness Remote bridge does not implement ${method}` }
+    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, error })}\n`)
   }
 
   #handleExit(error) {

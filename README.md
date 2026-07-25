@@ -122,7 +122,22 @@ Expected response:
 {"healthy":true,"backend":"omp","version":"…"}
 ```
 
-OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Agent selection, persistent session rename/delete, server slash commands, VCS/diff, and filesystem access outside the explicit `--root` directories are intentionally unavailable.
+OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Agent selection, persistent session rename/delete, server slash commands, and VCS/diff are intentionally unavailable.
+
+Session titles come from the title you give a session in the app, otherwise from its first prompt; sessions created outside the app are listed as `OMP session <id>`, because OMP session listings carry no title.
+
+#### What `--root` does and does not restrict
+
+`--root` restricts the bridge's own surface: which directories the app may browse (`/file`, `/path`) and which working directory a new session may use. It is not a sandbox for the agent. Once a session is running, OMP executes with your full user privileges and approves its own tool calls, so it can read and write outside the configured roots exactly as it would on the desktop. Point the bridge only at machines and accounts where you would already let OMP work unattended.
+
+#### Browser access
+
+Native app builds need no CORS configuration. To use the app from a browser instead, list each exact origin with `--cors`; the option is repeatable and no origin is allowed by default.
+
+```bash
+npx --yes ./bridge --port 4097 --username omp --password "…" --root "$HOME/Software" \
+  --cors http://localhost:5173
+```
 
 #### Live synchronization scope
 

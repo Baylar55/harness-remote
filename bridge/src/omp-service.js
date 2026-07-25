@@ -1,14 +1,25 @@
 import { randomUUID } from "node:crypto"
+import path from "node:path"
 
 function toEpoch(value) {
   const epoch = Date.parse(value ?? "")
   return Number.isFinite(epoch) ? epoch : Date.now()
 }
 
-function sessionView(session, status = "idle") {
+/** OMP reports native paths; the app may send them in either separator form. */
+export function sameDirectory(left, right) {
+  if (!left || !right) return false
+  const normalize = (value) => {
+    const resolved = path.resolve(value).replace(/[\\/]+$/, "")
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved
+  }
+  return normalize(left) === normalize(right)
+}
+
+function sessionView(session, status = "idle", title = session.title) {
   return {
     id: session.sessionId,
-    title: session.title || "Mobile session",
+    title: title || `OMP session ${session.sessionId.slice(0, 8)}`,
     directory: session.cwd,
     time: { created: toEpoch(session.updatedAt), updated: toEpoch(session.updatedAt) },
     summary: { additions: 0, deletions: 0, files: 0 },
@@ -28,6 +39,7 @@ export class OmpService {
   #sessionListing
   #replaying = new Set()
   #promptAcknowledgements = new Map()
+  #titles = new Map()
   #active = new Set()
   #listeners = new Set()
 
@@ -44,8 +56,8 @@ export class OmpService {
   async listSessions(directory) {
     const sessions = await this.#refreshSessions()
     return sessions
-      .filter((session) => !directory || session.cwd === directory)
-      .map((session) => sessionView(session, this.#active.has(session.sessionId) ? "busy" : "idle"))
+      .filter((session) => !directory || sameDirectory(session.cwd, directory))
+      .map((session) => sessionView(session, this.#active.has(session.sessionId) ? "busy" : "idle", this.#titleFor(session.sessionId)))
   }
 
   async createSession({ directory, title, model }) {
@@ -63,9 +75,10 @@ export class OmpService {
     this.#messages.set(session.sessionId, [])
     this.#todos.set(session.sessionId, [])
     this.#loaded.add(session.sessionId)
+    if (title) this.#titles.set(session.sessionId, title)
     if (model) await this.setModel(session.sessionId, model)
     this.#emit("session.created", session.sessionId)
-    return sessionView(session)
+    return sessionView(session, "idle", this.#titleFor(session.sessionId))
   }
 
   async messages(sessionID, refresh = false) {
@@ -182,6 +195,18 @@ export class OmpService {
     this.#emit("message.updated", sessionID)
   }
 
+  /** OMP session listings carry no title, so keep the creation title or derive one from the first prompt. */
+  #titleFor(sessionID) {
+    const known = this.#titles.get(sessionID)
+    if (known) return known
+    const firstPrompt = this.#messages.get(sessionID)?.find((message) => message.info.role === "user")
+    const text = firstPrompt?.parts?.[0]?.text?.trim()
+    if (!text) return undefined
+    const derived = text.split("\n")[0].slice(0, 60)
+    this.#titles.set(sessionID, derived)
+    return derived
+  }
+
   #isAcknowledgedPromptChunk(sessionID, text) {
     const acknowledgement = this.#promptAcknowledgements.get(sessionID)
     if (!acknowledgement) return false
@@ -212,7 +237,9 @@ export class OmpService {
     if (update.sessionUpdate !== "user_message_chunk" && update.sessionUpdate !== "agent_message_chunk") return
     if (update.content?.type !== "text" || !update.content.text) return
     const role = update.sessionUpdate === "user_message_chunk" ? "user" : "assistant"
-    if (role === "user" && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
+    // Acknowledgements only suppress a live echo of the prompt we just recorded;
+    // a history replay rebuilds from an empty list and must keep every message.
+    if (role === "user" && !replaying && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
     const messageID = update.messageId ?? randomUUID()
     const messages = this.#messages.get(sessionId) ?? []
     this.#messages.set(sessionId, messages)

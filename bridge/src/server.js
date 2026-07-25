@@ -21,6 +21,28 @@ function writeJSON(response, status, body) {
   response.end(JSON.stringify(body))
 }
 
+/** Returns the request origin when it is explicitly allowed by --cors. */
+function allowedOrigin(request, config) {
+  const origin = request.headers.origin
+  if (!origin || !config.corsOrigins?.length) return undefined
+  return config.corsOrigins.includes(origin) ? origin : undefined
+}
+
+/**
+ * Credentialed CORS forbids a wildcard origin, so each allowed origin is echoed
+ * back individually and responses are marked as origin-dependent for caches.
+ */
+function applyCorsHeaders(request, response, config) {
+  if (!config.corsOrigins?.length) return
+  response.setHeader("Vary", "Origin")
+  const origin = allowedOrigin(request, config)
+  if (!origin) return
+  response.setHeader("Access-Control-Allow-Origin", origin)
+  response.setHeader("Access-Control-Allow-Credentials", "true")
+  response.setHeader("Access-Control-Allow-Headers", "authorization, content-type")
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+}
+
 function matchesCredentials(request, config) {
   if (!config.username) return true
   const header = request.headers.authorization
@@ -76,6 +98,13 @@ function providersResponse(models) {
 export function createBridgeServer({ config, acp }) {
   const omp = new OmpService(acp)
   return http.createServer(async (request, response) => {
+    applyCorsHeaders(request, response, config)
+    // Browsers omit credentials on the preflight, so it must be answered before auth.
+    if (request.method === "OPTIONS") {
+      response.writeHead(allowedOrigin(request, config) ? 204 : 403)
+      response.end()
+      return
+    }
     if (!matchesCredentials(request, config)) {
       response.writeHead(401, { "WWW-Authenticate": 'Basic realm="OMP Bridge"' })
       response.end()
