@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import type { PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
@@ -77,15 +77,124 @@ function toolCommandLabel(part: MessagePart): string {
   return `${part.tool}(${JSON.stringify(input)})`
 }
 
-const DIFF_PREVIEW_LINES = 6
+/** Counts changed lines between two strings using an LCS-based line diff. Skipped (returns null) for inputs large
+ *  enough that the O(n*m) table would be expensive — callers fall back to no diff stats in that case. */
+function diffLineStats(oldText: string, newText: string): { additions: number; deletions: number } | null {
+  const a = oldText.split("\n")
+  const b = newText.split("\n")
+  if (a.length * b.length > 250_000) return null
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const lcsLength = dp[0][0]
+  return { additions: b.length - lcsLength, deletions: a.length - lcsLength }
+}
 
-function DiffLines({ patch, limit }: { patch: string; limit?: number }) {
+/** Builds a simple unified-style diff (no hunk headers, every line shown) between two strings, for rendering
+ *  with DiffLines. Skipped (returns null) for the same size cutoff as diffLineStats. */
+function buildSimpleDiff(oldText: string, newText: string): string | null {
+  const a = oldText.split("\n")
+  const b = newText.split("\n")
+  if (a.length * b.length > 250_000) return null
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const lines: string[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      lines.push(` ${a[i]}`)
+      i++
+      j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      lines.push(`-${a[i]}`)
+      i++
+    } else {
+      lines.push(`+${b[j]}`)
+      j++
+    }
+  }
+  while (i < a.length) {
+    lines.push(`-${a[i]}`)
+    i++
+  }
+  while (j < b.length) {
+    lines.push(`+${b[j]}`)
+    j++
+  }
+  return lines.join("\n")
+}
+
+/** Shortens a tool's absolute file path to a path relative to the session's working directory, when the file
+ *  actually lives under it — long absolute paths otherwise get truncated in the single-line summary row. */
+function relativizePath(path: string, directory: string | undefined): string {
+  if (!directory) return path
+  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "")
+  const normalizedPath = normalize(path)
+  const normalizedDir = normalize(directory)
+  if (normalizedPath === normalizedDir) return "."
+  const prefix = `${normalizedDir}/`
+  if (normalizedPath.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return normalizedPath.slice(prefix.length)
+  }
+  return path
+}
+
+/** Turns a raw tool call into a human-readable description of what the bot did, plus a +/- line-diff summary
+ *  when the tool is an edit with old/new content to compare. */
+function describeToolAction(
+  part: MessagePart,
+  directory: string | undefined
+): { label: string; diff: { additions: number; deletions: number } | null } {
+  const input = (part.state?.input ?? {}) as Record<string, unknown>
+  const tool = (part.tool || "").toLowerCase()
+  const filePath = typeof input.filePath === "string" ? relativizePath(input.filePath, directory) : undefined
+
+  switch (tool) {
+    case "read":
+      return { label: filePath ? `Read ${filePath}` : "Read file", diff: null }
+    case "write": {
+      const content = typeof input.content === "string" ? input.content : null
+      const diff = content !== null ? diffLineStats("", content) : null
+      return { label: filePath ? `Wrote ${filePath}` : "Wrote file", diff }
+    }
+    case "edit": {
+      const oldString = typeof input.oldString === "string" ? input.oldString : null
+      const newString = typeof input.newString === "string" ? input.newString : null
+      const diff = oldString !== null && newString !== null ? diffLineStats(oldString, newString) : null
+      return { label: filePath ? `Edited ${filePath}` : "Edited file", diff }
+    }
+    case "bash":
+      return { label: typeof input.command === "string" ? `Ran ${input.command}` : "Ran command", diff: null }
+    case "glob":
+      return { label: typeof input.pattern === "string" ? `Searched files for "${input.pattern}"` : "Searched files", diff: null }
+    case "grep":
+      return { label: typeof input.pattern === "string" ? `Searched for "${input.pattern}"` : "Searched code", diff: null }
+    case "webfetch":
+      return { label: typeof input.url === "string" ? `Fetched ${input.url}` : "Fetched a URL", diff: null }
+    case "todowrite":
+      return { label: "Updated the to-do list", diff: null }
+    case "task":
+      return { label: typeof input.description === "string" ? `Ran subagent: ${input.description}` : "Ran a subagent", diff: null }
+    case "skill":
+      return { label: typeof input.name === "string" ? `Used skill: ${input.name}` : "Used a skill", diff: null }
+    default:
+      return { label: toolCommandLabel(part), diff: null }
+  }
+}
+
+function DiffLines({ patch }: { patch: string }) {
   const lines = patch.split("\n")
-  const shown = limit ? lines.slice(0, limit) : lines
-  const hiddenCount = lines.length - shown.length
   return (
     <pre className="message-diff-patch">
-      {shown.map((line, index) => {
+      {lines.map((line, index) => {
         let className = "diff-line-context"
         if (line.startsWith("+++") || line.startsWith("---")) className = "diff-line-meta"
         else if (line.startsWith("+")) className = "diff-line-add"
@@ -97,12 +206,23 @@ function DiffLines({ patch, limit }: { patch: string; limit?: number }) {
           </div>
         )
       })}
-      {hiddenCount > 0 && <div className="diff-line-more">+{hiddenCount} more lines</div>}
     </pre>
   )
 }
 
-function PatchPartView({ config, sessionID, messageID, files }: { config: ServerConfig; sessionID: string; messageID: string; files: string[] }) {
+function PatchPartView({
+  config,
+  sessionID,
+  messageID,
+  files,
+  timestamp
+}: {
+  config: ServerConfig
+  sessionID: string
+  messageID: string
+  files: string[]
+  timestamp?: string
+}) {
   const [diffs, setDiffs] = useState<DiffFile[] | null>(null)
   const [expandedDiff, setExpandedDiff] = useState<DiffFile | null>(null)
 
@@ -133,92 +253,69 @@ function PatchPartView({ config, sessionID, messageID, files }: { config: Server
   return (
     <div className="message-patch">
       {diffs.map((diff) => (
-        <details key={diff.file} className="message-diff" open>
-          <summary>
-            <span className="message-diff-file">{diff.file}</span>
-            <span className="message-diff-stats">
-              <span className="diff-stat-add">+{diff.additions}</span>
-              <span className="diff-stat-del">-{diff.deletions}</span>
-            </span>
-          </summary>
-          {diff.patch && (
-            <button
-              type="button"
-              className="message-diff-preview"
-              onClick={() => setExpandedDiff(diff)}
-              aria-label={`Expand full diff for ${diff.file}`}
-            >
-              <DiffLines patch={diff.patch} limit={DIFF_PREVIEW_LINES} />
-            </button>
-          )}
-        </details>
+        <button
+          key={diff.file}
+          type="button"
+          className="message-diff-row"
+          onClick={() => setExpandedDiff(diff)}
+          aria-label={`Show diff for ${diff.file}`}
+        >
+          <span className="message-diff-file">{diff.file}</span>
+          <span className="message-diff-stats">
+            {diff.additions > 0 && <span className="diff-stat-add">+{diff.additions}</span>}
+            {diff.deletions > 0 && <span className="diff-stat-del">-{diff.deletions}</span>}
+          </span>
+        </button>
       ))}
 
       {expandedDiff && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setExpandedDiff(null)}>
-          <section
-            className="modal-card diff-modal fade-in"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="diff-modal-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="diff-modal-header">
-              <h2 id="diff-modal-title">{expandedDiff.file}</h2>
-              <button type="button" className="btn-secondary" onClick={() => setExpandedDiff(null)}>
-                Close
-              </button>
-            </div>
-            <div className="diff-modal-body">
-              {expandedDiff.patch && <DiffLines patch={expandedDiff.patch} />}
-            </div>
-          </section>
-        </div>
+        <Modal title={expandedDiff.file} timestamp={timestamp} onClose={() => setExpandedDiff(null)}>
+          {expandedDiff.patch && <DiffLines patch={expandedDiff.patch} />}
+        </Modal>
       )}
     </div>
   )
 }
 
-const TEXT_PREVIEW_LINES = 6
+const BOTTOM_STICK_THRESHOLD = 80
 
-function truncatedText(text: string, limit: number): { shown: string; hiddenCount: number } {
-  const lines = text.split("\n")
-  if (lines.length <= limit) return { shown: text, hiddenCount: 0 }
-  return { shown: lines.slice(0, limit).join("\n"), hiddenCount: lines.length - limit }
-}
+let modalTitleSequence = 0
 
-function ExpandableOutput({ text, className, modalTitle }: { text: string; className: string; modalTitle: string }) {
-  const [expanded, setExpanded] = useState(false)
-  const { shown, hiddenCount } = truncatedText(text, TEXT_PREVIEW_LINES)
+/** Shared full-detail modal — everything that isn't the primary output text (thoughts, tool calls, edits) is
+ *  surfaced through this rather than inline collapsible/expandable regions. */
+function Modal({
+  title,
+  timestamp,
+  onClose,
+  children
+}: {
+  title: string
+  timestamp?: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  const [titleID] = useState(() => `modal-title-${++modalTitleSequence}`)
   return (
-    <>
-      <button type="button" className="message-tool-preview" onClick={() => setExpanded(true)} aria-label={`Expand ${modalTitle}`}>
-        <pre className={className}>{shown}</pre>
-        {hiddenCount > 0 && <div className="diff-line-more">+{hiddenCount} more lines</div>}
-      </button>
-
-      {expanded && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setExpanded(false)}>
-          <section
-            className="modal-card diff-modal fade-in"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="tool-modal-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="diff-modal-header">
-              <h2 id="tool-modal-title">{modalTitle}</h2>
-              <button type="button" className="btn-secondary" onClick={() => setExpanded(false)}>
-                Close
-              </button>
-            </div>
-            <div className="diff-modal-body">
-              <pre className={className}>{text}</pre>
-            </div>
-          </section>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal-card diff-modal fade-in"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleID}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="diff-modal-header">
+          <div className="diff-modal-heading">
+            <h2 id={titleID}>{title}</h2>
+            {timestamp && <small className="diff-modal-timestamp">{timestamp}</small>}
+          </div>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            Close
+          </button>
         </div>
-      )}
-    </>
+        <div className="diff-modal-body">{children}</div>
+      </section>
+    </div>
   )
 }
 
@@ -338,31 +435,97 @@ function QuestionCard({
   )
 }
 
-function ToolPartView({ part }: { part: MessagePart }) {
+function ToolPartView({
+  part,
+  directory,
+  timestamp
+}: {
+  part: MessagePart
+  directory: string | undefined
+  timestamp?: string
+}) {
+  const [open, setOpen] = useState(false)
   const status = part.state?.status || "pending"
   const command = toolCommandLabel(part)
+  const { label, diff } = describeToolAction(part, directory)
+  const tool = (part.tool || "").toLowerCase()
+  const input = (part.state?.input ?? {}) as Record<string, unknown>
+  let patch: string | null = null
+  if (tool === "edit" && typeof input.oldString === "string" && typeof input.newString === "string") {
+    patch = buildSimpleDiff(input.oldString, input.newString)
+  } else if (tool === "write" && typeof input.content === "string") {
+    patch = buildSimpleDiff("", input.content)
+  }
   return (
-    <div className={`message-tool message-tool-${status}`}>
-      <div className="message-tool-header">
-        <span className="message-tool-name">{part.tool}</span>
-        <span className="message-tool-status">{status}</span>
-      </div>
-      <ExpandableOutput text={command} className="message-tool-command" modalTitle={`${part.tool} — command`} />
-      {part.state?.output && (
-        <ExpandableOutput text={part.state.output} className="message-tool-output" modalTitle={`${part.tool} — output`} />
+    <>
+      <button type="button" className={`message-tool-summary message-tool-${status}`} onClick={() => setOpen(true)}>
+        <span className="message-tool-label">{label}</span>
+        <span className="message-tool-meta">
+          {diff && (diff.additions > 0 || diff.deletions > 0) && (
+            <span className="message-tool-diff-stats">
+              {diff.additions > 0 && <span className="diff-stat-add">+{diff.additions}</span>}
+              {diff.deletions > 0 && <span className="diff-stat-del">-{diff.deletions}</span>}
+            </span>
+          )}
+          {status === "error" && (
+            <span className="message-tool-status-error" title="Tool failed" aria-label="Tool failed">
+              ✕
+            </span>
+          )}
+          {(status === "pending" || status === "running") && (
+            <span className="message-tool-status-pending" title="Running…" aria-label="Running">
+              …
+            </span>
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)}>
+          <pre className="message-tool-command">{command}</pre>
+          {patch ? (
+            <DiffLines patch={patch} />
+          ) : (
+            part.state?.output && <pre className="message-tool-output">{part.state.output}</pre>
+          )}
+          {part.state?.error && <pre className="message-tool-output message-tool-error">{part.state.error}</pre>}
+        </Modal>
       )}
-      {part.state?.error && (
-        <ExpandableOutput
-          text={part.state.error}
-          className="message-tool-output message-tool-error"
-          modalTitle={`${part.tool} — error`}
-        />
-      )}
-    </div>
+    </>
   )
 }
 
-function MessagePartView({ part, config, sessionID }: { part: MessagePart; config: ServerConfig; sessionID: string }) {
+function ReasoningPartView({ part, timestamp }: { part: MessagePart; timestamp?: string }) {
+  const [open, setOpen] = useState(false)
+  if (!part.text) return null
+  const label = reasoningLabel([part])
+  return (
+    <>
+      <button type="button" className="message-reasoning-summary" onClick={() => setOpen(true)}>
+        {label}
+      </button>
+      {open && (
+        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)}>
+          <pre className="message-reasoning-text">{part.text}</pre>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+function MessagePartView({
+  part,
+  config,
+  sessionID,
+  directory,
+  timestamp
+}: {
+  part: MessagePart
+  config: ServerConfig
+  sessionID: string
+  directory?: string
+  timestamp?: string
+}) {
   if (part.type === "text") {
     if (!part.text) return null
     return (
@@ -373,25 +536,185 @@ function MessagePartView({ part, config, sessionID }: { part: MessagePart; confi
   }
 
   if (part.type === "reasoning") {
-    if (!part.text) return null
-    return (
-      <details className="message-reasoning">
-        <summary>Thinking</summary>
-        <pre>{part.text}</pre>
-      </details>
-    )
+    return <ReasoningPartView part={part} timestamp={timestamp} />
   }
 
   if (part.type === "tool") {
-    return <ToolPartView part={part} />
+    return <ToolPartView part={part} directory={directory} timestamp={timestamp} />
   }
 
   if (part.type === "patch") {
     if (!part.files || part.files.length === 0 || !part.messageID) return null
-    return <PatchPartView config={config} sessionID={sessionID} messageID={part.messageID} files={part.files} />
+    return (
+      <PatchPartView
+        config={config}
+        sessionID={sessionID}
+        messageID={part.messageID}
+        files={part.files}
+        timestamp={timestamp}
+      />
+    )
   }
 
   return null
+}
+
+const ACTION_GROUP_TYPES = new Set(["reasoning", "tool", "patch"])
+
+type TimelineItem = { kind: "action-group"; parts: MessagePart[] } | { kind: "part"; part: MessagePart }
+
+/** Walks a message's parts in order and collapses each run of consecutive thinking/tool-call/edit parts into a
+ *  single action-group item, alternating with the output text parts as they actually occurred — so a turn that
+ *  thinks, calls a tool, replies, thinks again, calls another tool, and replies again renders as two separate
+ *  "thought for Xs, used N tools" rows interleaved with their two outputs, rather than one merged blob. A run of
+ *  just one action part skips the group wrapper entirely and renders as that part directly. */
+function buildMessageTimeline(parts: MessagePart[]): TimelineItem[] {
+  const items: TimelineItem[] = []
+  let buffer: MessagePart[] = []
+  const flush = () => {
+    if (buffer.length === 0) return
+    items.push(buffer.length === 1 ? { kind: "part", part: buffer[0] } : { kind: "action-group", parts: buffer })
+    buffer = []
+  }
+  for (const part of parts) {
+    if (part.type === "step-start" || part.type === "step-finish") continue
+    if (ACTION_GROUP_TYPES.has(part.type)) {
+      buffer.push(part)
+    } else {
+      flush()
+      items.push({ kind: "part", part })
+    }
+  }
+  flush()
+  return items
+}
+
+function formatActionDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  return `${minutes}m`
+}
+
+/** Groups tool calls by what kind of action they represent (reads, searches, commands, ...) so a run of tool
+ *  calls summarizes as "read 5 files, searched 1 time" instead of a meaningless "ran 6 tools". */
+function summarizeToolCounts(toolParts: MessagePart[]): string[] {
+  const counts = new Map<string, number>()
+  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
+  for (const part of toolParts) {
+    const tool = (part.tool || "").toLowerCase()
+    switch (tool) {
+      case "read":
+        bump("read")
+        break
+      case "write":
+        bump("write")
+        break
+      case "edit":
+        bump("edit")
+        break
+      case "bash":
+        bump("bash")
+        break
+      case "glob":
+      case "grep":
+        bump("search")
+        break
+      case "webfetch":
+        bump("webfetch")
+        break
+      case "task":
+        bump("task")
+        break
+      case "skill":
+        bump("skill")
+        break
+      default:
+        bump("other")
+        break
+    }
+  }
+
+  const pieces: string[] = []
+  const push = (key: string, one: string, many: string) => {
+    const count = counts.get(key)
+    if (count) pieces.push(count === 1 ? one : many.replace("{n}", String(count)))
+  }
+  push("read", "read 1 file", "read {n} files")
+  push("write", "wrote 1 file", "wrote {n} files")
+  push("edit", "edited 1 file", "edited {n} files")
+  push("search", "searched 1 time", "searched {n} times")
+  push("bash", "ran 1 command", "ran {n} commands")
+  push("webfetch", "fetched 1 URL", "fetched {n} URLs")
+  push("task", "ran 1 subagent", "ran {n} subagents")
+  push("skill", "used 1 skill", "used {n} skills")
+  push("other", "ran 1 tool", "ran {n} tools")
+  return pieces
+}
+
+/** "Thought for Xs"/"Thought for Xm" when the reasoning part(s) carry timing, else a plain "Thinking". */
+function reasoningLabel(reasoningParts: MessagePart[]): string {
+  let minStart: number | undefined
+  let maxEnd: number | undefined
+  for (const part of reasoningParts) {
+    const time = part.time
+    if (!time) continue
+    if (minStart === undefined || time.start < minStart) minStart = time.start
+    const end = time.end ?? Date.now()
+    if (maxEnd === undefined || end > maxEnd) maxEnd = end
+  }
+  return minStart !== undefined && maxEnd !== undefined ? `Thought for ${formatActionDuration(maxEnd - minStart)}` : "Thinking"
+}
+
+function summarizeActionGroup(parts: MessagePart[]): string {
+  const reasoningParts = parts.filter((part) => part.type === "reasoning")
+  const toolParts = parts.filter((part) => part.type === "tool")
+  const editCount = parts
+    .filter((part) => part.type === "patch")
+    .reduce((sum, part) => sum + (part.files?.length ?? 0), 0)
+
+  const pieces: string[] = []
+  if (reasoningParts.length > 0) pieces.push(reasoningLabel(reasoningParts))
+  pieces.push(...summarizeToolCounts(toolParts))
+  if (editCount > 0) pieces.push(`made ${editCount} edit${editCount === 1 ? "" : "s"}`)
+  if (pieces.length === 0) pieces.push("Actions")
+  return pieces.join(", ")
+}
+
+function ActionGroupView({
+  parts,
+  config,
+  sessionID,
+  directory,
+  timestamp
+}: {
+  parts: MessagePart[]
+  config: ServerConfig
+  sessionID: string
+  directory?: string
+  timestamp?: string
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" className="message-action-summary" onClick={() => setOpen(true)}>
+        <span>{summarizeActionGroup(parts)}</span>
+      </button>
+
+      {open && (
+        <Modal title={summarizeActionGroup(parts)} timestamp={timestamp} onClose={() => setOpen(false)}>
+          <div className="message-action-details">
+            {parts.map((part, index) => (
+              <Fragment key={part.id}>
+                {index > 0 && <hr className="message-action-divider" />}
+                <MessagePartView part={part} config={config} sessionID={sessionID} directory={directory} timestamp={timestamp} />
+              </Fragment>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </>
+  )
 }
 
 function toFileStatusList(input: FileStatusEntry[] | Record<string, FileStatusEntry>): FileStatusEntry[] {
@@ -668,6 +991,7 @@ function App() {
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const [activeDetailSheet, setActiveDetailSheet] = useState<null | "ai" | "details">(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLDivElement | null>(null)
   const completionAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -1030,6 +1354,22 @@ function App() {
     const composerBottom = Number.parseFloat(composerStyles.bottom) || 0
     const clearance = Math.ceil(composerRect.height + composerBottom + 16)
     container.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
+  }
+
+  function isNearMessagesBottom(): boolean {
+    const container = messagesRef.current
+    if (!container) return true
+    const containerDistance = container.scrollHeight - container.scrollTop - container.clientHeight
+    if (containerDistance > BOTTOM_STICK_THRESHOLD) return false
+    // The page itself can also scroll (the composer is pinned via fixed positioning), so a user
+    // scrolling the outer window away from the bottom must also break the auto-scroll pin.
+    const doc = document.documentElement
+    const windowDistance = doc.scrollHeight - window.scrollY - window.innerHeight
+    return windowDistance <= BOTTOM_STICK_THRESHOLD
+  }
+
+  function handleMessagesScroll() {
+    stickToBottomRef.current = isNearMessagesBottom()
   }
 
   function scrollMessagesToBottom(behavior: ScrollBehavior = "smooth") {
@@ -1438,7 +1778,14 @@ function App() {
   }, [hasConfiguredServer])
 
   useEffect(() => {
+    const onWindowScroll = () => handleMessagesScroll()
+    window.addEventListener("scroll", onWindowScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onWindowScroll)
+  }, [])
+
+  useEffect(() => {
     if (view !== "detail") return
+    if (!stickToBottomRef.current) return
     scrollMessagesToBottom("auto")
   }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions])
 
@@ -1446,10 +1793,15 @@ function App() {
     if (view !== "detail" || !selectedID) return
     const container = messagesRef.current
     if (!container) return
+    // Opening a session should always land at the bottom, regardless of where a previous session left off.
+    stickToBottomRef.current = true
     scrollMessagesToBottom("auto")
     // Tool/diff parts fetch their content asynchronously and grow after the
-    // initial layout, so keep pinning to the bottom while that settles.
-    const observer = new ResizeObserver(() => scrollMessagesToBottom("auto"))
+    // initial layout, so keep pinning to the bottom while that settles — but only while the
+    // user hasn't scrolled away from it.
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scrollMessagesToBottom("auto")
+    })
     observer.observe(container)
     const timeout = setTimeout(() => observer.disconnect(), 2000)
     return () => {
@@ -2030,7 +2382,7 @@ function App() {
           )}
 
           <div className="messages-wrap">
-            <div className="messages" ref={messagesRef}>
+            <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
             {loadingSessionID === selectedID ? (
               <div className="empty-state compact">
                 <LoadingIcon size={32} />
@@ -2046,15 +2398,27 @@ function App() {
               <>
                 {renderedMessages.map((message) => (
                   <article key={message.info.id} className={`message ${message.info.role} fade-in`}>
-                    <header>
-                      <strong>
-                        {message.info.role === "user" ? t('detail.you') : t('detail.opencode')}
-                      </strong>
-                      <small>{formatTime(message.info.time.created)}</small>
-                    </header>
-                    {message.parts.map((part) => (
-                      <MessagePartView key={part.id} part={part} config={config} sessionID={message.info.sessionID} />
-                    ))}
+                    {buildMessageTimeline(message.parts).map((item) =>
+                      item.kind === "action-group" ? (
+                        <ActionGroupView
+                          key={`group-${item.parts[0].id}`}
+                          parts={item.parts}
+                          config={config}
+                          sessionID={message.info.sessionID}
+                          directory={selectedSession?.directory}
+                          timestamp={formatTime(message.info.time.created)}
+                        />
+                      ) : (
+                        <MessagePartView
+                          key={item.part.id}
+                          part={item.part}
+                          config={config}
+                          sessionID={message.info.sessionID}
+                          directory={selectedSession?.directory}
+                          timestamp={formatTime(message.info.time.created)}
+                        />
+                      )
+                    )}
                   </article>
                 ))}
                 {selectedSession &&

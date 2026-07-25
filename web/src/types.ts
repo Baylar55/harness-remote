@@ -73,6 +73,7 @@ export type ToolState = {
   title?: string
   output?: string
   error?: string
+  time?: { start: number; end?: number }
 }
 
 export type MessagePart = {
@@ -85,6 +86,7 @@ export type MessagePart = {
   state?: ToolState
   hash?: string
   files?: string[]
+  time?: { start: number; end?: number }
 }
 
 export type MessageEnvelope = {

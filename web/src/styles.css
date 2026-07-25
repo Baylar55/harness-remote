@@ -874,20 +874,6 @@ p {
   animation-delay: 320ms;
 }
 
-.message header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-2);
-}
-
-.message small {
-  color: var(--muted);
-  font-size: 0.76rem;
-  white-space: nowrap;
-}
-
 .message-content p {
   margin-top: var(--space-2);
   white-space: pre-wrap;
@@ -912,78 +898,98 @@ p {
   color: inherit;
 }
 
-.message-reasoning {
+.message-reasoning-summary,
+.message-action-summary,
+.message-tool-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  width: 100%;
   margin-top: var(--space-2);
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
+  background: transparent;
   padding: var(--space-2) var(--space-3);
   color: var(--muted);
-}
-
-.message-reasoning summary {
-  cursor: pointer;
   font-size: 0.82rem;
   font-weight: 600;
+  text-align: left;
+  cursor: pointer;
 }
 
-.message-reasoning pre {
-  margin-top: var(--space-2);
+.message-reasoning-summary:hover,
+.message-action-summary:hover,
+.message-tool-summary:hover {
+  background: var(--surface-strong);
+}
+
+.message-reasoning-text {
+  margin: 0;
   white-space: pre-wrap;
   font-family: var(--font-mono);
   font-size: 0.82rem;
 }
 
-.message-tool {
-  margin-top: var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--code-bg);
-  color: var(--code-text);
-  padding: var(--space-3);
+.message-action-details > *:first-child {
+  margin-top: 0;
 }
 
-.message-tool-header {
+.message-action-divider {
+  border: 0;
+  margin: var(--space-3) 0;
+}
+
+.message-tool-summary {
+  min-width: 0;
+}
+
+.message-tool-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.message-tool-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.message-tool-diff-stats {
+  display: flex;
   gap: var(--space-2);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
 }
 
-.message-tool-name {
-  font-weight: 600;
+.message-tool-status-error {
+  color: var(--danger, #d33);
+  font-weight: 700;
+  font-size: 0.8rem;
+  line-height: 1;
 }
 
-.message-tool-status {
+.message-tool-status-pending {
   color: var(--muted);
-  text-transform: uppercase;
-  font-size: 0.7rem;
-}
-
-.message-tool-preview {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  margin-top: var(--space-2);
-  text-align: left;
-  cursor: pointer;
-}
-
-.message-tool-preview:hover .message-tool-command,
-.message-tool-preview:hover .message-tool-output {
-  background: var(--surface-strong);
+  font-size: 0.8rem;
+  line-height: 1;
 }
 
 .message-tool-command,
 .message-tool-output {
   margin: 0;
+  margin-top: var(--space-2);
   white-space: pre;
   font-family: var(--font-mono);
   font-size: 0.82rem;
   overflow-x: auto;
+}
+
+.message-tool-command:first-child {
+  margin-top: 0;
 }
 
 .message-tool-error {
@@ -1087,22 +1093,25 @@ p {
   gap: var(--space-2);
 }
 
-.message-diff {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.message-diff summary {
+.message-diff-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   cursor: pointer;
   padding: 0.35rem 0.6rem;
   background: var(--surface-strong);
+  color: inherit;
   font-family: var(--font-mono);
   font-size: 0.8rem;
+  text-align: left;
+}
+
+.message-diff-row:hover {
+  border-color: var(--primary-border);
 }
 
 .message-diff-file {
@@ -1123,27 +1132,6 @@ p {
   color: #cf222e;
 }
 
-.message-diff-preview {
-  display: block;
-  width: 100%;
-  border: 0;
-  border-top: 1px solid var(--border);
-  background: transparent;
-  padding: 0;
-  margin: 0;
-  text-align: left;
-  cursor: pointer;
-}
-
-.message-diff-preview:hover .message-diff-patch {
-  background: var(--surface-strong);
-}
-
-.diff-line-more {
-  color: var(--muted);
-  font-style: italic;
-}
-
 .diff-modal {
   width: min(92vw, 900px);
   max-height: 85vh;
@@ -1157,8 +1145,14 @@ p {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: var(--space-4);
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-3);
+}
+
+.diff-modal-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .diff-modal-header h2 {
@@ -1167,9 +1161,15 @@ p {
   overflow-wrap: anywhere;
 }
 
+.diff-modal-timestamp {
+  color: var(--muted);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
 .diff-modal-body {
   overflow: auto;
-  padding: 0 var(--space-2);
+  padding: var(--space-4) var(--space-2) 0;
 }
 
 .diff-modal-body .message-diff-patch {
@@ -1179,6 +1179,8 @@ p {
 .message-diff-patch {
   margin: 0;
   overflow-x: auto;
+  width: fit-content;
+  min-width: 100%;
   font-family: var(--font-mono);
   font-size: 0.78rem;
   line-height: 1.45;
@@ -1339,8 +1341,12 @@ p {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  padding: var(--space-5);
+  padding: var(--space-4);
   box-shadow: var(--shadow-md);
+}
+
+.modal-card h2 {
+  margin-bottom: var(--space-4);
 }
 
 .modal-card .subtle {
@@ -1612,10 +1618,6 @@ button.compact {
 
   .message {
     padding: var(--space-3);
-  }
-
-  .message header {
-    align-items: baseline;
   }
 
   .composer {
