@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import type { PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
@@ -1039,6 +1039,107 @@ function hasMatchingUserMessage(messages: MessageEnvelope[], optimistic: Message
   ))
 }
 
+/** Renders the message list, pending questions, and typing bubble. Memoized so that unrelated state changes in
+ *  the parent (most importantly typing into the composer) don't re-run the per-message formatting/diffing work
+ *  on every keystroke. */
+const MessagesPane = memo(function MessagesPane({
+  loadingSessionID,
+  selectedID,
+  renderedMessages,
+  showTypingBubble,
+  pendingQuestions,
+  config,
+  directory,
+  t,
+  messagesRef,
+  messagesEndRef,
+  onMessagesScroll,
+  onQuestionResolved
+}: {
+  loadingSessionID: string | null
+  selectedID: string | null
+  renderedMessages: (MessageEnvelope & { text: string })[]
+  showTypingBubble: boolean
+  pendingQuestions: QuestionRequest[]
+  config: ServerConfig
+  directory: string | undefined
+  t: Translator
+  messagesRef: RefObject<HTMLDivElement>
+  messagesEndRef: RefObject<HTMLDivElement>
+  onMessagesScroll: () => void
+  onQuestionResolved: (id: string) => void
+}) {
+  return (
+    <div className="messages-wrap">
+      <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
+        {loadingSessionID === selectedID ? (
+          <div className="empty-state compact">
+            <LoadingIcon size={32} />
+            <p>{t('detail.loading')}</p>
+          </div>
+        ) : renderedMessages.length === 0 && !showTypingBubble && pendingQuestions.length === 0 ? (
+          <div className="empty-state compact">
+            <ChatIcon size={40} className="icon-empty-state" />
+            <p>{t('detail.emptyTitle')}</p>
+            <p className="subtle">{t('detail.emptyHint')}</p>
+          </div>
+        ) : (
+          <>
+            {renderedMessages.map((message) => (
+              <article key={message.info.id} className={`message ${message.info.role} fade-in`}>
+                {buildMessageTimeline(message.parts).map((item) =>
+                  item.kind === "action-group" ? (
+                    <ActionGroupView
+                      key={`group-${item.parts[0].id}`}
+                      parts={item.parts}
+                      config={config}
+                      sessionID={message.info.sessionID}
+                      directory={directory}
+                      timestamp={formatTime(message.info.time.created)}
+                      t={t}
+                    />
+                  ) : (
+                    <MessagePartView
+                      key={item.part.id}
+                      part={item.part}
+                      config={config}
+                      sessionID={message.info.sessionID}
+                      directory={directory}
+                      timestamp={formatTime(message.info.time.created)}
+                      t={t}
+                    />
+                  )
+                )}
+              </article>
+            ))}
+            {directory !== undefined &&
+              pendingQuestions.map((request) => (
+                <QuestionCard
+                  key={request.id}
+                  config={config}
+                  directory={directory}
+                  request={request}
+                  onResolved={onQuestionResolved}
+                  t={t}
+                />
+              ))}
+            {showTypingBubble && (
+              <article className="message assistant typing-bubble fade-in" aria-label={t('detail.waiting')}>
+                <div className="typing-dots" aria-hidden="true">
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </div>
+              </article>
+            )}
+            <div ref={messagesEndRef} className="messages-end" aria-hidden="true" />
+          </>
+        )}
+      </div>
+    </div>
+  )
+})
+
 function App() {
   type NoticeType = "info" | "success" | "error"
   type ThemePreference = "system" | "light" | "dark"
@@ -1498,9 +1599,13 @@ function App() {
     return windowDistance <= BOTTOM_STICK_THRESHOLD
   }
 
-  function handleMessagesScroll() {
+  const handleMessagesScroll = useCallback(() => {
     stickToBottomRef.current = isNearMessagesBottom()
-  }
+  }, [])
+
+  const handleQuestionResolved = useCallback((id: string) => {
+    setPendingQuestions((current) => current.filter((item) => item.id !== id))
+  }, [])
 
   function scrollMessagesToBottom(behavior: ScrollBehavior = "smooth") {
     requestAnimationFrame(() => {
@@ -2521,73 +2626,20 @@ function App() {
             </div>
           )}
 
-          <div className="messages-wrap">
-            <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
-            {loadingSessionID === selectedID ? (
-              <div className="empty-state compact">
-                <LoadingIcon size={32} />
-                <p>{t('detail.loading')}</p>
-              </div>
-            ) : renderedMessages.length === 0 && !showTypingBubble && pendingQuestions.length === 0 ? (
-              <div className="empty-state compact">
-                <ChatIcon size={40} className="icon-empty-state" />
-                <p>{t('detail.emptyTitle')}</p>
-                <p className="subtle">{t('detail.emptyHint')}</p>
-              </div>
-            ) : (
-              <>
-                {renderedMessages.map((message) => (
-                  <article key={message.info.id} className={`message ${message.info.role} fade-in`}>
-                    {buildMessageTimeline(message.parts).map((item) =>
-                      item.kind === "action-group" ? (
-                        <ActionGroupView
-                          key={`group-${item.parts[0].id}`}
-                          parts={item.parts}
-                          config={config}
-                          sessionID={message.info.sessionID}
-                          directory={selectedSession?.directory}
-                          timestamp={formatTime(message.info.time.created)}
-                          t={t}
-                        />
-                      ) : (
-                        <MessagePartView
-                          key={item.part.id}
-                          part={item.part}
-                          config={config}
-                          sessionID={message.info.sessionID}
-                          directory={selectedSession?.directory}
-                          timestamp={formatTime(message.info.time.created)}
-                          t={t}
-                        />
-                      )
-                    )}
-                  </article>
-                ))}
-                {selectedSession &&
-                  pendingQuestions.map((request) => (
-                    <QuestionCard
-                      key={request.id}
-                      config={config}
-                      directory={selectedSession.directory}
-                      request={request}
-                      onResolved={(id) => setPendingQuestions((current) => current.filter((item) => item.id !== id))}
-                      t={t}
-                    />
-                  ))}
-                {showTypingBubble && (
-                  <article className="message assistant typing-bubble fade-in" aria-label={t('detail.waiting')}>
-                    <div className="typing-dots" aria-hidden="true">
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                    </div>
-                  </article>
-                )}
-                <div ref={messagesEndRef} className="messages-end" aria-hidden="true" />
-              </>
-            )}
-            </div>
-          </div>
+          <MessagesPane
+            loadingSessionID={loadingSessionID}
+            selectedID={selectedID}
+            renderedMessages={renderedMessages}
+            showTypingBubble={showTypingBubble}
+            pendingQuestions={pendingQuestions}
+            config={config}
+            directory={selectedSession?.directory}
+            t={t}
+            messagesRef={messagesRef}
+            messagesEndRef={messagesEndRef}
+            onMessagesScroll={handleMessagesScroll}
+            onQuestionResolved={handleQuestionResolved}
+          />
 
           <div className="composer" ref={composerRef}>
             <textarea
