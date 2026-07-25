@@ -11,7 +11,7 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 |---|---|---|
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
 | Oh My Pi (OMP) | supported | through the local bridge included in this repository |
-| PI | planned | — |
+| [PI](https://pi.dev/) | planned — [#36](https://github.com/giuliastro/harness-remote/issues/36) is open, help welcome | likely the same ACP bridge, via a PI ACP adapter |
 
 Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup) and [OMP](#oh-my-pi-bridge-setup) sections below document the setup and the per-backend limitations.
 
