@@ -210,9 +210,6 @@ p {
 }
 
 .top-nav {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1553,7 +1550,6 @@ button.compact {
   }
 
   .top-nav {
-    top: 0;
     border-radius: var(--radius-md);
   }
 
