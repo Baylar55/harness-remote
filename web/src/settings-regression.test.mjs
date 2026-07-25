@@ -22,5 +22,7 @@ assert.ok(app.includes('disabled={testingConnection || !canTestDraft || testAlre
 assert.ok(app.includes('connection-help'), 'Settings should explain whether the current configuration can be tested')
 assert.ok(app.includes('Full, versioned backend guides live in the Harness Remote repository'), 'Help should link out instead of duplicating every backend guide')
 assert.ok(app.includes('"oh-my-pi-bridge-setup"') && app.includes('"opencode-server-setup"'), 'Help should select the repository guide for the active backend')
+assert.ok(app.includes('https://github.com/giuliastro/harness-remote#'), 'Help should link to the canonical repository')
+assert.equal(app.includes('https://github.com/gervaso-assistant/opencode-remote-android#'), false, 'Help must not link to the obsolete repository owner')
 
 console.log('settings regression tests passed')

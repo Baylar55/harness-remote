@@ -73,5 +73,5 @@ export function parseConfig(args, environment = process.env) {
 }
 
 export function usage() {
-  return `Usage: opencode-remote-omp [options]\n\nOptions:\n  --host <host>          Bind host (default: 127.0.0.1)\n  --port <port>          Bind port (default: 4097)\n  --username <username>  Enable HTTP Basic Auth\n  --password <password>  Enable HTTP Basic Auth\n  --omp-bin <path>       OMP executable (default: omp)\n  --root <path>          Allowed worktree root; repeatable\n  --log-requests         Log request method, path, and query\n  --help                 Show this help`
+  return `Usage: harness-remote-omp [options]\n\nOptions:\n  --host <host>          Bind host (default: 127.0.0.1)\n  --port <port>          Bind port (default: 4097)\n  --username <username>  Enable HTTP Basic Auth\n  --password <password>  Enable HTTP Basic Auth\n  --omp-bin <path>       OMP executable (default: omp)\n  --root <path>          Allowed worktree root; repeatable\n  --log-requests         Log request method, path, and query\n  --help                 Show this help`
 }

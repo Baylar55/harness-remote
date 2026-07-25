@@ -98,6 +98,21 @@ function assistantPayloadLength(items: MessageEnvelope[]): number {
     .reduce((sum, message) => sum + extractText(message).length, 0)
 }
 
+function messagesHaveSameContent(left: MessageEnvelope[], right: MessageEnvelope[]): boolean {
+  return left.length === right.length && left.every((message, index) => {
+    const candidate = right[index]
+    return candidate?.info.role === message.info.role && extractText(candidate) === extractText(message)
+  })
+}
+
+function messagesExtendContent(current: MessageEnvelope[], next: MessageEnvelope[]): boolean {
+  if (next.length < current.length) return false
+  return current.every((message, index) => {
+    const candidate = next[index]
+    return candidate?.info.role === message.info.role && extractText(candidate).startsWith(extractText(message))
+  })
+}
+
 function normalizeMessageMarkdown(text: string): string {
   return text.includes("\n") ? text : text.replace(/\s-\s(?=\S)/g, "\n- ")
 }
@@ -320,6 +335,8 @@ function App() {
   const latestMessageTimesRef = useRef(new Map<string, { sessionUpdated: number; activityTime: number }>())
   const selectedSessionRef = useRef<SessionView | null>(null)
 
+  const loadedMessagesRef = useRef<MessageEnvelope[]>([])
+  const shouldAutoScrollRef = useRef(false)
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedID) ?? null,
     [sessions, selectedID]
@@ -379,9 +396,6 @@ function App() {
       .filter((message) => message.text)
   }, [messages, optimisticUserMessages])
 
-  const messageScrollSignature = useMemo(() => {
-    return renderedMessages.map((message) => `${message.info.id}:${message.text.length}`).join("|")
-  }, [renderedMessages])
 
   const assistantResponseSignature = useMemo(() => {
     return renderedMessages
@@ -428,6 +442,7 @@ function App() {
   async function openSession(sessionID: string, directory: string) {
     setSelectedID(sessionID)
     setMessages([])
+    loadedMessagesRef.current = []
     setOptimisticUserMessages([])
     setTodos([])
     setDiffFiles([])
@@ -438,7 +453,7 @@ function App() {
     setView("detail")
     setLoadingSessionID(sessionID)
     try {
-      await loadSelected(sessionID, directory)
+      await loadSelected(sessionID, directory, true)
       await Promise.all([loadAgents(), loadModels(sessionID, directory)])
     } catch (err) {
       setRuntimeError((err as Error).message)
@@ -453,6 +468,7 @@ function App() {
       setSessions([])
       setSelectedID(null)
       setMessages([])
+      loadedMessagesRef.current = []
       setOptimisticUserMessages([])
       setTodos([])
       setDiffFiles([])
@@ -618,6 +634,9 @@ function App() {
   }
 
   async function loadSessionActivityTimes(items: Session[]): Promise<Map<string, number>> {
+    if (config.backend === "omp") {
+      return new Map(items.map((session) => [session.id, session.time.updated]))
+    }
     const results = await Promise.all(items.map(async (session) => {
       const cached = latestMessageTimesRef.current.get(session.id)
       if (cached?.sessionUpdated === session.time.updated) return [session.id, cached.activityTime] as const
@@ -641,18 +660,23 @@ function App() {
     localStorage.setItem(AGENT_STORAGE_KEY, nextAgentID)
   }
 
-  async function loadSelected(sessionID: string, directory: string) {
+  async function loadSelected(sessionID: string, directory: string, refreshHistory = false) {
     const requestID = ++loadSelectedRequestRef.current
     const [msg, todo, diff] = await Promise.all([
-      api.loadMessages(config, sessionID, directory),
+      api.loadMessages(config, sessionID, directory, refreshHistory),
       api.loadTodo(config, sessionID, directory),
       api.loadDiff(config, sessionID, directory).catch(() => [])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
-    setMessages((current) => {
-      if (assistantPayloadLength(current) > assistantPayloadLength(msg)) return current
-      return msg
-    })
+    const current = loadedMessagesRef.current
+    if (
+      !messagesHaveSameContent(current, msg) &&
+      assistantPayloadLength(current) <= assistantPayloadLength(msg)
+    ) {
+      shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isChatNearBottom()
+      loadedMessagesRef.current = msg
+      setMessages(msg)
+    }
     setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
     setTodos(todo)
     setDiffFiles(diff)
@@ -683,6 +707,15 @@ function App() {
     const composerBottom = Number.parseFloat(composerStyles.bottom) || 0
     const clearance = Math.ceil(composerRect.height + composerBottom + 16)
     container.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
+  }
+
+  function isChatNearBottom(): boolean {
+    const container = messagesRef.current
+    if (container && container.scrollHeight > container.clientHeight + 1) {
+      return container.scrollHeight - container.scrollTop - container.clientHeight <= 48
+    }
+    const page = document.documentElement
+    return page.scrollHeight - window.scrollY - window.innerHeight <= 48
   }
 
   function scrollMessagesToBottom(behavior: ScrollBehavior = "smooth") {
@@ -766,6 +799,8 @@ function App() {
         return [createdView, ...current].sort((a, b) => b.updated - a.updated)
       })
       setSelectedID(created.id)
+      setMessages([])
+      loadedMessagesRef.current = []
       setView("detail")
       await loadSelected(created.id, created.directory)
       await loadModels(created.id, created.directory)
@@ -895,6 +930,7 @@ function App() {
       if (selectedID === sessionID) {
         setSelectedID(null)
         setMessages([])
+        loadedMessagesRef.current = []
         setOptimisticUserMessages([])
         setTodos([])
         setDiffFiles([])
@@ -1071,9 +1107,16 @@ function App() {
   }, [hasConfiguredServer])
 
   useEffect(() => {
-    if (view !== "detail") return
+    if (view !== "detail" || !selectedSession) return
     scrollMessagesToBottom("auto")
-  }, [view, messageScrollSignature, isWorking, showTypingBubble])
+  }, [view, selectedSession?.id])
+
+  useEffect(() => {
+    loadedMessagesRef.current = messages
+    if (!shouldAutoScrollRef.current) return
+    shouldAutoScrollRef.current = false
+    scrollMessagesToBottom("smooth")
+  }, [messages])
 
   useEffect(() => {
     if (!awaitingAssistantReply) return
@@ -2023,7 +2066,7 @@ function App() {
               </div>
               <p>
                 <a
-                  href={`https://github.com/gervaso-assistant/opencode-remote-android#${config.backend === "omp" ? "oh-my-pi-bridge-setup" : "opencode-server-setup"}`}
+                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "omp" ? "oh-my-pi-bridge-setup" : "opencode-server-setup"}`}
                   target="_blank"
                   rel="noreferrer"
                 >

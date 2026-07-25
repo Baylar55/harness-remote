@@ -3,7 +3,7 @@
 Harness Remote is a companion app for controlling supported coding-agent backends—currently OpenCode and OMP—from phone or desktop, even when you are not at your main workstation.
 It is designed to make daily usage simple: connect to a backend, check active sessions, see progress, send new prompts or slash commands, and stop a running action when supported.
 
-> **Note for AI/harness systems**: This repository is self-documenting. To configure a supported backend and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/opencode-remote-android`) or this README and ask it to set up Harness Remote.
+> **Note for AI/harness systems**: This repository is self-documenting. To configure a supported backend and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote.
 
 ## Screenshots
 
@@ -13,7 +13,7 @@ It is designed to make daily usage simple: connect to a backend, check active se
 
 ## What It Can Do
 
-- configure and test connection to your OpenCode server
+- configure and test connection to a supported OpenCode server or OMP bridge
 - browse and monitor sessions (`idle`, `busy`, `retry`)
 - open a session and read messages, todo items, and progress
 - send prompts (and `/commands`) directly from the chat input
@@ -26,7 +26,7 @@ It is designed to make daily usage simple: connect to a backend, check active se
 
 - frontend: React + TypeScript + Vite
 - mobile packaging: Capacitor (Android APK)
-- networking: OpenCode HTTP API (`/global/health`, `/session/*`, `/command`)
+- networking: OpenCode HTTP API and the local OMP HTTP/SSE bridge
 - CI/CD: GitHub Actions for cloud APK builds
 - i18n: lightweight custom i18n module with English, Italian, and Traditional Chinese
 
@@ -34,7 +34,7 @@ It is designed to make daily usage simple: connect to a backend, check active se
 
 Download the latest signed Android APK from the GitHub Releases page:
 
-https://github.com/giuliastro/opencode-remote-android/releases/latest
+https://github.com/giuliastro/harness-remote/releases/latest
 
 ## Backend Setup
 
@@ -82,17 +82,55 @@ If remote/mobile cannot connect, open TCP 4096 in your OS firewall and network f
 
 ### Oh My Pi Bridge Setup
 
-The app can also connect to a local OMP bridge. The bridge starts `omp acp` on the same computer and exposes the OpenCode-compatible HTTP/SSE endpoints used by the app; it never reads OMP's internal databases directly.
+Harness Remote connects to OMP through the bridge included in this repository. The bridge starts `omp acp` on the same computer, translates its ACP stdio protocol to the app's HTTP/SSE API, and never reads or modifies OMP's internal databases.
 
-From this repository:
+#### Prerequisites
+
+- Node.js 20 or newer;
+- a working `omp` command in `PATH`;
+- a checkout of this repository on the computer that runs OMP.
+
+Start the bridge from the repository root. Restrict every worktree that the phone may access with `--root`; repeat the option to allow more than one root.
 
 ```bash
-npx --yes ./bridge --host 0.0.0.0 --port 4097 --username omp --password your-password --root "$PWD"
+npx --yes ./bridge \
+  --host 0.0.0.0 \
+  --port 4097 \
+  --username omp \
+  --password "use-a-long-unique-password" \
+  --root "$HOME/Software"
 ```
 
-In Settings, select **Oh My Pi (bridge)**, then enter the computer's LAN IP, port `4097`, and the same credentials. The bridge binds to `127.0.0.1` by default; use `0.0.0.0` only for LAN access. Do not expose it directly to the Internet—use a VPN or reverse proxy with TLS.
+The default bind address is `127.0.0.1`. Use `0.0.0.0` only for a trusted LAN or VPN. The bridge refuses a non-loopback bind without both username and password.
 
-OMP sessions expose their configured model in the app and let you change it for subsequent prompts. Agent selection, persistent session rename/delete, server slash commands, VCS/diff, and directories outside `--root` are intentionally unavailable in the current bridge.
+#### Configure the app
+
+1. In **Settings**, select **Oh My Pi (bridge)**.
+2. Enter the computer's LAN or VPN address, port `4097`, and the same Basic Auth credentials.
+3. Select **Test connection**. A healthy bridge reports the installed OMP version.
+4. Create or open a session, then send a prompt. The user message appears immediately, followed by streamed assistant output.
+
+To verify the bridge from the host before configuring the app:
+
+```bash
+curl --user "omp:use-a-long-unique-password" http://127.0.0.1:4097/v1/health
+```
+
+Expected response:
+
+```json
+{"healthy":true,"backend":"omp","version":"…"}
+```
+
+OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Agent selection, persistent session rename/delete, server slash commands, VCS/diff, and filesystem access outside the explicit `--root` directories are intentionally unavailable.
+
+#### Live synchronization scope
+
+The bridge streams `busy`, assistant chunks, todos, and completion for work started through that same bridge. OMP ACP does not expose a global cross-client event feed or running-status API: a session driven by a separate desktop OMP or harness process can be listed and reopened, but the app cannot reliably show its live `busy` state, thinking bubble, or incremental output. A prompt sent from the app is recorded and handled by the bridge's ACP process; it does not inject a message into another already-running agent transport.
+
+Use the bridge-created session for mobile-driven work. Reliable live observation and hand-off between independent OMP clients require a global session event/status API from OMP (or a relay integrated with the host harness); the bridge does not read OMP databases to simulate one.
+
+Do not expose the bridge directly to the Internet. Use Tailscale, another VPN, or a TLS-terminating reverse proxy, and open port `4097` only to the network that needs it.
 
 ## Run Locally (Web)
 
@@ -105,28 +143,18 @@ Open the shown URL from your browser (or your phone on the same LAN).
 
 ## Android APK Build (Cloud, no local SDK required)
 
-1. Push to `main`; the workflow builds a signed debug APK for testing and a release APK.
-2. Open GitHub Actions -> **Build Android APK**.
-3. Download artifact `harness-remote-debug-apk-v<version>` for installation tests.
-4. Extract the artifact and install the APK on Android.
+1. Push to `main` to run build and regression checks and upload debug/release APK artifacts.
+2. Create a `v*` tag after the checks and device smoke test succeed; it publishes a GitHub Release.
+3. Download `harness-remote-debug-apk-v<version>` from GitHub Actions for installation tests.
 
-To generate a signed release APK (`app-release-signed.apk`), configure these GitHub repository secrets:
+To publish a signed release APK (`app-release-signed.apk`), configure these GitHub repository secrets:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-When all four secrets are present, the workflow signs the APK and verifies the signature.
-
-When the workflow runs from a `v*` tag, it also publishes a GitHub Release and attaches the signed APK.
-
-The workflow does this automatically:
-
-- builds the React app
-- creates Capacitor Android project
-- compiles a release APK with Gradle
-- signs the APK when signing secrets are configured
+Tagged releases fail rather than publishing an unsigned APK when any signing secret is missing. The workflow builds the web app, runs web and bridge regressions, synchronizes Capacitor plus native live events, builds Android artifacts, and verifies APK signatures.
 
 ## Manual Android Packaging (Optional)
 

@@ -129,10 +129,12 @@ Completato:
 - svuotamento immediato di sessione e stato quando viene salvata una configurazione backend diversa;
 - bridge: catalogo modelli OMP per una sessione attiva, applicazione tramite `session/set_config_option`, caricamento concorrente sincronizzato e messaggi utente registrati prima dello streaming assistant;
 - UI OMP senza selettore agenti fittizio.
-- bridge `v0.1.6` distribuibile come `opencode-remote-omp-0.1.6.tgz`, con handshake ACP, errori/notifiche, restart, Basic Auth, mapping sessioni, refresh cronologia forzato e confinamento `--root`;
-- smoke reale contro OMP `v17.0.8` per health, discovery e ripristino della cronologia via `session/load`.
+- bridge `v0.1.7`: snapshot persistiti separati dallo streaming live; il polling non forza più `session/load`;
+- smoke reale contro OMP `v17.0.8` completato su due sessioni e sei cicli di polling.
 
 Ancora intenzionalmente non supportato: rinomina/eliminazione persistente di una sessione OMP, comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite.
+
+**Limite ACP verificato:** lo stream SSE del bridge riporta l'attività generata dal suo processo `omp acp`. OMP non espone al bridge eventi globali né lo stato `busy` di una sessione eseguita da un altro client desktop/harness; quella sessione può essere elencata e riaperta, ma non può avere sincronizzazione live affidabile senza un'API OMP dedicata o un relay nel runtime host.
 
 ## Risoluzione: pannello AI Model OMP
 
@@ -158,7 +160,35 @@ Ancora intenzionalmente non supportato: rinomina/eliminazione persistente di una
 
 **Prova:** regressione HTTP che inverte intenzionalmente le notifiche ACP (assistant, poi user) e verifica la sequenza restituita: user, assistant.
 
-**Persistenza verificata:** un bridge nuovo, senza cache in memoria, ha riaperto due sessioni OMP reali e ha ricevuto da ACP entrambi i messaggi user e assistant nell'ordine corretto. Il bridge `v0.1.6` ricarica ogni richiesta di cronologia dal client ACP principale: OMP può lasciare invariato `updatedAt` anche quando aggiunge messaggi, quindi tale campo non è un criterio affidabile di freschezza.
+## Risoluzione: sessioni, cronologia e refresh OMP
+
+**Cause dimostrate:**
+
+1. ogni GET dei messaggi forzava `session/load`;
+2. il replay ACP cancellava e ricostruiva la chat con ID diversi, provocando lampeggio;
+3. dopo la prima notifica di replay, le successive venivano trattate come attività live, modificando `updatedAt` ed emettendo eventi SSE;
+4. l'app caricava l'ultimo messaggio di ogni sessione OMP durante il refresh della lista;
+5. il follow dello scroll non distingueva una chat già in fondo da una pagina scorsa verso l'alto.
+
+**Correzione:**
+
+- il bridge carica una snapshot persistita una sola volta e la aggiorna esplicitamente solo all'apertura della sessione (`refresh=1`);
+- le notifiche di replay aggiornano la snapshot senza modificare i metadati della sessione e senza emettere eventi live;
+- streaming e prompt locali continuano ad aggiornare la snapshot in memoria e a emettere eventi;
+- il polling dell'app usa la snapshot in cache e non legge la cronologia di tutte le sessioni per ordinarle;
+- l'apertura richiede un refresh esplicito; gli aggiornamenti identici non sostituiscono lo stato React;
+- il follow automatico avviene solo per contenuto aggiunto mentre la chat è già in fondo. L'apertura iniziale conserva il comportamento di posizionamento in fondo.
+
+**Prove eseguite:**
+
+- transcript ACP reale: due replay di una sessione inattiva hanno restituito gli stessi sei messaggi con ID rigenerati, senza cambiare `updatedAt`; un `session/load` durante un turno attivo non ha completato entro il limite e non viene più usato dal polling;
+- suite bridge: 15 test superati, inclusi snapshot stabile, refresh esplicito e assenza di eventi/metadati artificiali durante il replay;
+- suite web completa e build TypeScript/Vite superate;
+- smoke browser mobile: una cronologia di 50 messaggi è rimasta invariata e la posizione pagina a `scrollY=10061` è rimasta stabile per otto secondi;
+- smoke bridge reale: due sessioni, rispettivamente 6 e 50 messaggi, hanno mantenuto digest, date e ordine identici per sei cicli di polling;
+- APK debug `1.5.2-test` (`versionCode 10502`) costruito con Android SDK 36 e JDK 21; firma APK v2 verificata.
+
+**Verifica nativa pendente:** `adb devices` non rileva dispositivi collegati su questa workstation. L'APK debug viene consegnato al tester per installazione e verifica manuale sul dispositivo.
 
 ## Sicurezza
 
@@ -181,7 +211,7 @@ Ancora intenzionalmente non supportato: rinomina/eliminazione persistente di una
 
 ## Stato e prossime capacità
 
-La prima integrazione OMP è completata: connessione, sessioni, cronologia, prompt/streaming, annullamento, todo e modelli sono verificati. Il prossimo incremento deve essere scelto e verificato uno alla volta: agenti configurabili, rinomina/eliminazione persistente, VCS/diff oppure directory browser più ricco.
+L'integrazione OMP resta bloccata sulla stabilità di sessioni e cronologia. Non aggiungere capacità finché il blocco attivo non è chiuso con le prove richieste.
 
 Le impostazioni dell'app si autosalvano dopo una breve pausa di digitazione; non esiste più una modifica silenziosamente persa al cambio di pagina. L'help in-app mantiene un solo esempio minimo per il backend selezionato e rimanda alle guide versionate nel repository. Le future integrazioni aggiungono una guida nel repository, non pagine di help sempre più grandi nell'APK.
 
@@ -190,7 +220,18 @@ Le impostazioni dell'app si autosalvano dopo una breve pausa di digitazione; non
 Test unitari per parser ACP, mapping, auth, limitazione `--root` e restart. Test di integrazione contro un vero `omp acp`, non solo mock. Smoke test:
 
 ```bash
-npx -y opencode-remote-omp --port 4097 --username omp --password 'segreto'
+npx --yes ./bridge --port 4097 --username omp --password 'segreto'
 ```
 
 Dall'app: selezionare OMP, configurare IP e porta, verificare health, creare/riprendere sessione, inviare prompt, osservare streaming/completamento, riavviare il bridge e ricaricare la sessione.
+
+## Gate di release
+
+Prima di creare un tag `v*`, devono riuscire nello stesso commit:
+
+1. `npm test` in `bridge/`;
+2. build TypeScript/Vite e tutte le regressioni web in `web/`;
+3. build Android release nel workflow GitHub Actions, con il bundle web e il plugin `LiveEventsPlugin` sincronizzati;
+4. installazione e smoke manuale dell'APK firmato su dispositivo: configurazione OpenCode e OMP, health, sessione nuova/esistente, prompt, streaming, stop e riconnessione del bridge.
+
+Il workflow APK esegue le verifiche web e bridge su `main` e sui tag `v*`; un tag richiede i quattro secret di firma e pubblica solo l'APK firmato. Il controllo nativo resta un gate umano: questa workstation non dispone di Android SDK né di un dispositivo ADB.

@@ -1,10 +1,10 @@
 {
-  "name": "opencode-remote-omp",
-  "version": "0.1.6",
+  "name": "harness-remote-omp",
+  "version": "0.1.7",
   "private": true,
   "type": "module",
   "bin": {
-    "opencode-remote-omp": "./src/cli.js"
+    "harness-remote-omp": "./src/cli.js"
   },
   "scripts": {
     "start": "node src/cli.js",

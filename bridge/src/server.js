@@ -146,7 +146,7 @@ export function createBridgeServer({ config, acp }) {
       if (sessionMatch) {
         const [, sessionID, operation] = sessionMatch
         if (request.method === "GET" && operation === "message") {
-          writeJSON(response, 200, await omp.messages(sessionID))
+          writeJSON(response, 200, await omp.messages(sessionID, url.searchParams.get("refresh") === "1"))
           return
         }
         if (request.method === "GET" && operation === "todo") {

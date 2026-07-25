@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events"
 import path from "node:path"
 import test from "node:test"
 import { createBridgeServer } from "../src/server.js"
+import { OmpService } from "../src/omp-service.js"
 
 class FakeAcp extends EventEmitter {
   agentInfo = { version: "17.0.7" }
@@ -49,11 +50,12 @@ class FakeAcp extends EventEmitter {
 
 class ReplayAcp extends EventEmitter {
   agentInfo = { version: "17.0.8" }
+  session = { sessionId: "session-1", title: "Persisted", cwd: process.cwd(), updatedAt: "2026-07-23T00:00:00.000Z" }
 
   async start() {}
 
   async listSessions() {
-    return [{ sessionId: "session-1", title: "Persisted", cwd: process.cwd(), updatedAt: "2026-07-23T00:00:00.000Z" }]
+    return [this.session]
   }
 
   async request(method) {
@@ -90,6 +92,7 @@ class ReplayAcp extends EventEmitter {
 class FreshnessAcp extends EventEmitter {
   agentInfo = { version: "17.0.8" }
   revision = "2026-07-23T00:00:00.000Z"
+  loadStarts = 0
   history = [
     { role: "user", id: "first-user", text: "First prompt" },
     { role: "assistant", id: "first-assistant", text: "First response" }
@@ -103,7 +106,10 @@ class FreshnessAcp extends EventEmitter {
   }
 
   async request(method) {
-    if (method === "session/load") this.#replay(this)
+    if (method === "session/load") {
+      this.loadStarts += 1
+      this.#replay(this)
+    }
     return {}
   }
 
@@ -304,30 +310,53 @@ test("replays persistent user and assistant history when reopening an OMP sessio
   }
 })
 
-test("reloads a stale session history after ACP reports a newer revision", async () => {
+test("does not publish replay notifications as live session activity", async () => {
+  const acp = new ReplayAcp()
+  const omp = new OmpService(acp)
+  const events = []
+  omp.subscribe((event) => events.push(event))
+  const originalUpdatedAt = acp.session.updatedAt
+
+  await omp.messages("session-1", true)
+
+  assert.equal(acp.session.updatedAt, originalUpdatedAt)
+  assert.deepEqual(events, [])
+})
+
+test("keeps the persisted snapshot stable until an explicit history refresh", async () => {
   const acp = new FreshnessAcp()
   const bridge = await startServer({ acp })
   try {
     const first = await fetch(`${bridge.baseURL}/session/session-1/message`, { headers: authHeaders() })
     assert.equal((await first.json()).length, 2)
+    assert.equal(acp.loadStarts, 1)
+
     acp.advance()
-    const refreshed = await fetch(`${bridge.baseURL}/session/session-1/message`, { headers: authHeaders() })
-    assert.deepEqual((await refreshed.json()).map((message) => message.parts[0].text), [
+    const backgroundPoll = await fetch(`${bridge.baseURL}/session/session-1/message`, { headers: authHeaders() })
+    assert.deepEqual((await backgroundPoll.json()).map((message) => message.parts[0].text), [
+      "First prompt",
+      "First response"
+    ])
+    assert.equal(acp.loadStarts, 1)
+
+    const reopened = await fetch(`${bridge.baseURL}/session/session-1/message?refresh=1`, { headers: authHeaders() })
+    assert.deepEqual((await reopened.json()).map((message) => message.parts[0].text), [
       "First prompt",
       "First response",
       "Second prompt",
       "Second response"
     ])
+    assert.equal(acp.loadStarts, 2)
+
     acp.appendWithoutRevision()
     const unchangedRevision = await fetch(`${bridge.baseURL}/session/session-1/message`, { headers: authHeaders() })
     assert.deepEqual((await unchangedRevision.json()).map((message) => message.parts[0].text), [
       "First prompt",
       "First response",
       "Second prompt",
-      "Second response",
-      "Third prompt",
-      "Third response"
+      "Second response"
     ])
+    assert.equal(acp.loadStarts, 2)
   } finally {
     await bridge.close()
   }

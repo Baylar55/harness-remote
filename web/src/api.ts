@@ -292,8 +292,9 @@ export const api = {
     return request<boolean>(config, withDirectory(`/session/${id}`, directory), { method: "DELETE" })
   },
 
-  loadMessages(config: ServerConfig, sessionID: string, directory?: string) {
-    return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100`, directory))
+  loadMessages(config: ServerConfig, sessionID: string, directory?: string, refreshHistory = false) {
+    const refresh = config.backend === "omp" && refreshHistory ? "&refresh=1" : ""
+    return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100${refresh}`, directory))
   },
 
   loadLatestMessage(config: ServerConfig, sessionID: string, directory?: string) {
