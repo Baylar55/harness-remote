@@ -1635,7 +1635,6 @@ button.compact {
 
   .composer {
     bottom: calc(72px + env(safe-area-inset-bottom));
-    grid-template-columns: 1fr;
     margin-left: calc(var(--space-2) * -1);
     margin-right: calc(var(--space-2) * -1);
   }
