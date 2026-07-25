@@ -474,7 +474,7 @@ p {
 
 .session-card-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--space-3);
 }
@@ -494,6 +494,10 @@ p {
   margin-top: var(--space-3);
   color: var(--muted);
   font-size: 0.86rem;
+}
+
+.session-stats .pill {
+  margin-left: auto;
 }
 
 .change-summary {
@@ -1707,10 +1711,6 @@ button.compact {
 
   .session-card-main {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .session-card-main .pill {
-    justify-self: start;
   }
 }
 

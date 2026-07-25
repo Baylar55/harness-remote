@@ -2140,7 +2140,6 @@ function App() {
                       )}
                       <p>{session.directory}</p>
                     </div>
-                    <span className={`pill ${session.status}`}>{session.status}</span>
                   </div>
                   <div className="session-stats">
                     {session.files > 0 || session.additions > 0 || session.deletions > 0 ? (
@@ -2153,6 +2152,7 @@ function App() {
                       <span className="subtle">{t('sessions.noFileChanges')}</span>
                     )}
                     <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
+                    <span className={`pill ${session.status}`}>{session.status}</span>
                   </div>
                   <div className="inline-actions">
                     <button
