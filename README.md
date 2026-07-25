@@ -185,6 +185,7 @@ the app.
 #### Prerequisites
 
 - Node.js 24 or newer, as required by the current PI ACP adapter;
+- Bun available in `PATH`; the current `pi-acp` package entry launches its runtime through `bun`;
 - PI provider credentials configured for the adapter;
 - a checkout of this repository on the computer that runs the bridge.
 
