@@ -38,6 +38,8 @@ const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
+type Translator = ReturnType<typeof createTranslator>
+
 const defaultConfig: ServerConfig = {
   host: "",
   port: 4096,
@@ -150,7 +152,8 @@ function relativizePath(path: string, directory: string | undefined): string {
  *  when the tool is an edit with old/new content to compare. */
 function describeToolAction(
   part: MessagePart,
-  directory: string | undefined
+  directory: string | undefined,
+  t: Translator
 ): { label: string; diff: { additions: number; deletions: number } | null } {
   const input = (part.state?.input ?? {}) as Record<string, unknown>
   const tool = (part.tool || "").toLowerCase()
@@ -158,32 +161,50 @@ function describeToolAction(
 
   switch (tool) {
     case "read":
-      return { label: filePath ? `Read ${filePath}` : "Read file", diff: null }
+      return { label: filePath ? t('action.readFileNamed', { file: filePath }) : t('action.readFile'), diff: null }
     case "write": {
       const content = typeof input.content === "string" ? input.content : null
       const diff = content !== null ? diffLineStats("", content) : null
-      return { label: filePath ? `Wrote ${filePath}` : "Wrote file", diff }
+      return { label: filePath ? t('action.wroteFileNamed', { file: filePath }) : t('action.wroteFile'), diff }
     }
     case "edit": {
       const oldString = typeof input.oldString === "string" ? input.oldString : null
       const newString = typeof input.newString === "string" ? input.newString : null
       const diff = oldString !== null && newString !== null ? diffLineStats(oldString, newString) : null
-      return { label: filePath ? `Edited ${filePath}` : "Edited file", diff }
+      return { label: filePath ? t('action.editedFileNamed', { file: filePath }) : t('action.editedFile'), diff }
     }
     case "bash":
-      return { label: typeof input.command === "string" ? `Ran ${input.command}` : "Ran command", diff: null }
+      return {
+        label: typeof input.command === "string" ? t('action.ranCommandNamed', { command: input.command }) : t('action.ranCommand'),
+        diff: null
+      }
     case "glob":
-      return { label: typeof input.pattern === "string" ? `Searched files for "${input.pattern}"` : "Searched files", diff: null }
+      return {
+        label: typeof input.pattern === "string" ? t('action.searchedFilesFor', { pattern: input.pattern }) : t('action.searchedFiles'),
+        diff: null
+      }
     case "grep":
-      return { label: typeof input.pattern === "string" ? `Searched for "${input.pattern}"` : "Searched code", diff: null }
+      return {
+        label: typeof input.pattern === "string" ? t('action.searchedCodeFor', { pattern: input.pattern }) : t('action.searchedCode'),
+        diff: null
+      }
     case "webfetch":
-      return { label: typeof input.url === "string" ? `Fetched ${input.url}` : "Fetched a URL", diff: null }
+      return { label: typeof input.url === "string" ? t('action.fetchedUrlNamed', { url: input.url }) : t('action.fetchedUrl'), diff: null }
     case "todowrite":
-      return { label: "Updated the to-do list", diff: null }
+      return { label: t('action.updatedTodos'), diff: null }
     case "task":
-      return { label: typeof input.description === "string" ? `Ran subagent: ${input.description}` : "Ran a subagent", diff: null }
+      return {
+        label:
+          typeof input.description === "string"
+            ? t('action.ranSubagentNamed', { description: input.description })
+            : t('action.ranSubagent'),
+        diff: null
+      }
     case "skill":
-      return { label: typeof input.name === "string" ? `Used skill: ${input.name}` : "Used a skill", diff: null }
+      return {
+        label: typeof input.name === "string" ? t('action.usedSkillNamed', { name: input.name }) : t('action.usedSkill'),
+        diff: null
+      }
     default:
       return { label: toolCommandLabel(part), diff: null }
   }
@@ -214,13 +235,15 @@ function PatchPartView({
   sessionID,
   messageID,
   files,
-  timestamp
+  timestamp,
+  t
 }: {
   config: ServerConfig
   sessionID: string
   messageID: string
   files: string[]
   timestamp?: string
+  t: Translator
 }) {
   const [diffs, setDiffs] = useState<DiffFile[] | null>(null)
   const [expandedDiff, setExpandedDiff] = useState<DiffFile | null>(null)
@@ -257,7 +280,7 @@ function PatchPartView({
           type="button"
           className="message-diff-row"
           onClick={() => setExpandedDiff(diff)}
-          aria-label={`Show diff for ${diff.file}`}
+          aria-label={t('action.showDiffFor', { file: diff.file })}
         >
           <span className="message-diff-file">{diff.file}</span>
           <span className="message-diff-stats">
@@ -268,7 +291,7 @@ function PatchPartView({
       ))}
 
       {expandedDiff && (
-        <Modal title={expandedDiff.file} timestamp={timestamp} onClose={() => setExpandedDiff(null)}>
+        <Modal title={expandedDiff.file} timestamp={timestamp} onClose={() => setExpandedDiff(null)} t={t}>
           {expandedDiff.patch && <DiffLines patch={expandedDiff.patch} />}
         </Modal>
       )}
@@ -286,12 +309,14 @@ function Modal({
   title,
   timestamp,
   onClose,
-  children
+  children,
+  t
 }: {
   title: string
   timestamp?: string
   onClose: () => void
   children: ReactNode
+  t: Translator
 }) {
   const [titleID] = useState(() => `modal-title-${++modalTitleSequence}`)
   return (
@@ -309,7 +334,7 @@ function Modal({
             {timestamp && <small className="diff-modal-timestamp">{timestamp}</small>}
           </div>
           <button type="button" className="btn-secondary" onClick={onClose}>
-            Close
+            {t('action.close')}
           </button>
         </div>
         <div className="diff-modal-body">{children}</div>
@@ -322,12 +347,14 @@ function QuestionCard({
   config,
   directory,
   request,
-  onResolved
+  onResolved,
+  t
 }: {
   config: ServerConfig
   directory: string
   request: QuestionRequest
   onResolved: (id: string) => void
+  t: Translator
 }) {
   const [selections, setSelections] = useState<string[][]>(() => request.questions.map(() => []))
   const [customValues, setCustomValues] = useState<string[]>(() => request.questions.map(() => ""))
@@ -390,7 +417,7 @@ function QuestionCard({
   }
 
   return (
-    <article className="message assistant question-card fade-in" aria-label="Question from OpenCode">
+    <article className="message assistant question-card fade-in" aria-label={t('question.ariaLabel')}>
       {request.questions.map((question, index) => (
         <div key={index} className="question-block">
           <div className="question-header">{question.header}</div>
@@ -413,7 +440,7 @@ function QuestionCard({
             <input
               type="text"
               className="question-custom-input"
-              placeholder="Other…"
+              placeholder={t('question.otherPlaceholder')}
               value={customValues[index]}
               onChange={(event) => setCustomValue(index, event.target.value)}
               disabled={submitting}
@@ -424,10 +451,10 @@ function QuestionCard({
       {error && <p className="question-error">{error}</p>}
       <div className="question-actions">
         <button type="button" className="btn-secondary" onClick={reject} disabled={submitting}>
-          Skip
+          {t('question.skip')}
         </button>
         <button type="button" className="btn-primary" onClick={submit} disabled={submitting || !canSubmit}>
-          Send answer
+          {t('question.sendAnswer')}
         </button>
       </div>
     </article>
@@ -437,16 +464,18 @@ function QuestionCard({
 function ToolPartView({
   part,
   directory,
-  timestamp
+  timestamp,
+  t
 }: {
   part: MessagePart
   directory: string | undefined
   timestamp?: string
+  t: Translator
 }) {
   const [open, setOpen] = useState(false)
   const status = part.state?.status || "pending"
   const command = toolCommandLabel(part)
-  const { label, diff } = describeToolAction(part, directory)
+  const { label, diff } = describeToolAction(part, directory, t)
   const tool = (part.tool || "").toLowerCase()
   const input = (part.state?.input ?? {}) as Record<string, unknown>
   let patch: string | null = null
@@ -467,12 +496,12 @@ function ToolPartView({
             </span>
           )}
           {status === "error" && (
-            <span className="message-tool-status-error" title="Tool failed" aria-label="Tool failed">
+            <span className="message-tool-status-error" title={t('action.toolFailed')} aria-label={t('action.toolFailed')}>
               ✕
             </span>
           )}
           {(status === "pending" || status === "running") && (
-            <span className="message-tool-status-pending" title="Running…" aria-label="Running">
+            <span className="message-tool-status-pending" title={t('action.running')} aria-label={t('action.running')}>
               …
             </span>
           )}
@@ -480,7 +509,7 @@ function ToolPartView({
       </button>
 
       {open && (
-        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)}>
+        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
           <pre className="message-tool-command">{command}</pre>
           {patch ? (
             <DiffLines patch={patch} />
@@ -494,17 +523,17 @@ function ToolPartView({
   )
 }
 
-function ReasoningPartView({ part, timestamp }: { part: MessagePart; timestamp?: string }) {
+function ReasoningPartView({ part, timestamp, t }: { part: MessagePart; timestamp?: string; t: Translator }) {
   const [open, setOpen] = useState(false)
   if (!part.text) return null
-  const label = reasoningLabel([part])
+  const label = reasoningLabel([part], t)
   return (
     <>
       <button type="button" className="message-reasoning-summary" onClick={() => setOpen(true)}>
         {label}
       </button>
       {open && (
-        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)}>
+        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
           <pre className="message-reasoning-text">{part.text}</pre>
         </Modal>
       )}
@@ -517,13 +546,15 @@ function MessagePartView({
   config,
   sessionID,
   directory,
-  timestamp
+  timestamp,
+  t
 }: {
   part: MessagePart
   config: ServerConfig
   sessionID: string
   directory?: string
   timestamp?: string
+  t: Translator
 }) {
   if (part.type === "text") {
     if (!part.text) return null
@@ -535,11 +566,11 @@ function MessagePartView({
   }
 
   if (part.type === "reasoning") {
-    return <ReasoningPartView part={part} timestamp={timestamp} />
+    return <ReasoningPartView part={part} timestamp={timestamp} t={t} />
   }
 
   if (part.type === "tool") {
-    return <ToolPartView part={part} directory={directory} timestamp={timestamp} />
+    return <ToolPartView part={part} directory={directory} timestamp={timestamp} t={t} />
   }
 
   if (part.type === "patch") {
@@ -551,6 +582,7 @@ function MessagePartView({
         messageID={part.messageID}
         files={part.files}
         timestamp={timestamp}
+        t={t}
       />
     )
   }
@@ -588,16 +620,16 @@ function buildMessageTimeline(parts: MessagePart[]): TimelineItem[] {
   return items
 }
 
-function formatActionDuration(ms: number): string {
+function formatActionDuration(ms: number, t: Translator): string {
   const seconds = Math.max(1, Math.round(ms / 1000))
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60) return t('action.durationSeconds', { n: seconds })
   const minutes = Math.round(seconds / 60)
-  return `${minutes}m`
+  return t('action.durationMinutes', { n: minutes })
 }
 
 /** Groups tool calls by what kind of action they represent (reads, searches, commands, ...) so a run of tool
  *  calls summarizes as "read 5 files, searched 1 time" instead of a meaningless "ran 6 tools". */
-function summarizeToolCounts(toolParts: MessagePart[]): string[] {
+function summarizeToolCounts(toolParts: MessagePart[], t: Translator): string[] {
   const counts = new Map<string, number>()
   const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
   for (const part of toolParts) {
@@ -635,24 +667,24 @@ function summarizeToolCounts(toolParts: MessagePart[]): string[] {
   }
 
   const pieces: string[] = []
-  const push = (key: string, one: string, many: string) => {
+  const push = (key: string, oneKey: string, manyKey: string) => {
     const count = counts.get(key)
-    if (count) pieces.push(count === 1 ? one : many.replace("{n}", String(count)))
+    if (count) pieces.push(count === 1 ? t(oneKey) : t(manyKey, { n: count }))
   }
-  push("read", "read 1 file", "read {n} files")
-  push("write", "wrote 1 file", "wrote {n} files")
-  push("edit", "edited 1 file", "edited {n} files")
-  push("search", "searched 1 time", "searched {n} times")
-  push("bash", "ran 1 command", "ran {n} commands")
-  push("webfetch", "fetched 1 URL", "fetched {n} URLs")
-  push("task", "ran 1 subagent", "ran {n} subagents")
-  push("skill", "used 1 skill", "used {n} skills")
-  push("other", "ran 1 tool", "ran {n} tools")
+  push("read", "action.countReadOne", "action.countReadMany")
+  push("write", "action.countWriteOne", "action.countWriteMany")
+  push("edit", "action.countEditOne", "action.countEditMany")
+  push("search", "action.countSearchOne", "action.countSearchMany")
+  push("bash", "action.countBashOne", "action.countBashMany")
+  push("webfetch", "action.countWebfetchOne", "action.countWebfetchMany")
+  push("task", "action.countTaskOne", "action.countTaskMany")
+  push("skill", "action.countSkillOne", "action.countSkillMany")
+  push("other", "action.countOtherOne", "action.countOtherMany")
   return pieces
 }
 
 /** "Thought for Xs"/"Thought for Xm" when the reasoning part(s) carry timing, else a plain "Thinking". */
-function reasoningLabel(reasoningParts: MessagePart[]): string {
+function reasoningLabel(reasoningParts: MessagePart[], t: Translator): string {
   let minStart: number | undefined
   let maxEnd: number | undefined
   for (const part of reasoningParts) {
@@ -662,10 +694,12 @@ function reasoningLabel(reasoningParts: MessagePart[]): string {
     const end = time.end ?? Date.now()
     if (maxEnd === undefined || end > maxEnd) maxEnd = end
   }
-  return minStart !== undefined && maxEnd !== undefined ? `Thought for ${formatActionDuration(maxEnd - minStart)}` : "Thinking"
+  return minStart !== undefined && maxEnd !== undefined
+    ? t('action.thoughtFor', { duration: formatActionDuration(maxEnd - minStart, t) })
+    : t('action.thinking')
 }
 
-function summarizeActionGroup(parts: MessagePart[]): string {
+function summarizeActionGroup(parts: MessagePart[], t: Translator): string {
   const reasoningParts = parts.filter((part) => part.type === "reasoning")
   const toolParts = parts.filter((part) => part.type === "tool")
   const editCount = parts
@@ -673,10 +707,10 @@ function summarizeActionGroup(parts: MessagePart[]): string {
     .reduce((sum, part) => sum + (part.files?.length ?? 0), 0)
 
   const pieces: string[] = []
-  if (reasoningParts.length > 0) pieces.push(reasoningLabel(reasoningParts))
-  pieces.push(...summarizeToolCounts(toolParts))
-  if (editCount > 0) pieces.push(`made ${editCount} edit${editCount === 1 ? "" : "s"}`)
-  if (pieces.length === 0) pieces.push("Actions")
+  if (reasoningParts.length > 0) pieces.push(reasoningLabel(reasoningParts, t))
+  pieces.push(...summarizeToolCounts(toolParts, t))
+  if (editCount > 0) pieces.push(editCount === 1 ? t('action.madeEditOne') : t('action.madeEditMany', { n: editCount }))
+  if (pieces.length === 0) pieces.push(t('action.actionsFallback'))
   return pieces.join(", ")
 }
 
@@ -685,28 +719,30 @@ function ActionGroupView({
   config,
   sessionID,
   directory,
-  timestamp
+  timestamp,
+  t
 }: {
   parts: MessagePart[]
   config: ServerConfig
   sessionID: string
   directory?: string
   timestamp?: string
+  t: Translator
 }) {
   const [open, setOpen] = useState(false)
   return (
     <>
       <button type="button" className="message-action-summary" onClick={() => setOpen(true)}>
-        <span>{summarizeActionGroup(parts)}</span>
+        <span>{summarizeActionGroup(parts, t)}</span>
       </button>
 
       {open && (
-        <Modal title={summarizeActionGroup(parts)} timestamp={timestamp} onClose={() => setOpen(false)}>
+        <Modal title={summarizeActionGroup(parts, t)} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
           <div className="message-action-details">
             {parts.map((part, index) => (
               <Fragment key={part.id}>
                 {index > 0 && <hr className="message-action-divider" />}
-                <MessagePartView part={part} config={config} sessionID={sessionID} directory={directory} timestamp={timestamp} />
+                <MessagePartView part={part} config={config} sessionID={sessionID} directory={directory} timestamp={timestamp} t={t} />
               </Fragment>
             ))}
           </div>
@@ -2411,6 +2447,7 @@ function App() {
                           sessionID={message.info.sessionID}
                           directory={selectedSession?.directory}
                           timestamp={formatTime(message.info.time.created)}
+                          t={t}
                         />
                       ) : (
                         <MessagePartView
@@ -2420,6 +2457,7 @@ function App() {
                           sessionID={message.info.sessionID}
                           directory={selectedSession?.directory}
                           timestamp={formatTime(message.info.time.created)}
+                          t={t}
                         />
                       )
                     )}
@@ -2433,6 +2471,7 @@ function App() {
                       directory={selectedSession.directory}
                       request={request}
                       onResolved={(id) => setPendingQuestions((current) => current.filter((item) => item.id !== id))}
+                      t={t}
                     />
                   ))}
                 {showTypingBubble && (

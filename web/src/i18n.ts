@@ -148,6 +148,58 @@ type TranslationKey =
   | 'help.network'
   | 'help.troubleshooting'
   | 'help.commands'
+  | 'action.close'
+  | 'action.thinking'
+  | 'action.thoughtFor'
+  | 'action.durationSeconds'
+  | 'action.durationMinutes'
+  | 'action.readFile'
+  | 'action.readFileNamed'
+  | 'action.wroteFile'
+  | 'action.wroteFileNamed'
+  | 'action.editedFile'
+  | 'action.editedFileNamed'
+  | 'action.ranCommand'
+  | 'action.ranCommandNamed'
+  | 'action.searchedFiles'
+  | 'action.searchedFilesFor'
+  | 'action.searchedCode'
+  | 'action.searchedCodeFor'
+  | 'action.fetchedUrl'
+  | 'action.fetchedUrlNamed'
+  | 'action.updatedTodos'
+  | 'action.ranSubagent'
+  | 'action.ranSubagentNamed'
+  | 'action.usedSkill'
+  | 'action.usedSkillNamed'
+  | 'action.toolFailed'
+  | 'action.running'
+  | 'action.showDiffFor'
+  | 'action.actionsFallback'
+  | 'action.countReadOne'
+  | 'action.countReadMany'
+  | 'action.countWriteOne'
+  | 'action.countWriteMany'
+  | 'action.countEditOne'
+  | 'action.countEditMany'
+  | 'action.countSearchOne'
+  | 'action.countSearchMany'
+  | 'action.countBashOne'
+  | 'action.countBashMany'
+  | 'action.countWebfetchOne'
+  | 'action.countWebfetchMany'
+  | 'action.countTaskOne'
+  | 'action.countTaskMany'
+  | 'action.countSkillOne'
+  | 'action.countSkillMany'
+  | 'action.countOtherOne'
+  | 'action.countOtherMany'
+  | 'action.madeEditOne'
+  | 'action.madeEditMany'
+  | 'question.ariaLabel'
+  | 'question.otherPlaceholder'
+  | 'question.skip'
+  | 'question.sendAnswer'
 
 const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   en: {
@@ -297,7 +349,59 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'help.server': 'Server',
     'help.network': 'Network',
     'help.troubleshooting': 'Troubleshooting',
-    'help.commands': 'Commands'
+    'help.commands': 'Commands',
+    'action.close': 'Close',
+    'action.thinking': 'Thinking',
+    'action.thoughtFor': 'Thought for {duration}',
+    'action.durationSeconds': '{n}s',
+    'action.durationMinutes': '{n}m',
+    'action.readFile': 'Read file',
+    'action.readFileNamed': 'Read {file}',
+    'action.wroteFile': 'Wrote file',
+    'action.wroteFileNamed': 'Wrote {file}',
+    'action.editedFile': 'Edited file',
+    'action.editedFileNamed': 'Edited {file}',
+    'action.ranCommand': 'Ran command',
+    'action.ranCommandNamed': 'Ran {command}',
+    'action.searchedFiles': 'Searched files',
+    'action.searchedFilesFor': 'Searched files for "{pattern}"',
+    'action.searchedCode': 'Searched code',
+    'action.searchedCodeFor': 'Searched for "{pattern}"',
+    'action.fetchedUrl': 'Fetched a URL',
+    'action.fetchedUrlNamed': 'Fetched {url}',
+    'action.updatedTodos': 'Updated the to-do list',
+    'action.ranSubagent': 'Ran a subagent',
+    'action.ranSubagentNamed': 'Ran subagent: {description}',
+    'action.usedSkill': 'Used a skill',
+    'action.usedSkillNamed': 'Used skill: {name}',
+    'action.toolFailed': 'Tool failed',
+    'action.running': 'Running…',
+    'action.showDiffFor': 'Show diff for {file}',
+    'action.actionsFallback': 'Actions',
+    'action.countReadOne': 'read 1 file',
+    'action.countReadMany': 'read {n} files',
+    'action.countWriteOne': 'wrote 1 file',
+    'action.countWriteMany': 'wrote {n} files',
+    'action.countEditOne': 'edited 1 file',
+    'action.countEditMany': 'edited {n} files',
+    'action.countSearchOne': 'searched 1 time',
+    'action.countSearchMany': 'searched {n} times',
+    'action.countBashOne': 'ran 1 command',
+    'action.countBashMany': 'ran {n} commands',
+    'action.countWebfetchOne': 'fetched 1 URL',
+    'action.countWebfetchMany': 'fetched {n} URLs',
+    'action.countTaskOne': 'ran 1 subagent',
+    'action.countTaskMany': 'ran {n} subagents',
+    'action.countSkillOne': 'used 1 skill',
+    'action.countSkillMany': 'used {n} skills',
+    'action.countOtherOne': 'ran 1 tool',
+    'action.countOtherMany': 'ran {n} tools',
+    'action.madeEditOne': 'made 1 edit',
+    'action.madeEditMany': 'made {n} edits',
+    'question.ariaLabel': 'Question from OpenCode',
+    'question.otherPlaceholder': 'Other…',
+    'question.skip': 'Skip',
+    'question.sendAnswer': 'Send answer'
   },
   it: {
     'app.title': 'OpenCode Remote',
@@ -382,7 +486,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.loading': 'Caricamento sessione...',
     'detail.emptyTitle': 'Ancora nessun messaggio',
     'detail.emptyHint': 'Inizia una conversazione qui sotto',
-    'detail.composerPlaceholder': 'Scrivi un prompt o comando (inizia con / per gli slash command)...',
+    'detail.composerPlaceholder': 'Scrivi un prompt o un comando (inizia con / per gli slash command)...',
     'detail.waiting': 'Attesa...',
     'detail.send': 'Invia',
     'detail.jumpToLatest': 'Vai alla fine',
@@ -446,7 +550,59 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'help.server': 'Server',
     'help.network': 'Rete',
     'help.troubleshooting': 'Risoluzione problemi',
-    'help.commands': 'Comandi'
+    'help.commands': 'Comandi',
+    'action.close': 'Chiudi',
+    'action.thinking': 'Sto pensando',
+    'action.thoughtFor': 'Pensato per {duration}',
+    'action.durationSeconds': '{n}s',
+    'action.durationMinutes': '{n}m',
+    'action.readFile': 'File letto',
+    'action.readFileNamed': 'Letto {file}',
+    'action.wroteFile': 'File scritto',
+    'action.wroteFileNamed': 'Scritto {file}',
+    'action.editedFile': 'File modificato',
+    'action.editedFileNamed': 'Modificato {file}',
+    'action.ranCommand': 'Comando eseguito',
+    'action.ranCommandNamed': 'Eseguito {command}',
+    'action.searchedFiles': 'File cercati',
+    'action.searchedFilesFor': 'File cercati per "{pattern}"',
+    'action.searchedCode': 'Codice cercato',
+    'action.searchedCodeFor': 'Cercato "{pattern}"',
+    'action.fetchedUrl': 'URL recuperato',
+    'action.fetchedUrlNamed': 'Recuperato {url}',
+    'action.updatedTodos': 'Elenco to-do aggiornato',
+    'action.ranSubagent': 'Subagente eseguito',
+    'action.ranSubagentNamed': 'Eseguito subagente: {description}',
+    'action.usedSkill': 'Skill usata',
+    'action.usedSkillNamed': 'Usata skill: {name}',
+    'action.toolFailed': 'Tool fallito',
+    'action.running': 'In esecuzione…',
+    'action.showDiffFor': 'Mostra diff per {file}',
+    'action.actionsFallback': 'Azioni',
+    'action.countReadOne': 'letto 1 file',
+    'action.countReadMany': 'letti {n} file',
+    'action.countWriteOne': 'scritto 1 file',
+    'action.countWriteMany': 'scritti {n} file',
+    'action.countEditOne': 'modificato 1 file',
+    'action.countEditMany': 'modificati {n} file',
+    'action.countSearchOne': 'cercato 1 volta',
+    'action.countSearchMany': 'cercato {n} volte',
+    'action.countBashOne': 'eseguito 1 comando',
+    'action.countBashMany': 'eseguiti {n} comandi',
+    'action.countWebfetchOne': 'recuperato 1 URL',
+    'action.countWebfetchMany': 'recuperati {n} URL',
+    'action.countTaskOne': 'eseguito 1 subagente',
+    'action.countTaskMany': 'eseguiti {n} subagenti',
+    'action.countSkillOne': 'usata 1 skill',
+    'action.countSkillMany': 'usate {n} skill',
+    'action.countOtherOne': 'eseguito 1 tool',
+    'action.countOtherMany': 'eseguiti {n} tool',
+    'action.madeEditOne': 'fatta 1 modifica',
+    'action.madeEditMany': 'fatte {n} modifiche',
+    'question.ariaLabel': 'Domanda da OpenCode',
+    'question.otherPlaceholder': 'Altro…',
+    'question.skip': 'Salta',
+    'question.sendAnswer': 'Invia risposta'
   },
   'zh-TW': {
     'app.title': 'OpenCode 遠端',
@@ -595,7 +751,59 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'help.server': '伺服器',
     'help.network': '網路',
     'help.troubleshooting': '疑難排解',
-    'help.commands': '命令'
+    'help.commands': '命令',
+    'action.close': '關閉',
+    'action.thinking': '思考中',
+    'action.thoughtFor': '思考了 {duration}',
+    'action.durationSeconds': '{n} 秒',
+    'action.durationMinutes': '{n} 分',
+    'action.readFile': '已讀取檔案',
+    'action.readFileNamed': '已讀取 {file}',
+    'action.wroteFile': '已寫入檔案',
+    'action.wroteFileNamed': '已寫入 {file}',
+    'action.editedFile': '已編輯檔案',
+    'action.editedFileNamed': '已編輯 {file}',
+    'action.ranCommand': '已執行命令',
+    'action.ranCommandNamed': '已執行 {command}',
+    'action.searchedFiles': '已搜尋檔案',
+    'action.searchedFilesFor': '已搜尋檔案「{pattern}」',
+    'action.searchedCode': '已搜尋程式碼',
+    'action.searchedCodeFor': '已搜尋「{pattern}」',
+    'action.fetchedUrl': '已擷取網址',
+    'action.fetchedUrlNamed': '已擷取 {url}',
+    'action.updatedTodos': '已更新待辦事項清單',
+    'action.ranSubagent': '已執行子代理',
+    'action.ranSubagentNamed': '已執行子代理：{description}',
+    'action.usedSkill': '已使用技能',
+    'action.usedSkillNamed': '已使用技能：{name}',
+    'action.toolFailed': '工具失敗',
+    'action.running': '執行中…',
+    'action.showDiffFor': '顯示 {file} 的差異',
+    'action.actionsFallback': '動作',
+    'action.countReadOne': '讀取 1 個檔案',
+    'action.countReadMany': '讀取 {n} 個檔案',
+    'action.countWriteOne': '寫入 1 個檔案',
+    'action.countWriteMany': '寫入 {n} 個檔案',
+    'action.countEditOne': '編輯 1 個檔案',
+    'action.countEditMany': '編輯 {n} 個檔案',
+    'action.countSearchOne': '搜尋 1 次',
+    'action.countSearchMany': '搜尋 {n} 次',
+    'action.countBashOne': '執行 1 個命令',
+    'action.countBashMany': '執行 {n} 個命令',
+    'action.countWebfetchOne': '擷取 1 個網址',
+    'action.countWebfetchMany': '擷取 {n} 個網址',
+    'action.countTaskOne': '執行 1 個子代理',
+    'action.countTaskMany': '執行 {n} 個子代理',
+    'action.countSkillOne': '使用 1 個技能',
+    'action.countSkillMany': '使用 {n} 個技能',
+    'action.countOtherOne': '執行 1 個工具',
+    'action.countOtherMany': '執行 {n} 個工具',
+    'action.madeEditOne': '進行了 1 次編輯',
+    'action.madeEditMany': '進行了 {n} 次編輯',
+    'question.ariaLabel': '來自 OpenCode 的問題',
+    'question.otherPlaceholder': '其他…',
+    'question.skip': '略過',
+    'question.sendAnswer': '傳送回答'
   }
 }
 
