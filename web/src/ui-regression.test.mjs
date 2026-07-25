@@ -110,4 +110,28 @@ assert.ok(/\.message-content pre[\s\S]*?overflow-x:\s*auto/.test(styles), 'fence
 
 assert.match(icons, /export const RefreshIcon/, 'RefreshIcon should exist for idle refresh UI')
 
+// Android back button: dismiss the topmost layer, then fall back to the session list.
+const backStart = app.indexOf('CapacitorApp.addListener("backButton"')
+assert.notEqual(backStart, -1, 'the Android back button should be handled')
+const backHandler = app.slice(backStart, app.indexOf('}, [])', backStart))
+assert.equal(
+  /setView\(\(current\)/.test(backHandler),
+  false,
+  'exitApp must not run inside a state updater, which React may invoke more than once'
+)
+assert.ok(backHandler.includes('backStateRef.current'), 'the handler is registered once, so it must read state through a ref')
+assert.ok(backHandler.includes('if (removed) void registered.remove()'), 'a listener registered after teardown must still be removed')
+for (const layer of ['sessionToDelete', 'renamingSessionID', 'activeDetailSheet']) {
+  assert.ok(backHandler.includes(layer), `back should dismiss ${layer} before leaving the view`)
+}
+assert.ok(
+  backHandler.indexOf('exitApp') > backHandler.indexOf('setView("sessions")'),
+  'the app should only exit from the session list'
+)
+
+// A follow-up prompt can be queued while the agent is still working.
+assert.ok(app.includes('const showStopAction = isWorking && !composer.trim()'), 'stop should be offered only when there is nothing to send')
+assert.equal(app.includes('disabled={!selectedSession || isWorking}'), false, 'the composer must stay usable while the agent works')
+assert.ok(app.includes('onClick={showStopAction ? abortSession : send}'), 'the action button should send a queued follow-up instead of only stopping')
+
 console.log('ui regression tests passed')
