@@ -367,6 +367,18 @@ p {
   padding: var(--space-2) var(--space-3);
 }
 
+.connection-status-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.connection-status-row .connection-status {
+  margin-top: 0;
+}
+
 .connection-status {
   display: flex;
   align-items: center;

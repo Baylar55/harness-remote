@@ -2164,17 +2164,21 @@ function App() {
               <p className="subtle">
                 {t('sessions.summary', { total: sessions.length, active: activeSessions, changed: changedSessions })}
               </p>
-              {connectionStatusText && (
-                <p className={`connection-status ${connectionState}`}>
-                  {['connecting', 'reconnecting'].includes(connectionState) && <LoadingIcon size={14} />}
-                  {connectionStatusText}
-                </p>
-              )}
-              {eventStreamText && (
-                <p className={`connection-status event-stream ${eventStreamState}`}>
-                  {['connecting', 'reconnecting'].includes(eventStreamState) && <LoadingIcon size={14} />}
-                  {eventStreamText}
-                </p>
+              {(connectionStatusText || eventStreamText) && (
+                <div className="connection-status-row">
+                  {connectionStatusText && (
+                    <p className={`connection-status ${connectionState}`}>
+                      {['connecting', 'reconnecting'].includes(connectionState) && <LoadingIcon size={14} />}
+                      {connectionStatusText}
+                    </p>
+                  )}
+                  {eventStreamText && (
+                    <p className={`connection-status event-stream ${eventStreamState}`}>
+                      {['connecting', 'reconnecting'].includes(eventStreamState) && <LoadingIcon size={14} />}
+                      {eventStreamText}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
             <div className="inline-actions">
