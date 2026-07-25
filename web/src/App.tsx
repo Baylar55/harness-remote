@@ -70,6 +70,10 @@ function normalizeMessageMarkdown(text: string): string {
   return text.includes("\n") ? text : text.replace(/\s-\s(?=\S)/g, "\n- ")
 }
 
+function capitalizeFirst(text: string): string {
+  return text.length > 0 ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
 const MODAL_TITLE_MAX_LENGTH = 80
 
 function truncateForTitle(text: string, maxLength: number = MODAL_TITLE_MAX_LENGTH): string {
@@ -802,7 +806,7 @@ function summarizeActionGroup(parts: MessagePart[], t: Translator): string {
   pieces.push(...summarizeToolCounts(toolParts, t))
   if (editCount > 0) pieces.push(editCount === 1 ? t('action.madeEditOne') : t('action.madeEditMany', { n: editCount }))
   if (pieces.length === 0) pieces.push(t('action.actionsFallback'))
-  return pieces.join(", ")
+  return capitalizeFirst(pieces.join(", "))
 }
 
 function ActionGroupView({
