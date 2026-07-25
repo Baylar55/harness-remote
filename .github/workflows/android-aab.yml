@@ -37,6 +37,7 @@ jobs:
       - name: Run web regression tests
         run: |
           npm run test:i18n
+          npm run test:config
           npm run test:ui
           npm run test:settings
           npm run test:model

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { api } from "./api"
+import { api, isValidServerConfig } from "./api"
+import { ACTIVE_BACKEND_STORAGE_KEY, BACKEND_STORAGE_KEYS, LEGACY_STORAGE_KEY } from "./storageKeys"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
@@ -29,12 +30,6 @@ import {
   CloseIcon
 } from "./Icons"
 
-const LEGACY_STORAGE_KEY = "opencode.remote.server"
-const ACTIVE_BACKEND_STORAGE_KEY = "opencode.remote.backend"
-const BACKEND_STORAGE_KEYS = {
-  opencode: "opencode.remote.server.opencode",
-  omp: "opencode.remote.server.omp"
-} as const
 const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
 const AGENT_STORAGE_KEY = "opencode.remote.agent"
@@ -143,7 +138,7 @@ function configKey(config: ServerConfig): string {
 }
 
 function canTestConfig(config: ServerConfig): boolean {
-  return Boolean(config.host.trim() && config.port > 0 && config.username.trim())
+  return Boolean(config.username.trim()) && isValidServerConfig(config)
 }
 
 function modelKey(model: ModelSelection): string {
@@ -404,7 +399,7 @@ function App() {
       .join("|")
   }, [renderedMessages])
 
-  const hasConfiguredServer = Boolean(config.host && config.port > 0)
+  const hasConfiguredServer = isValidServerConfig(config)
   const draftConfigKey = configKey(draftConfig)
   const canTestDraft = canTestConfig(draftConfig)
   const testAlreadyPassedForDraft = lastTestedConfigKey === draftConfigKey
@@ -510,7 +505,7 @@ function App() {
   }
 
   async function refreshSessions(silent = false, preserveSession?: SessionView) {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     if (!silent) {
       setRuntimeError(null)
       setConnectionState(sessions.length === 0 ? "connecting" : "reconnecting")
@@ -579,7 +574,7 @@ function App() {
   }
 
   async function loadCommands() {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     try {
       const list = await api.listCommands(config)
       setCommands(list)
@@ -589,7 +584,7 @@ function App() {
   }
 
   async function loadAgents() {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     try {
       const list = await api.listAgents(config, selectedSession?.directory ?? selectedNewSessionDirectory)
       setAgentOptions(list)
@@ -607,7 +602,7 @@ function App() {
   }
 
   async function loadModels(sessionID = selectedSession?.id, directory = selectedSession?.directory ?? selectedNewSessionDirectory) {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     try {
       const list = await api.listModels(config, directory, config.backend === "omp" ? sessionID : undefined)
       setModelOptions(list)
@@ -1014,6 +1009,9 @@ function App() {
 
   useEffect(() => {
     if (configKey(draftConfig) === configKey(config)) return
+    // A half-typed host such as `http://` cannot be turned into a URL. Persisting it
+    // would also poison the next launch, so incomplete drafts are simply not applied.
+    if (draftConfig.host.trim() && !isValidServerConfig(draftConfig)) return
     const timer = setTimeout(() => applyConfig(draftConfig), 500)
     return () => clearTimeout(timer)
   }, [draftConfig, config])
@@ -1028,7 +1026,7 @@ function App() {
     loadModels(selectedSession.id, selectedSession.directory).catch(() => undefined)
   }, [config.backend, config.host, config.port, config.username, config.password, selectedSession?.id])
   useEffect(() => {
-    if (!config.host || config.port <= 0) {
+    if (!isValidServerConfig(config)) {
       setConnectionState("idle")
       setConnectionMessage("")
       return
@@ -1051,12 +1049,20 @@ function App() {
   }, [config.backend, config.host, config.port, config.username, config.password, selectedSession?.id, selectedNewSessionDirectory])
 
   useEffect(() => {
-    if (!config.host || config.port <= 0) {
+    if (!isValidServerConfig(config)) {
       setEventStreamState("idle")
       return
     }
     setEventStreamState("connecting")
-    const { url, headers } = api.eventStream(config)
+    let stream: { url: string; headers: Record<string, string> }
+    try {
+      stream = api.eventStream(config)
+    } catch (error) {
+      setLiveEventError((error as Error).message)
+      setEventStreamState("fallback")
+      return
+    }
+    const { url, headers } = stream
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const scheduleRefresh = () => {
       if (refreshTimer !== undefined) return

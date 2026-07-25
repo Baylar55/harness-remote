@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { streamURL } from "./opencode-events"
+import { baseUrl, isValidServerConfig } from "./serverConfig"
 import type {
   AgentOption,
   CommandInfo,
@@ -23,13 +24,7 @@ function authHeader(config: ServerConfig): string {
   return `Basic ${btoa(`${config.username}:${config.password}`)}`
 }
 
-function baseUrl(config: ServerConfig): string {
-  const host = config.host.trim()
-  const schemeMatch = host.match(/^(https?):\/\//)
-  const scheme = schemeMatch ? schemeMatch[1] : "http"
-  const cleanHost = schemeMatch ? host.slice(schemeMatch[0].length) : host
-  return `${scheme}://${cleanHost}:${config.port}`
-}
+export { baseUrl, isValidServerConfig }
 
 function withDirectory(path: string, directory?: string): string {
   if (!directory) return path
