@@ -2175,15 +2175,15 @@ function App() {
                     >
                       <PencilIcon size={16} />
                     </button>
-                    <button 
-                      className="btn-danger" 
+                    <button
+                      className="btn-danger"
                       onClick={(event) => {
                         event.stopPropagation()
                         setSessionToDelete(session)
                       }}
+                      title={t('sessions.delete')}
                     >
                       <TrashIcon size={16} />
-                      {t('sessions.delete')}
                     </button>
                   </div>
                 </article>

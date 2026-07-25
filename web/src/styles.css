@@ -1574,6 +1574,10 @@ button.compact {
     grid-template-columns: 1fr 1fr;
   }
 
+  .session-card .inline-actions {
+    grid-template-columns: 1fr auto auto;
+  }
+
   .form-grid,
   .actions,
   .connection-help,
@@ -1695,6 +1699,10 @@ button.compact {
 
   .inline-actions {
     grid-template-columns: 1fr;
+  }
+
+  .session-card .inline-actions {
+    grid-template-columns: 1fr auto auto;
   }
 
   .session-card-main {
