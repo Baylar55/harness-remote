@@ -2,7 +2,9 @@
 
 ## Identità prodotto
 
-**Nome prodotto:** Harness Remote. OpenCode e OMP sono backend selezionabili; i loro nomi restano nei riferimenti a protocolli, comandi e contratti specifici.
+**Nome prodotto:** Harness Remote. L'app è agnostica rispetto all'harness: OpenCode e OMP sono backend
+selezionabili, PI è pianificato. I nomi dei singoli harness restano nei riferimenti a protocolli, comandi e
+contratti specifici. Aggiungere un harness significa aggiungere una voce di backend e la sua sezione nel README.
 
 ## Decisione
 

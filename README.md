@@ -1,9 +1,21 @@
 # Harness Remote
 
-Harness Remote is a companion app for controlling supported coding-agent backends—currently OpenCode and OMP—from phone or desktop, even when you are not at your main workstation.
+Harness Remote is a companion app for controlling coding-agent harnesses from phone or desktop, even when you are not at your main workstation.
 It is designed to make daily usage simple: connect to a backend, check active sessions, see progress, send new prompts or slash commands, and stop a running action when supported.
 
-> **Note for AI/harness systems**: This repository is self-documenting. To configure a supported backend and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote.
+## Supported Harnesses
+
+The app is backend-agnostic: you pick the harness in **Settings** and each one keeps its own saved connection, so you can switch between them without re-entering anything.
+
+| Harness | Status | How it connects |
+|---|---|---|
+| [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
+| Oh My Pi (OMP) | supported | through the local bridge included in this repository |
+| PI | planned | — |
+
+Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup) and [OMP](#oh-my-pi-bridge-setup) sections below document the setup and the per-backend limitations.
+
+> **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
 ## Screenshots
 
@@ -13,7 +25,7 @@ It is designed to make daily usage simple: connect to a backend, check active se
 
 ## What It Can Do
 
-- configure and test connection to a supported OpenCode server or OMP bridge
+- configure and test connection to a supported harness (OpenCode server or OMP bridge)
 - browse and monitor sessions (`idle`, `busy`, `retry`)
 - open a session and read messages, todo items, and progress
 - send prompts (and `/commands`) directly from the chat input
@@ -26,7 +38,7 @@ It is designed to make daily usage simple: connect to a backend, check active se
 
 - frontend: React + TypeScript + Vite
 - mobile packaging: Capacitor (Android APK)
-- networking: OpenCode HTTP API and the local OMP HTTP/SSE bridge
+- networking: per-harness transports behind one app-side API — the OpenCode HTTP API, and the local OMP HTTP/SSE bridge in `bridge/`
 - CI/CD: GitHub Actions for cloud APK builds
 - i18n: lightweight custom i18n module with English, Italian, and Traditional Chinese
 
@@ -36,7 +48,7 @@ Download the latest signed Android APK from the GitHub Releases page:
 
 https://github.com/giuliastro/harness-remote/releases/latest
 
-## Backend Setup
+## Harness Setup
 
 ### OpenCode Server Setup
 
