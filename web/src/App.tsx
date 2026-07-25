@@ -3,7 +3,8 @@ import { App as CapacitorApp } from "@capacitor/app"
 import type { PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { api } from "./api"
+import { api, isValidServerConfig } from "./api"
+import { ACTIVE_BACKEND_STORAGE_KEY, BACKEND_STORAGE_KEYS, LEGACY_STORAGE_KEY } from "./storageKeys"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
@@ -28,12 +29,12 @@ import {
   LoadingIcon,
   RefreshIcon,
   PencilIcon,
-  CloseIcon
+  CloseIcon,
+  PlayIcon
 } from "./Icons"
 
 const REMARK_PLUGINS = [remarkGfm]
 
-const STORAGE_KEY = "opencode.remote.server"
 const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
 const AGENT_STORAGE_KEY = "opencode.remote.agent"
@@ -42,11 +43,42 @@ const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
 type Translator = ReturnType<typeof createTranslator>
 
-const defaultConfig: ServerConfig = {
-  host: "",
-  port: 4096,
-  username: "opencode",
-  password: ""
+function defaultConfig(backend: ServerConfig["backend"]): ServerConfig {
+  return {
+    backend,
+    host: "",
+    port: backend === "omp" ? 4097 : 4096,
+    username: backend === "omp" ? "omp" : "opencode",
+    password: ""
+  }
+}
+
+function parseStoredConfig(value: string | null, backend: ServerConfig["backend"]): ServerConfig | null {
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value) as Partial<ServerConfig>
+    const storedBackend = parsed.backend === "omp" || parsed.backend === "opencode" ? parsed.backend : backend
+    return { ...defaultConfig(storedBackend), ...parsed, backend: storedBackend }
+  } catch {
+    return null
+  }
+}
+
+function readConfig(backend: ServerConfig["backend"]): ServerConfig {
+  const saved = parseStoredConfig(localStorage.getItem(BACKEND_STORAGE_KEYS[backend]), backend)
+  if (saved) return { ...saved, backend }
+  const legacy = parseStoredConfig(localStorage.getItem(LEGACY_STORAGE_KEY), "opencode")
+  return legacy?.backend === backend ? legacy : defaultConfig(backend)
+}
+
+function initialConfig(): ServerConfig {
+  const legacy = parseStoredConfig(localStorage.getItem(LEGACY_STORAGE_KEY), "opencode")
+  const storedBackend = localStorage.getItem(ACTIVE_BACKEND_STORAGE_KEY)
+  const backend = storedBackend === "omp" || storedBackend === "opencode" ? storedBackend : legacy?.backend ?? "opencode"
+  const config = readConfig(backend)
+  localStorage.setItem(BACKEND_STORAGE_KEYS[backend], JSON.stringify(config))
+  localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, backend)
+  return config
 }
 
 function formatTime(epoch: number): string {
@@ -80,6 +112,21 @@ function assistantPayloadLength(items: MessageEnvelope[]): number {
   return items
     .filter((message) => message.info.role !== "user")
     .reduce((sum, message) => sum + extractText(message).length, 0)
+}
+
+function messagesHaveSameContent(left: MessageEnvelope[], right: MessageEnvelope[]): boolean {
+  return left.length === right.length && left.every((message, index) => {
+    const candidate = right[index]
+    return candidate?.info.role === message.info.role && extractText(candidate) === extractText(message)
+  })
+}
+
+function messagesExtendContent(current: MessageEnvelope[], next: MessageEnvelope[]): boolean {
+  if (next.length < current.length) return false
+  return current.every((message, index) => {
+    const candidate = next[index]
+    return candidate?.info.role === message.info.role && extractText(candidate).startsWith(extractText(message))
+  })
 }
 
 function normalizeMessageMarkdown(text: string): string {
@@ -880,6 +927,7 @@ function summarizeJson(value: unknown): string {
 
 function configKey(config: ServerConfig): string {
   return JSON.stringify({
+    backend: config.backend,
     host: config.host.trim(),
     port: config.port,
     username: config.username.trim(),
@@ -888,7 +936,7 @@ function configKey(config: ServerConfig): string {
 }
 
 function canTestConfig(config: ServerConfig): boolean {
-  return Boolean(config.host.trim() && config.port > 0 && config.username.trim())
+  return Boolean(config.username.trim()) && isValidServerConfig(config)
 }
 
 function modelKey(model: ModelSelection): string {
@@ -1186,16 +1234,7 @@ const MessagesPane = memo(function MessagesPane({
 function App() {
   type NoticeType = "info" | "success" | "error"
   type ThemePreference = "system" | "light" | "dark"
-
-  const [config, setConfig] = useState<ServerConfig>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) return defaultConfig
-    try {
-      return { ...defaultConfig, ...JSON.parse(saved) }
-    } catch {
-      return defaultConfig
-    }
-  })
+  const [config, setConfig] = useState<ServerConfig>(initialConfig)
   const [language, setLanguage] = useState<LanguageCode>(() => {
     return normalizeLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || navigator.language)
   })
@@ -1280,6 +1319,8 @@ function App() {
   const selectedSessionRef = useRef<SessionView | null>(null)
   const eventStreamStateRef = useRef<"idle" | "connecting" | "live" | "reconnecting" | "fallback">("idle")
 
+  const loadedMessagesRef = useRef<MessageEnvelope[]>([])
+  const shouldAutoScrollRef = useRef(false)
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedID) ?? null,
     [sessions, selectedID]
@@ -1350,10 +1391,8 @@ function App() {
       .join("|")
   }, [renderedMessages])
 
-  const hasConfiguredServer = Boolean(config.host && config.port > 0)
+  const hasConfiguredServer = isValidServerConfig(config)
   const draftConfigKey = configKey(draftConfig)
-  const savedConfigKey = configKey(config)
-  const hasDraftChanges = draftConfigKey !== savedConfigKey
   const canTestDraft = canTestConfig(draftConfig)
   const testAlreadyPassedForDraft = lastTestedConfigKey === draftConfigKey
   const connectionStatusText = connectionMessage || (connectionState === "connecting"
@@ -1377,6 +1416,7 @@ function App() {
   const isSessionRunning = Boolean(selectedSession && ["busy", "retry"].includes(selectedSession.status))
   const isWaitingForOpenCodeReply = awaitingAssistantReply || busySending || isSessionRunning
   const isWorking = isWaitingForOpenCodeReply
+  const showStopAction = isWorking && !composer.trim()
   const showTypingBubble = Boolean(selectedSession) && isWaitingForOpenCodeReply
   const activeSessions = sessions.filter((session) => ["busy", "retry"].includes(session.status)).length
   const changedSessions = sessions.filter(
@@ -1389,6 +1429,7 @@ function App() {
   async function openSession(sessionID: string, directory: string) {
     setSelectedID(sessionID)
     setMessages([])
+    loadedMessagesRef.current = []
     setOptimisticUserMessages([])
     setTodos([])
     setDiffFiles([])
@@ -1400,17 +1441,36 @@ function App() {
     setView("detail")
     setLoadingSessionID(sessionID)
     try {
-      await loadSelected(sessionID, directory)
-      await Promise.all([loadAgents(), loadModels()])
+      await loadSelected(sessionID, directory, true)
+      await Promise.all([loadAgents(), loadModels(sessionID, directory)])
     } catch (err) {
       setRuntimeError((err as Error).message)
     }
     setLoadingSessionID((activeID) => (activeID === sessionID ? null : activeID))
   }
 
-  function saveConfig() {
-    setConfig(draftConfig)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draftConfig))
+  function applyConfig(nextConfig: ServerConfig) {
+    const serverChanged = configKey(nextConfig) !== configKey(config)
+    if (serverChanged) {
+      loadSelectedRequestRef.current += 1
+      setSessions([])
+      setSelectedID(null)
+      setMessages([])
+      loadedMessagesRef.current = []
+      setOptimisticUserMessages([])
+      setTodos([])
+      setDiffFiles([])
+      setProjectDashboard(null)
+      setDashboardError(null)
+      setAwaitingAssistantReply(false)
+      setConnectedVersion("")
+      setCommands([])
+      setAgentOptions([])
+      setModelOptions([])
+    }
+    setConfig(nextConfig)
+    localStorage.setItem(BACKEND_STORAGE_KEYS[nextConfig.backend], JSON.stringify(nextConfig))
+    localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, nextConfig.backend)
     setSettingsNotice({ type: "success", text: t('settings.saved') })
     setConnectionState("connecting")
     setConnectionMessage(t('connection.connecting'))
@@ -1438,7 +1498,7 @@ function App() {
   }
 
   async function refreshSessions(silent = false, preserveSession?: SessionView) {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     if (!silent) {
       setRuntimeError(null)
       setConnectionState(sessions.length === 0 ? "connecting" : "reconnecting")
@@ -1507,7 +1567,7 @@ function App() {
   }
 
   async function loadCommands() {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     try {
       const list = await api.listCommands(config)
       setCommands(list)
@@ -1517,7 +1577,7 @@ function App() {
   }
 
   async function loadAgents() {
-    if (!config.host || config.port <= 0) return
+    if (!isValidServerConfig(config)) return
     try {
       const list = await api.listAgents(config, selectedSession?.directory ?? selectedNewSessionDirectory)
       setAgentOptions(list)
@@ -1534,13 +1594,13 @@ function App() {
     }
   }
 
-  async function loadModels() {
-    if (!config.host || config.port <= 0) return
+  async function loadModels(sessionID = selectedSession?.id, directory = selectedSession?.directory ?? selectedNewSessionDirectory) {
+    if (!isValidServerConfig(config)) return
     try {
-      const list = await api.listModels(config, selectedSession?.directory ?? selectedNewSessionDirectory)
+      const list = await api.listModels(config, directory, config.backend === "omp" ? sessionID : undefined)
       setModelOptions(list)
       setModelLoadError(null)
-      const sessionModel = selectedSession?.model
+      const sessionModel = selectedSession && selectedSession.id === sessionID ? selectedSession.model : undefined
       const sessionOption = sessionModel ? list.find((option) => sameModel(option, sessionModel)) : null
       if (sessionOption) {
         const nextKey = modelKey(sessionOption)
@@ -1562,6 +1622,9 @@ function App() {
   }
 
   async function loadSessionActivityTimes(items: Session[]): Promise<Map<string, number>> {
+    if (config.backend === "omp") {
+      return new Map(items.map((session) => [session.id, session.time.updated]))
+    }
     const results = await Promise.all(items.map(async (session) => {
       const cached = latestMessageTimesRef.current.get(session.id)
       if (cached?.sessionUpdated === session.time.updated) return [session.id, cached.activityTime] as const
@@ -1585,19 +1648,24 @@ function App() {
     localStorage.setItem(AGENT_STORAGE_KEY, nextAgentID)
   }
 
-  async function loadSelected(sessionID: string, directory: string) {
+  async function loadSelected(sessionID: string, directory: string, refreshHistory = false) {
     const requestID = ++loadSelectedRequestRef.current
     const [msg, todo, diff, questions] = await Promise.all([
-      api.loadMessages(config, sessionID, directory),
+      api.loadMessages(config, sessionID, directory, refreshHistory),
       api.loadTodo(config, sessionID, directory),
       api.loadDiff(config, sessionID, directory).catch(() => []),
-      api.loadQuestions(config, directory).catch(() => [])
+      config.backend === "omp" ? Promise.resolve([]) : api.loadQuestions(config, directory).catch(() => [])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
-    setMessages((current) => {
-      if (assistantPayloadLength(current) > assistantPayloadLength(msg)) return current
-      return mergeFetchedMessages(current, msg)
-    })
+    const current = loadedMessagesRef.current
+    if (
+      !messagesHaveSameContent(current, msg) &&
+      assistantPayloadLength(current) <= assistantPayloadLength(msg)
+    ) {
+      shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isNearMessagesBottom()
+      loadedMessagesRef.current = msg
+      setMessages((prev) => mergeFetchedMessages(prev, msg))
+    }
     setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
     setTodos(todo)
     setDiffFiles(diff)
@@ -1739,11 +1807,13 @@ function App() {
       setProjectDashboard(null)
       setDashboardError(null)
       setAwaitingAssistantReply(false)
+      loadedMessagesRef.current = []
       setView("detail")
       setLoadingSessionID(created.id)
       try {
         await loadSelected(created.id, created.directory)
-        await Promise.all([loadAgents(), loadModels()])
+        await Promise.all([loadAgents(), loadModels(created.id, created.directory)])
+        await refreshSessions(false, createdView)
       } catch (err) {
         setRuntimeError((err as Error).message)
       } finally {
@@ -1874,6 +1944,7 @@ function App() {
       if (selectedID === sessionID) {
         setSelectedID(null)
         setMessages([])
+        loadedMessagesRef.current = []
         setOptimisticUserMessages([])
         setTodos([])
         setDiffFiles([])
@@ -1932,6 +2003,45 @@ function App() {
     localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
   }, [language])
 
+  // Android back: dismiss whatever is on top, then fall back to the session list,
+  // and only leave the app from there. Reads state through a ref because the
+  // handler is registered once and must not capture a stale view.
+  const backStateRef = useRef({ view, activeDetailSheet, sessionToDelete, renamingSessionID })
+  backStateRef.current = { view, activeDetailSheet, sessionToDelete, renamingSessionID }
+
+  useEffect(() => {
+    let handle: PluginListenerHandle | undefined
+    let removed = false
+    void CapacitorApp.addListener("backButton", () => {
+      const state = backStateRef.current
+      if (state.sessionToDelete) {
+        setSessionToDelete(null)
+        return
+      }
+      if (state.renamingSessionID) {
+        setRenamingSessionID(null)
+        return
+      }
+      if (state.activeDetailSheet) {
+        setActiveDetailSheet(null)
+        return
+      }
+      if (state.view !== "sessions") {
+        setView("sessions")
+        return
+      }
+      CapacitorApp.exitApp()
+    }).then((registered) => {
+      // The effect can be torn down before registration resolves.
+      if (removed) void registered.remove()
+      else handle = registered
+    })
+    return () => {
+      removed = true
+      void handle?.remove()
+    }
+  }, [])
+
   useEffect(() => {
     let listenerHandle: PluginListenerHandle | undefined
     CapacitorApp.addListener("backButton", () => {
@@ -1978,7 +2088,25 @@ function App() {
   }, [eventStreamState])
 
   useEffect(() => {
-    if (!config.host || config.port <= 0) {
+    if (configKey(draftConfig) === configKey(config)) return
+    // A half-typed host such as `http://` cannot be turned into a URL. Persisting it
+    // would also poison the next launch, so incomplete drafts are simply not applied.
+    if (draftConfig.host.trim() && !isValidServerConfig(draftConfig)) return
+    const timer = setTimeout(() => applyConfig(draftConfig), 500)
+    return () => clearTimeout(timer)
+  }, [draftConfig, config])
+
+  useEffect(() => {
+    if (!selectedSession) {
+      setModelOptions([])
+      setModelLoadError(null)
+      return
+    }
+    loadModels(selectedSession.id, selectedSession.directory).catch(() => undefined)
+  }, [config.backend, config.host, config.port, config.username, config.password, selectedSession?.id])
+
+  useEffect(() => {
+    if (!isValidServerConfig(config)) {
       setConnectionState("idle")
       setConnectionMessage("")
       return
@@ -1990,7 +2118,7 @@ function App() {
     refreshSessions(true).catch(() => undefined)
     loadCommands().catch(() => undefined)
     loadAgents().catch(() => undefined)
-    loadModels().catch(() => undefined)
+    if (config.backend !== "omp") loadModels().catch(() => undefined)
     const timer = setInterval(() => {
       // Live SSE events already keep sessions and the open session's messages/todos/diffs in sync
       // (via applyStreamedPartUpdate/scheduleRefresh); this poll is only a fallback for when the
@@ -2002,15 +2130,23 @@ function App() {
       }
     }, 3500)
     return () => clearInterval(timer)
-  }, [config.host, config.port, config.username, config.password, selectedSession?.id, selectedNewSessionDirectory])
+  }, [config.backend, config.host, config.port, config.username, config.password, selectedSession?.id, selectedNewSessionDirectory])
 
   useEffect(() => {
-    if (!config.host || config.port <= 0) {
+    if (!isValidServerConfig(config)) {
       setEventStreamState("idle")
       return
     }
     setEventStreamState("connecting")
-    const { url, headers } = api.eventStream(config)
+    let stream: { url: string; headers: Record<string, string> }
+    try {
+      stream = api.eventStream(config)
+    } catch (error) {
+      setLiveEventError((error as Error).message)
+      setEventStreamState("fallback")
+      return
+    }
+    const { url, headers } = stream
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const scheduleRefresh = () => {
       if (refreshTimer !== undefined) return
@@ -2070,7 +2206,7 @@ function App() {
       if (refreshTimer !== undefined) clearTimeout(refreshTimer)
       subscription.close()
     }
-  }, [config.host, config.port, config.username, config.password])
+  }, [config.backend, config.host, config.port, config.username, config.password])
 
   useEffect(() => {
     if (!hasConfiguredServer) {
@@ -2110,6 +2246,13 @@ function App() {
       clearTimeout(timeout)
     }
   }, [view, selectedID])
+
+  useEffect(() => {
+    loadedMessagesRef.current = messages
+    if (!shouldAutoScrollRef.current) return
+    shouldAutoScrollRef.current = false
+    scrollMessagesToBottom("smooth")
+  }, [messages])
 
   useEffect(() => {
     if (!awaitingAssistantReply) return
@@ -2218,15 +2361,32 @@ function App() {
             </select>
           </label>
           
+          <label htmlFor="backend">
+            {t('settings.backend')}
+            <select
+              id="backend"
+              value={draftConfig.backend}
+              onChange={(event) => {
+                const backend = event.target.value as ServerConfig["backend"]
+                setDraftConfig(readConfig(backend))
+              }}
+            >
+              <option value="opencode">OpenCode</option>
+              <option value="omp">Oh My Pi (bridge)</option>
+            </select>
+          </label>
+
           <label htmlFor="host">
             {t('settings.host')}
-            <input 
+            <input
               id="host"
-              value={draftConfig.host} 
-              onChange={(event) => setDraftConfig({ ...draftConfig, host: event.target.value })} 
+              value={draftConfig.host}
+              onChange={(event) => setDraftConfig({ ...draftConfig, host: event.target.value })}
               placeholder={t('settings.hostPlaceholder')}
+              aria-describedby="host-hint"
             />
           </label>
+          <p className="field-hint" id="host-hint">{t('settings.hostHint')}</p>
           
           <label htmlFor="port">
             {t('settings.port')}
@@ -2263,14 +2423,6 @@ function App() {
           
           <div className="actions">
             <button 
-              onClick={saveConfig} 
-              disabled={testingConnection || !hasDraftChanges}
-              className="btn-primary"
-            >
-              <SaveIcon size={18} />
-              {hasDraftChanges ? t('settings.save') : t('settings.savedButton')}
-            </button>
-            <button 
               onClick={() => testConnection(draftConfig)} 
               className="btn-secondary"
               disabled={testingConnection || !canTestDraft || testAlreadyPassedForDraft}
@@ -2301,7 +2453,6 @@ function App() {
           
           <div className="connection-help">
             <span>{canTestDraft ? t('settings.readyToTest') : t('settings.testNeedsFields')}</span>
-            <span>{hasDraftChanges ? t('settings.unsavedChanges') : t('settings.noUnsavedChanges')}</span>
           </div>
 
           {connectedVersion && testAlreadyPassedForDraft && (
@@ -2461,27 +2612,42 @@ function App() {
                   </div>
                   <div className="inline-actions">
                     <button
-                      className="btn-secondary"
                       onClick={(event) => {
                         event.stopPropagation()
-                        startRename(session)
+                        openSession(session.id, session.directory).catch(() => undefined)
                       }}
-                      title={t('session.renameTitle')}
+                      className="btn-primary"
                     >
-                      <PencilIcon size={16} />
-                      {t('session.renameConfirm')}
+                      <PlayIcon size={16} />
+                      {t('sessions.open')}
                     </button>
-                    <button
-                      className="btn-danger"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        setSessionToDelete(session)
-                      }}
-                      title={t('sessions.delete')}
-                    >
-                      <TrashIcon size={16} />
-                      {t('sessions.delete')}
-                    </button>
+                    {config.backend !== "omp" && (
+                      <>
+                        <button
+                          className="btn-secondary"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            startRename(session)
+                          }}
+                          title={t('session.renameTitle')}
+                          aria-label={t('session.renameTitle')}
+                        >
+                          <PencilIcon size={16} />
+                          {t('session.renameConfirm')}
+                        </button>
+                        <button
+                          className="btn-danger"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setSessionToDelete(session)
+                          }}
+                          title={t('sessions.delete')}
+                        >
+                          <TrashIcon size={16} />
+                          {t('sessions.delete')}
+                        </button>
+                      </>
+                    )}
                   </div>
                 </article>
               ))
@@ -2607,14 +2773,17 @@ function App() {
                     ) : (
                       <>
                         {selectedSession.title}
-                        <button
-                          className="btn-icon btn-secondary compact"
-                          onClick={() => startRename(selectedSession)}
-                          title={t('session.renameTitle')}
-                          style={{ marginLeft: 'var(--space-1)' }}
-                        >
-                          <PencilIcon size={14} />
-                        </button>
+                        {config.backend !== "omp" && (
+                          <button
+                            className="btn-icon btn-secondary compact"
+                            onClick={() => startRename(selectedSession)}
+                            title={t('session.renameTitle')}
+                            aria-label={t('session.renameTitle')}
+                            style={{ marginLeft: 'var(--space-1)' }}
+                          >
+                            <PencilIcon size={14} />
+                          </button>
+                        )}
                       </>
                     )}
                   </div>
@@ -2635,7 +2804,7 @@ function App() {
               {showModelChip && (
                 <button type="button" className="context-chip" onClick={() => setActiveDetailSheet("ai")}>
                   <span>{t('detail.aiChip')}</span>
-                  <strong>{agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })} · {activeModelOption?.modelName ?? t('detail.modelLoading')}</strong>
+                  <strong>{config.backend === "omp" ? activeModelOption?.modelName ?? t('detail.modelLoading') : `${agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })} · ${activeModelOption?.modelName ?? t('detail.modelLoading')}`}</strong>
                 </button>
               )}
 
@@ -2715,13 +2884,18 @@ function App() {
               }}
               disabled={!selectedSession}
             />
+            {/* While the agent works the same button stops it, but starts sending again as
+                soon as there is something to send, so a follow-up can be queued. */}
             <button
-              onClick={isWorking && !composer.trim() ? abortSession : send}
+              onClick={showStopAction ? abortSession : send}
               disabled={!selectedSession}
-              className={isWorking && !composer.trim() ? "btn-danger" : "btn-primary"}
+              className={showStopAction ? "btn-danger" : "btn-primary"}
             >
-              {isWorking && !composer.trim() ? (
-                <StopCircleIcon size={18} />
+              {showStopAction ? (
+                <>
+                  <StopCircleIcon size={18} />
+                  {t('detail.waiting')}
+                </>
               ) : (
                 <SendIcon size={18} />
               )}
@@ -2764,7 +2938,7 @@ function App() {
                   <RefreshIcon size={16} />
                   {t('detail.refreshAi')}
                 </button>
-                {primaryAgentOptions.length > 0 ? (
+                {config.backend !== "omp" && (primaryAgentOptions.length > 0 ? (
                   <div className="agent-controls">
                     <label htmlFor="agent-select">
                       {t('detail.agentSelectLabel')}
@@ -2785,7 +2959,7 @@ function App() {
                   </div>
                 ) : (
                   <p className="subtle">{agentLoadError ? t('detail.agentLoadError', { message: agentLoadError }) : t('detail.agentLoading')}</p>
-                )}
+                ))}
                 {modelOptions.length > 0 ? (
                   <div className="model-controls">
                     <label htmlFor="model-search">
@@ -2962,7 +3136,7 @@ function App() {
               <ul>
                 <li><strong>Configure Server:</strong> Use Settings to enter host, port, username and password</li>
                 <li><strong>Test Connection:</strong> Press Test to validate server connectivity</li>
-                <li><strong>Save Settings:</strong> Press Save to apply configuration and start polling</li>
+                <li><strong>Configuration:</strong> Changes are saved automatically and applied after you pause typing.</li>
                 <li><strong>Browse Sessions:</strong> View and manage sessions from the Sessions tab</li>
                 <li><strong>Interact:</strong> Open a session and chat in the Detail view</li>
                 <li><strong>Quick Input:</strong> Press Enter to send, Shift+Enter for new lines</li>
@@ -2982,31 +3156,33 @@ function App() {
 
           {helpPage === "server" && (
             <div className="help-content fade-in">
-              <h3>Starting the OpenCode Server</h3>
-              <p>Start OpenCode server with Basic Authentication enabled:</p>
-              
+              <h3>{config.backend === "omp" ? "Oh My Pi bridge" : "OpenCode server"}</h3>
+              <p>
+                This page keeps setup brief. Full, versioned backend guides live in the Harness Remote repository so new
+                backends do not make the app help unwieldy.
+              </p>
               <div className="code-blocks">
-                <h4>macOS / Linux (bash/zsh)</h4>
-                <pre>OPENCODE_SERVER_USERNAME=opencode \
-OPENCODE_SERVER_PASSWORD=your-password \
-npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096</pre>
-                
-                <h4>Windows PowerShell</h4>
-                <pre>$env:OPENCODE_SERVER_USERNAME="opencode"
-$env:OPENCODE_SERVER_PASSWORD="your-password"
-npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096</pre>
-                
-                <h4>Windows Command Prompt</h4>
-                <pre>set OPENCODE_SERVER_USERNAME=opencode
-set OPENCODE_SERVER_PASSWORD=your-password
-npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096</pre>
+                {config.backend === "omp" ? (
+                  <>
+                    <h4>OMP bridge (macOS / Linux)</h4>
+                    <pre>npx --yes ./bridge --host 0.0.0.0 --port 4097 --username omp --password your-password --root "$PWD"</pre>
+                  </>
+                ) : (
+                  <>
+                    <h4>OpenCode server (macOS / Linux)</h4>
+                    <pre>OPENCODE_SERVER_USERNAME=opencode OPENCODE_SERVER_PASSWORD=your-password npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096</pre>
+                  </>
+                )}
               </div>
-              
-              <div className="help-note">
-                <strong>🔧 Browser Debugging:</strong>
-                <p>Add CORS origins for browser testing:</p>
-                <pre>--cors http://localhost:5173 --cors http://127.0.0.1:5173</pre>
-              </div>
+              <p>
+                <a
+                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "omp" ? "oh-my-pi-bridge-setup" : "opencode-server-setup"}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open the complete {config.backend === "omp" ? "OMP bridge" : "OpenCode server"} guide in the repository
+                </a>
+              </p>
             </div>
           )}
 

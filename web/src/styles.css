@@ -1807,3 +1807,33 @@ button.compact {
     transition-duration: 0.01ms !important;
   }
 }
+
+.crash-screen {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--space-5, 2rem) var(--space-4, 1.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 1rem);
+}
+
+.crash-screen pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: var(--space-3, 1rem);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-2, rgba(127, 127, 127, 0.12));
+}
+
+.crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2, 0.5rem);
+}
+
+.field-hint {
+  margin: calc(-1 * var(--space-2, 0.5rem)) 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-muted, #8a93a6);
+}

@@ -1,4 +1,4 @@
-// Modern SVG icon components for OpenCode Remote
+// Modern SVG icon components for Harness Remote
 
 export const SettingsIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
   <svg 
@@ -390,7 +390,7 @@ export const LogoIcon = ({ className = "", size = 32 }: { className?: string; si
     fill="none" 
     className={className}
     role="img"
-    aria-label="OpenCode Remote Logo"
+    aria-label="Harness Remote Logo"
   >
     <defs>
       <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">

@@ -12,7 +12,11 @@ assert.ok(refreshButton[0].includes('RefreshIcon'), 'idle sessions refresh butto
 assert.ok(refreshButton[0].includes('refreshingSessions ? <LoadingIcon'), 'refresh button should spin only during an active manual refresh')
 
 assert.ok(app.includes('messageScrollSignature'), 'conversation auto-scroll should react to message content changes, not only message count')
-assert.ok(app.includes('scrollMessagesToBottom("auto")'), 'auto-scroll should re-anchor the conversation at the bottom on new messages')
+assert.ok(
+  /if \(!stickToBottomRef\.current\) return[\s\S]*?scrollMessagesToBottom\("auto"\)/.test(app),
+  'content-driven auto-scroll must be gated on the user already being pinned to the bottom, so background refreshes cannot force the conversation to scroll while the user has scrolled away'
+)
+assert.ok(app.includes('}, [view, selectedID])'), 'auto-scroll should run only when opening a selected session')
 assert.ok(app.includes('scrollMessagesToBottom("smooth")'), 'focusing the composer should scroll to the bottom')
 assert.ok(app.includes('messagesEndRef'), 'auto-scroll should target a bottom sentinel marker')
 assert.ok(app.includes('scrollTo({ top: container.scrollHeight'), 'auto-scroll should set the messages container scrollTop to its max scrollHeight')
@@ -36,7 +40,7 @@ assert.ok(app.includes('completionShouldPlayRef.current = true'), 'completion so
 assert.ok(app.includes('wasAwaitingAssistantReplyRef.current && !awaitingAssistantReply && completionShouldPlayRef.current'), 'completion sound should play only when assistant waiting ends, not when the user bubble renders')
 assert.ok(app.includes('loadSelectedRequestRef'), 'session message refreshes should ignore stale overlapping polling responses')
 assert.ok(app.includes('if (requestID !== loadSelectedRequestRef.current) return'), 'older loadSelected requests must not overwrite newer assistant output')
-assert.ok(app.includes('assistantPayloadLength(current) > assistantPayloadLength(msg)'), 'message refresh should not regress from assistant output back to user-only history')
+assert.ok(app.includes('assistantPayloadLength(current) <= assistantPayloadLength(msg)'), 'message refresh should not regress from assistant output back to user-only history')
 assert.ok(app.includes('SendIcon') && app.includes('<SendIcon size={18} />'), 'composer send button should use the clear paper-plane SendIcon')
 assert.ok(app.includes('StopCircleIcon') && app.includes('<StopCircleIcon size={18} />'), 'composer waiting button should use a clear stop-task icon')
 assert.match(icons, /export const StopCircleIcon/, 'StopCircleIcon should exist in the shared SVG icon set')
@@ -109,5 +113,29 @@ assert.ok(app.includes('remarkGfm'), 'messages should support GitHub-flavored Ma
 assert.ok(/\.message-content pre[\s\S]*?overflow-x:\s*auto/.test(styles), 'fenced code blocks should render as scrollable blocks')
 
 assert.match(icons, /export const RefreshIcon/, 'RefreshIcon should exist for idle refresh UI')
+
+// Android back button: dismiss the topmost layer, then fall back to the session list.
+const backStart = app.indexOf('CapacitorApp.addListener("backButton"')
+assert.notEqual(backStart, -1, 'the Android back button should be handled')
+const backHandler = app.slice(backStart, app.indexOf('}, [])', backStart))
+assert.equal(
+  /setView\(\(current\)/.test(backHandler),
+  false,
+  'exitApp must not run inside a state updater, which React may invoke more than once'
+)
+assert.ok(backHandler.includes('backStateRef.current'), 'the handler is registered once, so it must read state through a ref')
+assert.ok(backHandler.includes('if (removed) void registered.remove()'), 'a listener registered after teardown must still be removed')
+for (const layer of ['sessionToDelete', 'renamingSessionID', 'activeDetailSheet']) {
+  assert.ok(backHandler.includes(layer), `back should dismiss ${layer} before leaving the view`)
+}
+assert.ok(
+  backHandler.indexOf('exitApp') > backHandler.indexOf('setView("sessions")'),
+  'the app should only exit from the session list'
+)
+
+// A follow-up prompt can be queued while the agent is still working.
+assert.ok(app.includes('const showStopAction = isWorking && !composer.trim()'), 'stop should be offered only when there is nothing to send')
+assert.equal(app.includes('disabled={!selectedSession || isWorking}'), false, 'the composer must stay usable while the agent works')
+assert.ok(app.includes('onClick={showStopAction ? abortSession : send}'), 'the action button should send a queued follow-up instead of only stopping')
 
 console.log('ui regression tests passed')

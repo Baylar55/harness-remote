@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { streamURL } from "./opencode-events"
+import { baseUrl, isValidServerConfig } from "./serverConfig"
 import type {
   AgentOption,
   CommandInfo,
@@ -24,13 +25,7 @@ function authHeader(config: ServerConfig): string {
   return `Basic ${btoa(`${config.username}:${config.password}`)}`
 }
 
-function baseUrl(config: ServerConfig): string {
-  const host = config.host.trim()
-  const schemeMatch = host.match(/^(https?):\/\//)
-  const scheme = schemeMatch ? schemeMatch[1] : "http"
-  const cleanHost = schemeMatch ? host.slice(schemeMatch[0].length) : host
-  return `${scheme}://${cleanHost}:${config.port}`
-}
+export { baseUrl, isValidServerConfig }
 
 function withDirectory(path: string, directory?: string): string {
   if (!directory) return path
@@ -253,8 +248,10 @@ export const api = {
     return agents.map(toAgentOption).filter((agent) => agent.id && !agent.hidden)
   },
 
-  async listModels(config: ServerConfig, directory?: string) {
-    const response = await request<ConfigProvidersResponse>(config, withDirectory("/config/providers", directory))
+  async listModels(config: ServerConfig, directory?: string, sessionID?: string) {
+    const path = withDirectory("/config/providers", directory)
+    const sessionPath = sessionID ? `${path}${path.includes("?") ? "&" : "?"}sessionID=${encodeURIComponent(sessionID)}` : path
+    const response = await request<ConfigProvidersResponse>(config, sessionPath)
     return response.providers.flatMap((provider) => {
       const defaultModel = response.default?.[provider.id]
       return Object.entries(provider.models).flatMap(([modelID, model]) => {
@@ -291,8 +288,9 @@ export const api = {
     return request<boolean>(config, withDirectory(`/session/${id}`, directory), { method: "DELETE" })
   },
 
-  loadMessages(config: ServerConfig, sessionID: string, directory?: string) {
-    return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100`, directory))
+  loadMessages(config: ServerConfig, sessionID: string, directory?: string, refreshHistory = false) {
+    const refresh = config.backend === "omp" && refreshHistory ? "&refresh=1" : ""
+    return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100${refresh}`, directory))
   },
 
   loadLatestMessage(config: ServerConfig, sessionID: string, directory?: string) {
