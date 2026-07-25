@@ -15,6 +15,7 @@ type TranslationKey =
   | 'settings.backend'
   | 'settings.host'
   | 'settings.hostPlaceholder'
+  | 'settings.hostHint'
   | 'settings.port'
   | 'settings.username'
   | 'settings.password'
@@ -166,6 +167,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': 'Backend',
     'settings.host': 'Host Address',
     'settings.hostPlaceholder': '192.168.1.100, localhost, or https://example.com',
+    'settings.hostHint': "Use the computer's IP address. http:// is optional and only needed as https:// for a TLS server. A Windows computer name such as MY-PC usually cannot be resolved from a phone.",
     'settings.port': 'Port',
     'settings.username': 'Username',
     'settings.password': 'Password',
@@ -316,6 +318,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': 'Backend',
     'settings.host': 'Indirizzo host',
     'settings.hostPlaceholder': '192.168.1.100, localhost o https://example.com',
+    'settings.hostHint': "Usa l'indirizzo IP del computer. http:// è facoltativo e serve solo come https:// per un server TLS. Un nome di computer Windows come MIO-PC di solito non è risolvibile dal telefono.",
     'settings.port': 'Porta',
     'settings.username': 'Username',
     'settings.password': 'Password',
@@ -466,6 +469,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': '後端',
     'settings.host': '主機位址',
     'settings.hostPlaceholder': '192.168.1.100、localhost 或 https://example.com',
+    'settings.hostHint': '請使用電腦的 IP 位址。http:// 可省略，僅在使用 TLS 伺服器時需寫成 https://。像 MY-PC 這樣的 Windows 電腦名稱通常無法從手機解析。',
     'settings.port': '連接埠',
     'settings.username': '使用者名稱',
     'settings.password': '密碼',

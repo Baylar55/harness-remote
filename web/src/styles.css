@@ -1484,3 +1484,10 @@ button.compact {
   flex-wrap: wrap;
   gap: var(--space-2, 0.5rem);
 }
+
+.field-hint {
+  margin: calc(-1 * var(--space-2, 0.5rem)) 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-muted, #8a93a6);
+}

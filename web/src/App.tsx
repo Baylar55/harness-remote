@@ -1248,13 +1248,15 @@ function App() {
 
           <label htmlFor="host">
             {t('settings.host')}
-            <input 
+            <input
               id="host"
-              value={draftConfig.host} 
-              onChange={(event) => setDraftConfig({ ...draftConfig, host: event.target.value })} 
+              value={draftConfig.host}
+              onChange={(event) => setDraftConfig({ ...draftConfig, host: event.target.value })}
               placeholder={t('settings.hostPlaceholder')}
+              aria-describedby="host-hint"
             />
           </label>
+          <p className="field-hint" id="host-hint">{t('settings.hostHint')}</p>
           
           <label htmlFor="port">
             {t('settings.port')}
