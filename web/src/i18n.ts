@@ -168,6 +168,10 @@ type TranslationKey =
   | 'action.fetchedUrl'
   | 'action.fetchedUrlNamed'
   | 'action.updatedTodos'
+  | 'action.todoSummary'
+  | 'action.askedQuestion'
+  | 'action.askedQuestionNamed'
+  | 'action.askedQuestions'
   | 'action.ranSubagent'
   | 'action.ranSubagentNamed'
   | 'action.usedSkill'
@@ -194,6 +198,10 @@ type TranslationKey =
   | 'action.countSkillMany'
   | 'action.countOtherOne'
   | 'action.countOtherMany'
+  | 'action.countTodoOne'
+  | 'action.countTodoMany'
+  | 'action.countQuestionOne'
+  | 'action.countQuestionMany'
   | 'action.madeEditOne'
   | 'action.madeEditMany'
   | 'question.ariaLabel'
@@ -370,6 +378,10 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.fetchedUrl': 'Fetched a URL',
     'action.fetchedUrlNamed': 'Fetched {url}',
     'action.updatedTodos': 'Updated the to-do list',
+    'action.todoSummary': '{done}/{total} to-dos done',
+    'action.askedQuestion': 'Asked a question',
+    'action.askedQuestionNamed': 'Asked: {question}',
+    'action.askedQuestions': 'Asked {n} questions',
     'action.ranSubagent': 'Ran a subagent',
     'action.ranSubagentNamed': 'Ran subagent: {description}',
     'action.usedSkill': 'Used a skill',
@@ -396,6 +408,10 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.countSkillMany': 'used {n} skills',
     'action.countOtherOne': 'ran 1 tool',
     'action.countOtherMany': 'ran {n} tools',
+    'action.countTodoOne': 'updated the to-do list',
+    'action.countTodoMany': 'updated the to-do list {n} times',
+    'action.countQuestionOne': 'asked 1 question',
+    'action.countQuestionMany': 'asked {n} questions',
     'action.madeEditOne': 'made 1 edit',
     'action.madeEditMany': 'made {n} edits',
     'question.ariaLabel': 'Question from OpenCode',
@@ -571,6 +587,10 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.fetchedUrl': 'URL recuperato',
     'action.fetchedUrlNamed': 'Recuperato {url}',
     'action.updatedTodos': 'Elenco to-do aggiornato',
+    'action.todoSummary': '{done}/{total} to-do completati',
+    'action.askedQuestion': 'Posta una domanda',
+    'action.askedQuestionNamed': 'Chiesto: {question}',
+    'action.askedQuestions': 'Poste {n} domande',
     'action.ranSubagent': 'Subagente eseguito',
     'action.ranSubagentNamed': 'Eseguito subagente: {description}',
     'action.usedSkill': 'Skill usata',
@@ -597,6 +617,10 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.countSkillMany': 'usate {n} skill',
     'action.countOtherOne': 'eseguito 1 tool',
     'action.countOtherMany': 'eseguiti {n} tool',
+    'action.countTodoOne': 'aggiornato l\'elenco to-do',
+    'action.countTodoMany': 'aggiornato l\'elenco to-do {n} volte',
+    'action.countQuestionOne': 'posta 1 domanda',
+    'action.countQuestionMany': 'poste {n} domande',
     'action.madeEditOne': 'fatta 1 modifica',
     'action.madeEditMany': 'fatte {n} modifiche',
     'question.ariaLabel': 'Domanda da OpenCode',
@@ -772,6 +796,10 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.fetchedUrl': '已擷取網址',
     'action.fetchedUrlNamed': '已擷取 {url}',
     'action.updatedTodos': '已更新待辦事項清單',
+    'action.todoSummary': '已完成 {done}/{total} 個待辦事項',
+    'action.askedQuestion': '提出問題',
+    'action.askedQuestionNamed': '已提問：{question}',
+    'action.askedQuestions': '提出 {n} 個問題',
     'action.ranSubagent': '已執行子代理',
     'action.ranSubagentNamed': '已執行子代理：{description}',
     'action.usedSkill': '已使用技能',
@@ -798,6 +826,10 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.countSkillMany': '使用 {n} 個技能',
     'action.countOtherOne': '執行 1 個工具',
     'action.countOtherMany': '執行 {n} 個工具',
+    'action.countTodoOne': '更新待辦事項清單',
+    'action.countTodoMany': '更新待辦事項清單 {n} 次',
+    'action.countQuestionOne': '提出 1 個問題',
+    'action.countQuestionMany': '提出 {n} 個問題',
     'action.madeEditOne': '進行了 1 次編輯',
     'action.madeEditMany': '進行了 {n} 次編輯',
     'question.ariaLabel': '來自 OpenCode 的問題',

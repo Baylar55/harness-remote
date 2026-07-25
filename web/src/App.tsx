@@ -13,7 +13,7 @@ import {
   type EventStreamStatus
 } from "./opencode-events"
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
-import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
+import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
   FolderIcon,
@@ -148,6 +148,22 @@ function relativizePath(path: string, directory: string | undefined): string {
   return path
 }
 
+function parseTodos(value: unknown): TodoItem[] | null {
+  if (!Array.isArray(value)) return null
+  const items = value.filter(
+    (item): item is TodoItem => Boolean(item) && typeof item === "object" && typeof (item as TodoItem).content === "string"
+  )
+  return items.length > 0 ? items : null
+}
+
+function parseQuestions(value: unknown): QuestionInfo[] | null {
+  if (!Array.isArray(value)) return null
+  const items = value.filter(
+    (item): item is QuestionInfo => Boolean(item) && typeof item === "object" && typeof (item as QuestionInfo).question === "string"
+  )
+  return items.length > 0 ? items : null
+}
+
 /** Turns a raw tool call into a human-readable description of what the bot did, plus a +/- line-diff summary
  *  when the tool is an edit with old/new content to compare. */
 function describeToolAction(
@@ -190,8 +206,20 @@ function describeToolAction(
       }
     case "webfetch":
       return { label: typeof input.url === "string" ? t('action.fetchedUrlNamed', { url: input.url }) : t('action.fetchedUrl'), diff: null }
-    case "todowrite":
-      return { label: t('action.updatedTodos'), diff: null }
+    case "todowrite": {
+      const todos = parseTodos(input.todos)
+      if (!todos) return { label: t('action.updatedTodos'), diff: null }
+      const done = todos.filter((item) => item.status === "completed").length
+      return { label: t('action.todoSummary', { done, total: todos.length }), diff: null }
+    }
+    case "question": {
+      const questions = parseQuestions(input.questions)
+      if (!questions) return { label: t('action.askedQuestion'), diff: null }
+      return {
+        label: questions.length === 1 ? t('action.askedQuestionNamed', { question: questions[0].question }) : t('action.askedQuestions', { n: questions.length }),
+        diff: null
+      }
+    }
     case "task":
       return {
         label:
@@ -208,6 +236,44 @@ function describeToolAction(
     default:
       return { label: toolCommandLabel(part), diff: null }
   }
+}
+
+function TodoListView({ items }: { items: TodoItem[] }) {
+  return (
+    <div className="message-todo-list">
+      {items.map((item) => (
+        <div key={item.id} className="todo-item">
+          <span className={`todo-status ${item.status}`}>
+            {item.status === "completed" ? "✓" : item.status === "in_progress" ? "◐" : "○"}
+          </span>
+          <span>{item.content}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function QuestionListView({ questions }: { questions: QuestionInfo[] }) {
+  return (
+    <div className="question-options">
+      {questions.map((question, index) => (
+        <div key={index} className="question-block">
+          <div className="question-header">{question.header}</div>
+          <p className="question-text">{question.question}</p>
+          {question.options.length > 0 && (
+            <div className="question-options">
+              {question.options.map((option) => (
+                <div key={option.label} className="question-option static">
+                  <span className="question-option-label">{option.label}</span>
+                  {option.description && <span className="question-option-description">{option.description}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function DiffLines({ patch }: { patch: string }) {
@@ -484,6 +550,8 @@ function ToolPartView({
   } else if (tool === "write" && typeof input.content === "string") {
     patch = buildSimpleDiff("", input.content)
   }
+  const todos = tool === "todowrite" ? parseTodos(input.todos) : null
+  const questions = tool === "question" ? parseQuestions(input.questions) : null
   return (
     <>
       <button type="button" className={`message-tool-summary message-tool-${status}`} onClick={() => setOpen(true)}>
@@ -510,11 +578,19 @@ function ToolPartView({
 
       {open && (
         <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
-          <pre className="message-tool-command">{command}</pre>
-          {patch ? (
-            <DiffLines patch={patch} />
+          {todos ? (
+            <TodoListView items={todos} />
+          ) : questions ? (
+            <QuestionListView questions={questions} />
           ) : (
-            part.state?.output && <pre className="message-tool-output">{part.state.output}</pre>
+            <>
+              <pre className="message-tool-command">{command}</pre>
+              {patch ? (
+                <DiffLines patch={patch} />
+              ) : (
+                part.state?.output && <pre className="message-tool-output">{part.state.output}</pre>
+              )}
+            </>
           )}
           {part.state?.error && <pre className="message-tool-output message-tool-error">{part.state.error}</pre>}
         </Modal>
@@ -660,6 +736,12 @@ function summarizeToolCounts(toolParts: MessagePart[], t: Translator): string[] 
       case "skill":
         bump("skill")
         break
+      case "todowrite":
+        bump("todo")
+        break
+      case "question":
+        bump("question")
+        break
       default:
         bump("other")
         break
@@ -679,6 +761,8 @@ function summarizeToolCounts(toolParts: MessagePart[], t: Translator): string[] 
   push("webfetch", "action.countWebfetchOne", "action.countWebfetchMany")
   push("task", "action.countTaskOne", "action.countTaskMany")
   push("skill", "action.countSkillOne", "action.countSkillMany")
+  push("todo", "action.countTodoOne", "action.countTodoMany")
+  push("question", "action.countQuestionOne", "action.countQuestionMany")
   push("other", "action.countOtherOne", "action.countOtherMany")
   return pieces
 }

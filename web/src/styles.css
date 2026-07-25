@@ -1083,6 +1083,24 @@ p {
   color: var(--muted);
 }
 
+.question-option.static {
+  cursor: default;
+}
+
+.message-todo-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.message-todo-list .todo-item {
+  margin-top: 0;
+  padding: var(--space-2) 0;
+}
+
+.message-todo-list .todo-item + .todo-item {
+  border-top: 1px solid var(--border);
+}
+
 .question-custom-input {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1287,8 +1305,16 @@ p {
 }
 
 .todo-status {
-  color: var(--success);
+  color: var(--muted);
   font-weight: 800;
+}
+
+.todo-status.completed {
+  color: var(--success);
+}
+
+.todo-status.in_progress {
+  color: var(--primary);
 }
 
 .notice,
