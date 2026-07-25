@@ -1,4 +1,7 @@
+export type BackendKind = "opencode" | "omp"
+
 export type ServerConfig = {
+  backend: BackendKind
   host: string
   port: number
   username: string

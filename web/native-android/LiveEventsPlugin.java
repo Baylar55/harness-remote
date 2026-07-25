@@ -1,4 +1,4 @@
-package ai.opencode.remote.web;
+package ai.harness.remote;
 
 import android.util.Base64;
 

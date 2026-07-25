@@ -1,0 +1,16 @@
+{
+  "name": "harness-remote-omp",
+  "version": "0.1.7",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "harness-remote-omp": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

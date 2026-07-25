@@ -1,7 +1,12 @@
 name: Build Android APK
 
-on:
-  workflow_dispatch:
+"on":
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -33,6 +38,19 @@ jobs:
       - name: Build web app
         run: npm run build
         working-directory: web
+      - name: Run web regression tests
+        run: |
+          npm run test:i18n
+          npm run test:config
+          npm run test:ui
+          npm run test:settings
+          npm run test:model
+          npm run test:events
+        working-directory: web
+
+      - name: Run bridge tests
+        run: npm test
+        working-directory: bridge
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
@@ -79,6 +97,20 @@ jobs:
         run: ./gradlew assembleRelease --stacktrace --no-daemon
         working-directory: web/android
 
+      - name: Build test APK (debug signed)
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+        working-directory: web/android
+
+      - name: Verify test APK signature
+        run: |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose web/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-remote-debug-apk-v${{ steps.version.outputs.app_version }}
+          path: web/android/app/build/outputs/apk/debug/app-debug.apk
+
       - name: Require signing secrets for tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -120,7 +152,7 @@ jobs:
       - name: Upload release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: opencode-remote-release-apk-v${{ steps.version.outputs.app_version }}
+          name: harness-remote-release-apk-v${{ steps.version.outputs.app_version }}
           path: ${{ steps.apk.outputs.path }}
 
       - name: Publish GitHub release
@@ -128,12 +160,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: OpenCode Remote v${{ steps.version.outputs.app_version }}
+          name: Harness Remote v${{ steps.version.outputs.app_version }}
           files: ${{ steps.apk.outputs.path }}
           generate_release_notes: true
           body: |
             ## Release
-            Stable Android release APK for OpenCode Remote `${{ steps.version.outputs.app_version }}`.
+            Stable Android release APK for Harness Remote `${{ steps.version.outputs.app_version }}`.
 
             ## Notes
             - Built from `${{ github.sha }}`

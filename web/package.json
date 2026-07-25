@@ -1,7 +1,7 @@
 {
-  "name": "opencode-remote-web",
+  "name": "harness-remote-web",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.5.2",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
@@ -14,7 +14,8 @@
     "test:ui": "node src/ui-regression.test.mjs",
     "test:settings": "node src/settings-regression.test.mjs",
     "test:model": "node src/model-regression.test.mjs",
-    "test:events": "node --experimental-strip-types src/opencode-events.test.mjs"
+    "test:events": "node --experimental-strip-types src/opencode-events.test.mjs",
+    "test:config": "node --experimental-strip-types src/server-config.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.4",
