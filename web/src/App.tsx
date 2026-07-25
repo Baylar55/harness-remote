@@ -31,6 +31,8 @@ import {
   CloseIcon
 } from "./Icons"
 
+const REMARK_PLUGINS = [remarkGfm]
+
 const STORAGE_KEY = "opencode.remote.server"
 const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
@@ -661,7 +663,7 @@ function MessagePartView({
     if (!part.text) return null
     return (
       <div className="message-content">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMessageMarkdown(part.text)}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{normalizeMessageMarkdown(part.text)}</ReactMarkdown>
       </div>
     )
   }
@@ -993,6 +995,14 @@ function reconcileReasoningPart(previous: MessagePart | undefined, incoming: Mes
 }
 
 /** GET /session/{id}/message doesn't return reasoning parts, only the live event stream does — keep any streamed-in reasoning the refetch would otherwise silently drop. */
+function partsEqual(a: MessagePart[], b: MessagePart[]): boolean {
+  return a === b || (a.length === b.length && JSON.stringify(a) === JSON.stringify(b))
+}
+
+/** Reuses the previous message object whenever the merged result is logically unchanged, instead of always
+ *  returning a fresh `{ ...message }` wrapper. The periodic 3.5s poll calls this for every message in the
+ *  conversation regardless of whether anything actually changed, and a fresh reference per message would defeat
+ *  the WeakMap/memo caching that keeps unrelated messages from re-rendering while one is actively streaming. */
 function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelope[]): MessageEnvelope[] {
   const currentByID = new Map(current.map((message) => [message.info.id, message]))
   return fetched.map((message) => {
@@ -1002,8 +1012,8 @@ function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelo
     const parts = message.parts.map((part) => reconcileReasoningPart(previousPartsByID.get(part.id), part))
     const fetchedPartIDs = new Set(message.parts.map((part) => part.id))
     const missingReasoning = previous.parts.filter((part) => part.type === "reasoning" && !fetchedPartIDs.has(part.id))
-    if (missingReasoning.length === 0) return { ...message, parts }
-    return { ...message, parts: [...missingReasoning, ...parts] }
+    const mergedParts = missingReasoning.length === 0 ? parts : [...missingReasoning, ...parts]
+    return partsEqual(previous.parts, mergedParts) ? previous : { ...message, parts: mergedParts }
   })
 }
 
