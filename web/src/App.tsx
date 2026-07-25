@@ -70,6 +70,13 @@ function normalizeMessageMarkdown(text: string): string {
   return text.includes("\n") ? text : text.replace(/\s-\s(?=\S)/g, "\n- ")
 }
 
+const MODAL_TITLE_MAX_LENGTH = 80
+
+function truncateForTitle(text: string, maxLength: number = MODAL_TITLE_MAX_LENGTH): string {
+  const singleLine = text.replace(/\s+/g, " ").trim()
+  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength - 1)}…` : singleLine
+}
+
 function toolCommandLabel(part: MessagePart): string {
   const input = part.state?.input
   if (!input) return part.tool || "tool"
@@ -577,7 +584,7 @@ function ToolPartView({
       </button>
 
       {open && (
-        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
+        <Modal title={truncateForTitle(label)} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
           {todos ? (
             <TodoListView items={todos} />
           ) : questions ? (
