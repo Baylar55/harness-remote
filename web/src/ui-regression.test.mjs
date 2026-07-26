@@ -142,7 +142,13 @@ for (const capability of ['agents', 'models', 'todos', 'diff', 'questions', 'ses
 assert.ok(app.includes('const showStopAction = isWorking && !composer.trim()'), 'stop should be offered only when there is nothing to send')
 assert.equal(app.includes('disabled={!selectedSession || isWorking}'), false, 'the composer must stay usable while the agent works')
 assert.ok(app.includes("authoritativeExternalHistory || assistantPayloadLength(current) <= assistantPayloadLength(msg)"), "external OMP history must replace stale cached ordering even when the corrected payload is shorter")
-assert.ok(app.includes("selectedSession?.external"), "sessions from another client should explain that sending continues them here")
+// The marker moved from below the messages, where the sticky composer cut it in half, into the
+// header. What matters is that an external session is still marked and still explained, not where.
+assert.ok(app.includes("selectedSession.external && ("), "a session from another client must be marked as such")
+assert.ok(
+  app.includes("title={t('detail.externalSession')}") && app.includes("t('detail.externalShort')"),
+  "the marker must still carry the explanation that sending continues the session here"
+)
 assert.equal(app.includes("disabled={!selectedSession || selectedSession.external}"), false, "external sessions must remain writable")
 assert.ok(app.includes('onClick={showStopAction ? abortSession : send}'), 'the action button should send a queued follow-up instead of only stopping')
 
@@ -196,7 +202,15 @@ assert.ok(app.includes('<p title={session.directory}>{shortDirectory(session.dir
 assert.equal(app.includes("t('sessions.noFileChanges')"), false, 'absence of changes needs no line of its own on a phone')
 
 // Hover is not a state a finger can produce.
-assert.match(styles, /@media \(hover: hover\)[\s\S]*?\.detail-title-row \.btn-icon/, 'a hover-only affordance must not leave a control dimmed on touch')
+// The defect was a control left at 60% opacity until hovered, a state a finger cannot produce.
+// What must hold is that hover-dependent styling is behind a hover query, and that nothing
+// interactive is dimmed by default. Disabled controls and the typing animation are not that.
+assert.ok(styles.includes('@media (hover: hover)'), 'hover-dependent styling must be behind a hover query')
+const dimmedOutsideHover = styles
+  .split('@media (hover: hover)')[0]
+  .match(/opacity: 0\.\d+/g)
+  ?.filter((rule) => rule !== 'opacity: 0.45' && rule !== 'opacity: 0.35') ?? []
+assert.deepEqual(dimmedOutsideHover, [], 'no interactive control should start dimmed on a touch device')
 assert.ok(styles.includes('-webkit-tap-highlight-color: transparent'), 'the platform tap flash should not fight the pressed state')
 assert.ok(styles.includes('overscroll-behavior: contain'), 'scrolling to the end of a list should not drag the page')
 assert.match(styles, /button\.compact \{[\s\S]*?min-height: 44px/, 'a compact button is still a thumb target')
