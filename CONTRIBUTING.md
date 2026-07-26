@@ -161,6 +161,10 @@ the fakes could have caught. Observed with OMP 17.1.3:
 - it does not emit ACP `agent_plan`, so the plan panel stays empty;
 - it approves its own tool calls and sends no permission requests.
 
+Every quirk found this way is recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md), together with
+what breaks if it changes. Read it before touching a harness integration, and update it in the same
+commit when you learn something new.
+
 The fakes in `bridge/test/` exist to keep fixed behaviour fixed. They are not evidence about how an
 agent behaves. When you add support for something, drive it with the real thing at least once, then
 encode what you observed in a fake.
