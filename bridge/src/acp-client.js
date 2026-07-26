@@ -1,8 +1,12 @@
 import { spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
 
-const START_TIMEOUT_MS = 10_000
+// An adapter launched through `npx` downloads itself on first use, which takes far longer
+// than a warm start. Ten seconds failed on a cold PI adapter while npm was still fetching.
+const START_TIMEOUT_MS = 90_000
 const REQUEST_TIMEOUT_MS = 30_000
+/** Kept so a failed handshake can report why the adapter died instead of just its exit code. */
+const STDERR_KEPT_CHARS = 600
 
 export class AcpClient extends EventEmitter {
   #command
@@ -14,6 +18,7 @@ export class AcpClient extends EventEmitter {
   #pending = new Map()
   #starting
   #agentInfo
+  #stderr = ""
 
   constructor({ command = "omp", args = ["acp"], spawnProcess = spawn } = {}) {
     super()
@@ -53,10 +58,16 @@ export class AcpClient extends EventEmitter {
     child.stdout.setEncoding("utf8")
     child.stderr.setEncoding("utf8")
     child.stdout.on("data", (chunk) => this.#consume(chunk))
-    child.stderr.on("data", (chunk) => this.emit("stderr", chunk))
+    child.stderr.on("data", (chunk) => {
+      this.#stderr = `${this.#stderr}${chunk}`.slice(-STDERR_KEPT_CHARS)
+      this.emit("stderr", chunk)
+    })
     child.on("error", (error) => this.#handleExit(error))
     child.on("exit", (code, signal) => {
-      this.#handleExit(new Error(`ACP adapter exited (${code ?? "unknown"}${signal ? `, ${signal}` : ""})`))
+      const reason = this.#stderrSummary()
+      this.#handleExit(new Error(
+        `ACP adapter exited (${code ?? "unknown"}${signal ? `, ${signal}` : ""})${reason ? `: ${reason}` : ""}`
+      ))
     })
 
     try {
@@ -162,6 +173,16 @@ export class AcpClient extends EventEmitter {
     if (!this.#child?.stdin.writable) return
     const error = { code: -32_601, message: `Harness Remote bridge does not implement ${method}` }
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, error })}\n`)
+  }
+
+  /**
+   * The adapter explains a missing prerequisite on stderr; without this the caller only sees an
+   * exit code. Several lines are kept because a Windows shell error wraps the useful part —
+   * "'bun' is not recognized…" arrives split from the sentence that follows it.
+   */
+  #stderrSummary() {
+    const lines = this.#stderr.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+    return lines.slice(-3).join(" ")
   }
 
   #handleExit(error) {
