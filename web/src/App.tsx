@@ -1626,6 +1626,7 @@ function App() {
   const [lastTestedConfigKey, setLastTestedConfigKey] = useState<string | null>(null)
   const [sessionToDelete, setSessionToDelete] = useState<SessionView | null>(null)
   const [renamingSessionID, setRenamingSessionID] = useState<string | null>(null)
+  const [renameSource, setRenameSource] = useState<"list" | "header" | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const [activeDetailSheet, setActiveDetailSheet] = useState<null | "ai" | "details">(null)
@@ -2346,9 +2347,15 @@ function App() {
     }
   }
 
-  function startRename(session: SessionView) {
+  // The session list (mobile panel and desktop sidebar) and the detail header both offer a rename
+  // affordance for the same session — on desktop the sidebar always shows the open session, so
+  // without this, renaming from either place would flip both into edit mode at once (and fight
+  // over the single renameInputRef). Track which one is active so only that side switches to the
+  // input.
+  function startRename(session: SessionView, source: "list" | "header" = "list") {
     setRenameValue(session.title)
     setRenamingSessionID(session.id)
+    setRenameSource(source)
     // Focus the input after render
     setTimeout(() => {
       renameInputRef.current?.focus()
@@ -2358,6 +2365,7 @@ function App() {
 
   function cancelRename() {
     setRenamingSessionID(null)
+    setRenameSource(null)
     setRenameValue("")
   }
 
@@ -2684,7 +2692,7 @@ function App() {
   const renderSessionCard = (session: SessionView) => (
     <article
       key={session.id}
-      className={`session-card ${session.status} ${selectedID === session.id ? "active" : ""} fade-in`}
+      className={`session-card ${session.status} ${selectedID === session.id ? "active" : ""} ${renamingSessionID === session.id && renameSource === "list" ? "renaming" : ""} fade-in`}
       onClick={() => openSession(session.id, session.directory).catch(() => undefined)}
       role="button"
       tabIndex={0}
@@ -2697,7 +2705,7 @@ function App() {
     >
       <div className="session-card-main">
         <div>
-          {renamingSessionID === session.id ? (
+          {renamingSessionID === session.id && renameSource === "list" ? (
             <div
               className="rename-inline"
               onClick={(event) => event.stopPropagation()}
@@ -3233,17 +3241,13 @@ function App() {
                 requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
               }}>{t('detail.backToSessions')}</button>
             )}
-            {selectedSession && (
-              <span className={`pill ${selectedSession.status}`}>{selectedSession.status}</span>
-            )}
           </div>
           <div className="header-row detail-header">
               <div>
               <h2>
                 {selectedSession ? (
                   <div className="detail-title-row">
-                    <ChatIcon size={24} className="icon-inline-heading" />
-                    {renamingSessionID === selectedSession.id ? (
+                    {renamingSessionID === selectedSession.id && renameSource === "header" ? (
                       <div className="rename-inline">
                         <input
                           ref={renameInputRef}
@@ -3269,13 +3273,14 @@ function App() {
                         {/* Two unlabelled 14px glyphs asked the user to guess which one commits.
                             One labelled primary action, and cancel as the quieter icon. */}
                         <button
-                          className="btn-primary compact rename-save"
+                          className="btn-icon btn-primary compact rename-save"
                           onClick={() => renameSession(selectedSession.id, renameValue, selectedSession.directory).catch(() => undefined)}
                           onMouseDown={(event) => event.preventDefault()}
                           disabled={!renameValue.trim() || renameValue === selectedSession.title}
+                          title={t('session.renameConfirm')}
+                          aria-label={t('session.renameConfirm')}
                         >
                           <SaveIcon size={16} />
-                          {t('session.renameConfirm')}
                         </button>
                         <button
                           className="btn-icon btn-secondary compact"
@@ -3295,7 +3300,7 @@ function App() {
                           <button
                             type="button"
                             className="session-title-button"
-                            onClick={() => startRename(selectedSession)}
+                            onClick={() => startRename(selectedSession, "header")}
                             title={t('session.renameTitle')}
                             aria-label={t('session.renameTitle')}
                           >

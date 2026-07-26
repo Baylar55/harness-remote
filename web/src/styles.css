@@ -1674,6 +1674,7 @@ button.compact {
 .sidebar-sessions {
   flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: var(--space-2);
   display: flex;
   flex-direction: column;
@@ -1773,13 +1774,92 @@ button.compact {
 .sidebar-sessions .inline-actions {
   grid-area: actions;
   flex: 0 0 auto;
+  flex-wrap: nowrap;
   gap: 2px;
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
 }
 
+/* Collapsed to zero width so the title's grid column reclaims the space instead of just hiding
+   the (still layout-reserving) buttons behind invisible pixels. */
+.sidebar-sessions .session-card:hover .inline-actions,
+.sidebar-sessions .session-card:focus-within .inline-actions {
+  width: auto;
+  opacity: 1;
+}
+
+/* Bare icons, not bordered buttons — a desktop sidebar is mouse-driven, and the icon alone reads
+   fine at this size without the extra chrome a touch target needs. */
 .sidebar-sessions .inline-actions button {
   font-size: 0;
-  padding: var(--space-1);
+  min-height: 0;
+  height: 22px;
+  width: 22px;
+  padding: 0;
   gap: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+.sidebar-sessions .inline-actions button:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.sidebar-sessions .inline-actions button.btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+/* While renaming, the rename/delete icons would just sit on top of (or squeeze) the rename
+   input — hide them until the rename is confirmed or cancelled. */
+.sidebar-sessions .session-card.renaming .inline-actions {
+  display: none;
+}
+
+/* The rename input and its save/cancel buttons default to full-size (44px-tall buttons, a
+   140px-min-width input) sized for the session detail header, not a ~40px-tall sidebar row —
+   shrink everything to fit. */
+.sidebar-sessions .rename-inline {
+  width: 100%;
+  gap: 4px;
+}
+
+.sidebar-sessions .rename-input {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 20px;
+  padding: 0 var(--space-1);
+  font-size: 0.78rem;
+}
+
+.sidebar-sessions .rename-inline button {
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 20px;
+  width: 20px;
+  padding: 0;
+  font-size: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+.sidebar-sessions .rename-inline button:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.sidebar-sessions .rename-inline button.btn-primary {
+  color: var(--primary);
 }
 
 .sidebar-footer {
@@ -2264,7 +2344,7 @@ button.compact {
    unlabelled glyphs. The title carries the action now, so the target is the width of the title. */
 .session-title-button {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   min-width: 0;
   min-height: 44px;
@@ -2286,13 +2366,13 @@ button.compact {
 
 .session-title-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 
 .session-title-pencil {
   flex: 0 0 auto;
+  margin-top: 0.2em;
   color: var(--muted);
 }
 
