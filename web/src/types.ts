@@ -70,6 +70,28 @@ export type SessionStatus = {
   next?: number
 }
 
+export type ToolState = {
+  status: string
+  input?: Record<string, unknown>
+  title?: string
+  output?: string
+  error?: string
+  time?: { start: number; end?: number }
+}
+
+export type MessagePart = {
+  id: string
+  messageID?: string
+  type: string
+  text?: string
+  tool?: string
+  callID?: string
+  state?: ToolState
+  hash?: string
+  files?: string[]
+  time?: { start: number; end?: number }
+}
+
 export type MessageEnvelope = {
   info: {
     id: string
@@ -80,11 +102,7 @@ export type MessageEnvelope = {
       completed?: number
     }
   }
-  parts: Array<{
-    id: string
-    type: string
-    text?: string
-  }>
+  parts: MessagePart[]
 }
 
 export type TodoItem = {
@@ -94,10 +112,35 @@ export type TodoItem = {
   id: string
 }
 
+export type QuestionOption = {
+  label: string
+  description: string
+}
+
+export type QuestionInfo = {
+  question: string
+  header: string
+  options: QuestionOption[]
+  multiple?: boolean
+  custom?: boolean
+}
+
+export type QuestionRequest = {
+  id: string
+  sessionID: string
+  questions: QuestionInfo[]
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
 export type DiffFile = {
   file: string
   additions: number
   deletions: number
+  patch?: string
+  status?: "added" | "deleted" | "modified"
 }
 
 export type ProjectCurrent = Record<string, unknown> & {

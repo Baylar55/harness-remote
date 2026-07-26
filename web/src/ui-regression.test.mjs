@@ -11,8 +11,12 @@ assert.ok(refreshButton, 'sessions refresh button should call refreshSessionsWit
 assert.ok(refreshButton[0].includes('RefreshIcon'), 'idle sessions refresh button should render a non-spinning RefreshIcon')
 assert.ok(refreshButton[0].includes('refreshingSessions ? <LoadingIcon'), 'refresh button should spin only during an active manual refresh')
 
-assert.equal(app.includes('messageScrollSignature'), false, 'background message refreshes must not force the conversation to the bottom')
-assert.ok(app.includes('}, [view, selectedSession?.id])'), 'auto-scroll should run only when opening a selected session')
+assert.ok(app.includes('messageScrollSignature'), 'conversation auto-scroll should react to message content changes, not only message count')
+assert.ok(
+  /if \(!stickToBottomRef\.current\) return[\s\S]*?scrollMessagesToBottom\("auto"\)/.test(app),
+  'content-driven auto-scroll must be gated on the user already being pinned to the bottom, so background refreshes cannot force the conversation to scroll while the user has scrolled away'
+)
+assert.ok(app.includes('}, [view, selectedID])'), 'auto-scroll should run only when opening a selected session')
 assert.ok(app.includes('scrollMessagesToBottom("smooth")'), 'focusing the composer should scroll to the bottom')
 assert.ok(app.includes('messagesEndRef'), 'auto-scroll should target a bottom sentinel marker')
 assert.ok(app.includes('scrollTo({ top: container.scrollHeight'), 'auto-scroll should set the messages container scrollTop to its max scrollHeight')
