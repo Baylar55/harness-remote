@@ -45,6 +45,32 @@ test("selects PI defaults for the ACP backend", () => {
   assert.match(parseConfig(["--backend", "pi"], {}).acpArgs[1], /@\d+\.\d+\.\d+$/, "the adapter version must stay pinned")
 })
 
+test("prefers generic environment names while retaining OMP aliases", () => {
+  const generic = parseConfig([], {
+    HARNESS_REMOTE_BACKEND: "pi",
+    HARNESS_REMOTE_HOST: "localhost",
+    HARNESS_REMOTE_PORT: "4901",
+    HARNESS_REMOTE_ACP_COMMAND: "custom-pi",
+    HARNESS_REMOTE_ACP_ARGS: "[\"serve\"]",
+    OMP_BRIDGE_BACKEND: "omp",
+    OMP_BRIDGE_PORT: "4902"
+  })
+  assert.equal(generic.backend, "pi")
+  assert.equal(generic.host, "localhost")
+  assert.equal(generic.port, 4901)
+  assert.equal(generic.acpCommand, "custom-pi")
+  assert.deepEqual(generic.acpArgs, ["serve"])
+
+  const legacy = parseConfig([], {
+    OMP_BRIDGE_BACKEND: "pi",
+    OMP_BRIDGE_HOST: "localhost",
+    OMP_BRIDGE_PORT: "4902"
+  })
+  assert.equal(legacy.backend, "pi")
+  assert.equal(legacy.host, "localhost")
+  assert.equal(legacy.port, 4902)
+})
+
 test("shares the bridge with browser origins only when asked", () => {
   assert.deepEqual(parseConfig([], {}).corsOrigins, [])
   const config = parseConfig(["--cors", "http://localhost:5173", "--cors", "http://192.168.1.64:5199"], {})
