@@ -137,6 +137,12 @@ function capitalizeFirst(text: string): string {
 }
 
 const MODAL_TITLE_MAX_LENGTH = 80
+/**
+ * How long the open session may go without an SSE event before the poll treats the stream as not
+ * covering it. Comfortably above opencode's 10s server heartbeat so a merely idle session isn't
+ * mistaken for a broken one the instant it stops streaming.
+ */
+const SESSION_STREAM_QUIET_MS = 12_000
 
 function truncateForTitle(text: string, maxLength: number = MODAL_TITLE_MAX_LENGTH): string {
   const singleLine = text.replace(/\s+/g, " ").trim()
@@ -1317,6 +1323,8 @@ function App() {
   const latestMessageTimesRef = useRef(new Map<string, { sessionUpdated: number; activityTime: number }>())
   const selectedSessionRef = useRef<SessionView | null>(null)
   const eventStreamStateRef = useRef<"idle" | "connecting" | "live" | "reconnecting" | "fallback">("idle")
+  /** Last time an SSE event arrived for a given session, used to spot sessions the stream isn't covering. */
+  const lastEventBySessionRef = useRef(new Map<string, number>())
 
   const loadedMessagesRef = useRef<MessageEnvelope[]>([])
   const shouldAutoScrollRef = useRef(false)
@@ -2120,9 +2128,18 @@ function App() {
     if (config.backend !== "omp") loadModels().catch(() => undefined)
     const timer = setInterval(() => {
       // Live SSE events already keep sessions and the open session's messages/todos/diffs in sync
-      // (via applyStreamedPartUpdate/scheduleRefresh); this poll is only a fallback for when the
-      // stream isn't actually connected, so skip the redundant full refetch while it's live.
-      if (eventStreamStateRef.current === "live") return
+      // (via applyStreamedPartUpdate/scheduleRefresh), so polling on top of a working stream is a
+      // redundant full refetch. But "connected" only proves the stream is open, not that it carries
+      // this session: opencode emits events on an in-process bus, so a session driven by a *different*
+      // opencode process (a local TUI running its own server) never produces events here even though
+      // the stream is perfectly healthy. Keep polling as a per-session fallback — skip it only while
+      // the open session is actually receiving events.
+      if (eventStreamStateRef.current === "live") {
+        const openSession = selectedSessionRef.current
+        if (!openSession) return
+        const lastEventAt = lastEventBySessionRef.current.get(openSession.id) ?? 0
+        if (Date.now() - lastEventAt < SESSION_STREAM_QUIET_MS) return
+      }
       refreshSessions(true).catch(() => undefined)
       if (selectedSession) {
         loadSelected(selectedSession.id, selectedSession.directory).catch(() => undefined)
@@ -2160,7 +2177,15 @@ function App() {
       const type = eventType(event.data) ?? event.name
       const payload = eventPayload(event.data)
       const body = (payload?.properties ?? payload?.data) as
-        | { sessionID?: string; part?: MessagePart; messageID?: string; partID?: string; field?: string; delta?: string }
+        | {
+            sessionID?: string
+            part?: MessagePart
+            messageID?: string
+            partID?: string
+            field?: string
+            delta?: string
+            info?: { id?: string; sessionID?: string }
+          }
         | undefined
       if (type === "message.part.updated" && body?.sessionID && body.part) {
         setMessages((current) => applyStreamedPartUpdate(current, body.sessionID!, body.part!))
@@ -2177,6 +2202,9 @@ function App() {
         )
       }
       if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.") || type.startsWith("question.")) {
+        // `session.*` events carry the id on the session itself; `message.*`/`todo.*` use sessionID.
+        const sessionID = body?.sessionID ?? body?.info?.sessionID ?? body?.info?.id
+        if (sessionID) lastEventBySessionRef.current.set(sessionID, Date.now())
         setLiveEventCount((count) => count + 1)
         scheduleRefresh()
       }

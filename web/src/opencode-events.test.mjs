@@ -193,4 +193,28 @@ assert.ok(invalidContentStatuses.some((status) => status.type === 'connection-er
 assert.ok(!invalidContentStatuses.some((status) => status.type === 'connected'))
 invalidContentSubscription.close()
 
+// A stream that opens, delivers nothing, and never ends must not sit in `connected` forever:
+// the caller suppresses its polling fallback while live, so a silent stall has to reconnect.
+const stallStatuses = []
+let stallConnects = 0
+const stallSubscription = createFetchOpenCodeEventSubscription({
+  url: 'http://127.0.0.1:4097/global/event',
+  stallTimeoutMs: 20,
+  reconnect: { initialDelayMs: 5 },
+  fetchFn: async () => {
+    stallConnects += 1
+    // Never enqueues and never closes: mimics a dead TCP connection.
+    const body = new ReadableStream({ start() {} })
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } })
+  },
+  onEvent() {},
+  onStatus(status) { stallStatuses.push(status) },
+  logger() {}
+})
+await new Promise((resolve) => setTimeout(resolve, 200))
+assert.ok(stallStatuses.some((status) => status.type === 'connected'), 'stalled stream should connect first')
+assert.ok(stallStatuses.some((status) => status.type === 'reconnecting'), 'stalled stream should reconnect')
+assert.ok(stallConnects > 1, `stalled stream should redial, got ${stallConnects} connects`)
+stallSubscription.close()
+
 console.log('OpenCode event subscription tests passed')

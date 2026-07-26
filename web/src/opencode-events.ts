@@ -98,6 +98,8 @@ type FetchEventSubscriptionOptions = {
   headers?: Record<string, string>
   reconnect?: ReconnectConfig
   fetchFn?: typeof fetch
+  /** Abort and reconnect when no bytes arrive for this long. Defaults to 30s (server beats every 10s). */
+  stallTimeoutMs?: number
   onEvent: (event: Extract<ParsedOpenCodeEvent, { ok: true }>) => void
   onStatus?: (status: EventStreamStatus) => void
   logger?: (message: string) => void
@@ -111,6 +113,7 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
   const initialDelayMs = validDelay(options.reconnect?.initialDelayMs, 1_000)
   const maxDelayMs = Math.max(initialDelayMs, validDelay(options.reconnect?.maxDelayMs, 30_000))
   const fetchFn = options.fetchFn ?? fetch
+  const stallTimeoutMs = validDelay(options.stallTimeoutMs, 30_000)
   const logger = options.logger ?? ((message: string) => console.debug(message))
   let controller: AbortController | undefined
   let reconnectTimer: TimerID | undefined
@@ -148,19 +151,45 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-      while (!closed && controller === currentController) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        let boundary = buffer.search(/\r?\n\r?\n/)
-        while (boundary !== -1) {
-          const frame = buffer.slice(0, boundary)
-          buffer = buffer.slice(boundary).replace(/^\r?\n\r?\n/, "")
-          const event = parseSSEFrame(frame)
-          if (event?.ok) options.onEvent(event)
-          if (event && !event.ok) publishStatus({ type: "parse-error", data: event.raw })
-          boundary = buffer.search(/\r?\n\r?\n/)
+      // A TCP connection can die silently (sleep/resume, NAT or proxy timeout) without ever
+      // rejecting the pending read or delivering `done`. Without this watchdog the stream would
+      // sit in `connected` forever, which also suppresses the caller's polling fallback. The
+      // server emits a heartbeat every 10s, so a long gap means the connection is gone.
+      let stallTimer: TimerID | undefined
+      const disarmStall = () => {
+        if (stallTimer !== undefined) clearTimeout(stallTimer)
+        stallTimer = undefined
+      }
+      const armStall = () => {
+        disarmStall()
+        stallTimer = setTimeout(() => {
+          stallTimer = undefined
+          logger(`OpenCode SSE stalled for ${stallTimeoutMs}ms, reconnecting`)
+          // Abort frees the socket; cancel guarantees the pending read settles even if the
+          // transport does not propagate the abort signal into the body stream.
+          currentController.abort()
+          reader.cancel().catch(() => undefined)
+        }, stallTimeoutMs)
+      }
+      try {
+        while (!closed && controller === currentController) {
+          armStall()
+          const { done, value } = await reader.read()
+          disarmStall()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          let boundary = buffer.search(/\r?\n\r?\n/)
+          while (boundary !== -1) {
+            const frame = buffer.slice(0, boundary)
+            buffer = buffer.slice(boundary).replace(/^\r?\n\r?\n/, "")
+            const event = parseSSEFrame(frame)
+            if (event?.ok) options.onEvent(event)
+            if (event && !event.ok) publishStatus({ type: "parse-error", data: event.raw })
+            boundary = buffer.search(/\r?\n\r?\n/)
+          }
         }
+      } finally {
+        disarmStall()
       }
     } catch (error) {
       if (!closed && controller === currentController && !(error instanceof DOMException && error.name === "AbortError")) {
