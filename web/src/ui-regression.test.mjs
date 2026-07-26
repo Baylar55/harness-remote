@@ -11,8 +11,12 @@ assert.ok(refreshButton, 'sessions refresh button should call refreshSessionsWit
 assert.ok(refreshButton[0].includes('RefreshIcon'), 'idle sessions refresh button should render a non-spinning RefreshIcon')
 assert.ok(refreshButton[0].includes('refreshingSessions ? <LoadingIcon'), 'refresh button should spin only during an active manual refresh')
 
-assert.equal(app.includes('messageScrollSignature'), false, 'background message refreshes must not force the conversation to the bottom')
-assert.ok(app.includes('}, [view, selectedSession?.id])'), 'auto-scroll should run only when opening a selected session')
+assert.ok(app.includes('messageScrollSignature'), 'conversation auto-scroll should react to message content changes, not only message count')
+assert.ok(
+  /if \(!stickToBottomRef\.current\) return[\s\S]*?scrollMessagesToBottom\("auto"\)/.test(app),
+  'content-driven auto-scroll must be gated on the user already being pinned to the bottom, so background refreshes cannot force the conversation to scroll while the user has scrolled away'
+)
+assert.ok(app.includes('}, [view, selectedID])'), 'auto-scroll should run only when opening a selected session')
 assert.ok(app.includes('scrollMessagesToBottom("smooth")'), 'focusing the composer should scroll to the bottom')
 assert.ok(app.includes('messagesEndRef'), 'auto-scroll should target a bottom sentinel marker')
 assert.ok(app.includes('scrollTo({ top: container.scrollHeight'), 'auto-scroll should set the messages container scrollTop to its max scrollHeight')
@@ -133,5 +137,18 @@ assert.ok(
 assert.ok(app.includes('const showStopAction = isWorking && !composer.trim()'), 'stop should be offered only when there is nothing to send')
 assert.equal(app.includes('disabled={!selectedSession || isWorking}'), false, 'the composer must stay usable while the agent works')
 assert.ok(app.includes('onClick={showStopAction ? abortSession : send}'), 'the action button should send a queued follow-up instead of only stopping')
+
+// A run bubble merges action groups that a message boundary split apart. Consecutive replies with
+// nothing groupable in them must stay separate, or two answers to two queued prompts render as one.
+const groupRenderer = app.slice(app.indexOf('function groupRenderedMessages'), app.indexOf('function ConversationRunView'))
+assert.ok(groupRenderer, 'consecutive assistant messages should be grouped for rendering')
+assert.ok(
+  groupRenderer.includes('!buffer.some((message) => message.parts.some((part) => ACTION_GROUP_TYPES.has(part.type)))'),
+  'a run must only form when the buffered messages actually contain groupable parts'
+)
+assert.ok(
+  groupRenderer.includes('for (const message of buffer) groups.push({ kind: "message", message })'),
+  'text-only replies must each keep their own bubble'
+)
 
 console.log('ui regression tests passed')

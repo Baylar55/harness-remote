@@ -446,6 +446,31 @@ test("matches session directories across path separator forms", async () => {
   }
 })
 
+test("beats on the event stream so an idle session is not mistaken for a dead one", async () => {
+  const bridge = await startServer({ heartbeatMs: 25 })
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`${bridge.baseURL}/global/event`, {
+      headers: authHeaders(),
+      signal: controller.signal
+    })
+    assert.equal(response.headers.get("content-type"), "text/event-stream")
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let received = ""
+    // No session activity at all: everything arriving here must be a heartbeat.
+    while (!received.includes(": ping")) {
+      const { value, done } = await reader.read()
+      if (done) break
+      received += decoder.decode(value, { stream: true })
+    }
+    assert.match(received, /: ping/, "an idle stream must still produce traffic")
+  } finally {
+    controller.abort()
+    await bridge.close()
+  }
+})
+
 test("allows only explicitly configured browser origins", async () => {
   const bridge = await startServer({ corsOrigins: ["http://192.168.1.64:5199"] })
   try {

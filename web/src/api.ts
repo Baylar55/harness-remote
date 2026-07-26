@@ -13,6 +13,7 @@ import type {
   ModelSelection,
   ProjectCurrent,
   PathInfo,
+  QuestionRequest,
   ServerConfig,
   Session,
   SessionStatus,
@@ -304,6 +305,10 @@ export const api = {
     return request<DiffFile[]>(config, withDirectory(`/session/${sessionID}/diff`, directory))
   },
 
+  loadMessageDiff(config: ServerConfig, sessionID: string, messageID: string, directory?: string) {
+    return request<DiffFile[]>(config, withDirectory(`/session/${sessionID}/diff?messageID=${encodeURIComponent(messageID)}`, directory))
+  },
+
   loadProjectCurrent(config: ServerConfig, directory?: string) {
     return request<ProjectCurrent>(config, withDirectory("/project/current", directory))
   },
@@ -333,6 +338,24 @@ export const api = {
 
   abort(config: ServerConfig, sessionID: string, directory?: string) {
     return request<boolean>(config, withDirectory(`/session/${sessionID}/abort`, directory), {
+      method: "POST",
+      body: {}
+    })
+  },
+
+  loadQuestions(config: ServerConfig, directory?: string) {
+    return request<QuestionRequest[]>(config, withDirectory("/question", directory))
+  },
+
+  replyQuestion(config: ServerConfig, requestID: string, answers: string[][], directory?: string) {
+    return request<boolean>(config, withDirectory(`/question/${requestID}/reply`, directory), {
+      method: "POST",
+      body: { answers }
+    })
+  },
+
+  rejectQuestion(config: ServerConfig, requestID: string, directory?: string) {
+    return request<boolean>(config, withDirectory(`/question/${requestID}/reject`, directory), {
       method: "POST",
       body: {}
     })

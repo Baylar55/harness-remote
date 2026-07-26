@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import type { PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
@@ -8,19 +8,19 @@ import { ACTIVE_BACKEND_STORAGE_KEY, BACKEND_STORAGE_KEYS, LEGACY_STORAGE_KEY } 
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
+  eventPayload,
   eventType,
   isNativeEventTransport,
   type EventStreamStatus
 } from "./opencode-events"
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
-import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, ModelOption, ModelSelection, PathInfo, ProjectDashboard, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
+import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
   FolderIcon,
   ChatIcon,
   HelpIcon,
   PlusIcon,
-  PlayIcon,
   TrashIcon,
   StopCircleIcon,
   SendIcon,
@@ -31,6 +31,8 @@ import {
   PencilIcon,
   CloseIcon
 } from "./Icons"
+
+const REMARK_PLUGINS = [remarkGfm]
 
 const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
@@ -99,6 +101,20 @@ function extractText(msg: MessageEnvelope): string {
     .trim()
 }
 
+/** Wraps a message with its extracted text, reusing the previous wrapper when the underlying message object is
+ *  unchanged. applyStreamedPartUpdate/applyStreamedPartDelta already keep unrelated messages referentially
+ *  identical across streamed updates — without this cache, mapping over the whole array would create a brand
+ *  new wrapper object for every message on every token, defeating memoization of per-message rendering. */
+const renderedMessageCache = new WeakMap<MessageEnvelope, MessageEnvelope & { text: string }>()
+
+function toRenderedMessage(message: MessageEnvelope): MessageEnvelope & { text: string } {
+  const cached = renderedMessageCache.get(message)
+  if (cached) return cached
+  const wrapped = { ...message, text: extractText(message) }
+  renderedMessageCache.set(message, wrapped)
+  return wrapped
+}
+
 function assistantPayloadLength(items: MessageEnvelope[]): number {
   return items
     .filter((message) => message.info.role !== "user")
@@ -122,6 +138,790 @@ function messagesExtendContent(current: MessageEnvelope[], next: MessageEnvelope
 
 function normalizeMessageMarkdown(text: string): string {
   return text.includes("\n") ? text : text.replace(/\s-\s(?=\S)/g, "\n- ")
+}
+
+function capitalizeFirst(text: string): string {
+  return text.length > 0 ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
+const MODAL_TITLE_MAX_LENGTH = 80
+/**
+ * How long the open session may go without an SSE event before the poll treats the stream as not
+ * covering it. Comfortably above opencode's 10s server heartbeat so a merely idle session isn't
+ * mistaken for a broken one the instant it stops streaming.
+ */
+const SESSION_STREAM_QUIET_MS = 12_000
+
+function truncateForTitle(text: string, maxLength: number = MODAL_TITLE_MAX_LENGTH): string {
+  const singleLine = text.replace(/\s+/g, " ").trim()
+  return singleLine.length > maxLength ? `${singleLine.slice(0, maxLength - 1)}…` : singleLine
+}
+
+function toolCommandLabel(part: MessagePart): string {
+  const input = part.state?.input
+  if (!input) return part.tool || "tool"
+  if (typeof input.command === "string") return input.command
+  if (typeof input.filePath === "string") return `${part.tool}: ${input.filePath}`
+  return `${part.tool}(${JSON.stringify(input)})`
+}
+
+/** Counts changed lines between two strings using an LCS-based line diff. Skipped (returns null) for inputs large
+ *  enough that the O(n*m) table would be expensive — callers fall back to no diff stats in that case. */
+function diffLineStats(oldText: string, newText: string): { additions: number; deletions: number } | null {
+  const a = oldText.split("\n")
+  const b = newText.split("\n")
+  if (a.length * b.length > 250_000) return null
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const lcsLength = dp[0][0]
+  return { additions: b.length - lcsLength, deletions: a.length - lcsLength }
+}
+
+/** Builds a simple unified-style diff (no hunk headers, every line shown) between two strings, for rendering
+ *  with DiffLines. Skipped (returns null) for the same size cutoff as diffLineStats. */
+function buildSimpleDiff(oldText: string, newText: string): string | null {
+  const a = oldText.split("\n")
+  const b = newText.split("\n")
+  if (a.length * b.length > 250_000) return null
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0))
+  for (let i = a.length - 1; i >= 0; i--) {
+    for (let j = b.length - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const lines: string[] = []
+  let i = 0
+  let j = 0
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      lines.push(` ${a[i]}`)
+      i++
+      j++
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      lines.push(`-${a[i]}`)
+      i++
+    } else {
+      lines.push(`+${b[j]}`)
+      j++
+    }
+  }
+  while (i < a.length) {
+    lines.push(`-${a[i]}`)
+    i++
+  }
+  while (j < b.length) {
+    lines.push(`+${b[j]}`)
+    j++
+  }
+  return lines.join("\n")
+}
+
+/** Shortens a tool's absolute file path to a path relative to the session's working directory, when the file
+ *  actually lives under it — long absolute paths otherwise get truncated in the single-line summary row. */
+function relativizePath(path: string, directory: string | undefined): string {
+  if (!directory) return path
+  const normalize = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "")
+  const normalizedPath = normalize(path)
+  const normalizedDir = normalize(directory)
+  if (normalizedPath === normalizedDir) return "."
+  const prefix = `${normalizedDir}/`
+  if (normalizedPath.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return normalizedPath.slice(prefix.length)
+  }
+  return path
+}
+
+function parseTodos(value: unknown): TodoItem[] | null {
+  if (!Array.isArray(value)) return null
+  const items = value.filter(
+    (item): item is TodoItem => Boolean(item) && typeof item === "object" && typeof (item as TodoItem).content === "string"
+  )
+  return items.length > 0 ? items : null
+}
+
+function parseQuestions(value: unknown): QuestionInfo[] | null {
+  if (!Array.isArray(value)) return null
+  const items = value.filter(
+    (item): item is QuestionInfo => Boolean(item) && typeof item === "object" && typeof (item as QuestionInfo).question === "string"
+  )
+  return items.length > 0 ? items : null
+}
+
+/** Turns a raw tool call into a human-readable description of what the bot did, plus a +/- line-diff summary
+ *  when the tool is an edit with old/new content to compare. */
+function describeToolAction(
+  part: MessagePart,
+  directory: string | undefined,
+  t: Translator
+): { label: string; diff: { additions: number; deletions: number } | null } {
+  const input = (part.state?.input ?? {}) as Record<string, unknown>
+  const tool = (part.tool || "").toLowerCase()
+  const filePath = typeof input.filePath === "string" ? relativizePath(input.filePath, directory) : undefined
+
+  switch (tool) {
+    case "read":
+      return { label: filePath ? t('action.readFileNamed', { file: filePath }) : t('action.readFile'), diff: null }
+    case "write": {
+      const content = typeof input.content === "string" ? input.content : null
+      const diff = content !== null ? diffLineStats("", content) : null
+      return { label: filePath ? t('action.wroteFileNamed', { file: filePath }) : t('action.wroteFile'), diff }
+    }
+    case "edit": {
+      const oldString = typeof input.oldString === "string" ? input.oldString : null
+      const newString = typeof input.newString === "string" ? input.newString : null
+      const diff = oldString !== null && newString !== null ? diffLineStats(oldString, newString) : null
+      return { label: filePath ? t('action.editedFileNamed', { file: filePath }) : t('action.editedFile'), diff }
+    }
+    case "bash":
+      return {
+        label: typeof input.command === "string" ? t('action.ranCommandNamed', { command: input.command }) : t('action.ranCommand'),
+        diff: null
+      }
+    case "glob":
+      return {
+        label: typeof input.pattern === "string" ? t('action.searchedFilesFor', { pattern: input.pattern }) : t('action.searchedFiles'),
+        diff: null
+      }
+    case "grep":
+      return {
+        label: typeof input.pattern === "string" ? t('action.searchedCodeFor', { pattern: input.pattern }) : t('action.searchedCode'),
+        diff: null
+      }
+    case "webfetch":
+      return { label: typeof input.url === "string" ? t('action.fetchedUrlNamed', { url: input.url }) : t('action.fetchedUrl'), diff: null }
+    case "todowrite": {
+      const todos = parseTodos(input.todos)
+      if (!todos) return { label: t('action.updatedTodos'), diff: null }
+      const done = todos.filter((item) => item.status === "completed").length
+      return { label: t('action.todoSummary', { done, total: todos.length }), diff: null }
+    }
+    case "question": {
+      const questions = parseQuestions(input.questions)
+      if (!questions) return { label: t('action.askedQuestion'), diff: null }
+      return {
+        label: questions.length === 1 ? t('action.askedQuestionNamed', { question: questions[0].question }) : t('action.askedQuestions', { n: questions.length }),
+        diff: null
+      }
+    }
+    case "task":
+      return {
+        label:
+          typeof input.description === "string"
+            ? t('action.ranSubagentNamed', { description: input.description })
+            : t('action.ranSubagent'),
+        diff: null
+      }
+    case "skill":
+      return {
+        label: typeof input.name === "string" ? t('action.usedSkillNamed', { name: input.name }) : t('action.usedSkill'),
+        diff: null
+      }
+    default:
+      return { label: toolCommandLabel(part), diff: null }
+  }
+}
+
+function TodoListView({ items }: { items: TodoItem[] }) {
+  return (
+    <div className="message-todo-list">
+      {items.map((item) => (
+        <div key={item.id} className="todo-item">
+          <span className={`todo-status ${item.status}`}>
+            {item.status === "completed" ? "✓" : item.status === "in_progress" ? "◐" : "○"}
+          </span>
+          <span>{item.content}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function QuestionListView({ questions }: { questions: QuestionInfo[] }) {
+  return (
+    <div className="question-options">
+      {questions.map((question, index) => (
+        <div key={index} className="question-block">
+          <div className="question-header">{question.header}</div>
+          <p className="question-text">{question.question}</p>
+          {question.options.length > 0 && (
+            <div className="question-options">
+              {question.options.map((option) => (
+                <div key={option.label} className="question-option static">
+                  <span className="question-option-label">{option.label}</span>
+                  {option.description && <span className="question-option-description">{option.description}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function DiffLines({ patch }: { patch: string }) {
+  const lines = patch.split("\n")
+  return (
+    <pre className="message-diff-patch">
+      {lines.map((line, index) => {
+        let className = "diff-line-context"
+        if (line.startsWith("+++") || line.startsWith("---")) className = "diff-line-meta"
+        else if (line.startsWith("+")) className = "diff-line-add"
+        else if (line.startsWith("-")) className = "diff-line-del"
+        else if (line.startsWith("@@")) className = "diff-line-hunk"
+        return (
+          <div key={index} className={className}>
+            {line}
+          </div>
+        )
+      })}
+    </pre>
+  )
+}
+
+function PatchPartView({
+  config,
+  sessionID,
+  messageID,
+  files,
+  timestamp,
+  t
+}: {
+  config: ServerConfig
+  sessionID: string
+  messageID: string
+  files: string[]
+  timestamp?: string
+  t: Translator
+}) {
+  const [diffs, setDiffs] = useState<DiffFile[] | null>(null)
+  const [expandedDiff, setExpandedDiff] = useState<DiffFile | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.loadMessageDiff(config, sessionID, messageID).then((result) => {
+      if (!cancelled) setDiffs(result)
+    }).catch(() => {
+      if (!cancelled) setDiffs([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [config.host, config.port, config.username, config.password, sessionID, messageID])
+
+  if (diffs === null) {
+    return (
+      <div className="message-patch">
+        {files.map((file) => (
+          <div key={file} className="message-patch-file">{file}</div>
+        ))}
+      </div>
+    )
+  }
+
+  if (diffs.length === 0) return null
+
+  return (
+    <div className="message-patch">
+      {diffs.map((diff) => (
+        <button
+          key={diff.file}
+          type="button"
+          className="message-diff-row"
+          onClick={() => setExpandedDiff(diff)}
+          aria-label={t('action.showDiffFor', { file: diff.file })}
+        >
+          <span className="message-diff-file">{diff.file}</span>
+          <span className="message-diff-stats">
+            {diff.additions > 0 && <span className="diff-stat-add">+{diff.additions}</span>}
+            {diff.deletions > 0 && <span className="diff-stat-del">-{diff.deletions}</span>}
+          </span>
+        </button>
+      ))}
+
+      {expandedDiff && (
+        <Modal title={expandedDiff.file} timestamp={timestamp} onClose={() => setExpandedDiff(null)} t={t}>
+          {expandedDiff.patch && <DiffLines patch={expandedDiff.patch} />}
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+const BOTTOM_STICK_THRESHOLD = 80
+
+let modalTitleSequence = 0
+
+/** Shared full-detail modal — everything that isn't the primary output text (thoughts, tool calls, edits) is
+ *  surfaced through this rather than inline collapsible/expandable regions. */
+function Modal({
+  title,
+  timestamp,
+  onClose,
+  children,
+  t
+}: {
+  title: string
+  timestamp?: string
+  onClose: () => void
+  children: ReactNode
+  t: Translator
+}) {
+  const [titleID] = useState(() => `modal-title-${++modalTitleSequence}`)
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal-card diff-modal fade-in"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleID}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="diff-modal-header">
+          <div className="diff-modal-heading">
+            <h2 id={titleID}>{title}</h2>
+            {timestamp && <small className="diff-modal-timestamp">{timestamp}</small>}
+          </div>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            {t('action.close')}
+          </button>
+        </div>
+        <div className="diff-modal-body">{children}</div>
+      </section>
+    </div>
+  )
+}
+
+function QuestionCard({
+  config,
+  directory,
+  request,
+  onResolved,
+  t
+}: {
+  config: ServerConfig
+  directory: string
+  request: QuestionRequest
+  onResolved: (id: string) => void
+  t: Translator
+}) {
+  const [selections, setSelections] = useState<string[][]>(() => request.questions.map(() => []))
+  const [customValues, setCustomValues] = useState<string[]>(() => request.questions.map(() => ""))
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function toggleOption(questionIndex: number, label: string, multiple: boolean) {
+    setSelections((current) => {
+      const next = [...current]
+      const existing = next[questionIndex]
+      next[questionIndex] = multiple
+        ? existing.includes(label)
+          ? existing.filter((value) => value !== label)
+          : [...existing, label]
+        : existing.includes(label)
+          ? []
+          : [label]
+      return next
+    })
+  }
+
+  function setCustomValue(questionIndex: number, value: string) {
+    setCustomValues((current) => {
+      const next = [...current]
+      next[questionIndex] = value
+      return next
+    })
+  }
+
+  const canSubmit = request.questions.every((question, index) => {
+    return selections[index].length > 0 || (question.custom && customValues[index].trim().length > 0)
+  })
+
+  async function submit() {
+    setSubmitting(true)
+    setError(null)
+    try {
+      const answers = request.questions.map((_, index) => {
+        const customValue = customValues[index].trim()
+        return customValue ? [...selections[index], customValue] : selections[index]
+      })
+      await api.replyQuestion(config, request.id, answers, directory)
+      onResolved(request.id)
+    } catch (err) {
+      setError((err as Error).message)
+      setSubmitting(false)
+    }
+  }
+
+  async function reject() {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api.rejectQuestion(config, request.id, directory)
+      onResolved(request.id)
+    } catch (err) {
+      setError((err as Error).message)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <article className="message assistant question-card fade-in" aria-label={t('question.ariaLabel')}>
+      {request.questions.map((question, index) => (
+        <div key={index} className="question-block">
+          <div className="question-header">{question.header}</div>
+          <p className="question-text">{question.question}</p>
+          <div className="question-options">
+            {question.options.map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                className={`question-option ${selections[index].includes(option.label) ? "selected" : ""}`}
+                onClick={() => toggleOption(index, option.label, Boolean(question.multiple))}
+                disabled={submitting}
+              >
+                <span className="question-option-label">{option.label}</span>
+                {option.description && <span className="question-option-description">{option.description}</span>}
+              </button>
+            ))}
+          </div>
+          {question.custom && (
+            <input
+              type="text"
+              className="question-custom-input"
+              placeholder={t('question.otherPlaceholder')}
+              value={customValues[index]}
+              onChange={(event) => setCustomValue(index, event.target.value)}
+              disabled={submitting}
+            />
+          )}
+        </div>
+      ))}
+      {error && <p className="question-error">{error}</p>}
+      <div className="question-actions">
+        <button type="button" className="btn-secondary" onClick={reject} disabled={submitting}>
+          {t('question.skip')}
+        </button>
+        <button type="button" className="btn-primary" onClick={submit} disabled={submitting || !canSubmit}>
+          {t('question.sendAnswer')}
+        </button>
+      </div>
+    </article>
+  )
+}
+
+function ToolPartView({
+  part,
+  directory,
+  timestamp,
+  t
+}: {
+  part: MessagePart
+  directory: string | undefined
+  timestamp?: string
+  t: Translator
+}) {
+  const [open, setOpen] = useState(false)
+  const status = part.state?.status || "pending"
+  const command = toolCommandLabel(part)
+  const { label, diff } = describeToolAction(part, directory, t)
+  const tool = (part.tool || "").toLowerCase()
+  const input = (part.state?.input ?? {}) as Record<string, unknown>
+  let patch: string | null = null
+  if (tool === "edit" && typeof input.oldString === "string" && typeof input.newString === "string") {
+    patch = buildSimpleDiff(input.oldString, input.newString)
+  } else if (tool === "write" && typeof input.content === "string") {
+    patch = buildSimpleDiff("", input.content)
+  }
+  const todos = tool === "todowrite" ? parseTodos(input.todos) : null
+  const questions = tool === "question" ? parseQuestions(input.questions) : null
+  return (
+    <>
+      <button type="button" className={`message-tool-summary message-tool-${status}`} onClick={() => setOpen(true)}>
+        <span className="message-tool-label">{label}</span>
+        <span className="message-tool-meta">
+          {diff && (diff.additions > 0 || diff.deletions > 0) && (
+            <span className="message-tool-diff-stats">
+              {diff.additions > 0 && <span className="diff-stat-add">+{diff.additions}</span>}
+              {diff.deletions > 0 && <span className="diff-stat-del">-{diff.deletions}</span>}
+            </span>
+          )}
+          {status === "error" && (
+            <span className="message-tool-status-error" title={t('action.toolFailed')} aria-label={t('action.toolFailed')}>
+              ✕
+            </span>
+          )}
+          {(status === "pending" || status === "running") && (
+            <span className="message-tool-status-pending" title={t('action.running')} aria-label={t('action.running')}>
+              …
+            </span>
+          )}
+        </span>
+      </button>
+
+      {open && (
+        <Modal title={truncateForTitle(label)} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
+          {todos ? (
+            <TodoListView items={todos} />
+          ) : questions ? (
+            <QuestionListView questions={questions} />
+          ) : (
+            <>
+              <pre className="message-tool-command">{command}</pre>
+              {patch ? (
+                <DiffLines patch={patch} />
+              ) : (
+                part.state?.output && <pre className="message-tool-output">{part.state.output}</pre>
+              )}
+            </>
+          )}
+          {part.state?.error && <pre className="message-tool-output message-tool-error">{part.state.error}</pre>}
+        </Modal>
+      )}
+    </>
+  )
+}
+
+function ReasoningPartView({ part, timestamp, t }: { part: MessagePart; timestamp?: string; t: Translator }) {
+  const [open, setOpen] = useState(false)
+  if (!part.text) return null
+  const label = reasoningLabel([part], t)
+  return (
+    <>
+      <button type="button" className="message-reasoning-summary" onClick={() => setOpen(true)}>
+        {label}
+      </button>
+      {open && (
+        <Modal title={label} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
+          <pre className="message-reasoning-text">{part.text}</pre>
+        </Modal>
+      )}
+    </>
+  )
+}
+
+function MessagePartView({
+  part,
+  config,
+  sessionID,
+  directory,
+  timestamp,
+  t
+}: {
+  part: MessagePart
+  config: ServerConfig
+  sessionID: string
+  directory?: string
+  timestamp?: string
+  t: Translator
+}) {
+  if (part.type === "text") {
+    if (!part.text) return null
+    return (
+      <div className="message-content">
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{normalizeMessageMarkdown(part.text)}</ReactMarkdown>
+      </div>
+    )
+  }
+
+  if (part.type === "reasoning") {
+    return <ReasoningPartView part={part} timestamp={timestamp} t={t} />
+  }
+
+  if (part.type === "tool") {
+    return <ToolPartView part={part} directory={directory} timestamp={timestamp} t={t} />
+  }
+
+  if (part.type === "patch") {
+    if (!part.files || part.files.length === 0 || !part.messageID) return null
+    return (
+      <PatchPartView
+        config={config}
+        sessionID={sessionID}
+        messageID={part.messageID}
+        files={part.files}
+        timestamp={timestamp}
+        t={t}
+      />
+    )
+  }
+
+  return null
+}
+
+const ACTION_GROUP_TYPES = new Set(["reasoning", "tool", "patch"])
+
+type TimelineItem = { kind: "action-group"; parts: MessagePart[] } | { kind: "part"; part: MessagePart }
+
+/** Walks a message's parts in order and collapses each run of consecutive thinking/tool-call/edit parts into a
+ *  single action-group item, alternating with the output text parts as they actually occurred — so a turn that
+ *  thinks, calls a tool, replies, thinks again, calls another tool, and replies again renders as two separate
+ *  "thought for Xs, used N tools" rows interleaved with their two outputs, rather than one merged blob. A run of
+ *  just one action part skips the group wrapper entirely and renders as that part directly. */
+function buildMessageTimeline(parts: MessagePart[]): TimelineItem[] {
+  const items: TimelineItem[] = []
+  let buffer: MessagePart[] = []
+  const flush = () => {
+    if (buffer.length === 0) return
+    items.push(buffer.length === 1 ? { kind: "part", part: buffer[0] } : { kind: "action-group", parts: buffer })
+    buffer = []
+  }
+  for (const part of parts) {
+    if (part.type === "step-start" || part.type === "step-finish") continue
+    if (part.type === "text" && !part.text) continue
+    if (ACTION_GROUP_TYPES.has(part.type)) {
+      buffer.push(part)
+    } else {
+      flush()
+      items.push({ kind: "part", part })
+    }
+  }
+  flush()
+  return items
+}
+
+function formatActionDuration(ms: number, t: Translator): string {
+  const seconds = Math.max(1, Math.round(ms / 1000))
+  if (seconds < 60) return t('action.durationSeconds', { n: seconds })
+  const minutes = Math.round(seconds / 60)
+  return t('action.durationMinutes', { n: minutes })
+}
+
+/** Groups tool calls by what kind of action they represent (reads, searches, commands, ...) so a run of tool
+ *  calls summarizes as "read 5 files, searched 1 time" instead of a meaningless "ran 6 tools". */
+function summarizeToolCounts(toolParts: MessagePart[], t: Translator): string[] {
+  const counts = new Map<string, number>()
+  const bump = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
+  for (const part of toolParts) {
+    const tool = (part.tool || "").toLowerCase()
+    switch (tool) {
+      case "read":
+        bump("read")
+        break
+      case "write":
+        bump("write")
+        break
+      case "edit":
+        bump("edit")
+        break
+      case "bash":
+        bump("bash")
+        break
+      case "glob":
+      case "grep":
+        bump("search")
+        break
+      case "webfetch":
+        bump("webfetch")
+        break
+      case "task":
+        bump("task")
+        break
+      case "skill":
+        bump("skill")
+        break
+      case "todowrite":
+        bump("todo")
+        break
+      case "question":
+        bump("question")
+        break
+      default:
+        bump("other")
+        break
+    }
+  }
+
+  const pieces: string[] = []
+  const push = (key: string, oneKey: string, manyKey: string) => {
+    const count = counts.get(key)
+    if (count) pieces.push(count === 1 ? t(oneKey) : t(manyKey, { n: count }))
+  }
+  push("read", "action.countReadOne", "action.countReadMany")
+  push("write", "action.countWriteOne", "action.countWriteMany")
+  push("edit", "action.countEditOne", "action.countEditMany")
+  push("search", "action.countSearchOne", "action.countSearchMany")
+  push("bash", "action.countBashOne", "action.countBashMany")
+  push("webfetch", "action.countWebfetchOne", "action.countWebfetchMany")
+  push("task", "action.countTaskOne", "action.countTaskMany")
+  push("skill", "action.countSkillOne", "action.countSkillMany")
+  push("todo", "action.countTodoOne", "action.countTodoMany")
+  push("question", "action.countQuestionOne", "action.countQuestionMany")
+  push("other", "action.countOtherOne", "action.countOtherMany")
+  return pieces
+}
+
+/** "Thought for Xs"/"Thought for Xm" when the reasoning part(s) carry timing, else a plain "Thinking". */
+function reasoningLabel(reasoningParts: MessagePart[], t: Translator): string {
+  let minStart: number | undefined
+  let maxEnd: number | undefined
+  for (const part of reasoningParts) {
+    const time = part.time
+    if (!time) continue
+    if (minStart === undefined || time.start < minStart) minStart = time.start
+    const end = time.end ?? Date.now()
+    if (maxEnd === undefined || end > maxEnd) maxEnd = end
+  }
+  return minStart !== undefined && maxEnd !== undefined
+    ? t('action.thoughtFor', { duration: formatActionDuration(maxEnd - minStart, t) })
+    : t('action.thinking')
+}
+
+function summarizeActionGroup(parts: MessagePart[], t: Translator): string {
+  const reasoningParts = parts.filter((part) => part.type === "reasoning")
+  const toolParts = parts.filter((part) => part.type === "tool")
+  const editCount = parts
+    .filter((part) => part.type === "patch")
+    .reduce((sum, part) => sum + (part.files?.length ?? 0), 0)
+
+  const pieces: string[] = []
+  if (reasoningParts.length > 0) pieces.push(reasoningLabel(reasoningParts, t))
+  pieces.push(...summarizeToolCounts(toolParts, t))
+  if (editCount > 0) pieces.push(editCount === 1 ? t('action.madeEditOne') : t('action.madeEditMany', { n: editCount }))
+  if (pieces.length === 0) pieces.push(t('action.actionsFallback'))
+  return capitalizeFirst(pieces.join(", "))
+}
+
+function ActionGroupView({
+  parts,
+  config,
+  sessionID,
+  directory,
+  timestamp,
+  t
+}: {
+  parts: MessagePart[]
+  config: ServerConfig
+  sessionID: string
+  directory?: string
+  timestamp?: string
+  t: Translator
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" className="message-action-summary" onClick={() => setOpen(true)}>
+        <span>{summarizeActionGroup(parts, t)}</span>
+      </button>
+
+      {open && (
+        <Modal title={summarizeActionGroup(parts, t)} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
+          <div className="message-action-details">
+            {parts.map((part, index) => (
+              <Fragment key={part.id}>
+                {index > 0 && <hr className="message-action-divider" />}
+                <MessagePartView part={part} config={config} sessionID={sessionID} directory={directory} timestamp={timestamp} t={t} />
+              </Fragment>
+            ))}
+          </div>
+        </Modal>
+      )}
+    </>
+  )
 }
 
 function toFileStatusList(input: FileStatusEntry[] | Record<string, FileStatusEntry>): FileStatusEntry[] {
@@ -248,6 +1048,74 @@ function createLocalAssistantMessage(sessionID: string, text: string): MessageEn
   }
 }
 
+/** Reasoning text should only ever grow while streaming — if an incoming snapshot is shorter than what's already shown, a reset/truncated event landed; keep the longer text instead of visibly erasing it. */
+function reconcileReasoningPart(previous: MessagePart | undefined, incoming: MessagePart): MessagePart {
+  if (incoming.type !== "reasoning" || !previous || previous.type !== "reasoning") return incoming
+  const previousText = previous.text ?? ""
+  const incomingText = incoming.text ?? ""
+  return incomingText.length >= previousText.length ? incoming : { ...incoming, text: previousText }
+}
+
+/** GET /session/{id}/message doesn't return reasoning parts, only the live event stream does — keep any streamed-in reasoning the refetch would otherwise silently drop. */
+function partsEqual(a: MessagePart[], b: MessagePart[]): boolean {
+  return a === b || (a.length === b.length && JSON.stringify(a) === JSON.stringify(b))
+}
+
+/** Reuses the previous message object whenever the merged result is logically unchanged, instead of always
+ *  returning a fresh `{ ...message }` wrapper. The periodic 3.5s poll calls this for every message in the
+ *  conversation regardless of whether anything actually changed, and a fresh reference per message would defeat
+ *  the WeakMap/memo caching that keeps unrelated messages from re-rendering while one is actively streaming. */
+function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelope[]): MessageEnvelope[] {
+  const currentByID = new Map(current.map((message) => [message.info.id, message]))
+  return fetched.map((message) => {
+    const previous = currentByID.get(message.info.id)
+    if (!previous) return message
+    const previousPartsByID = new Map(previous.parts.map((part) => [part.id, part]))
+    const parts = message.parts.map((part) => reconcileReasoningPart(previousPartsByID.get(part.id), part))
+    const fetchedPartIDs = new Set(message.parts.map((part) => part.id))
+    const missingReasoning = previous.parts.filter((part) => part.type === "reasoning" && !fetchedPartIDs.has(part.id))
+    const mergedParts = missingReasoning.length === 0 ? parts : [...missingReasoning, ...parts]
+    return partsEqual(previous.parts, mergedParts) ? previous : { ...message, parts: mergedParts }
+  })
+}
+
+function applyStreamedPartUpdate(messages: MessageEnvelope[], sessionID: string, part: MessagePart): MessageEnvelope[] {
+  let changed = false
+  const next = messages.map((message) => {
+    if (message.info.sessionID !== sessionID || message.info.id !== part.messageID) return message
+    changed = true
+    const exists = message.parts.some((existing) => existing.id === part.id)
+    const parts = exists
+      ? message.parts.map((existing) => (existing.id === part.id ? reconcileReasoningPart(existing, part) : existing))
+      : [...message.parts, part]
+    return { ...message, parts }
+  })
+  return changed ? next : messages
+}
+
+function applyStreamedPartDelta(
+  messages: MessageEnvelope[],
+  sessionID: string,
+  messageID: string,
+  partID: string,
+  field: string,
+  delta: string
+): MessageEnvelope[] {
+  let changed = false
+  const next = messages.map((message) => {
+    if (message.info.sessionID !== sessionID || message.info.id !== messageID) return message
+    const parts = message.parts.map((existing) => {
+      if (existing.id !== partID) return existing
+      changed = true
+      const current = (existing as Record<string, unknown>)[field]
+      const nextValue = (typeof current === "string" ? current : "") + delta
+      return { ...existing, [field]: nextValue }
+    })
+    return changed ? { ...message, parts } : message
+  })
+  return changed ? next : messages
+}
+
 function hasMatchingUserMessage(messages: MessageEnvelope[], optimistic: MessageEnvelope): boolean {
   const text = extractText(optimistic)
   return messages.some((message) => (
@@ -256,6 +1124,242 @@ function hasMatchingUserMessage(messages: MessageEnvelope[], optimistic: Message
     extractText(message) === text
   ))
 }
+
+type RenderGroup =
+  | { kind: "message"; message: MessageEnvelope & { text: string } }
+  | {
+      kind: "run"
+      key: string
+      items: TimelineItem[]
+      messagesByID: Map<string, MessageEnvelope & { text: string }>
+      sessionID: string
+    }
+
+/** Groups consecutive non-user messages into a single "run" and builds one continuous timeline across all of
+ *  their parts (via buildMessageTimeline), instead of computing each message's timeline in isolation. This is
+ *  what lets a trailing action-group in one message merge with a leading action-group in the next — a run of
+ *  thought/tool-call parts with no real text between them collapses into one summary row regardless of which
+ *  message boundary it happened to be split across. User messages always start a fresh group. */
+function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[]): RenderGroup[] {
+  const groups: RenderGroup[] = []
+  let buffer: (MessageEnvelope & { text: string })[] = []
+  const flush = () => {
+    if (buffer.length === 0) return
+    // A run exists to merge action groups that a message boundary split apart. With nothing
+    // groupable there is nothing to merge, and folding the messages together would glue two
+    // separate replies into one bubble — which is what an OMP session looks like while a queued
+    // prompt is running, since it produces text parts only.
+    if (!buffer.some((message) => message.parts.some((part) => ACTION_GROUP_TYPES.has(part.type)))) {
+      for (const message of buffer) groups.push({ kind: "message", message })
+    } else {
+      const items = buildMessageTimeline(buffer.flatMap((message) => message.parts))
+      const messagesByID = new Map(buffer.map((message) => [message.info.id, message]))
+      groups.push({
+        kind: "run",
+        key: `run-${buffer[0].info.id}`,
+        items,
+        messagesByID,
+        sessionID: buffer[buffer.length - 1].info.sessionID
+      })
+    }
+    buffer = []
+  }
+  for (const message of messages) {
+    if (message.info.role === "user") {
+      flush()
+      groups.push({ kind: "message", message })
+    } else {
+      buffer.push(message)
+    }
+  }
+  flush()
+  return groups
+}
+
+/** Renders one run's continuous timeline (see groupRenderedMessages) as a single message bubble, resolving
+ *  each item's timestamp to the specific message that produced it. */
+function ConversationRunView({
+  items,
+  messagesByID,
+  sessionID,
+  config,
+  directory,
+  t
+}: {
+  items: TimelineItem[]
+  messagesByID: Map<string, MessageEnvelope & { text: string }>
+  sessionID: string
+  config: ServerConfig
+  directory: string | undefined
+  t: Translator
+}) {
+  const fallback = [...messagesByID.values()].pop()
+  const timestampFor = (part: MessagePart) => {
+    const owner = (part.messageID && messagesByID.get(part.messageID)) || fallback
+    return owner ? formatTime(owner.info.time.created) : undefined
+  }
+  return (
+    <article className="message assistant fade-in">
+      {items.map((item) =>
+        item.kind === "action-group" ? (
+          <ActionGroupView
+            key={`group-${item.parts[0].id}`}
+            parts={item.parts}
+            config={config}
+            sessionID={sessionID}
+            directory={directory}
+            timestamp={timestampFor(item.parts[item.parts.length - 1])}
+            t={t}
+          />
+        ) : (
+          <MessagePartView
+            key={item.part.id}
+            part={item.part}
+            config={config}
+            sessionID={sessionID}
+            directory={directory}
+            timestamp={timestampFor(item.part)}
+            t={t}
+          />
+        )
+      )}
+    </article>
+  )
+}
+
+/** One message's parts. Memoized on the message object identity so that streaming a token into one message
+ *  (which necessarily re-renders MessagesPane) doesn't re-run timeline/diff formatting for every other message
+ *  in the conversation — toRenderedMessage keeps unrelated messages referentially stable across updates. */
+const MessageArticle = memo(function MessageArticle({
+  message,
+  config,
+  directory,
+  t
+}: {
+  message: MessageEnvelope & { text: string }
+  config: ServerConfig
+  directory: string | undefined
+  t: Translator
+}) {
+  return (
+    <article className={`message ${message.info.role} fade-in`}>
+      {buildMessageTimeline(message.parts).map((item) =>
+        item.kind === "action-group" ? (
+          <ActionGroupView
+            key={`group-${item.parts[0].id}`}
+            parts={item.parts}
+            config={config}
+            sessionID={message.info.sessionID}
+            directory={directory}
+            timestamp={formatTime(message.info.time.created)}
+            t={t}
+          />
+        ) : (
+          <MessagePartView
+            key={item.part.id}
+            part={item.part}
+            config={config}
+            sessionID={message.info.sessionID}
+            directory={directory}
+            timestamp={formatTime(message.info.time.created)}
+            t={t}
+          />
+        )
+      )}
+    </article>
+  )
+})
+
+/** Renders the message list, pending questions, and typing bubble. Memoized so that unrelated state changes in
+ *  the parent (most importantly typing into the composer) don't re-run the per-message formatting/diffing work
+ *  on every keystroke. */
+const MessagesPane = memo(function MessagesPane({
+  loadingSessionID,
+  selectedID,
+  renderedMessages,
+  timelineGroups,
+  showTypingBubble,
+  pendingQuestions,
+  config,
+  directory,
+  t,
+  messagesRef,
+  messagesEndRef,
+  onMessagesScroll,
+  onQuestionResolved
+}: {
+  loadingSessionID: string | null
+  selectedID: string | null
+  renderedMessages: (MessageEnvelope & { text: string })[]
+  timelineGroups: RenderGroup[]
+  showTypingBubble: boolean
+  pendingQuestions: QuestionRequest[]
+  config: ServerConfig
+  directory: string | undefined
+  t: Translator
+  messagesRef: RefObject<HTMLDivElement>
+  messagesEndRef: RefObject<HTMLDivElement>
+  onMessagesScroll: () => void
+  onQuestionResolved: (id: string) => void
+}) {
+  return (
+    <div className="messages-wrap">
+      <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
+        {loadingSessionID === selectedID ? (
+          <div className="empty-state compact">
+            <LoadingIcon size={32} />
+            <p>{t('detail.loading')}</p>
+          </div>
+        ) : renderedMessages.length === 0 && !showTypingBubble && pendingQuestions.length === 0 ? (
+          <div className="empty-state compact">
+            <ChatIcon size={40} className="icon-empty-state" />
+            <p>{t('detail.emptyTitle')}</p>
+            <p className="subtle">{t('detail.emptyHint')}</p>
+          </div>
+        ) : (
+          <>
+            {timelineGroups.map((group) =>
+              group.kind === "message" ? (
+                <MessageArticle key={group.message.info.id} message={group.message} config={config} directory={directory} t={t} />
+              ) : (
+                <ConversationRunView
+                  key={group.key}
+                  items={group.items}
+                  messagesByID={group.messagesByID}
+                  sessionID={group.sessionID}
+                  config={config}
+                  directory={directory}
+                  t={t}
+                />
+              )
+            )}
+            {directory !== undefined &&
+              pendingQuestions.map((request) => (
+                <QuestionCard
+                  key={request.id}
+                  config={config}
+                  directory={directory}
+                  request={request}
+                  onResolved={onQuestionResolved}
+                  t={t}
+                />
+              ))}
+            {showTypingBubble && (
+              <article className="message assistant typing-bubble fade-in" aria-label={t('detail.waiting')}>
+                <div className="typing-dots" aria-hidden="true">
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                  <span className="typing-dot" />
+                </div>
+              </article>
+            )}
+            <div ref={messagesEndRef} className="messages-end" aria-hidden="true" />
+          </>
+        )}
+      </div>
+    </div>
+  )
+})
 
 function App() {
   type NoticeType = "info" | "success" | "error"
@@ -300,6 +1404,7 @@ function App() {
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<MessageEnvelope[]>([])
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [diffFiles, setDiffFiles] = useState<DiffFile[]>([])
+  const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([])
 
   const [projectDashboard, setProjectDashboard] = useState<ProjectDashboard | null>(null)
 
@@ -329,6 +1434,7 @@ function App() {
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const [activeDetailSheet, setActiveDetailSheet] = useState<null | "ai" | "details">(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLDivElement | null>(null)
   const completionAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -341,6 +1447,9 @@ function App() {
   const initialSessionLoadRef = useRef(true)
   const latestMessageTimesRef = useRef(new Map<string, { sessionUpdated: number; activityTime: number }>())
   const selectedSessionRef = useRef<SessionView | null>(null)
+  const eventStreamStateRef = useRef<"idle" | "connecting" | "live" | "reconnecting" | "fallback">("idle")
+  /** Last time an SSE event arrived for a given session, used to spot sessions the stream isn't covering. */
+  const lastEventBySessionRef = useRef(new Map<string, number>())
 
   const loadedMessagesRef = useRef<MessageEnvelope[]>([])
   const shouldAutoScrollRef = useRef(false)
@@ -399,10 +1508,15 @@ function App() {
 
   const renderedMessages = useMemo(() => {
     return [...messages, ...optimisticUserMessages]
-      .map((message) => ({ ...message, text: extractText(message) }))
-      .filter((message) => message.text)
+      .map(toRenderedMessage)
+      .filter((message) => message.text || message.parts.some((part) => part.type !== "step-start" && part.type !== "step-finish"))
   }, [messages, optimisticUserMessages])
 
+  const timelineGroups = useMemo(() => groupRenderedMessages(renderedMessages), [renderedMessages])
+
+  const messageScrollSignature = useMemo(() => {
+    return renderedMessages.map((message) => `${message.info.id}:${message.text.length}`).join("|")
+  }, [renderedMessages])
 
   const assistantResponseSignature = useMemo(() => {
     return renderedMessages
@@ -454,6 +1568,7 @@ function App() {
     setOptimisticUserMessages([])
     setTodos([])
     setDiffFiles([])
+    setPendingQuestions([])
     setProjectDashboard(null)
     setDashboardError(null)
     setAwaitingAssistantReply(false)
@@ -672,10 +1787,11 @@ function App() {
 
   async function loadSelected(sessionID: string, directory: string, refreshHistory = false) {
     const requestID = ++loadSelectedRequestRef.current
-    const [msg, todo, diff] = await Promise.all([
+    const [msg, todo, diff, questions] = await Promise.all([
       api.loadMessages(config, sessionID, directory, refreshHistory),
       api.loadTodo(config, sessionID, directory),
-      api.loadDiff(config, sessionID, directory).catch(() => [])
+      api.loadDiff(config, sessionID, directory).catch(() => []),
+      config.backend === "omp" ? Promise.resolve([]) : api.loadQuestions(config, directory).catch(() => [])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
     const current = loadedMessagesRef.current
@@ -683,13 +1799,14 @@ function App() {
       !messagesHaveSameContent(current, msg) &&
       assistantPayloadLength(current) <= assistantPayloadLength(msg)
     ) {
-      shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isChatNearBottom()
+      shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isNearMessagesBottom()
       loadedMessagesRef.current = msg
-      setMessages(msg)
+      setMessages((prev) => mergeFetchedMessages(prev, msg))
     }
     setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
     setTodos(todo)
     setDiffFiles(diff)
+    setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
     await loadProjectDashboard(directory)
   }
 
@@ -719,14 +1836,25 @@ function App() {
     container.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
   }
 
-  function isChatNearBottom(): boolean {
+  function isNearMessagesBottom(): boolean {
     const container = messagesRef.current
-    if (container && container.scrollHeight > container.clientHeight + 1) {
-      return container.scrollHeight - container.scrollTop - container.clientHeight <= 48
-    }
-    const page = document.documentElement
-    return page.scrollHeight - window.scrollY - window.innerHeight <= 48
+    if (!container) return true
+    const containerDistance = container.scrollHeight - container.scrollTop - container.clientHeight
+    if (containerDistance > BOTTOM_STICK_THRESHOLD) return false
+    // The page itself can also scroll (the composer is pinned via fixed positioning), so a user
+    // scrolling the outer window away from the bottom must also break the auto-scroll pin.
+    const doc = document.documentElement
+    const windowDistance = doc.scrollHeight - window.scrollY - window.innerHeight
+    return windowDistance <= BOTTOM_STICK_THRESHOLD
   }
+
+  const handleMessagesScroll = useCallback(() => {
+    stickToBottomRef.current = isNearMessagesBottom()
+  }, [])
+
+  const handleQuestionResolved = useCallback((id: string) => {
+    setPendingQuestions((current) => current.filter((item) => item.id !== id))
+  }, [])
 
   function scrollMessagesToBottom(behavior: ScrollBehavior = "smooth") {
     requestAnimationFrame(() => {
@@ -810,11 +1938,24 @@ function App() {
       })
       setSelectedID(created.id)
       setMessages([])
+      setOptimisticUserMessages([])
+      setTodos([])
+      setDiffFiles([])
+      setProjectDashboard(null)
+      setDashboardError(null)
+      setAwaitingAssistantReply(false)
       loadedMessagesRef.current = []
       setView("detail")
-      await loadSelected(created.id, created.directory)
-      await loadModels(created.id, created.directory)
-      await refreshSessions(false, createdView)
+      setLoadingSessionID(created.id)
+      try {
+        await loadSelected(created.id, created.directory)
+        await Promise.all([loadAgents(), loadModels(created.id, created.directory)])
+        await refreshSessions(false, createdView)
+      } catch (err) {
+        setRuntimeError((err as Error).message)
+      } finally {
+        setLoadingSessionID((activeID) => (activeID === created.id ? null : activeID))
+      }
     } catch (err) {
       setPickerError((err as Error).message)
       setRuntimeError((err as Error).message)
@@ -1039,6 +2180,24 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let listenerHandle: PluginListenerHandle | undefined
+    CapacitorApp.addListener("backButton", () => {
+      setView((current) => {
+        if (current === "sessions") {
+          CapacitorApp.exitApp()
+          return current
+        }
+        return "sessions"
+      })
+    }).then((handle) => {
+      listenerHandle = handle
+    })
+    return () => {
+      listenerHandle?.remove()
+    }
+  }, [])
+
+  useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
 
     function applyThemePreference() {
@@ -1062,6 +2221,10 @@ function App() {
   }, [selectedSession])
 
   useEffect(() => {
+    eventStreamStateRef.current = eventStreamState
+  }, [eventStreamState])
+
+  useEffect(() => {
     if (configKey(draftConfig) === configKey(config)) return
     // A half-typed host such as `http://` cannot be turned into a URL. Persisting it
     // would also poison the next launch, so incomplete drafts are simply not applied.
@@ -1069,7 +2232,6 @@ function App() {
     const timer = setTimeout(() => applyConfig(draftConfig), 500)
     return () => clearTimeout(timer)
   }, [draftConfig, config])
-
 
   useEffect(() => {
     if (!selectedSession) {
@@ -1079,6 +2241,7 @@ function App() {
     }
     loadModels(selectedSession.id, selectedSession.directory).catch(() => undefined)
   }, [config.backend, config.host, config.port, config.username, config.password, selectedSession?.id])
+
   useEffect(() => {
     if (!isValidServerConfig(config)) {
       setConnectionState("idle")
@@ -1094,6 +2257,19 @@ function App() {
     loadAgents().catch(() => undefined)
     if (isBridgeBackend(config.backend)) loadModels().catch(() => undefined)
     const timer = setInterval(() => {
+      // Live SSE events already keep sessions and the open session's messages/todos/diffs in sync
+      // (via applyStreamedPartUpdate/scheduleRefresh), so polling on top of a working stream is a
+      // redundant full refetch. But "connected" only proves the stream is open, not that it carries
+      // this session: opencode emits events on an in-process bus, so a session driven by a *different*
+      // opencode process (a local TUI running its own server) never produces events here even though
+      // the stream is perfectly healthy. Keep polling as a per-session fallback — skip it only while
+      // the open session is actually receiving events.
+      if (eventStreamStateRef.current === "live") {
+        const openSession = selectedSessionRef.current
+        if (!openSession) return
+        const lastEventAt = lastEventBySessionRef.current.get(openSession.id) ?? 0
+        if (Date.now() - lastEventAt < SESSION_STREAM_QUIET_MS) return
+      }
       refreshSessions(true).catch(() => undefined)
       if (selectedSession) {
         loadSelected(selectedSession.id, selectedSession.directory).catch(() => undefined)
@@ -1129,7 +2305,36 @@ function App() {
     }
     const onEvent = (event: { data: unknown; name: string }) => {
       const type = eventType(event.data) ?? event.name
-      if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.")) {
+      const payload = eventPayload(event.data)
+      const body = (payload?.properties ?? payload?.data) as
+        | {
+            sessionID?: string
+            part?: MessagePart
+            messageID?: string
+            partID?: string
+            field?: string
+            delta?: string
+            info?: { id?: string; sessionID?: string }
+          }
+        | undefined
+      if (type === "message.part.updated" && body?.sessionID && body.part) {
+        setMessages((current) => applyStreamedPartUpdate(current, body.sessionID!, body.part!))
+      } else if (
+        type === "message.part.delta" &&
+        body?.sessionID &&
+        body.messageID &&
+        body.partID &&
+        body.field &&
+        typeof body.delta === "string"
+      ) {
+        setMessages((current) =>
+          applyStreamedPartDelta(current, body.sessionID!, body.messageID!, body.partID!, body.field!, body.delta!)
+        )
+      }
+      if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.") || type.startsWith("question.")) {
+        // `session.*` events carry the id on the session itself; `message.*`/`todo.*` use sessionID.
+        const sessionID = body?.sessionID ?? body?.info?.sessionID ?? body?.info?.id
+        if (sessionID) lastEventBySessionRef.current.set(sessionID, Date.now())
         setLiveEventCount((count) => count + 1)
         scheduleRefresh()
       }
@@ -1167,9 +2372,37 @@ function App() {
   }, [hasConfiguredServer])
 
   useEffect(() => {
-    if (view !== "detail" || !selectedSession) return
+    const onWindowScroll = () => handleMessagesScroll()
+    window.addEventListener("scroll", onWindowScroll, { passive: true })
+    return () => window.removeEventListener("scroll", onWindowScroll)
+  }, [])
+
+  useEffect(() => {
+    if (view !== "detail") return
+    if (!stickToBottomRef.current) return
     scrollMessagesToBottom("auto")
-  }, [view, selectedSession?.id])
+  }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions])
+
+  useEffect(() => {
+    if (view !== "detail" || !selectedID) return
+    const container = messagesRef.current
+    if (!container) return
+    // Opening a session should always land at the bottom, regardless of where a previous session left off.
+    stickToBottomRef.current = true
+    scrollMessagesToBottom("auto")
+    // Tool/diff parts fetch their content asynchronously and grow after the
+    // initial layout, so keep pinning to the bottom while that settles — but only while the
+    // user hasn't scrolled away from it.
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scrollMessagesToBottom("auto")
+    })
+    observer.observe(container)
+    const timeout = setTimeout(() => observer.disconnect(), 2000)
+    return () => {
+      observer.disconnect()
+      clearTimeout(timeout)
+    }
+  }, [view, selectedID])
 
   useEffect(() => {
     loadedMessagesRef.current = messages
@@ -1397,20 +2630,24 @@ function App() {
               <p className="subtle">
                 {t('sessions.summary', { total: sessions.length, active: activeSessions, changed: changedSessions })}
               </p>
-              {connectionStatusText && (
-                <p className={`connection-status ${connectionState}`}>
-                  {['connecting', 'reconnecting'].includes(connectionState) && <LoadingIcon size={14} />}
-                  {connectionStatusText}
-                </p>
-              )}
-              {eventStreamText && (
-                <p className={`connection-status event-stream ${eventStreamState}`}>
-                  {['connecting', 'reconnecting'].includes(eventStreamState) && <LoadingIcon size={14} />}
-                  {eventStreamText}
-                </p>
+              {(connectionStatusText || eventStreamText) && (
+                <div className="connection-status-row">
+                  {connectionStatusText && (
+                    <p className={`connection-status ${connectionState}`}>
+                      {['connecting', 'reconnecting'].includes(connectionState) && <LoadingIcon size={14} />}
+                      {connectionStatusText}
+                    </p>
+                  )}
+                  {eventStreamText && (
+                    <p className={`connection-status event-stream ${eventStreamState}`}>
+                      {['connecting', 'reconnecting'].includes(eventStreamState) && <LoadingIcon size={14} />}
+                      {eventStreamText}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
-            <div className="inline-actions">
+            <div className="inline-actions sessions-header-actions">
               <button onClick={refreshSessionsWithIndicator} className="btn-secondary" disabled={refreshingSessions}>
                 {refreshingSessions ? <LoadingIcon size={18} /> : <RefreshIcon size={18} />}
                 {t('sessions.refresh')}
@@ -1517,7 +2754,6 @@ function App() {
                       )}
                       <p>{session.directory}</p>
                     </div>
-                    <span className={`pill ${session.status}`}>{session.status}</span>
                   </div>
                   <div className="session-stats">
                     {session.files > 0 || session.additions > 0 || session.deletions > 0 ? (
@@ -1530,6 +2766,7 @@ function App() {
                       <span className="subtle">{t('sessions.noFileChanges')}</span>
                     )}
                     <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
+                    <span className={`pill ${session.status}`}>{session.status}</span>
                   </div>
                   <div className="inline-actions">
                     <button
@@ -1554,7 +2791,7 @@ function App() {
                           aria-label={t('session.renameTitle')}
                         >
                           <PencilIcon size={16} />
-                          {t('session.renameTitle')}
+                          {t('session.renameConfirm')}
                         </button>
                         <button
                           className="btn-danger"
@@ -1562,6 +2799,7 @@ function App() {
                             event.stopPropagation()
                             setSessionToDelete(session)
                           }}
+                          title={t('sessions.delete')}
                         >
                           <TrashIcon size={16} />
                           {t('sessions.delete')}
@@ -1767,50 +3005,21 @@ function App() {
             </div>
           )}
 
-          <div className="messages-wrap">
-            <div className="messages" ref={messagesRef}>
-            {loadingSessionID === selectedID ? (
-              <div className="empty-state compact">
-                <LoadingIcon size={32} />
-                <p>{t('detail.loading')}</p>
-              </div>
-            ) : renderedMessages.length === 0 && !showTypingBubble ? (
-              <div className="empty-state compact">
-                <ChatIcon size={40} className="icon-empty-state" />
-                <p>{t('detail.emptyTitle')}</p>
-                <p className="subtle">{t('detail.emptyHint')}</p>
-              </div>
-            ) : (
-              <>
-                {renderedMessages.map((message) => (
-                  <article key={message.info.id} className={`message ${message.info.role} fade-in`}>
-                    <header>
-                      <strong>
-                        {message.info.role === "user" ? t('detail.you') : assistantDisplayName}
-                      </strong>
-                      <small>{formatTime(message.info.time.created)}</small>
-                    </header>
-                    <div className="message-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {normalizeMessageMarkdown(message.text)}
-                      </ReactMarkdown>
-                    </div>
-                  </article>
-                ))}
-                {showTypingBubble && (
-                  <article className="message assistant typing-bubble fade-in" aria-label={t('detail.waiting')}>
-                    <div className="typing-dots" aria-hidden="true">
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                      <span className="typing-dot" />
-                    </div>
-                  </article>
-                )}
-                <div ref={messagesEndRef} className="messages-end" aria-hidden="true" />
-              </>
-            )}
-            </div>
-          </div>
+          <MessagesPane
+            loadingSessionID={loadingSessionID}
+            selectedID={selectedID}
+            renderedMessages={renderedMessages}
+            timelineGroups={timelineGroups}
+            showTypingBubble={showTypingBubble}
+            pendingQuestions={pendingQuestions}
+            config={config}
+            directory={selectedSession?.directory}
+            t={t}
+            messagesRef={messagesRef}
+            messagesEndRef={messagesEndRef}
+            onMessagesScroll={handleMessagesScroll}
+            onQuestionResolved={handleQuestionResolved}
+          />
 
           <div className="composer" ref={composerRef}>
             <textarea
@@ -1842,19 +3051,13 @@ function App() {
               className={showStopAction ? "btn-danger" : "btn-primary"}
             >
               {showStopAction ? (
-                <>
-                  <StopCircleIcon size={18} />
-                  {t('detail.waiting')}
-                </>
+                <StopCircleIcon size={18} />
               ) : (
-                <>
-                  <SendIcon size={18} />
-                  {t('detail.send')}
-                </>
+                <SendIcon size={18} />
               )}
             </button>
           </div>
-          
+
           {runtimeError && <div className="error fade-in">✗ {runtimeError}</div>}
         </main>
       )}
