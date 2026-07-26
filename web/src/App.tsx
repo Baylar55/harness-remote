@@ -157,6 +157,29 @@ function formatTime(epoch: number): string {
   return new Date(epoch).toLocaleString()
 }
 
+const RELATIVE_TIME_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ["year", 60 * 60 * 24 * 365],
+  ["month", 60 * 60 * 24 * 30],
+  ["week", 60 * 60 * 24 * 7],
+  ["day", 60 * 60 * 24],
+  ["hour", 60 * 60],
+  ["minute", 60]
+]
+
+/** Compact, locale-translated "13 min ago" / "13 minuti fa" style string — falls back to
+ *  "just now" (via the 0-second `second` bucket) rather than "-1 minutes ago" for very recent times. */
+function formatRelativeTime(epoch: number, locale: LanguageCode): string {
+  if (!epoch) return "-"
+  const deltaSeconds = Math.round((epoch - Date.now()) / 1000)
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "short" })
+  for (const [unit, secondsInUnit] of RELATIVE_TIME_UNITS) {
+    if (Math.abs(deltaSeconds) >= secondsInUnit) {
+      return formatter.format(Math.round(deltaSeconds / secondsInUnit), unit)
+    }
+  }
+  return formatter.format(deltaSeconds, "second")
+}
+
 function extractText(msg: MessageEnvelope): string {
   return msg.parts
     .filter((part) => part.type === "text" && part.text)
@@ -2774,7 +2797,12 @@ function App() {
             <strong className="negative">-{session.deletions}</strong>
           </span>
         )}
-        <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
+        <span className="subtle session-meta-line">
+          <span className="session-directory-compact" title={session.directory}>{shortDirectory(session.directory)}</span>
+          <span title={formatTime(session.updated)}>
+            {t('sessions.updated', { time: formatRelativeTime(session.updated, language) })}
+          </span>
+        </span>
         <span className={`pill ${session.status}`}>{session.status}</span>
       </div>
       <div className="inline-actions">

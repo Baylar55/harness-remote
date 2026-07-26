@@ -1773,6 +1773,16 @@ button.compact {
   display: none;
 }
 
+/* The full directory path lives in the now-hidden <p> above; the compact sidebar row surfaces a
+   shortened copy inline next to the relative timestamp instead. */
+.session-directory-compact {
+  display: none;
+}
+
+.sidebar-sessions .session-directory-compact {
+  display: inline;
+}
+
 /* .session-stats becomes a transparent box so its children (the "updated" timestamp and the
    status pill) can be placed directly into the row's grid areas, next to the title. */
 .sidebar-sessions .session-stats {
@@ -1790,6 +1800,25 @@ button.compact {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.72rem;
+}
+
+/* The directory and relative-time spans live inside a single flex row (rather than each being a
+   grid item in its own right) so they sit side by side instead of stacking on top of each other
+   in the "meta" grid area. */
+.session-meta-line {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.sidebar-sessions .session-directory-compact {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-sessions .session-directory-compact::after {
+  content: "\00b7";
+  margin-left: var(--space-1);
 }
 
 .sidebar-sessions .session-stats .pill {
