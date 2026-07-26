@@ -56,6 +56,7 @@ type TranslationKey =
   | 'sessions.loadingTitle'
   | 'sessions.loadingHint'
   | 'sessions.offlineHint'
+  | 'sessions.retry'
   | 'sessions.title'
   | 'sessions.summary'
   | 'sessions.new'
@@ -287,7 +288,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'sessions.emptyHint': 'Create a new session to get started',
     'sessions.loadingTitle': 'Connecting to backend',
     'sessions.loadingHint': 'Loading sessions. This can take a few seconds on mobile or after the server wakes up.',
-    'sessions.offlineHint': 'Backend is not reachable yet. Check Settings or try Refresh.',
+    'sessions.offlineHint': 'The server did not answer. It may be asleep, off, or on another network.',
+    'sessions.retry': 'Try again',
     'sessions.noFileChanges': 'No file changes',
     'sessions.updated': 'Updated {time}',
     'sessions.open': 'Open',
@@ -499,7 +501,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'sessions.emptyHint': 'Crea una nuova sessione per iniziare',
     'sessions.loadingTitle': 'Connessione al backend',
     'sessions.loadingHint': 'Carico le sessioni. Su mobile o dopo il risveglio del server può volerci qualche secondo.',
-    'sessions.offlineHint': 'Backend non ancora raggiungibile. Controlla Impostazioni o riprova con Aggiorna.',
+    'sessions.offlineHint': "Il server non ha risposto. Può essere spento, in standby o su un'altra rete.",
+    'sessions.retry': 'Riprova',
     'sessions.noFileChanges': 'Nessuna modifica ai file',
     'sessions.updated': 'Aggiornata {time}',
     'sessions.open': 'Apri',
@@ -711,7 +714,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'sessions.emptyHint': '建立新的工作階段以開始',
     'sessions.loadingTitle': '正在連線到後端',
     'sessions.loadingHint': '正在載入工作階段。行動裝置或伺服器剛喚醒時可能需要幾秒。',
-    'sessions.offlineHint': '尚無法連線到後端。請檢查設定或重新整理。',
+    'sessions.offlineHint': '伺服器未回應。它可能已關機、休眠，或位於另一個網路。',
+    'sessions.retry': '重試',
     'sessions.noFileChanges': '沒有檔案變更',
     'sessions.updated': '更新於 {time}',
     'sessions.open': '開啟',

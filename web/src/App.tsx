@@ -30,6 +30,7 @@ import {
   TestIcon,
   LoadingIcon,
   RefreshIcon,
+  OfflineIcon,
   PencilIcon,
   CloseIcon
 } from "./Icons"
@@ -1585,7 +1586,12 @@ function App() {
         : connectionState === "offline"
           ? t('connection.offline')
           : "")
-  const eventStreamText = eventStreamState === "live"
+  const isOffline = connectionState === "offline"
+  /* The connection status already speaks when the server is unreachable. A second, more hopeful
+     voice about the event stream only made the app look like it disagreed with itself. */
+  const eventStreamText = isOffline
+    ? ""
+    : eventStreamState === "live"
     ? t('events.live', { count: liveEventCount })
     : eventStreamState === "connecting"
       ? t('events.connecting')
@@ -1733,7 +1739,10 @@ function App() {
       }
 
       backgroundFailureCountRef.current += 1
-      if (backgroundFailureCountRef.current === 1) {
+      // Tolerating a few failures avoids flapping when a working connection hiccups — but on the
+      // first load there is no good state to protect, and pretending to still be connecting while
+      // an error is already on screen is what made the app look like it contradicted itself.
+      if (backgroundFailureCountRef.current === 1 && sessions.length > 0) {
         setConnectionState("reconnecting")
         setConnectionMessage(t('connection.reconnecting'))
         return
@@ -1744,6 +1753,7 @@ function App() {
       if (backgroundFailureCountRef.current >= 3) {
         setRuntimeError(message)
       }
+      initialSessionLoadRef.current = false
     }
   }
 
@@ -2732,7 +2742,12 @@ function App() {
                 {refreshingSessions ? <LoadingIcon size={18} /> : <RefreshIcon size={18} />}
                 {t('sessions.refresh')}
               </button>
-              <button onClick={openNewSessionPicker} className="btn-primary" disabled={creatingSession}>
+              <button
+                onClick={openNewSessionPicker}
+                className="btn-primary"
+                disabled={creatingSession || isOffline}
+                title={isOffline ? t('sessions.offlineHint') : undefined}
+              >
                 {creatingSession ? <LoadingIcon size={18} /> : <PlusIcon size={18} />}
                 {creatingSession ? t('sessions.creating') : t('sessions.new')}
               </button>
@@ -2749,7 +2764,29 @@ function App() {
           </div>
           
           <div className="session-list">
-            {filteredSessions.length === 0 && ['connecting', 'reconnecting'].includes(connectionState) ? (
+            {/* An empty list while the server is unreachable is not "still loading". Saying so,
+                and offering the two things worth doing, beats a spinner that never resolves. */}
+            {filteredSessions.length === 0 && isOffline ? (
+              <div className="empty-state">
+                <OfflineIcon size={44} className="icon-empty-state" />
+                <p>{t('sessions.offlineHint')}</p>
+                <div className="empty-state-actions">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => refreshSessionsWithIndicator().catch(() => undefined)}
+                    disabled={refreshingSessions}
+                  >
+                    {refreshingSessions ? <LoadingIcon size={18} /> : <RefreshIcon size={18} />}
+                    {t('sessions.retry')}
+                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => setView("settings")}>
+                    <SettingsIcon size={18} />
+                    {t('nav.settings')}
+                  </button>
+                </div>
+              </div>
+            ) : filteredSessions.length === 0 && ['connecting', 'reconnecting'].includes(connectionState) ? (
               <div className="empty-state connection-pending">
                 <LoadingIcon size={40} className="icon-empty-state" />
                 <p>{t('sessions.loadingTitle')}</p>
@@ -2759,7 +2796,7 @@ function App() {
               <div className="empty-state">
                 <FolderIcon size={48} className="icon-empty-state" />
                 <p>{t('sessions.emptyTitle')}</p>
-                <p className="subtle">{connectionState === "offline" ? t('sessions.offlineHint') : t('sessions.emptyHint')}</p>
+                <p className="subtle">{t('sessions.emptyHint')}</p>
               </div>
             ) : (
               filteredSessions.map((session) => (
@@ -2884,7 +2921,11 @@ function App() {
             )}
           </div>
           
-          {runtimeError && <div className="error fade-in">✗ {runtimeError}</div>}
+          {/* The offline empty state already explains this and offers the two useful actions;
+              repeating the raw transport error underneath is the second voice again. */}
+          {runtimeError && !(isOffline && filteredSessions.length === 0) && (
+            <div className="error fade-in">✗ {runtimeError}</div>
+          )}
         </section>
       )}
 

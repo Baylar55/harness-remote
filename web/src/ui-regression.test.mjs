@@ -201,4 +201,20 @@ assert.ok(styles.includes('-webkit-tap-highlight-color: transparent'), 'the plat
 assert.ok(styles.includes('overscroll-behavior: contain'), 'scrolling to the end of a list should not drag the page')
 assert.match(styles, /button\.compact \{[\s\S]*?min-height: 44px/, 'a compact button is still a thumb target')
 
+// With the server unreachable the app used to show four hopeful messages and a developer-facing
+// error at the same time, for about ten seconds, and kept a stale list that could not be opened.
+assert.ok(app.includes('const isOffline = connectionState === "offline"'), 'offline should be one named state')
+assert.ok(
+  app.includes("backgroundFailureCountRef.current === 1 && sessions.length > 0"),
+  'tolerating failures protects an existing list; on the first load it only delays the truth'
+)
+assert.ok(app.includes('eventStreamText = isOffline'), 'the event stream must not claim to be reconnecting while the connection is down')
+assert.ok(
+  app.includes('runtimeError && !(isOffline && filteredSessions.length === 0)'),
+  'the offline state explains itself; the raw transport error must not repeat it'
+)
+assert.ok(app.includes("t('sessions.retry')"), 'an offline state should offer a way out')
+assert.ok(app.includes('disabled={creatingSession || isOffline}'), 'an action that cannot succeed offline must not be offered')
+assert.ok(styles.includes('.empty-state-actions'), 'the offline actions should be styled')
+
 console.log('ui regression tests passed')
