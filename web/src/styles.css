@@ -1636,7 +1636,6 @@ button.compact {
   background: var(--nav-bg);
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(14px);
-  overflow: hidden;
 }
 
 .sidebar-brand {
@@ -1798,7 +1797,11 @@ button.compact {
 .app-shell-desktop {
   flex-direction: row;
   align-items: flex-start;
-  width: min(100%, 1400px);
+  /* The sidebar and main pane both carry an explicit resizable width, so the shell should hug
+     their combined width (up to the viewport) rather than stretching to a fixed max — otherwise
+     dragging a panel's outer edge would leave dead space instead of visibly resizing anything. */
+  width: fit-content;
+  max-width: 100%;
 }
 
 .main-content {
@@ -1807,6 +1810,45 @@ button.compact {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+}
+
+/* Draggable borders for the desktop sidebar/main-pane layout: a thin invisible strip straddling
+   the panel edge, widened on hover/drag so it's easy to grab without adding visible chrome. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: transparent;
+}
+
+.resize-handle:hover::after,
+.resize-handle:active::after {
+  background: var(--primary);
+}
+
+.resize-handle--start {
+  left: 0;
+  transform: translateX(-50%);
+}
+
+.resize-handle--end {
+  right: 0;
+  transform: translateX(50%);
 }
 
 .desktop-panel-modal {
