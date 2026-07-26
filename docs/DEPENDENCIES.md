@@ -1,0 +1,108 @@
+# External dependencies and the assumptions behind them
+
+This app is a client for other people's software. Almost everything that has broken it broke
+because a harness behaved differently from what the code assumed — not because of a logic error.
+This file records what we depend on, what we assume from it, and what to check when it changes.
+
+Keep it current. An assumption that is not written down is one nobody will re-check.
+
+## Harness surfaces
+
+### OpenCode — HTTP API
+
+Spoken directly, no adapter. The app calls `/global/health`, `/global/event`, `/session*`,
+`/config/providers`, `/command`, `/agent`, `/project/current`, `/vcs`, `/file*` and `/question*`.
+
+**Assumed:** the server emits an SSE heartbeat roughly every 10s. The client aborts and reconnects
+after 30s of silence, so a server that stops beating looks dead.
+
+**Watch:** new or renamed endpoints, and the event envelope shape (`{directory, payload}`).
+
+### Oh My Pi (OMP) — ACP over stdio, via `omp acp`
+
+First-party command, no third party in the path. The bridge uses `session/new`, `session/load`,
+`session/list`, `session/prompt`, `session/cancel` and `session/set_config_option`.
+
+**Assumed, all observed on OMP 17.1.3 rather than read from a spec:**
+
+| Assumption | What breaks if it changes |
+|---|---|
+| `session/list` returns no `title` | titles are derived from the first prompt; a real title would be ignored |
+| A submitted prompt is never echoed back as `user_message_chunk` | the deduplication acknowledgement would swallow the user's message |
+| Chunks carry a `messageId` | without one, chunk aggregation falls back to per-turn tracking |
+| No `agent_plan` is emitted | the todo panel stays empty by design |
+| The agent approves its own tool calls and never sends `session/request_permission` | the permission path would start being exercised |
+
+**Watch:** any of the above, and new `sessionUpdate` kinds we silently ignore (`tool_call`,
+`tool_call_update` and `agent_thought_chunk` are dropped today).
+
+### PI — ACP over stdio, via a third-party adapter
+
+This is the only dependency that is neither ours nor first-party, and the one to watch hardest.
+
+- **Adapter:** [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp),
+  Apache-2.0, in [`VikashLoomba/agentprism-workflows`](https://github.com/VikashLoomba/agentprism-workflows)
+  under `packages/pi-acp`. Single maintainer (`automatalabsteam`).
+- **Pinned to `0.2.5`** in `bridge/src/harness-profiles.js`.
+- **It is young and moves fast:** first published 2026-07-16, eleven versions in the following ten
+  days. Treat a bump as a change worth testing, not a routine refresh.
+
+**Why an adapter at all.** PI's maintainer
+[declined native ACP support](https://github.com/earendil-works/pi/issues/175), suggesting an
+adapter over PI's own RPC mode instead. Several exist. The other widely referenced one,
+`@victor-software-house/pi-acp`, declares `engines.bun` and shells out to `bun`; this project runs
+on Node everywhere, which is why it is not used.
+
+**Why the version is pinned.** An unpinned `npx -y` default failed live with `notarget`: version
+`0.2.6` was in the npm index and tagged `latest` while its tarball was not yet fetchable. A
+floating default breaks whenever an upstream publish goes wrong.
+
+**Assumed:**
+
+| Assumption | What breaks if it changes |
+|---|---|
+| Launched over stdio as an `npx`-installable `bin` | the `--acp-command` / `--acp-arg` defaults in the profile |
+| Offers a non-`env_var` auth method (`pi-stored-credentials`) | the bridge would fall back to an API key from an unset environment variable and fail at inference |
+| Asks `session/request_permission` before each tool call, offering an `allow_once` option | tool calls stop happening, silently — the failure mode is "reports success, changes nothing" |
+| Streams chunks with **no** `messageId` | replies would split into one message per token, or aggregate wrongly |
+| Emits no `agent_plan` | the todo panel stays empty |
+
+**The adapter embeds its own PI.** It depends on `@earendil-works/pi-coding-agent` pinned to a
+specific version (`0.82.1` in adapter 0.2.5), so the PI that actually runs is the one bundled with
+the adapter, not the `pi` on your PATH. Your local install still matters for configuration and
+credentials, which it reads from disk. Two consequences:
+
+- updating `pi` locally does not change what the bridge runs;
+- the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
+
+**Exit route.** If the adapter becomes unmaintained or unreliable, PI's own RPC mode
+(`packages/coding-agent/docs/rpc.md` in the PI repo) is the first-party alternative. It means
+writing a transport in the bridge rather than reusing the ACP client, but it removes the third
+party entirely.
+
+## App and packaging
+
+- **Capacitor** (`@capacitor/core`, `/android`, `/cli`, `/app`) — Android packaging and the back
+  button. A major Capacitor version changes the generated Android project, and
+  `web/native-android/*.java` is copied into it by `npm run cap:sync:android`; a plain
+  `npx cap sync android` drops those files silently.
+- **React 18, Vite, `react-markdown`, `remark-gfm`** — ordinary frontend dependencies.
+- The **bridge has no dependencies at all** and runs on the Node standard library. Keep it that
+  way: it is the piece that has to start reliably on someone else's machine.
+
+## When a harness changes
+
+Unit tests will not catch this. Every quirk in the tables above was found by running a real agent,
+and the fakes in `bridge/test/` only lock in what was already learned.
+
+1. Run the harness for real: create a session, send a prompt, watch the reply stream, run a prompt
+   that uses a **tool**, and stop a run.
+2. Check whether a tool call actually did something. "Reported success and changed nothing" is the
+   signature failure here.
+3. Reopen a session and confirm the history is intact and in order.
+4. Compare what you see against this file's tables, and update them in the same commit as the fix.
+5. Update the capability matrix in `bridge/src/harness-profiles.js` if the harness gained or lost
+   something.
+
+For a version bump of the PI adapter specifically, the pin in `harness-profiles.js` is deliberate:
+change it consciously, run the checks above, then commit the new pin.

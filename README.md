@@ -13,6 +13,9 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 | Oh My Pi (OMP) | supported | through the local bridge included in this repository |
 | [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
 
+What each harness actually provides, the assumptions the code makes about it, and what to re-check
+when one of them changes are recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
+
 Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), and [PI](#pi-bridge-setup) sections below document the setup and per-backend limitations.
 
 > **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.

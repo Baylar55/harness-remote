@@ -1,9 +1,9 @@
 # Contributing to Harness Remote
 
 Thanks for wanting to work on this. Harness Remote is a companion app for driving coding-agent
-harnesses from a phone. It is deliberately harness-agnostic: OpenCode and Oh My Pi (OMP) are
-supported today, PI is planned. Adding a harness should mean adding a backend entry and its setup
-section, never a special case threaded through the app.
+harnesses from a phone. It is deliberately harness-agnostic: OpenCode, Oh My Pi (OMP) and PI are
+supported today. Adding a harness should mean adding a profile entry and its setup section, never a
+special case threaded through the app.
 
 This document is long on purpose. Read the section that matches what you are touching, or all of it
 if you are having an agent do the work.
@@ -15,7 +15,7 @@ if you are having an agent do the work.
 | `web/` | The app: React + TypeScript + Vite, packaged for Android with Capacitor |
 | `web/src/` | Application source. `App.tsx` holds most of the UI, `api.ts` the HTTP client, `i18n.ts` the translations |
 | `web/native-android/` | Java sources copied into the generated Android project — see [Android packaging](#android-packaging) |
-| `bridge/` | A local HTTP/SSE server that translates the app's API to OMP's ACP stdio protocol |
+| `bridge/` | A local HTTP/SSE server translating the app's API to ACP over stdio, for OMP and PI. Per-harness launch commands and capabilities live in `src/harness-profiles.js` |
 | `.github/workflows/` | Cloud APK and AAB builds |
 | `OMP-INTEGRATION-PLAN.md` | Design notes and findings from the OMP integration, in Italian |
 
@@ -23,7 +23,7 @@ if you are having an agent do the work.
 
 - **Node.js 20 or newer.** `web/` needs `npm install`; `bridge/` has no dependencies at all and
   runs on the standard library, so do not look for a lockfile there.
-- **A harness to talk to.** Either an OpenCode server or a working `omp` command. You can develop
+- **A harness to talk to.** An OpenCode server, a working `omp` command, or PI. You can develop
   UI-only changes without one, but see [Test against a real agent](#test-against-a-real-agent)
   before assuming that is enough.
 - **No Android SDK required.** CI builds the APK. You only need one for local native debugging.
@@ -160,6 +160,10 @@ the fakes could have caught. Observed with OMP 17.1.3:
 - its session listings carry no title, so every session rendered with the same placeholder;
 - it does not emit ACP `agent_plan`, so the plan panel stays empty;
 - it approves its own tool calls and sends no permission requests.
+
+Every quirk found this way is recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md), together with
+what breaks if it changes. Read it before touching a harness integration, and update it in the same
+commit when you learn something new.
 
 The fakes in `bridge/test/` exist to keep fixed behaviour fixed. They are not evidence about how an
 agent behaves. When you add support for something, drive it with the real thing at least once, then
