@@ -1815,14 +1815,20 @@ button.compact {
   line-height: 1;
 }
 
+/* Full opacity is the default: dimming it is a hover affordance, and a finger never hovers. */
 .detail-title-row .btn-icon {
-  opacity: 0.6;
   transition: opacity 0.15s;
 }
 
-.detail-title-row:hover .btn-icon,
-.detail-title-row .btn-icon:focus-visible {
-  opacity: 1;
+@media (hover: hover) {
+  .detail-title-row .btn-icon {
+    opacity: 0.6;
+  }
+
+  .detail-title-row:hover .btn-icon,
+  .detail-title-row .btn-icon:focus-visible {
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1935,4 +1941,29 @@ button.compact {
   .brand-server {
     font-size: 0.76rem;
   }
+}
+
+/* Touch tuning. Android paints its own blue flash over a tap, which fights the pressed state
+   the buttons already have, and a scroll that reaches the end of a list should not start
+   dragging the page underneath it. */
+button,
+.session-card,
+.context-chip,
+.model-option,
+.folder-row,
+.message-diff-row {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.messages,
+.model-option-list,
+.folder-list,
+.bottom-sheet,
+.diff-modal-body {
+  overscroll-behavior: contain;
+}
+
+/* A sheet is dismissed from a small button, so it has to be reachable by thumb. */
+button.compact {
+  min-height: 44px;
 }

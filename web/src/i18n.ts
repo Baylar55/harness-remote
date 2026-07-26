@@ -15,7 +15,6 @@ type TranslationKey =
   | 'settings.backend'
   | 'settings.host'
   | 'settings.hostPlaceholder'
-  | 'settings.hostHint'
   | 'settings.port'
   | 'settings.username'
   | 'settings.password'
@@ -229,7 +228,6 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': 'Backend',
     'settings.host': 'Host Address',
     'settings.hostPlaceholder': '192.168.1.100, localhost, or https://example.com',
-    'settings.hostHint': "Use the computer's IP address. http:// is optional and only needed as https:// for a TLS server. A Windows computer name such as MY-PC usually cannot be resolved from a phone.",
     'settings.port': 'Port',
     'settings.username': 'Username',
     'settings.password': 'Password',
@@ -299,7 +297,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.loading': 'Loading session...',
     'detail.emptyTitle': 'No messages yet',
     'detail.emptyHint': 'Start a conversation below',
-    'detail.composerPlaceholder': 'Type a prompt or command (start with / for slash commands)...',
+    'detail.composerPlaceholder': 'Prompt, or / for commands',
     'detail.externalSession': 'From another client; sending continues it here',
     'detail.waiting': 'Waiting...',
     'detail.send': 'Send',
@@ -442,7 +440,6 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': 'Backend',
     'settings.host': 'Indirizzo host',
     'settings.hostPlaceholder': '192.168.1.100, localhost o https://example.com',
-    'settings.hostHint': "Usa l'indirizzo IP del computer. http:// è facoltativo e serve solo come https:// per un server TLS. Un nome di computer Windows come MIO-PC di solito non è risolvibile dal telefono.",
     'settings.port': 'Porta',
     'settings.username': 'Username',
     'settings.password': 'Password',
@@ -512,7 +509,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.loading': 'Caricamento sessione...',
     'detail.emptyTitle': 'Ancora nessun messaggio',
     'detail.emptyHint': 'Inizia una conversazione qui sotto',
-    'detail.composerPlaceholder': 'Scrivi un prompt o un comando (inizia con / per gli slash command)...',
+    'detail.composerPlaceholder': 'Prompt, o / per i comandi',
     'detail.externalSession': 'Da un altro client; inviando la continui qui',
     'detail.waiting': 'Attesa...',
     'detail.send': 'Invia',
@@ -655,7 +652,6 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': '後端',
     'settings.host': '主機位址',
     'settings.hostPlaceholder': '192.168.1.100、localhost 或 https://example.com',
-    'settings.hostHint': '請使用電腦的 IP 位址。http:// 可省略，僅在使用 TLS 伺服器時需寫成 https://。像 MY-PC 這樣的 Windows 電腦名稱通常無法從手機解析。',
     'settings.port': '連接埠',
     'settings.username': '使用者名稱',
     'settings.password': '密碼',
@@ -725,7 +721,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.loading': '載入工作階段...',
     'detail.emptyTitle': '尚無訊息',
     'detail.emptyHint': '在下方開始對話',
-    'detail.composerPlaceholder': '輸入提示或命令（以 / 開頭使用斜線命令）...',
+    'detail.composerPlaceholder': '輸入提示，或以 / 下命令',
     'detail.externalSession': '來自其他用戶端；傳送後將在此繼續',
     'detail.waiting': '等待中...',
     'detail.send': '傳送',

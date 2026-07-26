@@ -48,6 +48,17 @@ function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
   return backend === "omp" || backend === "pi"
 }
 
+/**
+ * A session card showed the whole absolute path, which on a phone wrapped to three lines and
+ * took a third of the card. The last segments are what identifies a project; the full path stays
+ * in the title attribute and in the session detail.
+ */
+function shortDirectory(directory: string): string {
+  const segments = directory.split(/[\\/]+/).filter(Boolean)
+  if (segments.length <= 2) return directory
+  return `…/${segments.slice(-2).join("/")}`
+}
+
 function backendDisplayName(backend: ServerConfig["backend"]): string {
   if (backend === "omp") return "Oh My Pi"
   if (backend === "pi") return "PI"
@@ -2600,6 +2611,11 @@ function App() {
               value={draftConfig.host}
               onChange={(event) => setDraftConfig({ ...draftConfig, host: event.target.value })}
               placeholder={t('settings.hostPlaceholder')}
+              inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="off"
             />
           </label>
           
@@ -2611,6 +2627,8 @@ function App() {
               value={draftConfig.port}
               onChange={(event) => setDraftConfig({ ...draftConfig, port: Number(event.target.value || 0) })}
               placeholder="4096"
+              inputMode="numeric"
+              autoComplete="off"
             />
           </label>
           
@@ -2621,6 +2639,10 @@ function App() {
               value={draftConfig.username}
               onChange={(event) => setDraftConfig({ ...draftConfig, username: event.target.value })}
               placeholder="opencode"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="username"
             />
           </label>
           
@@ -2632,6 +2654,7 @@ function App() {
               value={draftConfig.password}
               onChange={(event) => setDraftConfig({ ...draftConfig, password: event.target.value })}
               placeholder={t('settings.passwordPlaceholder')}
+              autoComplete="current-password"
             />
           </label>
           </div>
@@ -2781,6 +2804,9 @@ function App() {
                               }
                             }}
                             placeholder={t('session.renamePlaceholder')}
+                            enterKeyHint="done"
+                            autoCorrect="off"
+                            spellCheck={false}
                             className="rename-input"
                             autoComplete="off"
                           />
@@ -2809,18 +2835,17 @@ function App() {
                       ) : (
                         <h3>{session.title}</h3>
                       )}
-                      <p>{session.directory}</p>
+                      <p title={session.directory}>{shortDirectory(session.directory)}</p>
                     </div>
                   </div>
                   <div className="session-stats">
-                    {session.files > 0 || session.additions > 0 || session.deletions > 0 ? (
+                    {/* "No file changes" is said by its absence: one line fewer on a phone. */}
+                    {(session.files > 0 || session.additions > 0 || session.deletions > 0) && (
                       <span className="change-summary">
                         <strong>{session.files}</strong> files
                         <strong className="positive">+{session.additions}</strong>
                         <strong className="negative">-{session.deletions}</strong>
                       </span>
-                    ) : (
-                      <span className="subtle">{t('sessions.noFileChanges')}</span>
                     )}
                     <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
                     <span className={`pill ${session.status}`}>{session.status}</span>
@@ -3082,6 +3107,9 @@ function App() {
               value={composer}
               onChange={(event) => setComposer(event.target.value)}
               placeholder={t('detail.composerPlaceholder')}
+              enterKeyHint="send"
+              autoCapitalize="sentences"
+              autoCorrect="on"
               onFocus={() => {
                 syncChatBottomClearance()
                 setTimeout(() => scrollMessagesToBottom("smooth"), 400)
@@ -3181,6 +3209,10 @@ function App() {
                         value={modelQuery}
                         onChange={(event) => setModelQuery(event.target.value)}
                         placeholder={t('detail.modelSearchPlaceholder')}
+                        inputMode="search"
+                        enterKeyHint="search"
+                        autoCapitalize="none"
+                        spellCheck={false}
                         disabled={isWorking}
                         autoComplete="off"
                       />

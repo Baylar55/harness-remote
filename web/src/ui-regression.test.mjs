@@ -184,4 +184,21 @@ for (const cls of ['.harness-badge', '.harness-omp', '.harness-pi', '.brand-serv
 }
 assert.match(styles, /\.brand-server[\s\S]*?text-overflow: ellipsis/, 'a long address must truncate rather than push the badge off screen')
 
+// Mobile keyboard: an address is not a sentence, a port is a number, and Enter sends.
+assert.ok(app.includes('inputMode="url"') && app.includes('autoCapitalize="none"'), 'the host field must not be autocapitalised or autocorrected')
+assert.ok(app.includes('inputMode="numeric"'), 'the port field should raise a numeric keypad')
+assert.ok(app.includes('autoComplete="username"') && app.includes('autoComplete="current-password"'), 'credentials should be offerable by a password manager')
+assert.ok(app.includes('enterKeyHint="send"'), "the composer's action key should say send")
+
+// A session card showed a full absolute path over three lines, a third of its height.
+assert.ok(app.includes('function shortDirectory'), 'the card should shorten the directory it shows')
+assert.ok(app.includes('<p title={session.directory}>{shortDirectory(session.directory)}</p>'), 'the full path should stay available as a title')
+assert.equal(app.includes("t('sessions.noFileChanges')"), false, 'absence of changes needs no line of its own on a phone')
+
+// Hover is not a state a finger can produce.
+assert.match(styles, /@media \(hover: hover\)[\s\S]*?\.detail-title-row \.btn-icon/, 'a hover-only affordance must not leave a control dimmed on touch')
+assert.ok(styles.includes('-webkit-tap-highlight-color: transparent'), 'the platform tap flash should not fight the pressed state')
+assert.ok(styles.includes('overscroll-behavior: contain'), 'scrolling to the end of a list should not drag the page')
+assert.match(styles, /button\.compact \{[\s\S]*?min-height: 44px/, 'a compact button is still a thumb target')
+
 console.log('ui regression tests passed')
