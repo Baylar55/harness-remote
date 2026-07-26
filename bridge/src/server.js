@@ -134,7 +134,15 @@ export function createBridgeServer({ config, acp }) {
         })
         response.write(": connected\n\n")
         const unsubscribe = omp.subscribe((event) => writeSSE(response, event.type, event))
-        request.on("close", unsubscribe)
+        // Clients treat a long silence as a dead connection, because a TCP stream can die
+        // without ever delivering an error. OpenCode beats every 10s; without matching it an
+        // idle OMP session looks broken and the client reconnects on a loop.
+        const heartbeat = setInterval(() => response.write(": ping\n\n"), config.heartbeatMs ?? 10_000)
+        heartbeat.unref?.()
+        request.on("close", () => {
+          clearInterval(heartbeat)
+          unsubscribe()
+        })
         return
       }
       if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session" || url.pathname === "/experimental/session")) {
