@@ -138,4 +138,17 @@ assert.ok(app.includes('const showStopAction = isWorking && !composer.trim()'), 
 assert.equal(app.includes('disabled={!selectedSession || isWorking}'), false, 'the composer must stay usable while the agent works')
 assert.ok(app.includes('onClick={showStopAction ? abortSession : send}'), 'the action button should send a queued follow-up instead of only stopping')
 
+// A run bubble merges action groups that a message boundary split apart. Consecutive replies with
+// nothing groupable in them must stay separate, or two answers to two queued prompts render as one.
+const groupRenderer = app.slice(app.indexOf('function groupRenderedMessages'), app.indexOf('function ConversationRunView'))
+assert.ok(groupRenderer, 'consecutive assistant messages should be grouped for rendering')
+assert.ok(
+  groupRenderer.includes('!buffer.some((message) => message.parts.some((part) => ACTION_GROUP_TYPES.has(part.type)))'),
+  'a run must only form when the buffered messages actually contain groupable parts'
+)
+assert.ok(
+  groupRenderer.includes('for (const message of buffer) groups.push({ kind: "message", message })'),
+  'text-only replies must each keep their own bubble'
+)
+
 console.log('ui regression tests passed')
