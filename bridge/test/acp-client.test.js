@@ -148,6 +148,25 @@ test("answers agent-initiated requests instead of leaving them unresolved", asyn
   client.close()
 })
 
+test("reports why the adapter died instead of only its exit code", async () => {
+  // The PI ACP adapter requires Bun, and when it is missing the shell explains that on
+  // stderr while the exit code alone says nothing. Windows wraps the message over two
+  // lines, so a single trailing line would drop the part that names the missing command.
+  const child = new FakeChild((current, request) => {
+    if (request.method !== "initialize") return
+    current.stderr.emit("data", '"bun" is not recognized as an internal or external command,\n')
+    current.stderr.emit("data", "operable program or batch file.\n")
+    current.emit("exit", 1, null)
+  })
+  const client = new AcpClient({ spawnProcess: () => child })
+
+  await assert.rejects(client.start(), (error) => {
+    assert.match(error.message, /ACP adapter exited \(1\)/)
+    assert.match(error.message, /"bun" is not recognized/, "the failing prerequisite must reach the caller")
+    return true
+  })
+})
+
 test("rejects an in-flight request when ACP exits", async () => {
   const child = new FakeChild((current, request) => {
     respondToHandshake(current, request)
