@@ -357,6 +357,19 @@ p {
   margin-top: var(--space-4);
 }
 
+/* Settings only ever puts one button (Test connection) in .actions, so it should span the row
+   instead of sitting in the first half of a two-column grid meant for pairs of buttons. */
+.settings .actions,
+.settings .connection-help {
+  grid-template-columns: 1fr;
+}
+
+/* Password is the seventh (odd) field in the two-column form-grid, so it lands alone in the
+   last row occupying only the first column — span the full row instead. */
+.settings .form-grid label[for="password"] {
+  grid-column: 1 / -1;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1604,6 +1617,218 @@ button.compact {
     opacity: 1;
     transform: translateY(-4px);
   }
+}
+
+/* Desktop-only left sidebar, replacing the top header bar above the 780px breakpoint. The
+   sidebar element only exists in the DOM when App.tsx's isDesktop check is true, so this rule
+   never touches layout on mobile. */
+.desktop-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  flex: 0 0 280px;
+  position: sticky;
+  top: var(--space-4);
+  align-self: flex-start;
+  max-height: calc(100dvh - var(--space-4) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--nav-bg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.sidebar-brand .brand-text {
+  min-width: 0;
+}
+
+.sidebar-brand h1,
+.sidebar-brand .subtle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-toolbar .search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-sessions {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sidebar-empty {
+  padding: var(--space-3);
+}
+
+/* Desktop sidebar sessions render as compact single-line rows rather than the card grid the
+   mobile sessions panel uses — same markup (renderSessionCard), scoped override here. */
+.sidebar-sessions {
+  gap: 2px;
+}
+
+.sidebar-sessions .session-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "title  actions"
+    "meta   actions";
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+/* On desktop the pill is dropped in favor of a left-border flag: a session is assumed idle
+   unless it's actively busy/retrying, which is the only state worth calling out at a glance. */
+.sidebar-sessions .session-card.busy,
+.sidebar-sessions .session-card.retry {
+  border-left-color: var(--warning);
+}
+
+.sidebar-sessions .session-card:hover,
+.sidebar-sessions .session-card:focus-visible {
+  background: var(--surface-subtle);
+  box-shadow: none;
+}
+
+.sidebar-sessions .session-card.active {
+  background: var(--primary-soft);
+}
+
+.sidebar-sessions .session-card-main {
+  grid-area: title;
+  display: block;
+  min-width: 0;
+}
+
+.sidebar-sessions .session-card-main > div {
+  min-width: 0;
+}
+
+.sidebar-sessions .session-card h3 {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-sessions .session-card-main p,
+.sidebar-sessions .session-card > p {
+  display: none;
+}
+
+/* .session-stats becomes a transparent box so its children (the "updated" timestamp and the
+   status pill) can be placed directly into the row's grid areas, next to the title. */
+.sidebar-sessions .session-stats {
+  display: contents;
+}
+
+.sidebar-sessions .session-stats .change-summary {
+  display: none;
+}
+
+.sidebar-sessions .session-stats > .subtle {
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+
+.sidebar-sessions .session-stats .pill {
+  display: none;
+}
+
+.sidebar-sessions .inline-actions {
+  grid-area: actions;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.sidebar-sessions .inline-actions button {
+  font-size: 0;
+  padding: var(--space-1);
+  gap: 0;
+}
+
+.sidebar-footer {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-footer button {
+  flex: 1 1 0;
+  justify-content: center;
+}
+
+.app-shell-desktop {
+  flex-direction: row;
+  align-items: flex-start;
+  width: min(100%, 1400px);
+}
+
+.main-content {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.desktop-panel-modal {
+  position: relative;
+  width: min(92vw, 720px);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.desktop-panel-modal > .panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.desktop-modal-close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  padding: var(--space-2);
 }
 
 @media (max-width: 780px) {

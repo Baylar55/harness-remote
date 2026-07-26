@@ -512,6 +512,51 @@ function Modal({
   )
 }
 
+/** Wraps children with `wrapper(children)` only when `condition` holds, otherwise renders children
+ *  as-is. Lets a panel's body be written once and reused unmodified in both its mobile inline form
+ *  and its desktop modal form. */
+function ConditionalWrapper({
+  condition,
+  wrapper,
+  children
+}: {
+  condition: boolean
+  wrapper: (children: ReactNode) => ReactNode
+  children: ReactNode
+}) {
+  return <>{condition ? wrapper(children) : children}</>
+}
+
+/** Desktop-only modal shell for panels (settings, help) that already render their own heading —
+ *  unlike Modal, it has no title bar of its own, just a close affordance, so the panel's existing
+ *  content isn't duplicated under a second title. */
+function DesktopModalOverlay({
+  onClose,
+  ariaLabel,
+  children
+}: {
+  onClose: () => void
+  ariaLabel: string
+  children: ReactNode
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal-card desktop-panel-modal fade-in"
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button type="button" className="btn-secondary desktop-modal-close" onClick={onClose} aria-label={ariaLabel}>
+          <CloseIcon size={16} />
+        </button>
+        {children}
+      </section>
+    </div>
+  )
+}
+
 function QuestionCard({
   config,
   directory,
@@ -1435,6 +1480,18 @@ function App() {
   const [view, setView] = useState<"settings" | "sessions" | "detail" | "help">(() => {
     return config.host && config.port > 0 ? "sessions" : "settings"
   })
+  // Desktop gets a persistent left sidebar instead of the mobile top bar/bottom nav; this mirrors
+  // the existing 780px CSS breakpoint so JS layout and stylesheet layout never disagree.
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia("(min-width: 781px)").matches)
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 781px)")
+    const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches)
+    query.addEventListener("change", onChange)
+    return () => query.removeEventListener("change", onChange)
+  }, [])
+  // On desktop the sidebar always shows sessions, so the main pane falls back to the chat view
+  // instead of duplicating the session list there.
+  const mainView = isDesktop && view === "sessions" ? "detail" : view
 
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [selectedID, setSelectedID] = useState<string | null>(null)
@@ -2516,6 +2573,128 @@ function App() {
     wasRunningRef.current = ["busy", "retry"].includes(selectedSession.status)
   }, [selectedSession?.id, selectedSession?.status])
 
+  // Shared between the mobile sessions panel and the desktop sidebar so both list sessions
+  // identically instead of maintaining two copies of this markup.
+  const renderSessionCard = (session: SessionView) => (
+    <article
+      key={session.id}
+      className={`session-card ${session.status} ${selectedID === session.id ? "active" : ""} fade-in`}
+      onClick={() => openSession(session.id, session.directory).catch(() => undefined)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          openSession(session.id, session.directory).catch(() => undefined)
+        }
+      }}
+    >
+      <div className="session-card-main">
+        <div>
+          {renamingSessionID === session.id ? (
+            <div
+              className="rename-inline"
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation()
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    renameSession(session.id, renameValue, session.directory).catch(() => undefined)
+                  } else if (event.key === "Escape") {
+                    cancelRename()
+                  }
+                }}
+                onBlur={() => {
+                  // Only cancel if not clicked on save button
+                  if (renameValue === session.title || !renameValue.trim()) {
+                    cancelRename()
+                  }
+                }}
+                placeholder={t('session.renamePlaceholder')}
+                enterKeyHint="done"
+                autoCorrect="off"
+                spellCheck={false}
+                className="rename-input"
+                autoComplete="off"
+              />
+              <button
+                className="btn-primary compact"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  renameSession(session.id, renameValue, session.directory).catch(() => undefined)
+                }}
+                onMouseDown={(event) => event.preventDefault()}
+                title={t('session.renameConfirm')}
+              >
+                <SaveIcon size={14} />
+              </button>
+              <button
+                className="btn-secondary compact"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  cancelRename()
+                }}
+                title={t('session.cancel')}
+              >
+                <CloseIcon size={14} />
+              </button>
+            </div>
+          ) : (
+            <h3 title={session.title}>{session.title}</h3>
+          )}
+          <p title={session.directory}>{shortDirectory(session.directory)}</p>
+        </div>
+      </div>
+      <div className="session-stats">
+        {/* "No file changes" is said by its absence: one line fewer on a phone. */}
+        {(session.files > 0 || session.additions > 0 || session.deletions > 0) && (
+          <span className="change-summary">
+            <strong>{session.files}</strong> files
+            <strong className="positive">+{session.additions}</strong>
+            <strong className="negative">-{session.deletions}</strong>
+          </span>
+        )}
+        <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
+        <span className={`pill ${session.status}`}>{session.status}</span>
+      </div>
+      <div className="inline-actions">
+        {capabilities.sessionRename && capabilities.sessionDelete && (
+          <>
+            <button
+              className="btn-secondary"
+              onClick={(event) => {
+                event.stopPropagation()
+                startRename(session)
+              }}
+              title={t('session.renameTitle')}
+              aria-label={t('session.renameTitle')}
+            >
+              <PencilIcon size={16} />
+              {t('session.renameConfirm')}
+            </button>
+            <button
+              className="btn-danger"
+              onClick={(event) => {
+                event.stopPropagation()
+                setSessionToDelete(session)
+              }}
+              title={t('sessions.delete')}
+            >
+              <TrashIcon size={16} />
+              {t('sessions.delete')}
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  )
+
   const navItems = [
     { view: "sessions" as const, label: t('nav.sessions'), icon: <FolderIcon size={19} />, disabled: !hasConfiguredServer },
     { view: "detail" as const, label: t('nav.detail'), icon: <ChatIcon size={19} />, disabled: !selectedSession },
@@ -2524,15 +2703,36 @@ function App() {
   ]
 
   return (
-    <div className="app-shell">
-      <header className="top-nav fade-in">
-        <div className="brand-section">
-          <div className="brand-title">
+    <div className={`app-shell${isDesktop ? " app-shell-desktop" : ""}`}>
+      {!isDesktop && (
+        <header className="top-nav fade-in">
+          <div className="brand-section">
+            <div className="brand-title">
+              <img src="/app-icon.png" alt="" className="app-icon" />
+              <div className="brand-text">
+                <h1>{t('app.title')}</h1>
+                {/* The harness matters more than the address: the same host can serve a different
+                    one, and every backend-specific limitation follows from which it is. */}
+                <p className="brand-meta">
+                  <span className={`harness-badge harness-${config.backend}`}>
+                    {backendDisplayName(config.backend)}
+                  </span>
+                  <span className="brand-server">
+                    {hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.title')}
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </header>
+      )}
+
+      {isDesktop && (
+        <aside className="desktop-sidebar fade-in">
+          <div className="sidebar-brand">
             <img src="/app-icon.png" alt="" className="app-icon" />
             <div className="brand-text">
               <h1>{t('app.title')}</h1>
-              {/* The harness matters more than the address: the same host can serve a different
-                  one, and every backend-specific limitation follows from which it is. */}
               <p className="brand-meta">
                 <span className={`harness-badge harness-${config.backend}`}>
                   {backendDisplayName(config.backend)}
@@ -2543,25 +2743,67 @@ function App() {
               </p>
             </div>
           </div>
-        </div>
 
-        <nav className="desktop-nav tab-row" role="navigation" aria-label="Main navigation">
-          {navItems.map((item) => (
+          <div className="sidebar-toolbar">
+            <input
+              placeholder={t('sessions.searchPlaceholder')}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="search"
+            />
             <button
-              key={item.view}
-              className={view === item.view ? "active" : ""}
-              onClick={() => setView(item.view)}
-              disabled={item.disabled}
-              aria-label={item.label}
+              onClick={refreshSessionsWithIndicator}
+              className="btn-secondary"
+              disabled={refreshingSessions}
+              aria-label={t('sessions.refresh')}
+              title={t('sessions.refresh')}
             >
-              {item.icon}
-              <span>{item.label}</span>
+              {refreshingSessions ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
             </button>
-          ))}
-        </nav>
-      </header>
+            <button
+              onClick={openNewSessionPicker}
+              className="btn-primary"
+              disabled={creatingSession || isOffline}
+              aria-label={t('sessions.new')}
+              title={isOffline ? t('sessions.offlineHint') : t('sessions.new')}
+            >
+              {creatingSession ? <LoadingIcon size={16} /> : <PlusIcon size={16} />}
+            </button>
+          </div>
 
-      {view === "settings" && (
+          <div className="sidebar-sessions">
+            {filteredSessions.length === 0 ? (
+              <p className="subtle sidebar-empty">
+                {isOffline ? t('sessions.offlineHint') : t('sessions.emptyTitle')}
+              </p>
+            ) : (
+              filteredSessions.map(renderSessionCard)
+            )}
+          </div>
+
+          <div className="sidebar-footer">
+            <button type="button" className="btn-secondary" onClick={() => setView("help")}>
+              <HelpIcon size={18} />
+              {t('nav.help')}
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => setView("settings")}>
+              <SettingsIcon size={18} />
+              {t('nav.settings')}
+            </button>
+          </div>
+        </aside>
+      )}
+
+      <div className="main-content">
+      {mainView === "settings" && (
+        <ConditionalWrapper
+          condition={isDesktop}
+          wrapper={(children) => (
+            <DesktopModalOverlay onClose={() => setView("detail")} ariaLabel={t('settings.title')}>
+              {children}
+            </DesktopModalOverlay>
+          )}
+        >
         <section className="panel settings fade-in">
           <div className="section-heading">
             <div>
@@ -2710,9 +2952,10 @@ function App() {
             </div>
           )}
         </section>
+        </ConditionalWrapper>
       )}
 
-      {view === "sessions" && (
+      {mainView === "sessions" && (
         <section className="panel sessions fade-in">
           <div className="section-heading">
             <div>
@@ -2799,128 +3042,10 @@ function App() {
                 <p className="subtle">{t('sessions.emptyHint')}</p>
               </div>
             ) : (
-              filteredSessions.map((session) => (
-                <article 
-                  key={session.id} 
-                  className={`session-card ${selectedID === session.id ? "active" : ""} fade-in`}
-                  onClick={() => openSession(session.id, session.directory).catch(() => undefined)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      openSession(session.id, session.directory).catch(() => undefined)
-                    }
-                  }}
-                >
-                  <div className="session-card-main">
-                    <div>
-                      {renamingSessionID === session.id ? (
-                        <div
-                          className="rename-inline"
-                          onClick={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                        >
-                          <input
-                            ref={renameInputRef}
-                            value={renameValue}
-                            onChange={(event) => setRenameValue(event.target.value)}
-                            onKeyDown={(event) => {
-                              event.stopPropagation()
-                              if (event.key === "Enter") {
-                                event.preventDefault()
-                                renameSession(session.id, renameValue, session.directory).catch(() => undefined)
-                              } else if (event.key === "Escape") {
-                                cancelRename()
-                              }
-                            }}
-                            onBlur={() => {
-                              // Only cancel if not clicked on save button
-                              if (renameValue === session.title || !renameValue.trim()) {
-                                cancelRename()
-                              }
-                            }}
-                            placeholder={t('session.renamePlaceholder')}
-                            enterKeyHint="done"
-                            autoCorrect="off"
-                            spellCheck={false}
-                            className="rename-input"
-                            autoComplete="off"
-                          />
-                          <button
-                            className="btn-primary compact"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              renameSession(session.id, renameValue, session.directory).catch(() => undefined)
-                            }}
-                            onMouseDown={(event) => event.preventDefault()}
-                            title={t('session.renameConfirm')}
-                          >
-                            <SaveIcon size={14} />
-                          </button>
-                          <button
-                            className="btn-secondary compact"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              cancelRename()
-                            }}
-                            title={t('session.cancel')}
-                          >
-                            <CloseIcon size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <h3>{session.title}</h3>
-                      )}
-                      <p title={session.directory}>{shortDirectory(session.directory)}</p>
-                    </div>
-                  </div>
-                  <div className="session-stats">
-                    {/* "No file changes" is said by its absence: one line fewer on a phone. */}
-                    {(session.files > 0 || session.additions > 0 || session.deletions > 0) && (
-                      <span className="change-summary">
-                        <strong>{session.files}</strong> files
-                        <strong className="positive">+{session.additions}</strong>
-                        <strong className="negative">-{session.deletions}</strong>
-                      </span>
-                    )}
-                    <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
-                    <span className={`pill ${session.status}`}>{session.status}</span>
-                  </div>
-                  <div className="inline-actions">
-                    {capabilities.sessionRename && capabilities.sessionDelete && (
-                      <>
-                        <button
-                          className="btn-secondary"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            startRename(session)
-                          }}
-                          title={t('session.renameTitle')}
-                          aria-label={t('session.renameTitle')}
-                        >
-                          <PencilIcon size={16} />
-                          {t('session.renameConfirm')}
-                        </button>
-                        <button
-                          className="btn-danger"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setSessionToDelete(session)
-                          }}
-                          title={t('sessions.delete')}
-                        >
-                          <TrashIcon size={16} />
-                          {t('sessions.delete')}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              ))
+              filteredSessions.map(renderSessionCard)
             )}
           </div>
-          
+
           {/* The offline empty state already explains this and offers the two useful actions;
               repeating the raw transport error underneath is the second voice again. */}
           {runtimeError && !(isOffline && filteredSessions.length === 0) && (
@@ -2985,13 +3110,15 @@ function App() {
         </div>
       )}
 
-      {view === "detail" && (
+      {mainView === "detail" && (
         <main className="panel detail fade-in">
           <div className="detail-topbar">
-            <button className="btn-secondary" onClick={() => {
-              setView("sessions");
-              requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
-            }}>{t('detail.backToSessions')}</button>
+            {!isDesktop && (
+              <button className="btn-secondary" onClick={() => {
+                setView("sessions");
+                requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
+              }}>{t('detail.backToSessions')}</button>
+            )}
             {selectedSession && (
               <span className={`pill ${selectedSession.status}`}>{selectedSession.status}</span>
             )}
@@ -3377,7 +3504,15 @@ function App() {
         </div>
       )}
 
-      {view === "help" && (
+      {mainView === "help" && (
+        <ConditionalWrapper
+          condition={isDesktop}
+          wrapper={(children) => (
+            <DesktopModalOverlay onClose={() => setView("detail")} ariaLabel={t('help.title')}>
+              {children}
+            </DesktopModalOverlay>
+          )}
+        >
         <section className="panel help fade-in">
           <h2>
             <HelpIcon size={24} className="icon-inline-heading" />
@@ -3609,7 +3744,9 @@ http://YOUR_PC_IP:4096/global/health</pre>
           )}
           {runtimeError && <p className="error">{runtimeError}</p>}
         </section>
+        </ConditionalWrapper>
       )}
+      </div>
 
       <nav className="bottom-nav" role="navigation" aria-label="Mobile navigation">
         {navItems.map((item) => (
