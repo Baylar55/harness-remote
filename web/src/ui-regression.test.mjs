@@ -159,4 +159,29 @@ assert.ok(
   'text-only replies must each keep their own bubble'
 )
 
+// A model list that never arrived used to render as "loading" forever, which reads as a slow
+// server rather than a failure — the reason a misconfigured server looked like a broken feature.
+assert.ok(
+  app.includes("?? (modelLoadError ? t('detail.modelUnavailable') : t('detail.modelLoading'))"),
+  'a failed model fetch must be named, not shown as still loading'
+)
+assert.ok(
+  app.includes('activeModelOption?.modelName') && app.includes('const modelStatusLabel'),
+  'a model already known must keep showing, even if a later refresh fails'
+)
+assert.equal(
+  app.includes("activeModelOption?.modelName ?? t('detail.modelLoading')"),
+  false,
+  'every model label should go through modelStatusLabel so the failure state cannot be missed'
+)
+assert.ok(app.includes('chip-warning'), 'the context chip should mark the failure visually')
+
+// The harness in use decides what the app can do, so it is named in the header.
+assert.ok(app.includes('className={`harness-badge harness-${config.backend}`}'), 'the header should badge the active harness')
+assert.ok(app.includes('{backendDisplayName(config.backend)}'), 'the badge should show the harness display name')
+for (const cls of ['.harness-badge', '.harness-omp', '.harness-pi', '.brand-server']) {
+  assert.ok(styles.includes(cls), `${cls} should be styled`)
+}
+assert.match(styles, /\.brand-server[\s\S]*?text-overflow: ellipsis/, 'a long address must truncate rather than push the badge off screen')
+
 console.log('ui regression tests passed')
