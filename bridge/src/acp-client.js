@@ -5,7 +5,8 @@ const START_TIMEOUT_MS = 10_000
 const REQUEST_TIMEOUT_MS = 30_000
 
 export class AcpClient extends EventEmitter {
-  #ompBin
+  #command
+  #args
   #spawn
   #child
   #buffer = ""
@@ -14,9 +15,10 @@ export class AcpClient extends EventEmitter {
   #starting
   #agentInfo
 
-  constructor({ ompBin = "omp", spawnProcess = spawn } = {}) {
+  constructor({ command = "omp", args = ["acp"], spawnProcess = spawn } = {}) {
     super()
-    this.#ompBin = ompBin
+    this.#command = command
+    this.#args = args
     this.#spawn = spawnProcess
   }
 
@@ -37,7 +39,13 @@ export class AcpClient extends EventEmitter {
   }
 
   async #start() {
-    const child = this.#spawn(this.#ompBin, ["acp"], {
+    const windowsCommand = process.platform === "win32" && this.#spawn === spawn && /\.(cmd|bat)$/i.test(this.#command)
+      ? process.env.ComSpec ?? "cmd.exe"
+      : this.#command
+    const windowsArgs = windowsCommand === this.#command
+      ? this.#args
+      : ["/d", "/s", "/c", this.#command, ...this.#args]
+    const child = this.#spawn(windowsCommand, windowsArgs, {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     })
@@ -48,19 +56,19 @@ export class AcpClient extends EventEmitter {
     child.stderr.on("data", (chunk) => this.emit("stderr", chunk))
     child.on("error", (error) => this.#handleExit(error))
     child.on("exit", (code, signal) => {
-      this.#handleExit(new Error(`OMP ACP exited (${code ?? "unknown"}${signal ? `, ${signal}` : ""})`))
+      this.#handleExit(new Error(`ACP adapter exited (${code ?? "unknown"}${signal ? `, ${signal}` : ""})`))
     })
 
     try {
       const initialized = await this.request("initialize", {
         protocolVersion: 1,
         clientCapabilities: {},
-        clientInfo: { name: "harness-remote-omp", version: "0.1.7" }
+        clientInfo: { name: "harness-remote-bridge", version: "0.1.7" }
       }, START_TIMEOUT_MS)
       this.#agentInfo = initialized.agentInfo
-      const authMethod = initialized.authMethods?.find((method) => method.id === "agent")
-      if (!authMethod) throw new Error("OMP ACP does not offer local agent authentication")
-      await this.request("authenticate", { methodId: authMethod.id }, START_TIMEOUT_MS)
+      const authMethods = Array.isArray(initialized.authMethods) ? initialized.authMethods : []
+      const authMethod = authMethods.find((method) => method?.id === "agent") ?? authMethods.find((method) => method?.id)
+      if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, START_TIMEOUT_MS)
     } catch (error) {
       this.close()
       throw error
@@ -69,29 +77,29 @@ export class AcpClient extends EventEmitter {
 
   request(method, params, timeoutMs = REQUEST_TIMEOUT_MS) {
     if (!this.#child || this.#child.killed || !this.#child.stdin.writable) {
-      return Promise.reject(new Error("OMP ACP is not running"))
+      return Promise.reject(new Error("ACP adapter is not running"))
     }
     const id = this.#nextID++
     const message = JSON.stringify({ jsonrpc: "2.0", id, method, params })
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id)
-        reject(new Error(`OMP ACP request timed out: ${method}`))
+        reject(new Error(`ACP adapter request timed out: ${method}`))
       }, timeoutMs)
       this.#pending.set(id, { resolve, reject, timer })
       this.#child.stdin.write(`${message}\n`, (error) => {
-        if (!error) return
-        const pending = this.#pending.get(id)
-        if (!pending) return
-        clearTimeout(pending.timer)
-        this.#pending.delete(id)
-        pending.reject(error)
+        if (error) {
+          clearTimeout(timer)
+          this.#pending.delete(id)
+          reject(error)
+        }
       })
     })
   }
+
   notify(method, params) {
     if (!this.#child || this.#child.killed || !this.#child.stdin.writable) {
-      throw new Error("OMP ACP is not running")
+      throw new Error("ACP adapter is not running")
     }
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`)
   }
@@ -108,7 +116,7 @@ export class AcpClient extends EventEmitter {
     const child = this.#child
     this.#child = undefined
     if (child && !child.killed) child.kill()
-    this.#rejectPending(new Error("OMP ACP closed"))
+    this.#rejectPending(new Error("ACP adapter closed"))
   }
 
   #consume(chunk) {
@@ -127,12 +135,12 @@ export class AcpClient extends EventEmitter {
     try {
       message = JSON.parse(line)
     } catch {
-      this.emit("protocol-error", new Error("OMP ACP emitted invalid JSON"))
+      this.emit("protocol-error", new Error("ACP adapter emitted invalid JSON"))
       return
     }
     // A JSON-RPC message carrying both an id and a method is an agent-initiated
-    // request. OMP does not send any today, but an unanswered one would stall the
-    // agent until the prompt timeout, so always reply.
+    // request. An unanswered request would stall the agent until the prompt
+    // timeout, so always reply.
     if (message.id !== undefined && message.method) {
       this.emit("agent-request", message)
       this.#respondUnsupported(message.id, message.method)
@@ -143,7 +151,7 @@ export class AcpClient extends EventEmitter {
       if (!pending) return
       clearTimeout(pending.timer)
       this.#pending.delete(message.id)
-      if (message.error) pending.reject(new Error(message.error.message ?? "OMP ACP request failed"))
+      if (message.error) pending.reject(new Error(message.error.message ?? "ACP adapter request failed"))
       else pending.resolve(message.result)
       return
     }

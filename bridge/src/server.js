@@ -2,7 +2,7 @@ import http from "node:http"
 import { timingSafeEqual } from "node:crypto"
 import { readdir, realpath } from "node:fs/promises"
 import path from "node:path"
-import { OmpService } from "./omp-service.js"
+import { AcpService } from "./acp-service.js"
 
 const CAPABILITIES = {
   sessions: true,
@@ -14,6 +14,11 @@ const CAPABILITIES = {
   todos: true,
   diff: false,
   filesystemBrowser: false
+}
+
+const BACKEND_SERVICES = {
+  omp: (acp) => new AcpService(acp),
+  pi: (acp) => new AcpService(acp)
 }
 
 function writeJSON(response, status, body) {
@@ -74,7 +79,7 @@ async function allowedDirectory(candidate, config) {
   return resolved
 }
 
-function ompModelWireName(model) {
+function modelWireName(model) {
   if (!model) return undefined
   const modelID = model.modelID ?? model.id
   return model.providerID && modelID ? `${model.providerID}/${modelID}` : undefined
@@ -96,7 +101,10 @@ function providersResponse(models) {
 }
 
 export function createBridgeServer({ config, acp }) {
-  const omp = new OmpService(acp)
+  const backend = config.backend ?? "omp"
+  const createService = BACKEND_SERVICES[backend]
+  if (!createService) throw new Error(`Unsupported backend: ${backend}`)
+  const service = createService(acp)
   return http.createServer(async (request, response) => {
     applyCorsHeaders(request, response, config)
     // Browsers omit credentials on the preflight, so it must be answered before auth.
@@ -106,7 +114,7 @@ export function createBridgeServer({ config, acp }) {
       return
     }
     if (!matchesCredentials(request, config)) {
-      response.writeHead(401, { "WWW-Authenticate": 'Basic realm="OMP Bridge"' })
+      response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Harness Remote Bridge"' })
       response.end()
       return
     }
@@ -119,7 +127,7 @@ export function createBridgeServer({ config, acp }) {
     try {
       if (request.method === "GET" && (url.pathname === "/v1/health" || url.pathname === "/global/health")) {
         await acp.start()
-        writeJSON(response, 200, { healthy: true, backend: "omp", version: acp.agentInfo?.version ?? "unknown" })
+        writeJSON(response, 200, { healthy: true, backend, version: acp.agentInfo?.version ?? "unknown" })
         return
       }
       if (request.method === "GET" && url.pathname === "/v1/capabilities") {
@@ -133,24 +141,16 @@ export function createBridgeServer({ config, acp }) {
           Connection: "keep-alive"
         })
         response.write(": connected\n\n")
-        const unsubscribe = omp.subscribe((event) => writeSSE(response, event.type, event))
-        // Clients treat a long silence as a dead connection, because a TCP stream can die
-        // without ever delivering an error. OpenCode beats every 10s; without matching it an
-        // idle OMP session looks broken and the client reconnects on a loop.
-        const heartbeat = setInterval(() => response.write(": ping\n\n"), config.heartbeatMs ?? 10_000)
-        heartbeat.unref?.()
-        request.on("close", () => {
-          clearInterval(heartbeat)
-          unsubscribe()
-        })
+        const unsubscribe = service.subscribe((event) => writeSSE(response, event.type, event))
+        request.on("close", unsubscribe)
         return
       }
       if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session" || url.pathname === "/experimental/session")) {
-        writeJSON(response, 200, await omp.listSessions(directory))
+        writeJSON(response, 200, await service.listSessions(directory))
         return
       }
       if (request.method === "GET" && url.pathname === "/session/status") {
-        const statuses = Object.fromEntries((await omp.listSessions(directory)).map((session) => [session.id, omp.status(session.id)]))
+        const statuses = Object.fromEntries((await service.listSessions(directory)).map((session) => [session.id, service.status(session.id)]))
         writeJSON(response, 200, statuses)
         return
       }
@@ -174,7 +174,7 @@ export function createBridgeServer({ config, acp }) {
       if (request.method === "POST" && url.pathname === "/session") {
         const body = await readBody(request)
         const selected = await allowedDirectory(directory ?? config.roots[0] ?? process.cwd(), config)
-        const created = await omp.createSession({ directory: selected, title: body.title, model: ompModelWireName(body.model) })
+        const created = await service.createSession({ directory: selected, title: body.title, model: modelWireName(body.model) })
         writeJSON(response, 200, created)
         return
       }
@@ -183,11 +183,11 @@ export function createBridgeServer({ config, acp }) {
       if (sessionMatch) {
         const [, sessionID, operation] = sessionMatch
         if (request.method === "GET" && operation === "message") {
-          writeJSON(response, 200, await omp.messages(sessionID, url.searchParams.get("refresh") === "1"))
+          writeJSON(response, 200, await service.messages(sessionID, url.searchParams.get("refresh") === "1"))
           return
         }
         if (request.method === "GET" && operation === "todo") {
-          writeJSON(response, 200, await omp.todos(sessionID))
+          writeJSON(response, 200, await service.todos(sessionID))
           return
         }
         if (request.method === "GET" && operation === "diff") {
@@ -198,12 +198,12 @@ export function createBridgeServer({ config, acp }) {
           const body = await readBody(request)
           const text = body.parts?.find((part) => part.type === "text")?.text
           if (!text) throw new Error("A text prompt is required")
-          await omp.prompt(sessionID, text, ompModelWireName(body.model))
+          await service.prompt(sessionID, text, modelWireName(body.model))
           writeJSON(response, 200, true)
           return
         }
         if (request.method === "POST" && operation === "abort") {
-          omp.abort(sessionID)
+          service.abort(sessionID)
           writeJSON(response, 200, true)
           return
         }
@@ -222,7 +222,7 @@ export function createBridgeServer({ config, acp }) {
           writeJSON(response, 200, { providers: [], default: {} })
           return
         }
-        writeJSON(response, 200, providersResponse(await omp.models(sessionID)))
+        writeJSON(response, 200, providersResponse(await service.models(sessionID)))
         return
       }
       writeJSON(response, 404, { error: "Not found" })

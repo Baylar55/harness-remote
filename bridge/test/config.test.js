@@ -4,15 +4,41 @@ import { parseConfig } from "../src/config.js"
 
 test("defaults to a loopback-only unauthenticated listener", () => {
   assert.deepEqual(parseConfig([], {}), {
+    backend: "omp",
     host: "127.0.0.1",
     port: 4097,
     username: "",
     password: "",
-    ompBin: "omp",
+    acpCommand: "omp",
+    acpArgs: ["acp"],
     roots: [],
     corsOrigins: [],
     logRequests: false
   })
+})
+
+test("configures a non-OMP ACP adapter command and arguments", () => {
+  assert.deepEqual(parseConfig([
+    "--acp-command", "npx",
+    "--acp-arg", "-y",
+    "--acp-arg", "@victor-software-house/pi-acp"
+  ], {}).acpCommand, "npx")
+  assert.deepEqual(parseConfig([
+    "--acp-command", "npx",
+    "--acp-arg", "-y",
+    "--acp-arg", "@victor-software-house/pi-acp"
+  ], {}).acpArgs, ["-y", "@victor-software-house/pi-acp"])
+  assert.deepEqual(parseConfig([], {
+    OMP_BRIDGE_ACP_COMMAND: "pi-acp",
+    OMP_BRIDGE_ACP_ARGS: "[]"
+  }).acpArgs, [])
+})
+
+test("selects PI defaults for the ACP backend", () => {
+  assert.deepEqual(parseConfig(["--backend", "pi"], {}).backend, "pi")
+  assert.equal(parseConfig(["--backend", "pi"], {}).acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
+  assert.deepEqual(parseConfig(["--backend", "pi"], {}).acpArgs, ["-y", "@victor-software-house/pi-acp"])
+  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "pi" }).acpArgs, ["-y", "@victor-software-house/pi-acp"])
 })
 
 test("shares the bridge with browser origins only when asked", () => {

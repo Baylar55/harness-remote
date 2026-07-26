@@ -11,9 +11,9 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 |---|---|---|
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
 | Oh My Pi (OMP) | supported | through the local bridge included in this repository |
-| [PI](https://pi.dev/) | planned — [#36](https://github.com/giuliastro/harness-remote/issues/36) is open, help welcome | likely the same ACP bridge, via a PI ACP adapter |
+| [PI](https://pi.dev/) | supported | through the local ACP bridge and [`pi-acp`](https://github.com/victor-software-house/pi-acp) adapter |
 
-Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup) and [OMP](#oh-my-pi-bridge-setup) sections below document the setup and the per-backend limitations.
+Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), and [PI](#pi-bridge-setup) sections below document the setup and per-backend limitations.
 
 > **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
@@ -113,6 +113,19 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
+The default ACP launch is `omp acp`. The bridge can launch another ACP adapter with `--acp-command` and repeatable `--acp-arg` options, for example:
+
+```bash
+npx --yes ./bridge \
+  --acp-command npx \
+  --acp-arg -y \
+  --acp-arg @victor-software-house/pi-acp
+```
+
+The equivalent environment variables are `OMP_BRIDGE_ACP_COMMAND` and
+`OMP_BRIDGE_ACP_ARGS`, where the latter is a JSON array of strings. The
+PI setup below selects the adapter and the matching app backend automatically.
+
 The default bind address is `127.0.0.1`. Use `0.0.0.0` only for a trusted LAN or VPN. The bridge refuses a non-loopback bind without both username and password.
 
 #### Configure the app
@@ -139,7 +152,7 @@ OMP sessions expose their configured model when ACP provides it, and model chang
 A prompt sent while the agent is still working is queued rather than refused: it appears in the conversation
 straight away and runs when the current turn ends. Stopping the session discards anything still queued.
 
-Session titles come from the title you give a session in the app, otherwise from its first prompt; sessions created outside the app are listed as `OMP session <id>`, because OMP session listings carry no title.
+Session titles come from the title you give a session in the app, otherwise from its first prompt; sessions created outside the app are listed with a generated `Session <id>` title when the ACP listing carries no title.
 
 #### What `--root` does and does not restrict
 
@@ -161,6 +174,51 @@ The bridge streams `busy`, assistant chunks, todos, and completion for work star
 Use the bridge-created session for mobile-driven work. Reliable live observation and hand-off between independent OMP clients require a global session event/status API from OMP (or a relay integrated with the host harness); the bridge does not read OMP databases to simulate one.
 
 Do not expose the bridge directly to the Internet. Use Tailscale, another VPN, or a TLS-terminating reverse proxy, and open port `4097` only to the network that needs it.
+
+### PI Bridge Setup
+
+Harness Remote connects to PI through the same ACP bridge, using the community
+[`pi-acp`](https://github.com/victor-software-house/pi-acp) adapter. The bridge
+starts the adapter over stdio and translates ACP into the HTTP/SSE API used by
+the app.
+
+#### Prerequisites
+
+- Node.js 24 or newer, as required by the current PI ACP adapter;
+- Bun available in `PATH`; the current `pi-acp` package entry launches its runtime through `bun`;
+- PI provider credentials configured for the adapter;
+- a checkout of this repository on the computer that runs the bridge.
+
+Start the bridge from the repository root:
+
+```bash
+npx --yes ./bridge \
+  --backend pi \
+  --host 0.0.0.0 \
+  --port 4097 \
+  --username pi \
+  --password "use-a-long-unique-password" \
+  --root "$HOME/Software"
+```
+
+The `pi` backend defaults to `npx -y @victor-software-house/pi-acp`. Use
+`--acp-command` and repeated `--acp-arg` options if the adapter is installed
+globally or launched from a local checkout.
+
+In the app, select **PI (ACP bridge)** and enter the same host, port, username,
+and password. A successful health check reports `backend: "pi"` and the
+adapter version.
+
+PI supports session listing, history replay, streaming prompts, cancellation,
+queued follow-up prompts, and model selection. Plan/todo updates, persistent
+session rename/delete, server slash commands, and VCS/diff are not currently
+exposed through this bridge.
+
+The bridge's `--root` restriction applies to directory browsing and new-session
+selection; it is not a sandbox for PI. The adapter still runs with the full
+filesystem privileges of the account that launched it. Do not expose the
+bridge directly to the Internet; use a trusted LAN, VPN, or TLS-terminating
+reverse proxy.
 
 ## Run Locally (Web)
 
