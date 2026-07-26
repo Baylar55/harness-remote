@@ -40,6 +40,8 @@ const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
+type Translator = ReturnType<typeof createTranslator>
+
 function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
   return backend === "omp" || backend === "pi"
 }
@@ -1558,7 +1560,6 @@ function App() {
   ).length
   const totalDiffAdditions = diffFiles.reduce((sum, file) => sum + file.additions, 0)
   const totalDiffDeletions = diffFiles.reduce((sum, file) => sum + file.deletions, 0)
-  const assistantDisplayName = backendDisplayName(config.backend)
   const showModelChip = modelOptions.length > 1 || Boolean(activeModelOption) || primaryAgentOptions.length > 0
 
   async function openSession(sessionID: string, directory: string) {
@@ -2769,16 +2770,6 @@ function App() {
                     <span className={`pill ${session.status}`}>{session.status}</span>
                   </div>
                   <div className="inline-actions">
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        openSession(session.id, session.directory).catch(() => undefined)
-                      }}
-                      className="btn-primary"
-                    >
-                      <PlayIcon size={16} />
-                      {t('sessions.open')}
-                    </button>
                     {config.backend === "opencode" && (
                       <>
                         <button
