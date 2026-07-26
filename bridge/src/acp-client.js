@@ -77,8 +77,14 @@ export class AcpClient extends EventEmitter {
         clientInfo: { name: "harness-remote-bridge", version: "0.1.7" }
       }, START_TIMEOUT_MS)
       this.#agentInfo = initialized.agentInfo
+      // The bridge always runs beside a harness the user already configured, so prefer a method
+      // that uses those credentials. PI's adapter offers `anthropic-api-key` first and
+      // `pi-stored-credentials` last: picking the first would claim an API key from an
+      // environment variable that is usually unset, and fail later at inference rather than here.
       const authMethods = Array.isArray(initialized.authMethods) ? initialized.authMethods : []
-      const authMethod = authMethods.find((method) => method?.id === "agent") ?? authMethods.find((method) => method?.id)
+      const authMethod = authMethods.find((method) => method?.id === "agent")
+        ?? authMethods.find((method) => method?.id && method.type !== "env_var")
+        ?? authMethods.find((method) => method?.id)
       if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, START_TIMEOUT_MS)
     } catch (error) {
       this.close()
@@ -154,7 +160,8 @@ export class AcpClient extends EventEmitter {
     // timeout, so always reply.
     if (message.id !== undefined && message.method) {
       this.emit("agent-request", message)
-      this.#respondUnsupported(message.id, message.method)
+      if (message.method === "session/request_permission") this.#grantPermission(message)
+      else this.#respondUnsupported(message.id, message.method)
       return
     }
     if (message.id !== undefined) {
@@ -167,6 +174,26 @@ export class AcpClient extends EventEmitter {
       return
     }
     if (message.method) this.emit("notification", message)
+  }
+
+  /**
+   * Tool calls stall without an answer. OMP approves its own and never asks, so granting the
+   * same for an agent that does ask keeps the backends consistent — and matches what the
+   * bridge already is: a local agent running with the user's privileges, as the README says.
+   * Refusing instead, which is what the generic unsupported reply did, silently prevented PI
+   * from touching a single file.
+   */
+  #grantPermission(message) {
+    if (!this.#child?.stdin.writable) return
+    const options = Array.isArray(message.params?.options) ? message.params.options : []
+    const allowed = options.find((option) => option?.kind === "allow_always")
+      ?? options.find((option) => option?.kind === "allow_once")
+      ?? options.find((option) => option?.optionId)
+    const outcome = allowed?.optionId
+      ? { outcome: "selected", optionId: allowed.optionId }
+      : { outcome: "cancelled" }
+    this.emit("permission", { method: message.method, optionId: allowed?.optionId })
+    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { outcome } })}\n`)
   }
 
   #respondUnsupported(id, method) {

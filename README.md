@@ -11,7 +11,7 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 |---|---|---|
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
 | Oh My Pi (OMP) | supported | through the local bridge included in this repository |
-| [PI](https://pi.dev/) | supported | through the local ACP bridge and [`pi-acp`](https://github.com/victor-software-house/pi-acp) adapter |
+| [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
 
 Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), and [PI](#pi-bridge-setup) sections below document the setup and per-backend limitations.
 
@@ -119,7 +119,7 @@ The default ACP launch is `omp acp`. The bridge can launch another ACP adapter w
 npx --yes ./bridge \
   --acp-command npx \
   --acp-arg -y \
-  --acp-arg @victor-software-house/pi-acp
+  --acp-arg @automatalabs/pi-acp@0.2.5
 ```
 
 The equivalent environment variables are `OMP_BRIDGE_ACP_COMMAND` and
@@ -178,15 +178,18 @@ Do not expose the bridge directly to the Internet. Use Tailscale, another VPN, o
 ### PI Bridge Setup
 
 Harness Remote connects to PI through the same ACP bridge, using the community
-[`pi-acp`](https://github.com/victor-software-house/pi-acp) adapter. The bridge
-starts the adapter over stdio and translates ACP into the HTTP/SSE API used by
+[`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp)
+adapter, which embeds PI through its published SDK and speaks ACP over stdio.
+The bridge starts the adapter and translates ACP into the HTTP/SSE API used by
 the app.
 
 #### Prerequisites
 
-- Node.js 24 or newer, as required by the current PI ACP adapter;
-- Bun available in `PATH`; the current `pi-acp` package entry launches its runtime through `bun`;
-- PI provider credentials configured for the adapter;
+- Node.js 22.19 or newer, as required by the adapter. Nothing here needs Bun: the other
+  widely referenced adapter, `@victor-software-house/pi-acp`, declares `engines.bun` and shells
+  out to `bun`, which is why this project does not use it;
+- a working `pi` command, with its provider credentials already configured — the bridge
+  authenticates with PI's stored credentials rather than reading an API key from the environment;
 - a checkout of this repository on the computer that runs the bridge.
 
 Start the bridge from the repository root:
@@ -201,9 +204,11 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `pi` backend defaults to `npx -y @victor-software-house/pi-acp`. Use
-`--acp-command` and repeated `--acp-arg` options if the adapter is installed
-globally or launched from a local checkout.
+The `pi` backend defaults to `npx -y @automatalabs/pi-acp@0.2.5`. The version is pinned
+deliberately: an unpinned default failed with `notarget` when an upstream release appeared in
+the registry index before its tarball could be fetched. Use `--acp-command` and repeated
+`--acp-arg` options to track a newer adapter, or to launch one installed globally or from a
+local checkout. The first start downloads the adapter, which is why the handshake allows 90s.
 
 In the app, select **PI (ACP bridge)** and enter the same host, port, username,
 and password. A successful health check reports `backend: "pi"` and the
@@ -213,6 +218,12 @@ PI supports session listing, history replay, streaming prompts, cancellation,
 queued follow-up prompts, and model selection. Plan/todo updates, persistent
 session rename/delete, server slash commands, and VCS/diff are not currently
 exposed through this bridge.
+
+Unlike OMP, PI's adapter asks before each tool call. **The bridge grants those requests
+automatically**, choosing the broadest allow option the adapter offers, because there is no way
+to prompt you on the phone mid-turn and a refusal silently prevents PI from doing any work at
+all. The practical effect matches OMP, which approves its own tool calls without asking: an
+agent reached through this bridge edits files unattended.
 
 The bridge's `--root` restriction applies to directory browsing and new-session
 selection; it is not a sandbox for PI. The adapter still runs with the full

@@ -127,11 +127,47 @@ test("forwards ACP notifications and request errors", async () => {
   client.close()
 })
 
-test("answers agent-initiated requests instead of leaving them unresolved", async () => {
+test("grants tool permission so a tool call is not silently blocked", async () => {
+  // Verified against PI's ACP adapter: it asks before every tool call, and the generic
+  // unsupported reply meant it never touched a file while reporting success.
   const child = new FakeChild((current, request) => {
     respondToHandshake(current, request)
     if (request.method === "session/prompt") {
-      current.respond({ jsonrpc: "2.0", id: 99, method: "session/request_permission", params: { sessionId: "session-1" } })
+      current.respond({
+        jsonrpc: "2.0",
+        id: 99,
+        method: "session/request_permission",
+        params: {
+          sessionId: "session-1",
+          options: [
+            { optionId: "reject", kind: "reject_once", name: "Reject" },
+            { optionId: "once", kind: "allow_once", name: "Allow once" },
+            { optionId: "always", kind: "allow_always", name: "Always allow" }
+          ]
+        }
+      })
+      current.respond({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })
+    }
+  })
+  const client = new AcpClient({ spawnProcess: () => child })
+  const granted = []
+  client.on("permission", (event) => granted.push(event.optionId))
+  await client.start()
+
+  assert.deepEqual(await client.request("session/prompt", {}), { stopReason: "end_turn" })
+  const reply = child.writes.find((message) => message.id === 99)
+  assert.ok(reply, "a permission request must be answered")
+  assert.equal(reply.error, undefined, "answering with an error blocks the tool call")
+  assert.deepEqual(reply.result.outcome, { outcome: "selected", optionId: "always" })
+  assert.deepEqual(granted, ["always"])
+  client.close()
+})
+
+test("still declines agent-initiated requests it does not implement", async () => {
+  const child = new FakeChild((current, request) => {
+    respondToHandshake(current, request)
+    if (request.method === "session/prompt") {
+      current.respond({ jsonrpc: "2.0", id: 98, method: "fs/write_text_file", params: {} })
       current.respond({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })
     }
   })
@@ -141,9 +177,9 @@ test("answers agent-initiated requests instead of leaving them unresolved", asyn
   await client.start()
 
   assert.deepEqual(await client.request("session/prompt", {}), { stopReason: "end_turn" })
-  assert.deepEqual(observed, ["session/request_permission"])
-  const reply = child.writes.find((message) => message.id === 99)
-  assert.ok(reply, "the bridge must reply to an agent-initiated request")
+  assert.deepEqual(observed, ["fs/write_text_file"])
+  const reply = child.writes.find((message) => message.id === 98)
+  assert.ok(reply, "the bridge must reply rather than let the agent wait")
   assert.equal(reply.error.code, -32601)
   client.close()
 })
