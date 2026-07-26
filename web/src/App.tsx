@@ -3661,10 +3661,7 @@ function App() {
           )}
         >
         <section className="panel help fade-in">
-          <h2>
-            <HelpIcon size={24} className="icon-inline-heading" />
-            {t('help.title')}
-          </h2>
+          <h2>{t('help.title')}</h2>
           <div className="help-tabs" role="tablist">
             <button 
               className={helpPage === "overview" ? "active" : ""} 
