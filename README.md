@@ -214,6 +214,12 @@ The app is not limited to LAN. You can also use it over WAN/VPN if your network 
 - `/session/:id/message`, `/session/:id/command`, `/session/:id/abort`
 - `/session/:id/todo`, `/session/:id/diff`
 
+## Contributing
+
+Setup, the checks CI expects, how the regression suites work, and the rule that every change has to
+hold on more than one harness are all in [CONTRIBUTING.md](CONTRIBUTING.md).
+[#36](https://github.com/giuliastro/harness-remote/issues/36) (PI support) is open and unassigned.
+
 ## Contributors
 
 <a href="https://github.com/giuliastro"><img src="https://github.com/giuliastro.png" width="40" height="40" alt="giuliastro" title="giuliastro" /></a>
