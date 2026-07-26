@@ -1595,6 +1595,9 @@ function App() {
   const totalDiffAdditions = diffFiles.reduce((sum, file) => sum + file.additions, 0)
   const totalDiffDeletions = diffFiles.reduce((sum, file) => sum + file.deletions, 0)
   const showModelChip = modelOptions.length > 1 || Boolean(activeModelOption) || primaryAgentOptions.length > 0
+  /** Without this a failed model fetch is indistinguishable from one still in flight. */
+  const modelStatusLabel = activeModelOption?.modelName
+    ?? (modelLoadError ? t('detail.modelUnavailable') : t('detail.modelLoading'))
 
   async function openSession(sessionID: string, directory: string) {
     setSelectedID(sessionID)
@@ -2505,10 +2508,17 @@ function App() {
         <div className="brand-section">
           <div className="brand-title">
             <img src="/app-icon.png" alt="" className="app-icon" />
-            <div>
+            <div className="brand-text">
               <h1>{t('app.title')}</h1>
-              <p className="subtle">
-                {hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.title')}
+              {/* The harness matters more than the address: the same host can serve a different
+                  one, and every backend-specific limitation follows from which it is. */}
+              <p className="brand-meta">
+                <span className={`harness-badge harness-${config.backend}`}>
+                  {backendDisplayName(config.backend)}
+                </span>
+                <span className="brand-server">
+                  {hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.title')}
+                </span>
               </p>
             </div>
           </div>
@@ -2997,9 +3007,13 @@ function App() {
           {selectedSession && (
             <section className="session-context-strip" aria-label={t('detail.contextStripLabel')}>
               {showModelChip && (
-                <button type="button" className="context-chip" onClick={() => setActiveDetailSheet("ai")}>
+                <button
+                  type="button"
+                  className={`context-chip${modelLoadError && !activeModelOption ? " chip-warning" : ""}`}
+                  onClick={() => setActiveDetailSheet("ai")}
+                >
                   <span>{t('detail.aiChip')}</span>
-                  <strong>{capabilities.agents ? `${agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })} · ${activeModelOption?.modelName ?? t('detail.modelLoading')}` : activeModelOption?.modelName ?? t('detail.modelLoading')}</strong>
+                  <strong>{capabilities.agents ? `${agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })} · ${modelStatusLabel}` : modelStatusLabel}</strong>
                 </button>
               )}
 
@@ -3243,7 +3257,7 @@ function App() {
                 </div>
                 <div className="dashboard-card">
                   <span className="dashboard-label">{t('detail.modelTitle')}</span>
-                  <strong>{activeModelOption?.modelName ?? t('detail.modelLoading')}</strong>
+                  <strong>{modelStatusLabel}</strong>
                   <small>{activeModelOption?.providerName ?? "-"}</small>
                 </div>
               </div>

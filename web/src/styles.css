@@ -20,6 +20,12 @@
   --nav-bg: rgba(255, 255, 255, 0.94);
   --bottom-nav-bg: rgba(255, 255, 255, 0.96);
   --primary-border: #c9ddff;
+  --harness-omp: #7c3aed;
+  --harness-omp-soft: #f1e9ff;
+  --harness-omp-border: #ddccff;
+  --harness-pi: #0f766e;
+  --harness-pi-soft: #e2f5f2;
+  --harness-pi-border: #bfe6e0;
   --danger-border: #f0c2be;
   --focus-ring: rgba(23, 105, 224, 0.2);
   --code-bg: #111827;
@@ -68,6 +74,12 @@
   --nav-bg: rgba(17, 24, 39, 0.94);
   --bottom-nav-bg: rgba(17, 24, 39, 0.96);
   --primary-border: rgba(96, 165, 250, 0.36);
+  --harness-omp: #c4b5fd;
+  --harness-omp-soft: rgba(124, 58, 237, 0.22);
+  --harness-omp-border: rgba(196, 181, 253, 0.38);
+  --harness-pi: #5eead4;
+  --harness-pi-soft: rgba(15, 118, 110, 0.26);
+  --harness-pi-border: rgba(94, 234, 212, 0.34);
   --danger-border: rgba(248, 113, 113, 0.42);
   --focus-ring: rgba(96, 165, 250, 0.28);
   --code-bg: #020617;
@@ -1851,4 +1863,76 @@ button.compact {
   font-size: 0.8125rem;
   line-height: 1.45;
   color: var(--text-muted, #8a93a6);
+}
+
+/* Which harness you are driving decides what the app can do, so it is named next to the
+   address rather than buried in Settings. The badge never shrinks; the address truncates. */
+.brand-text {
+  min-width: 0;
+}
+
+.brand-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: 0.15rem;
+}
+
+.harness-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--primary-border);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  /* --primary on --primary-soft lands at 4.43:1, just under AA for 10px bold text. */
+  color: var(--primary-strong);
+  padding: 0.1rem 0.45rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.harness-badge.harness-omp {
+  border-color: var(--harness-omp-border);
+  background: var(--harness-omp-soft);
+  color: var(--harness-omp);
+}
+
+.harness-badge.harness-pi {
+  border-color: var(--harness-pi-border);
+  background: var(--harness-pi-soft);
+  color: var(--harness-pi);
+}
+
+.brand-server {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* A model list that failed to load is a different state from one still arriving. */
+.context-chip.chip-warning {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.context-chip.chip-warning strong {
+  color: var(--warning);
+}
+
+@media (max-width: 430px) {
+  .harness-badge {
+    font-size: 0.66rem;
+    padding: 0.1rem 0.4rem;
+  }
+
+  .brand-server {
+    font-size: 0.76rem;
+  }
 }

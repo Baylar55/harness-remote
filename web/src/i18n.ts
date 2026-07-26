@@ -127,6 +127,7 @@ type TranslationKey =
   | 'detail.modelToolsNo'
   | 'detail.modelVariant'
   | 'detail.modelLoading'
+  | 'detail.modelUnavailable'
   | 'detail.modelLoadError'
   | 'detail.contextStripLabel'
   | 'detail.aiChip'
@@ -340,6 +341,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.modelToolsNo': 'No tools',
     'detail.modelVariant': 'Variant: {variant}',
     'detail.modelLoading': 'Loading configured models...',
+    'detail.modelUnavailable': 'Models unavailable — check the server',
     'detail.modelLoadError': 'Cannot load models: {message}',
     'detail.contextStripLabel': 'Session context shortcuts',
     'detail.aiChip': 'AI',
@@ -552,6 +554,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.modelToolsNo': 'Nessun tool',
     'detail.modelVariant': 'Variante: {variant}',
     'detail.modelLoading': 'Caricamento modelli configurati...',
+    'detail.modelUnavailable': 'Modelli non disponibili — controlla il server',
     'detail.modelLoadError': 'Impossibile caricare i modelli: {message}',
     'detail.contextStripLabel': 'Scorciatoie contesto sessione',
     'detail.aiChip': 'AI',
@@ -764,6 +767,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.modelToolsNo': '無工具',
     'detail.modelVariant': '變體：{variant}',
     'detail.modelLoading': '正在載入已設定模型...',
+    'detail.modelUnavailable': '無法取得模型 — 請檢查伺服器',
     'detail.modelLoadError': '無法載入模型：{message}',
     'detail.contextStripLabel': '工作階段情境捷徑',
     'detail.aiChip': 'AI',
