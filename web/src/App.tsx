@@ -3075,9 +3075,10 @@ function App() {
                 <p className="subtle detail-subline" title={selectedSession.directory}>
                   <span className="detail-subline-path">{shortDirectory(selectedSession.directory)}</span>
                   {/* Moved up from between the messages and the composer, where the sticky
-                      composer covered half of it. */}
+                      composer covered half of it. Written out rather than tagged: a one-word
+                      label needed a tooltip to be understood, and touch has no tooltip. */}
                   {selectedSession.external && (
-                    <span className="pill external-pill" title={t('detail.externalSession')}>{t('detail.externalShort')}</span>
+                    <span className="detail-subline-note">{t('detail.externalSession')}</span>
                   )}
                 </p>
                 )}

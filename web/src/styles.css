@@ -1987,10 +1987,17 @@ button.compact {
   font-size: 0.82rem;
 }
 
-.external-pill {
-  flex: 0 0 auto;
-  color: var(--muted-strong);
-  background: var(--surface-strong);
+/* A word needing a tooltip is not a label. The note stands on its own, and gives way to the
+   path when there is no room for both. */
+.detail-subline-note {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 1px solid var(--border);
+  padding-left: var(--space-2);
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 /* Rename was a 14px pencil in a 37x44 button placed with an inline style, and an editor with two

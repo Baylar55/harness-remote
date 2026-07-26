@@ -146,8 +146,8 @@ assert.ok(app.includes("authoritativeExternalHistory || assistantPayloadLength(c
 // header. What matters is that an external session is still marked and still explained, not where.
 assert.ok(app.includes("selectedSession.external && ("), "a session from another client must be marked as such")
 assert.ok(
-  app.includes("title={t('detail.externalSession')}") && app.includes("t('detail.externalShort')"),
-  "the marker must still carry the explanation that sending continues the session here"
+  app.includes("t('detail.externalSession')") && !app.includes("externalShort"),
+  "the marker must read as a sentence, not a one-word tag that needs a tooltip touch cannot show"
 )
 assert.equal(app.includes("disabled={!selectedSession || selectedSession.external}"), false, "external sessions must remain writable")
 assert.ok(app.includes('onClick={showStopAction ? abortSession : send}'), 'the action button should send a queued follow-up instead of only stopping')
