@@ -1692,6 +1692,16 @@ function App() {
     return modelOptions.filter((option) => modelSearchText(option).includes(text))
   }, [modelOptions, modelQuery])
 
+  // On desktop there's always a sidebar listing sessions, so an empty main pane just says
+  // "select a session" for no reason — auto-open the first one instead. Only attempted once per
+  // server connection so it doesn't fight a session the user deliberately closed back out of.
+  const autoSelectAttemptedRef = useRef(false)
+  useEffect(() => {
+    if (!isDesktop || autoSelectAttemptedRef.current || selectedID || sessions.length === 0) return
+    autoSelectAttemptedRef.current = true
+    openSession(sessions[0].id, sessions[0].directory).catch(() => undefined)
+  }, [isDesktop, selectedID, sessions])
+
   const filteredSessions = useMemo(() => {
     const text = query.trim().toLowerCase()
     if (!text) return sessions
@@ -1799,6 +1809,7 @@ function App() {
     if (serverChanged) {
       loadSelectedRequestRef.current += 1
       loadModelsRequestRef.current += 1
+      autoSelectAttemptedRef.current = false
       setSessions([])
       setSelectedID(null)
       setMessages([])
