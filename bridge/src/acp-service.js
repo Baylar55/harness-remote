@@ -185,13 +185,13 @@ export class AcpService {
   }
 
   async models(sessionID) {
-    await this.#load(sessionID)
+    await this.#loadForConfigOptions(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
     return option?.options?.map((candidate) => ({ ...candidate, currentValue: candidate.value === option.currentValue })) ?? []
   }
 
   async setModel(sessionID, model) {
-    await this.#load(sessionID)
+    await this.#loadForConfigOptions(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
     if (!option?.options?.some((candidate) => candidate.value === model)) {
       throw new Error(`Harness model is not available: ${model}`)
@@ -357,14 +357,26 @@ export class AcpService {
     return this.#active.has(sessionID) || Boolean(this.#queues.get(sessionID)?.length)
   }
 
-  async #load(sessionID, force = false) {
+  /**
+   * Displaying an external session deliberately skips the ACP load, but config options only
+   * arrive with it, so a session this process did not create reported no models at all — and
+   * model switching failed too, since it validates against that list. Pay for the load only
+   * when the options are genuinely missing, which keeps opening a session cheap.
+   */
+  async #loadForConfigOptions(sessionID) {
+    await this.#load(sessionID)
+    if (this.#configOptions.has(sessionID)) return
+    await this.#load(sessionID, true, true)
+  }
+
+  async #load(sessionID, force = false, requireConfigOptions = false) {
     if (!this.#sessions.has(sessionID)) await this.listSessions()
     const session = this.#sessions.get(sessionID)
     if (!session) throw new Error("Harness session not found")
     if (!force && this.#loaded.has(sessionID)) return
     let loading = this.#loads.get(sessionID)
     if (!loading) {
-      loading = this.#loadSession(sessionID)
+      loading = this.#loadSession(sessionID, requireConfigOptions)
       this.#loads.set(sessionID, loading)
     }
     try {
@@ -374,7 +386,7 @@ export class AcpService {
     }
   }
 
-  async #loadSession(sessionID) {
+  async #loadSession(sessionID, requireConfigOptions = false) {
     const session = this.#sessions.get(sessionID)
     if (!session) throw new Error("Harness session not found")
     await this.#restoreSnapshot(sessionID)
@@ -386,7 +398,7 @@ export class AcpService {
         if (persistedMessages.length > 0) {
           previousMessages = mergeExternalHistory(persistedMessages, previousMessages)
           this.#messages.set(sessionID, previousMessages)
-          if (!this.#ownedSessions.has(sessionID)) {
+          if (!this.#ownedSessions.has(sessionID) && !requireConfigOptions) {
             this.#todos.set(sessionID, [])
             this.#loaded.add(sessionID)
             this.#persistSnapshot(sessionID)
