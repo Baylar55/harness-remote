@@ -764,6 +764,7 @@ function buildMessageTimeline(parts: MessagePart[]): TimelineItem[] {
   }
   for (const part of parts) {
     if (part.type === "step-start" || part.type === "step-finish") continue
+    if (part.type === "text" && !part.text) continue
     if (ACTION_GROUP_TYPES.has(part.type)) {
       buffer.push(part)
     } else {
@@ -1116,6 +1117,104 @@ function hasMatchingUserMessage(messages: MessageEnvelope[], optimistic: Message
   ))
 }
 
+type RenderGroup =
+  | { kind: "message"; message: MessageEnvelope & { text: string } }
+  | {
+      kind: "run"
+      key: string
+      items: TimelineItem[]
+      messagesByID: Map<string, MessageEnvelope & { text: string }>
+      sessionID: string
+    }
+
+/** Groups consecutive non-user messages into a single "run" and builds one continuous timeline across all of
+ *  their parts (via buildMessageTimeline), instead of computing each message's timeline in isolation. This is
+ *  what lets a trailing action-group in one message merge with a leading action-group in the next — a run of
+ *  thought/tool-call parts with no real text between them collapses into one summary row regardless of which
+ *  message boundary it happened to be split across. User messages always start a fresh group. */
+function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[]): RenderGroup[] {
+  const groups: RenderGroup[] = []
+  let buffer: (MessageEnvelope & { text: string })[] = []
+  const flush = () => {
+    if (buffer.length === 0) return
+    if (buffer.length === 1 && buffer[0].parts.every((part) => !ACTION_GROUP_TYPES.has(part.type))) {
+      groups.push({ kind: "message", message: buffer[0] })
+    } else {
+      const items = buildMessageTimeline(buffer.flatMap((message) => message.parts))
+      const messagesByID = new Map(buffer.map((message) => [message.info.id, message]))
+      groups.push({
+        kind: "run",
+        key: `run-${buffer[0].info.id}`,
+        items,
+        messagesByID,
+        sessionID: buffer[buffer.length - 1].info.sessionID
+      })
+    }
+    buffer = []
+  }
+  for (const message of messages) {
+    if (message.info.role === "user") {
+      flush()
+      groups.push({ kind: "message", message })
+    } else {
+      buffer.push(message)
+    }
+  }
+  flush()
+  return groups
+}
+
+/** Renders one run's continuous timeline (see groupRenderedMessages) as a single message bubble, resolving
+ *  each item's timestamp to the specific message that produced it. */
+function ConversationRunView({
+  items,
+  messagesByID,
+  sessionID,
+  config,
+  directory,
+  t
+}: {
+  items: TimelineItem[]
+  messagesByID: Map<string, MessageEnvelope & { text: string }>
+  sessionID: string
+  config: ServerConfig
+  directory: string | undefined
+  t: Translator
+}) {
+  const fallback = [...messagesByID.values()].pop()
+  const timestampFor = (part: MessagePart) => {
+    const owner = (part.messageID && messagesByID.get(part.messageID)) || fallback
+    return owner ? formatTime(owner.info.time.created) : undefined
+  }
+  return (
+    <article className="message assistant fade-in">
+      {items.map((item) =>
+        item.kind === "action-group" ? (
+          <ActionGroupView
+            key={`group-${item.parts[0].id}`}
+            parts={item.parts}
+            config={config}
+            sessionID={sessionID}
+            directory={directory}
+            timestamp={timestampFor(item.parts[item.parts.length - 1])}
+            t={t}
+          />
+        ) : (
+          <MessagePartView
+            key={item.part.id}
+            part={item.part}
+            config={config}
+            sessionID={sessionID}
+            directory={directory}
+            timestamp={timestampFor(item.part)}
+            t={t}
+          />
+        )
+      )}
+    </article>
+  )
+}
+
 /** One message's parts. Memoized on the message object identity so that streaming a token into one message
  *  (which necessarily re-renders MessagesPane) doesn't re-run timeline/diff formatting for every other message
  *  in the conversation — toRenderedMessage keeps unrelated messages referentially stable across updates. */
@@ -1166,6 +1265,7 @@ const MessagesPane = memo(function MessagesPane({
   loadingSessionID,
   selectedID,
   renderedMessages,
+  timelineGroups,
   showTypingBubble,
   pendingQuestions,
   config,
@@ -1179,6 +1279,7 @@ const MessagesPane = memo(function MessagesPane({
   loadingSessionID: string | null
   selectedID: string | null
   renderedMessages: (MessageEnvelope & { text: string })[]
+  timelineGroups: RenderGroup[]
   showTypingBubble: boolean
   pendingQuestions: QuestionRequest[]
   config: ServerConfig
@@ -1205,9 +1306,21 @@ const MessagesPane = memo(function MessagesPane({
           </div>
         ) : (
           <>
-            {renderedMessages.map((message) => (
-              <MessageArticle key={message.info.id} message={message} config={config} directory={directory} t={t} />
-            ))}
+            {timelineGroups.map((group) =>
+              group.kind === "message" ? (
+                <MessageArticle key={group.message.info.id} message={group.message} config={config} directory={directory} t={t} />
+              ) : (
+                <ConversationRunView
+                  key={group.key}
+                  items={group.items}
+                  messagesByID={group.messagesByID}
+                  sessionID={group.sessionID}
+                  config={config}
+                  directory={directory}
+                  t={t}
+                />
+              )
+            )}
             {directory !== undefined &&
               pendingQuestions.map((request) => (
                 <QuestionCard
@@ -1386,6 +1499,8 @@ function App() {
       .map(toRenderedMessage)
       .filter((message) => message.text || message.parts.some((part) => part.type !== "step-start" && part.type !== "step-finish"))
   }, [messages, optimisticUserMessages])
+
+  const timelineGroups = useMemo(() => groupRenderedMessages(renderedMessages), [renderedMessages])
 
   const messageScrollSignature = useMemo(() => {
     return renderedMessages.map((message) => `${message.info.id}:${message.text.length}`).join("|")
@@ -2868,6 +2983,7 @@ function App() {
             loadingSessionID={loadingSessionID}
             selectedID={selectedID}
             renderedMessages={renderedMessages}
+            timelineGroups={timelineGroups}
             showTypingBubble={showTypingBubble}
             pendingQuestions={pendingQuestions}
             config={config}
