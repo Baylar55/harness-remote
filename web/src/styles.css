@@ -1815,21 +1815,7 @@ button.compact {
   line-height: 1;
 }
 
-/* Full opacity is the default: dimming it is a hover affordance, and a finger never hovers. */
-.detail-title-row .btn-icon {
-  transition: opacity 0.15s;
-}
 
-@media (hover: hover) {
-  .detail-title-row .btn-icon {
-    opacity: 0.6;
-  }
-
-  .detail-title-row:hover .btn-icon,
-  .detail-title-row .btn-icon:focus-visible {
-    opacity: 1;
-  }
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1980,4 +1966,90 @@ button.compact {
 .empty-state-actions button {
   flex: 1 1 auto;
   min-width: 8.5rem;
+}
+
+/* The detail subline carried a full absolute path and a timestamp with seconds, wrapping to
+   three lines. The path is shortened, the whole line truncates, and the external marker moved
+   here from below the messages where the sticky composer cut it in half. */
+.detail-subline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: var(--space-1);
+}
+
+.detail-subline-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.external-pill {
+  flex: 0 0 auto;
+  color: var(--muted-strong);
+  background: var(--surface-strong);
+}
+
+/* Rename was a 14px pencil in a 37x44 button placed with an inline style, and an editor with two
+   unlabelled glyphs. The title carries the action now, so the target is the width of the title. */
+.session-title-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 var(--space-2) 0 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.session-title-button:hover:not(:disabled),
+.session-title-button:active:not(:disabled) {
+  border-color: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.session-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-title-pencil {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
+@media (hover: hover) {
+  .session-title-button:hover .session-title-pencil {
+    color: var(--primary);
+  }
+}
+
+.rename-inline {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.rename-inline .rename-input {
+  flex: 1 1 10rem;
+}
+
+.rename-save {
+  flex: 0 0 auto;
+}
+
+/* An icon-only button still needs a thumb-sized box, not just a thumb-sized height. */
+button.btn-icon.compact {
+  min-width: 44px;
 }

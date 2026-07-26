@@ -3025,35 +3025,44 @@ function App() {
                           className="rename-input"
                           autoComplete="off"
                         />
+                        {/* Two unlabelled 14px glyphs asked the user to guess which one commits.
+                            One labelled primary action, and cancel as the quieter icon. */}
                         <button
-                          className="btn-primary compact"
+                          className="btn-primary compact rename-save"
                           onClick={() => renameSession(selectedSession.id, renameValue, selectedSession.directory).catch(() => undefined)}
                           onMouseDown={(event) => event.preventDefault()}
-                          title={t('session.renameConfirm')}
+                          disabled={!renameValue.trim() || renameValue === selectedSession.title}
                         >
-                          <SaveIcon size={14} />
+                          <SaveIcon size={16} />
+                          {t('session.renameConfirm')}
                         </button>
                         <button
-                          className="btn-secondary compact"
+                          className="btn-icon btn-secondary compact"
                           onClick={() => cancelRename()}
+                          onMouseDown={(event) => event.preventDefault()}
                           title={t('session.cancel')}
+                          aria-label={t('session.cancel')}
                         >
-                          <CloseIcon size={14} />
+                          <CloseIcon size={18} />
                         </button>
                       </div>
                     ) : (
                       <>
-                        {selectedSession.title}
-                        {capabilities.sessionRename && (
+                        {/* A 14px glyph is a poor target and a poor hint. The title itself is the
+                            button; the pencil only says that it can be edited. */}
+                        {capabilities.sessionRename ? (
                           <button
-                            className="btn-icon btn-secondary compact"
+                            type="button"
+                            className="session-title-button"
                             onClick={() => startRename(selectedSession)}
                             title={t('session.renameTitle')}
                             aria-label={t('session.renameTitle')}
-                            style={{ marginLeft: 'var(--space-1)' }}
                           >
-                            <PencilIcon size={14} />
+                            <span className="session-title-text">{selectedSession.title}</span>
+                            <PencilIcon size={18} className="session-title-pencil" />
                           </button>
+                        ) : (
+                          <span className="session-title-text">{selectedSession.title}</span>
                         )}
                       </>
                     )}
@@ -3063,8 +3072,13 @@ function App() {
                 )}
               </h2>
               {selectedSession && (
-                <p className="subtle">
-                  {selectedSession.directory} • {t('sessions.updated', { time: formatTime(selectedSession.updated) })}
+                <p className="subtle detail-subline" title={selectedSession.directory}>
+                  <span className="detail-subline-path">{shortDirectory(selectedSession.directory)}</span>
+                  {/* Moved up from between the messages and the composer, where the sticky
+                      composer covered half of it. */}
+                  {selectedSession.external && (
+                    <span className="pill external-pill" title={t('detail.externalSession')}>{t('detail.externalShort')}</span>
+                  )}
                 </p>
                 )}
               </div>
@@ -3139,9 +3153,6 @@ function App() {
           />
 
 
-          {selectedSession?.external && (
-            <p className="field-hint">{t('detail.externalSession')}</p>
-          )}
 
           <div className="composer" ref={composerRef}>
             <textarea
