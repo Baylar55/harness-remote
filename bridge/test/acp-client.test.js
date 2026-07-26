@@ -127,29 +127,34 @@ test("forwards ACP notifications and request errors", async () => {
   client.close()
 })
 
-test("grants tool permission so a tool call is not silently blocked", async () => {
-  // Verified against PI's ACP adapter: it asks before every tool call, and the generic
-  // unsupported reply meant it never touched a file while reporting success.
-  const child = new FakeChild((current, request) => {
+/** Builds an adapter that asks permission once, offering reject, allow-always and allow-once. */
+function permissionAskingChild() {
+  return new FakeChild((current, request) => {
     respondToHandshake(current, request)
-    if (request.method === "session/prompt") {
-      current.respond({
-        jsonrpc: "2.0",
-        id: 99,
-        method: "session/request_permission",
-        params: {
-          sessionId: "session-1",
-          options: [
-            { optionId: "reject", kind: "reject_once", name: "Reject" },
-            { optionId: "once", kind: "allow_once", name: "Allow once" },
-            { optionId: "always", kind: "allow_always", name: "Always allow" }
-          ]
-        }
-      })
-      current.respond({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })
-    }
+    if (request.method !== "session/prompt") return
+    current.respond({
+      jsonrpc: "2.0",
+      id: 99,
+      method: "session/request_permission",
+      params: {
+        sessionId: "session-1",
+        options: [
+          { optionId: "reject", kind: "reject_once", name: "Reject" },
+          { optionId: "always", kind: "allow_always", name: "Always allow" },
+          { optionId: "once", kind: "allow_once", name: "Allow once" }
+        ]
+      }
+    })
+    current.respond({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })
   })
-  const client = new AcpClient({ spawnProcess: () => child })
+}
+
+test("grants tool permission once, so a tool call is not silently blocked", async () => {
+  // Verified against PI's ACP adapter: it asks before every tool call, and answering with an
+  // error meant it reported success while touching no file. allow_once is preferred over
+  // allow_always so the grant covers this call rather than persisting in the harness.
+  const child = permissionAskingChild()
+  const client = new AcpClient({ permissionMode: "allow", spawnProcess: () => child })
   const granted = []
   client.on("permission", (event) => granted.push(event.optionId))
   await client.start()
@@ -158,8 +163,19 @@ test("grants tool permission so a tool call is not silently blocked", async () =
   const reply = child.writes.find((message) => message.id === 99)
   assert.ok(reply, "a permission request must be answered")
   assert.equal(reply.error, undefined, "answering with an error blocks the tool call")
-  assert.deepEqual(reply.result.outcome, { outcome: "selected", optionId: "always" })
-  assert.deepEqual(granted, ["always"])
+  assert.deepEqual(reply.result.outcome, { outcome: "selected", optionId: "once" })
+  assert.deepEqual(granted, ["once"])
+  client.close()
+})
+
+test("cancels a permission request unless the harness profile allows tools", async () => {
+  const child = permissionAskingChild()
+  const client = new AcpClient({ spawnProcess: () => child })
+  await client.start()
+
+  assert.deepEqual(await client.request("session/prompt", {}), { stopReason: "end_turn" })
+  const reply = child.writes.find((message) => message.id === 99)
+  assert.deepEqual(reply.result.outcome, { outcome: "cancelled" }, "granting must be opt-in per harness")
   client.close()
 })
 
@@ -171,7 +187,7 @@ test("still declines agent-initiated requests it does not implement", async () =
       current.respond({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })
     }
   })
-  const client = new AcpClient({ spawnProcess: () => child })
+  const client = new AcpClient({ permissionMode: "allow", spawnProcess: () => child })
   const observed = []
   client.on("agent-request", (message) => observed.push(message.method))
   await client.start()
