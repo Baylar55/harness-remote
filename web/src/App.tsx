@@ -1137,8 +1137,12 @@ function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[])
   let buffer: (MessageEnvelope & { text: string })[] = []
   const flush = () => {
     if (buffer.length === 0) return
-    if (buffer.length === 1 && buffer[0].parts.every((part) => !ACTION_GROUP_TYPES.has(part.type))) {
-      groups.push({ kind: "message", message: buffer[0] })
+    // A run exists to merge action groups that a message boundary split apart. With nothing
+    // groupable there is nothing to merge, and folding the messages together would glue two
+    // separate replies into one bubble — which is what an OMP session looks like while a queued
+    // prompt is running, since it produces text parts only.
+    if (!buffer.some((message) => message.parts.some((part) => ACTION_GROUP_TYPES.has(part.type)))) {
+      for (const message of buffer) groups.push({ kind: "message", message })
     } else {
       const items = buildMessageTimeline(buffer.flatMap((message) => message.parts))
       const messagesByID = new Map(buffer.map((message) => [message.info.id, message]))
