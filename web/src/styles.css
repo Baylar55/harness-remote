@@ -2102,8 +2102,13 @@ button.compact {
     flex-direction: column;
   }
 
+  /* Bound the pane to the viewport (not just a floor) so .messages actually overflows and becomes
+     the scroller. Left unbounded, the flex chain grows to fit every message, .messages never
+     overflows, and its overscroll-behavior: contain leaves it a dead scroll container that
+     swallows swipes instead of passing them to the document. */
   .detail {
-    min-height: calc(100dvh - 158px);
+    height: calc(100dvh - 158px);
+    min-height: 0;
   }
 
   .detail-topbar {
@@ -2115,8 +2120,13 @@ button.compact {
     align-self: flex-start;
   }
 
+  /* min-height: 0 is what lets these flex children shrink below their content and overflow. */
+  .messages-wrap {
+    min-height: 0;
+  }
+
   .messages {
-    min-height: 240px;
+    min-height: 0;
     padding: 0;
   }
 
