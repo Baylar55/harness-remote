@@ -2746,7 +2746,7 @@ function App() {
                 onMouseDown={(event) => event.preventDefault()}
                 title={t('session.renameConfirm')}
               >
-                <SaveIcon size={14} />
+                <SaveIcon size={16} />
               </button>
               <button
                 className="btn-secondary compact"
@@ -2756,7 +2756,7 @@ function App() {
                 }}
                 title={t('session.cancel')}
               >
-                <CloseIcon size={14} />
+                <CloseIcon size={16} />
               </button>
             </div>
           ) : (
@@ -2898,13 +2898,13 @@ function App() {
           </div>
 
           <div className="sidebar-footer">
-            <button type="button" className="btn-secondary" onClick={() => setView("help")}>
+            <button type="button" className="btn-secondary" onClick={() => setView("help")} title={t('nav.help')}>
               <HelpIcon size={18} />
-              {t('nav.help')}
+              <span className="sidebar-footer-label">{t('nav.help')}</span>
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setView("settings")}>
+            <button type="button" className="btn-secondary" onClick={() => setView("settings")} title={t('nav.settings')}>
               <SettingsIcon size={18} />
-              {t('nav.settings')}
+              <span className="sidebar-footer-label">{t('nav.settings')}</span>
             </button>
           </div>
         </aside>

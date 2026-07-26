@@ -1692,6 +1692,7 @@ button.compact {
 }
 
 .sidebar-sessions .session-card {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   grid-template-areas:
@@ -1702,16 +1703,40 @@ button.compact {
   row-gap: 1px;
   padding: var(--space-2) var(--space-3);
   border: none;
-  border-left: 3px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
 }
 
 /* On desktop the pill is dropped in favor of a left-border flag: a session is assumed idle
-   unless it's actively busy/retrying, which is the only state worth calling out at a glance. */
-.sidebar-sessions .session-card.busy,
-.sidebar-sessions .session-card.retry {
-  border-left-color: var(--warning);
+   unless it's actively busy/retrying, which is the only state worth calling out at a glance. The
+   border uses the site's own accent color (rather than an off-palette warning yellow) and sweeps
+   like an indeterminate progress bar so a working session reads as "in motion" at a glance. */
+.sidebar-sessions .session-card.busy::before,
+.sidebar-sessions .session-card.retry::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: 3px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(var(--primary-soft), var(--primary), var(--primary-soft));
+  background-size: 100% 24px;
+  background-repeat: repeat-y;
+  animation: session-busy-sweep 1s linear infinite;
+}
+
+/* A plain pixel-length shift (one full tile per loop) rather than a percentage-based one: with a
+   background taller than its element, percentage background-position isn't a simple fraction of
+   the tile size, so the loop never quite lined back up with itself and visibly hitched on every
+   repeat. */
+@keyframes session-busy-sweep {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 24px;
+  }
 }
 
 .sidebar-sessions .session-card:hover,
@@ -1821,6 +1846,14 @@ button.compact {
   display: none;
 }
 
+/* The title area only spans the row's first column (the actions column sits to its right) — but
+   while renaming, actions is hidden and empty, so let the title area claim the full row width.
+   Otherwise the save/cancel buttons would end at the title column's edge instead of the row's,
+   misaligned with where the rename/delete icons themselves sit. */
+.sidebar-sessions .session-card.renaming .session-card-main {
+  grid-column: 1 / -1;
+}
+
 /* The rename input and its save/cancel buttons default to full-size (44px-tall buttons, a
    140px-min-width input) sized for the session detail header, not a ~40px-tall sidebar row —
    shrink everything to fit. */
@@ -1841,8 +1874,8 @@ button.compact {
 .sidebar-sessions .rename-inline button {
   flex: 0 0 auto;
   min-height: 0;
-  height: 20px;
-  width: 20px;
+  height: 22px;
+  width: 22px;
   padding: 0;
   font-size: 0;
   border: none;
@@ -1863,6 +1896,7 @@ button.compact {
 }
 
 .sidebar-footer {
+  container-type: inline-size;
   display: flex;
   gap: var(--space-2);
   padding: var(--space-3);
@@ -1871,7 +1905,20 @@ button.compact {
 
 .sidebar-footer button {
   flex: 1 1 0;
+  min-width: 0;
   justify-content: center;
+}
+
+.sidebar-footer button svg {
+  flex-shrink: 0;
+}
+
+/* Once the sidebar is narrow enough that "Help"/"Settings" would get cramped or truncated, drop
+   the labels entirely and fall back to icon-only buttons (the tooltip still carries the text). */
+@container (max-width: 260px) {
+  .sidebar-footer-label {
+    display: none;
+  }
 }
 
 .app-shell-desktop {
@@ -1950,7 +1997,10 @@ button.compact {
   position: absolute;
   top: var(--space-3);
   right: var(--space-3);
-  padding: var(--space-2);
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
 }
 
 @media (max-width: 780px) {
