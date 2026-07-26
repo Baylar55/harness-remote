@@ -877,6 +877,56 @@ p {
   scroll-padding-bottom: var(--chat-bottom-clearance, 140px);
 }
 
+/* Floating scroll affordances, stacked just above the composer. Absolute against .messages-wrap in
+   the desktop layout, where .messages is the scroller and the wrap itself stays put. */
+.jump-controls {
+  position: absolute;
+  right: var(--space-3);
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* The column spans dead space between the two buttons; don't let it eat clicks on the chat. */
+  pointer-events: none;
+}
+
+/* The clearance is measured from the composer, which already folds in its own bottom offset. */
+.jump-controls--chat {
+  bottom: var(--chat-bottom-clearance, 140px);
+}
+
+/* No composer on a plain page list, so it only has to sit clear of the bottom nav. */
+.jump-controls--page {
+  bottom: var(--space-3);
+}
+
+/* Anchored to the sidebar (not to .sidebar-sessions, which is the scroller and would carry the
+   buttons away with the rows), so it has to clear the footer's buttons and padding. */
+.jump-controls--sidebar {
+  right: var(--space-2);
+  bottom: calc(44px + var(--space-3) * 2 + var(--space-5));
+}
+
+.jump-button {
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--nav-bg);
+  color: var(--muted);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(14px);
+}
+
+.jump-button:hover {
+  color: var(--text);
+}
+
 .messages-end {
   min-height: 1px;
   scroll-margin-bottom: var(--chat-bottom-clearance, 140px);
@@ -1689,6 +1739,11 @@ button.compact {
    mobile sessions panel uses — same markup (renderSessionCard), scoped override here. */
 .sidebar-sessions {
   gap: 2px;
+  /* Reserve a button stack's worth of room past the last row. Raising the floating jump buttons
+     alone only changes which row they cover — the overlay sits over the scroller either way,
+     swallowing that row's hover actions. Letting the list scroll further means no row has to sit
+     underneath them. Must stay after the base rule's `padding` shorthand, which would reset this. */
+  padding-bottom: calc(88px + var(--space-3));
 }
 
 .sidebar-sessions .session-card {
@@ -1960,6 +2015,48 @@ button.compact {
   max-width: 100%;
 }
 
+/* Bound the chat pane to the viewport the same way .desktop-sidebar bounds itself, so .messages is
+   the scroller rather than the page. Without this the pane grows to fit the whole transcript: the
+   page scrolls instead, .messages-wrap ends up as tall as the transcript, and the floating jump
+   buttons — absolute against that wrap — anchor to the bottom of the content instead of the pane,
+   landing at the very bottom of the page behind the composer. */
+.app-shell-desktop .detail {
+  height: calc(100dvh - var(--space-4) * 2);
+  min-height: 0;
+}
+
+/* The message list is the only part that may absorb the bound. Everything else in the pane — topbar,
+   header, context strip, todo box, composer — is fixed-size chrome that would otherwise shrink and
+   clip its own contents once the transcript got long. */
+.app-shell-desktop .detail > * {
+  flex: 0 0 auto;
+}
+
+/* min-height: 0 is what lets these flex children shrink below their content so the bound reaches
+   .messages and it actually overflows. */
+.app-shell-desktop .messages-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The composer sits below the list in flow here rather than floating over it, so the list needs no
+   clearance reserved beneath it and the jump buttons only have to clear the list's own bottom edge.
+   Set explicitly rather than by overriding --chat-bottom-clearance: syncChatBottomClearance writes
+   that as an inline style on .messages-wrap, which would win over any rule here. */
+.app-shell-desktop .messages {
+  min-height: 0;
+  padding-bottom: var(--space-2);
+  scroll-padding-bottom: var(--space-2);
+}
+
+.app-shell-desktop .messages-end {
+  scroll-margin-bottom: 0;
+}
+
+.app-shell-desktop .jump-controls--chat {
+  bottom: var(--space-3);
+}
+
 .main-content {
   min-width: 0;
   flex: 1 1 auto;
@@ -2102,13 +2199,8 @@ button.compact {
     flex-direction: column;
   }
 
-  /* Bound the pane to the viewport (not just a floor) so .messages actually overflows and becomes
-     the scroller. Left unbounded, the flex chain grows to fit every message, .messages never
-     overflows, and its overscroll-behavior: contain leaves it a dead scroll container that
-     swallows swipes instead of passing them to the document. */
   .detail {
-    height: calc(100dvh - 158px);
-    min-height: 0;
+    min-height: calc(100dvh - 158px);
   }
 
   .detail-topbar {
@@ -2120,14 +2212,29 @@ button.compact {
     align-self: flex-start;
   }
 
-  /* min-height: 0 is what lets these flex children shrink below their content and overflow. */
-  .messages-wrap {
-    min-height: 0;
+  /* On mobile the whole page scrolls (the composer is pinned with fixed positioning), so the list
+     must not be a scroll container of its own: nothing bounds its height here, so it would never
+     overflow, and a scroll container with nothing to scroll swallows the swipe instead of letting
+     it reach the document. Keeping it a plain block also lets the header and topbar scroll away. */
+  .messages {
+    min-height: 240px;
+    overflow: visible;
+    padding: 0;
   }
 
-  .messages {
-    min-height: 0;
-    padding: 0;
+  /* The page is the scroller here, so the wrap scrolls away with it — pin to the viewport instead.
+     The clearance already folds in the composer's own bottom offset, so it clears the nav too. */
+  .jump-controls {
+    position: fixed;
+  }
+
+  .jump-controls--page {
+    bottom: calc(72px + var(--space-2) + env(safe-area-inset-bottom));
+  }
+
+  .jump-button {
+    width: 44px;
+    height: 44px;
   }
 
   .message {
@@ -2377,7 +2484,9 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
-.messages,
+/* Deliberately excludes .messages: outside the desktop layout its height is unbounded, so it never
+   overflows, and containment on a scroll container with nothing to scroll blocks the swipe from
+   chaining to the page that does scroll. These others are all genuinely bounded scrollers. */
 .model-option-list,
 .folder-list,
 .bottom-sheet,

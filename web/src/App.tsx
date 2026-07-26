@@ -21,6 +21,8 @@ import {
   SettingsIcon,
   FolderIcon,
   ChatIcon,
+  JumpToTopIcon,
+  JumpToBottomIcon,
   HelpIcon,
   PlusIcon,
   TrashIcon,
@@ -540,6 +542,130 @@ function PatchPartView({
 }
 
 const BOTTOM_STICK_THRESHOLD = 80
+
+/** How far from an end a list must be scrolled before its jump button appears, at most. */
+const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
+/** Below this much total travel, jumping saves nobody a scroll and the buttons are pure clutter. */
+const JUMP_AFFORDANCE_MIN_RANGE = 240
+
+type JumpAffordances = { top: boolean; bottom: boolean }
+type ScrollMetrics = { fromTop: number; fromBottom: number }
+
+const NO_JUMP_AFFORDANCES: JumpAffordances = { top: false, bottom: false }
+
+/** Which jump buttons are worth showing at this scroll position.
+ *
+ *  The threshold has to scale with the total scroll range rather than being a flat 320px. Measured
+ *  absolutely, a list that only scrolls ~600px has no position where both ends are more than 320px
+ *  away, and its jump-to-top only appears in the last 320px of travel — which reads as "the buttons
+ *  only show up at the very bottom". Anything scrolling less than 320px got no buttons at all. */
+function jumpAffordancesFor({ fromTop, fromBottom }: ScrollMetrics): JumpAffordances {
+  const range = fromTop + fromBottom
+  if (range < JUMP_AFFORDANCE_MIN_RANGE) return NO_JUMP_AFFORDANCES
+  const threshold = Math.min(JUMP_AFFORDANCE_MAX_THRESHOLD, range * 0.25)
+  return { top: fromTop > threshold, bottom: fromBottom > threshold }
+}
+
+function windowScrollMetrics(): ScrollMetrics {
+  const doc = document.documentElement
+  return { fromTop: window.scrollY, fromBottom: doc.scrollHeight - window.scrollY - window.innerHeight }
+}
+
+function elementScrollMetrics(element: HTMLElement | null): ScrollMetrics {
+  if (!element) return { fromTop: 0, fromBottom: 0 }
+  return {
+    fromTop: element.scrollTop,
+    fromBottom: element.scrollHeight - element.scrollTop - element.clientHeight
+  }
+}
+
+/** True when the element is a real scroller rather than one that grows to fit its content. Geometry
+ *  alone is not enough: scrollHeight also exceeds clientHeight on an overflow: visible element whose
+ *  content spills, which is exactly what the mobile message list is, and treating that as a scroller
+ *  reads a scrollTop that is permanently 0. */
+function scrollsItself(element: HTMLElement | null): element is HTMLElement {
+  if (!element || element.scrollHeight <= element.clientHeight + 1) return false
+  const overflowY = window.getComputedStyle(element).overflowY
+  return overflowY === "auto" || overflowY === "scroll"
+}
+
+/** Watches how far a list sits from each end and reports which jump buttons are worth showing.
+ *  `getMetrics` is injected because the scroller varies: the chat scrolls its own pane in the
+ *  desktop layout, while every mobile list lets the page scroll instead. Returns a `refresh` to
+ *  call from an element's own onScroll and whenever content changes the distances without a
+ *  scroll event. */
+function useJumpAffordances(active: boolean, getMetrics: () => ScrollMetrics): [JumpAffordances, () => void] {
+  const [affordances, setAffordances] = useState<JumpAffordances>(NO_JUMP_AFFORDANCES)
+  const getMetricsRef = useRef(getMetrics)
+  getMetricsRef.current = getMetrics
+
+  const refresh = useCallback(() => {
+    const next = jumpAffordancesFor(getMetricsRef.current())
+    setAffordances((current) => (current.top === next.top && current.bottom === next.bottom ? current : next))
+  }, [])
+
+  useEffect(() => {
+    if (!active) {
+      setAffordances(NO_JUMP_AFFORDANCES)
+      return
+    }
+    window.addEventListener("scroll", refresh, { passive: true })
+    window.addEventListener("resize", refresh)
+    // Layout settles a frame after the view mounts, so the first read has to wait for it.
+    const frame = requestAnimationFrame(refresh)
+    return () => {
+      window.removeEventListener("scroll", refresh)
+      window.removeEventListener("resize", refresh)
+      cancelAnimationFrame(frame)
+    }
+  }, [active, refresh])
+
+  return [affordances, refresh]
+}
+
+/** Floating jump-to-top/bottom buttons for a long list. */
+function JumpControls({
+  affordances,
+  onJumpToTop,
+  onJumpToBottom,
+  variant = "chat",
+  t
+}: {
+  affordances: JumpAffordances
+  onJumpToTop: () => void
+  onJumpToBottom: () => void
+  /** "chat" clears the composer, "page" the bottom nav, "sidebar" the desktop sidebar footer. */
+  variant?: "chat" | "page" | "sidebar"
+  t: Translator
+}) {
+  if (!affordances.top && !affordances.bottom) return null
+  return (
+    <div className={`jump-controls jump-controls--${variant}`}>
+      {affordances.top && (
+        <button
+          type="button"
+          className="jump-button fade-in"
+          onClick={onJumpToTop}
+          title={t('app.jumpToTop')}
+          aria-label={t('app.jumpToTop')}
+        >
+          <JumpToTopIcon size={18} />
+        </button>
+      )}
+      {affordances.bottom && (
+        <button
+          type="button"
+          className="jump-button fade-in"
+          onClick={onJumpToBottom}
+          title={t('app.jumpToBottom')}
+          aria-label={t('app.jumpToBottom')}
+        >
+          <JumpToBottomIcon size={18} />
+        </button>
+      )}
+    </div>
+  )
+}
 
 let modalTitleSequence = 0
 
@@ -1445,7 +1571,10 @@ const MessagesPane = memo(function MessagesPane({
   messagesRef,
   messagesEndRef,
   onMessagesScroll,
-  onQuestionResolved
+  onQuestionResolved,
+  jumpAffordances,
+  onJumpToTop,
+  onJumpToBottom
 }: {
   loadingSessionID: string | null
   selectedID: string | null
@@ -1460,6 +1589,9 @@ const MessagesPane = memo(function MessagesPane({
   messagesEndRef: RefObject<HTMLDivElement>
   onMessagesScroll: () => void
   onQuestionResolved: (id: string) => void
+  jumpAffordances: { top: boolean; bottom: boolean }
+  onJumpToTop: () => void
+  onJumpToBottom: () => void
 }) {
   return (
     <div className="messages-wrap">
@@ -1516,6 +1648,7 @@ const MessagesPane = memo(function MessagesPane({
           </>
         )}
       </div>
+      <JumpControls affordances={jumpAffordances} onJumpToTop={onJumpToTop} onJumpToBottom={onJumpToBottom} t={t} />
     </div>
   )
 })
@@ -1657,6 +1790,22 @@ function App() {
   const stickToBottomRef = useRef(true)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLDivElement | null>(null)
+  // Both gate on mainView, not view: on desktop, picking a session leaves view === "sessions" while
+  // the chat is what's actually rendered, so gating on view left the buttons permanently inactive.
+  const [jumpAffordances, refreshChatJumps] = useJumpAffordances(mainView === "detail", () =>
+    messagesScrollMetrics()
+  )
+  // mainView is never "sessions" on desktop — there the list is the sidebar below — so this is
+  // implicitly the mobile page-scrolled list.
+  const [sessionJumpAffordances, refreshSessionJumps] = useJumpAffordances(
+    mainView === "sessions",
+    windowScrollMetrics
+  )
+  // The desktop sidebar list scrolls itself, so it needs its own instance reading that element.
+  const sidebarSessionsRef = useRef<HTMLDivElement | null>(null)
+  const [sidebarJumpAffordances, refreshSidebarJumps] = useJumpAffordances(isDesktop, () =>
+    elementScrollMetrics(sidebarSessionsRef.current)
+  )
   const completionAudioRef = useRef<HTMLAudioElement | null>(null)
   const completionShouldPlayRef = useRef(false)
   const wasAwaitingAssistantReplyRef = useRef(false)
@@ -2095,7 +2244,17 @@ function App() {
     const composerStyles = window.getComputedStyle(composer)
     const composerBottom = Number.parseFloat(composerStyles.bottom) || 0
     const clearance = Math.ceil(composerRect.height + composerBottom + 16)
-    container.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
+    // Scoped to the wrap rather than the list itself so the jump buttons, which are siblings of the
+    // list, can sit on top of the same clearance the list reserves for the composer.
+    const scope = container.parentElement ?? container
+    scope.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
+  }
+
+  /** The chat is its own scroller in the desktop layout but lets the page scroll on mobile, so
+   *  anything reading scroll position has to look at whichever of the two actually scrolls. */
+  function messagesScrollMetrics(): ScrollMetrics {
+    const container = messagesRef.current
+    return scrollsItself(container) ? elementScrollMetrics(container) : windowScrollMetrics()
   }
 
   function isNearMessagesBottom(): boolean {
@@ -2112,6 +2271,7 @@ function App() {
 
   const handleMessagesScroll = useCallback(() => {
     stickToBottomRef.current = isNearMessagesBottom()
+    refreshChatJumps()
   }, [])
 
   const handleQuestionResolved = useCallback((id: string) => {
@@ -2138,6 +2298,43 @@ function App() {
       })
     })
   }
+
+  // Memoised so they don't defeat MessageList's memo on every render.
+  const handleJumpToTop = useCallback(() => {
+    // Jumping to the oldest message is an explicit "leave the live tail" gesture, so drop the pin;
+    // otherwise the next incoming message would yank the view straight back down.
+    stickToBottomRef.current = false
+    const container = messagesRef.current
+    if (scrollsItself(container)) {
+      container.scrollTo({ top: 0, behavior: "smooth" })
+      return
+    }
+    // The page is the scroller, so go to the actual top — scrolling the list into view instead
+    // would strand the header above the fold and leave this button showing with nowhere to go.
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
+  const handleJumpToBottom = useCallback(() => {
+    stickToBottomRef.current = true
+    scrollMessagesToBottom("smooth")
+  }, [])
+
+  const handleSessionsJumpToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
+  const handleSessionsJumpToBottom = useCallback(() => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" })
+  }, [])
+
+  const handleSidebarJumpToTop = useCallback(() => {
+    sidebarSessionsRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
+  const handleSidebarJumpToBottom = useCallback(() => {
+    const list = sidebarSessionsRef.current
+    list?.scrollTo({ top: list.scrollHeight, behavior: "smooth" })
+  }, [])
 
   async function browseNewSessionDirectory(path: string) {
     setPickerLoading(true)
@@ -2638,8 +2835,12 @@ function App() {
     }
   }, [hasConfiguredServer])
 
+  // useJumpAffordances watches window scroll for the jump buttons already; this listener is here for
+  // the auto-scroll pin, which must also break when the user scrolls the page rather than the list.
   useEffect(() => {
-    const onWindowScroll = () => handleMessagesScroll()
+    const onWindowScroll = () => {
+      stickToBottomRef.current = isNearMessagesBottom()
+    }
     window.addEventListener("scroll", onWindowScroll, { passive: true })
     return () => window.removeEventListener("scroll", onWindowScroll)
   }, [])
@@ -2649,6 +2850,29 @@ function App() {
     if (!stickToBottomRef.current) return
     scrollMessagesToBottom("auto")
   }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions])
+
+  // Growing or swapping the transcript changes the distance to each end without any scroll event
+  // firing, so the jump buttons have to be re-evaluated off the content too.
+  useEffect(() => {
+    if (mainView !== "detail") return
+    const frame = requestAnimationFrame(refreshChatJumps)
+    return () => cancelAnimationFrame(frame)
+  }, [mainView, selectedID, messageScrollSignature, refreshChatJumps])
+
+  // Same for the sessions list: filtering or a refresh changes its length under a static scroll offset.
+  useEffect(() => {
+    if (mainView !== "sessions") return
+    const frame = requestAnimationFrame(refreshSessionJumps)
+    return () => cancelAnimationFrame(frame)
+  }, [mainView, query, filteredSessions.length, refreshSessionJumps])
+
+  // The desktop sidebar list is always on screen, so it only depends on its own length, and on the
+  // sidebar width, which reflows the rows.
+  useEffect(() => {
+    if (!isDesktop) return
+    const frame = requestAnimationFrame(refreshSidebarJumps)
+    return () => cancelAnimationFrame(frame)
+  }, [isDesktop, query, filteredSessions.length, sidebarWidth, refreshSidebarJumps])
 
   useEffect(() => {
     if (view !== "detail" || !selectedID) return
@@ -2915,7 +3139,7 @@ function App() {
             </button>
           </div>
 
-          <div className="sidebar-sessions">
+          <div className="sidebar-sessions" ref={sidebarSessionsRef} onScroll={refreshSidebarJumps}>
             {filteredSessions.length === 0 ? (
               <p className="subtle sidebar-empty">
                 {isOffline ? t('sessions.offlineHint') : t('sessions.emptyTitle')}
@@ -2924,6 +3148,14 @@ function App() {
               filteredSessions.map(renderSessionCard)
             )}
           </div>
+
+          <JumpControls
+            affordances={sidebarJumpAffordances}
+            onJumpToTop={handleSidebarJumpToTop}
+            onJumpToBottom={handleSidebarJumpToBottom}
+            variant="sidebar"
+            t={t}
+          />
 
           <div className="sidebar-footer">
             <button type="button" className="btn-secondary" onClick={() => setView("help")} title={t('nav.help')}>
@@ -3201,6 +3433,14 @@ function App() {
           {runtimeError && !(isOffline && filteredSessions.length === 0) && (
             <div className="error fade-in">✗ {runtimeError}</div>
           )}
+
+          <JumpControls
+            affordances={sessionJumpAffordances}
+            onJumpToTop={handleSessionsJumpToTop}
+            onJumpToBottom={handleSessionsJumpToBottom}
+            variant="page"
+            t={t}
+          />
         </section>
       )}
 
@@ -3420,6 +3660,9 @@ function App() {
             config={config}
             directory={selectedSession?.directory}
             t={t}
+            jumpAffordances={jumpAffordances}
+            onJumpToTop={handleJumpToTop}
+            onJumpToBottom={handleJumpToBottom}
             messagesRef={messagesRef}
             messagesEndRef={messagesEndRef}
             onMessagesScroll={handleMessagesScroll}

@@ -428,3 +428,43 @@ export const OfflineIcon = ({ className = "", size = 20 }: { className?: string;
     <path d="M12 20h.01" />
   </svg>
 )
+
+export const JumpToTopIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Jump to top"
+  >
+    <path d="M5 4h14" />
+    <path d="M12 20V9" />
+    <path d="M6 15l6-6 6 6" />
+  </svg>
+)
+
+export const JumpToBottomIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Jump to bottom"
+  >
+    <path d="M5 20h14" />
+    <path d="M12 4v11" />
+    <path d="M6 9l6 6 6-6" />
+  </svg>
+)

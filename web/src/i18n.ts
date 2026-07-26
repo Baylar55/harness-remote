@@ -2,6 +2,8 @@ export type LanguageCode = 'en' | 'it' | 'zh-TW'
 
 type TranslationKey =
   | 'app.title'
+  | 'app.jumpToTop'
+  | 'app.jumpToBottom'
   | 'nav.settings'
   | 'nav.sessions'
   | 'nav.detail'
@@ -85,6 +87,7 @@ type TranslationKey =
   | 'detail.loading'
   | 'detail.emptyTitle'
   | 'detail.emptyHint'
+
   | 'detail.composerPlaceholder'
   | 'detail.externalSession'
   | 'detail.externalShort'
@@ -217,6 +220,8 @@ type TranslationKey =
 const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   en: {
     'app.title': 'Harness Remote',
+    'app.jumpToTop': 'Jump to top',
+    'app.jumpToBottom': 'Jump to bottom',
     'nav.settings': 'Settings',
     'nav.sessions': 'Sessions',
     'nav.detail': 'Detail',
@@ -431,6 +436,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   },
   it: {
     'app.title': 'Harness Remote',
+    'app.jumpToTop': 'Vai in alto',
+    'app.jumpToBottom': 'Vai in basso',
     'nav.settings': 'Impostazioni',
     'nav.sessions': 'Sessioni',
     'nav.detail': 'Dettaglio',
@@ -645,6 +652,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   },
   'zh-TW': {
     'app.title': 'Harness Remote',
+    'app.jumpToTop': '跳到頂部',
+    'app.jumpToBottom': '跳到底部',
     'nav.settings': '設定',
     'nav.sessions': '工作階段',
     'nav.detail': '詳情',
