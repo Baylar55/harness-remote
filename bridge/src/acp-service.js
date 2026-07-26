@@ -41,6 +41,7 @@ export class AcpService {
   #promptAcknowledgements = new Map()
   #titles = new Map()
   #queues = new Map()
+  #streaming = new Map()
   #active = new Set()
   #listeners = new Set()
 
@@ -130,6 +131,8 @@ export class AcpService {
 
   #startTurn(sessionID, text, recorded = false) {
     if (!recorded) this.#recordPrompt(sessionID, text)
+    // Chunks with no messageId aggregate per turn, so each turn starts with none open.
+    this.#streaming.set(sessionID, {})
     this.#active.add(sessionID)
     this.#emit("session.updated", sessionID)
     void this.#acp.request("session/prompt", {
@@ -138,6 +141,7 @@ export class AcpService {
     }, 300_000).catch((error) => {
       this.#emit("session.error", sessionID, { message: error.message })
     }).finally(() => {
+      this.#streaming.delete(sessionID)
       this.#active.delete(sessionID)
       this.#emit("session.updated", sessionID)
       void this.#runNextQueued(sessionID)
@@ -292,9 +296,16 @@ export class AcpService {
     // Acknowledgements only suppress a live echo of the prompt we just recorded;
     // a history replay rebuilds from an empty list and must keep every message.
     if (role === "user" && !replaying && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
-    const messageID = update.messageId ?? randomUUID()
     const messages = this.#messages.get(sessionId) ?? []
     this.#messages.set(sessionId, messages)
+    // PI's adapter streams a turn as chunks carrying no messageId, so minting a fresh id per
+    // chunk split one reply into a bubble per token. Without an id, keep appending to the
+    // message this turn already opened for that role — scoped to the turn, so a later reply
+    // never lands on an earlier one. Replay is excluded: there the missing id means separate
+    // persisted messages rather than one live turn.
+    const openMessages = replaying ? undefined : this.#streaming.get(sessionId)
+    const messageID = update.messageId ?? openMessages?.[role] ?? randomUUID()
+    if (!update.messageId && openMessages) openMessages[role] = messageID
     let message = messages.find((item) => item.info.id === messageID)
     if (!message) {
       message = {

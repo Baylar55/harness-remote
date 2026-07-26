@@ -22,6 +22,9 @@ if (config) {
   let shuttingDown = false
 
   acp.on("stderr", (line) => process.stderr.write(`[${config.backend}] ${line}`))
+  acp.on("permission", ({ optionId }) => {
+    process.stderr.write(`[${config.backend}] granted tool permission (${optionId ?? "none offered"})\n`)
+  })
   acp.on("agent-request", (message) => {
     process.stderr.write(`[${config.backend}] declined unsupported agent request: ${message.method}\n`)
   })

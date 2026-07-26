@@ -37,8 +37,17 @@ function defaultAcpCommand(backend) {
   return backend === "pi" ? (process.platform === "win32" ? "npx.cmd" : "npx") : "omp"
 }
 
+// @automatalabs/pi-acp embeds PI through its published SDK and runs on Node. The other
+// widely referenced adapter, @victor-software-house/pi-acp, declares `engines.bun` and
+// shells out to `bun`, which this project deliberately does not depend on.
+//
+// The version is pinned rather than floating on `latest`: an unpinned default failed here
+// with `notarget` when an upstream release appeared in the registry index before its
+// tarball was fetchable. Override with --acp-arg to track a newer adapter.
+const PI_ADAPTER = "@automatalabs/pi-acp@0.2.5"
+
 function defaultAcpArgs(backend) {
-  return backend === "pi" ? ["-y", "@victor-software-house/pi-acp"] : ["acp"]
+  return backend === "pi" ? ["-y", PI_ADAPTER] : ["acp"]
 }
 
 
