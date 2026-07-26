@@ -876,6 +876,63 @@ test("reads external history without loading and interrupting the ACP session", 
   assert.equal(acp.loads, 0)
 })
 
+test("reports models for an external session without losing its history", async () => {
+  // Displaying an external session skips the ACP load on purpose, but config options only
+  // arrive with that load — so every session survived a bridge restart reporting no models,
+  // and switching model failed because it validates against that same list.
+  const message = (id, text) => ({
+    info: { id, role: "assistant", sessionID: "session-1", time: { created: Date.now() } },
+    parts: [{ id: `${id}:text`, type: "text", text }]
+  })
+  class ConfigOptionAcp extends EventEmitter {
+    loads = 0
+    selected = []
+    async start() {}
+
+    async listSessions() {
+      return [{ sessionId: "session-1", cwd: process.cwd(), updatedAt: "2026-07-26T00:00:00.000Z" }]
+    }
+
+    async request(method, params) {
+      if (method === "session/set_config_option") {
+        this.selected.push(params.value)
+        return {}
+      }
+      if (method !== "session/load") return {}
+      this.loads += 1
+      return {
+        configOptions: [{
+          id: "model",
+          currentValue: "lm/one",
+          options: [{ value: "lm/one", name: "One" }, { value: "lm/two", name: "Two" }]
+        }]
+      }
+    }
+
+    notify() {}
+  }
+  const acp = new ConfigOptionAcp()
+  const driver = new AcpService(acp, { historyLoader: async () => [message("native-first", "First")] })
+
+  assert.deepEqual((await driver.messages("session-1")).map((item) => item.parts[0].text), ["First"])
+  assert.equal(acp.loads, 0, "displaying an external session must not load it")
+
+  assert.deepEqual((await driver.models("session-1")).map((option) => option.value), ["lm/one", "lm/two"])
+  assert.equal(acp.loads, 1, "the options are fetched once, only when asked for")
+
+  assert.deepEqual(
+    (await driver.messages("session-1")).map((item) => item.parts[0].text),
+    ["First"],
+    "fetching config options must not discard the external history"
+  )
+
+  await driver.setModel("session-1", "lm/two")
+  assert.deepEqual(acp.selected, ["lm/two"], "switching model must work on a session this process did not create")
+
+  await driver.models("session-1")
+  assert.equal(acp.loads, 1, "options already held must not trigger another load")
+})
+
 test("merges bridge-only legacy prompts into native external history by timestamp", async () => {
   class ExternalAcp extends EventEmitter {
     async start() {}
