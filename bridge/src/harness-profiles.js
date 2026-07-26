@@ -17,6 +17,7 @@ export const HARNESS_PROFILES = {
     label: "Oh My Pi",
     command: "omp",
     args: ["acp"],
+    permissionMode: "allow",
     capabilities: {
       ...COMMON_CAPABILITIES,
       models: true,
@@ -33,6 +34,7 @@ export const HARNESS_PROFILES = {
     // default failed with `notarget` when a release outran its own tarball in the registry.
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     args: ["-y", "@automatalabs/pi-acp@0.2.5"],
+    permissionMode: "allow",
     capabilities: {
       ...COMMON_CAPABILITIES,
       models: true,

@@ -12,6 +12,7 @@ export class AcpClient extends EventEmitter {
   #command
   #args
   #spawn
+  #permissionMode
   #child
   #buffer = ""
   #nextID = 1
@@ -20,10 +21,11 @@ export class AcpClient extends EventEmitter {
   #agentInfo
   #stderr = ""
 
-  constructor({ command = "omp", args = ["acp"], spawnProcess = spawn } = {}) {
+  constructor({ command = "omp", args = ["acp"], permissionMode = "deny", spawnProcess = spawn } = {}) {
     super()
     this.#command = command
     this.#args = args
+    this.#permissionMode = permissionMode
     this.#spawn = spawnProcess
   }
 
@@ -160,7 +162,7 @@ export class AcpClient extends EventEmitter {
     // timeout, so always reply.
     if (message.id !== undefined && message.method) {
       this.emit("agent-request", message)
-      if (message.method === "session/request_permission") this.#grantPermission(message)
+      if (message.method === "session/request_permission") this.#respondPermission(message.id, message.params)
       else this.#respondUnsupported(message.id, message.method)
       return
     }
@@ -177,23 +179,25 @@ export class AcpClient extends EventEmitter {
   }
 
   /**
-   * Tool calls stall without an answer. OMP approves its own and never asks, so granting the
-   * same for an agent that does ask keeps the backends consistent — and matches what the
-   * bridge already is: a local agent running with the user's privileges, as the README says.
-   * Refusing instead, which is what the generic unsupported reply did, silently prevented PI
-   * from touching a single file.
+   * A tool call stalls without an answer, and answering with an error silently stops the agent
+   * from doing any work — PI reported success while touching no file. Granting matches OMP,
+   * whose agent approves its own tool calls and never asks, and there is no way to prompt the
+   * user mid-turn on a phone. `allow_once` is preferred over `allow_always` so the grant covers
+   * this call rather than writing a lasting permission into the harness's own state.
    */
-  #grantPermission(message) {
+  #respondPermission(id, params) {
     if (!this.#child?.stdin.writable) return
-    const options = Array.isArray(message.params?.options) ? message.params.options : []
-    const allowed = options.find((option) => option?.kind === "allow_always")
-      ?? options.find((option) => option?.kind === "allow_once")
-      ?? options.find((option) => option?.optionId)
+    const options = Array.isArray(params?.options) ? params.options : []
+    const allowed = this.#permissionMode === "allow"
+      ? options.find((option) => option.kind === "allow_once")
+        ?? options.find((option) => option.kind === "allow_always")
+        ?? options.find((option) => typeof option.kind === "string" && option.kind.startsWith("allow"))
+      : undefined
     const outcome = allowed?.optionId
       ? { outcome: "selected", optionId: allowed.optionId }
       : { outcome: "cancelled" }
-    this.emit("permission", { method: message.method, optionId: allowed?.optionId })
-    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { outcome } })}\n`)
+    this.emit("permission", { optionId: allowed?.optionId })
+    this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: { outcome } })}\n`)
   }
 
   #respondUnsupported(id, method) {
