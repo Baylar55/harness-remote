@@ -877,7 +877,6 @@ p {
 
 .typing-bubble {
   width: auto;
-  min-width: 74px;
   padding: 0.75rem 1rem;
 }
 
