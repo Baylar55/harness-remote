@@ -126,7 +126,7 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
         readTimeout: options.readTimeout ?? 30_000
       })
     } catch {
-      throw new Error(`Network error: cannot reach ${target}. Check host, port, and firewall.`)
+      throw new Error(`Cannot reach ${config.host}:${config.port}.`)
     }
 
     if (response.status >= 400) {
@@ -146,12 +146,12 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     })
   } catch {
+    // Kept short: this text reaches a phone screen. The CORS note only means something in a
+    // browser, where it is the usual cause, and nothing at all inside the app.
     const corsHint = config.username && config.password
-      ? " Browser mode + Basic Auth may be blocked by CORS preflight; use APK/native mode or disable auth temporarily for browser debugging."
+      ? " In a browser, Basic Auth also needs the bridge started with --cors for this origin."
       : ""
-    throw new Error(
-      `Network error: cannot reach ${target}. Check server hostname/port, Windows firewall, and CORS (--cors).${corsHint}`
-    )
+    throw new Error(`Cannot reach ${config.host}:${config.port}.${corsHint}`)
   }
 
   if (!response.ok) {

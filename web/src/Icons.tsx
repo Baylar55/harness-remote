@@ -405,3 +405,26 @@ export const LogoIcon = ({ className = "", size = 32 }: { className?: string; si
     <path d="M16 3v6m0 8v6M3 16h6m8 0h6" stroke="url(#logoGradient)" strokeWidth="2" strokeLinecap="round"/>
   </svg>
 )
+export const OfflineIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Offline"
+  >
+    <path d="M2 2l20 20" />
+    <path d="M8.5 16.5a5 5 0 0 1 7 0" />
+    <path d="M5 12.86a10 10 0 0 1 3.5-2.32" />
+    <path d="M15.5 10.54A10 10 0 0 1 19 12.86" />
+    <path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
+    <path d="M10.66 5.05A15 15 0 0 1 22 8.82" />
+    <path d="M12 20h.01" />
+  </svg>
+)
