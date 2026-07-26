@@ -10,7 +10,7 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 | Harness | Status | How it connects |
 |---|---|---|
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
-| Oh My Pi (OMP) | supported | through the local bridge included in this repository |
+| [Oh My Pi (OMP)](https://omp.sh/) | supported | through the local bridge included in this repository |
 | [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
 
 What each harness actually provides, the assumptions the code makes about it, and what to re-check
