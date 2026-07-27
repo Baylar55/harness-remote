@@ -40,6 +40,9 @@ assert.ok(app.includes('completionShouldPlayRef.current = true'), 'completion so
 assert.ok(app.includes('wasAwaitingAssistantReplyRef.current && !awaitingAssistantReply && completionShouldPlayRef.current'), 'completion sound should play only when assistant waiting ends, not when the user bubble renders')
 assert.ok(app.includes('loadSelectedRequestRef'), 'session message refreshes should ignore stale overlapping polling responses')
 assert.ok(app.includes('if (requestID !== loadSelectedRequestRef.current) return'), 'older loadSelected requests must not overwrite newer assistant output')
+assert.ok(app.includes('loadedSessionID'), 'the message pane should track whether the selected session history has loaded')
+assert.ok(app.includes('loadedSessionID !== selectedID'), 'an unloaded selected session must render the loading state instead of an empty transcript')
+assert.ok(app.includes('setLoadedSessionID(sessionID)'), 'a successful selected-session snapshot should unlock the empty transcript state')
 assert.ok(app.includes('reconcileStreamedPart'), 'message refresh should not regress streamed assistant output back to a leaner snapshot')
 assert.ok(
   /function reconcileStreamedPart[\s\S]*?incomingText\.length >= previousText\.length \? incoming/.test(app),
@@ -65,7 +68,6 @@ assert.ok(/\.project-dashboard[\s\S]*?grid-template-columns:\s*repeat\(3/.test(s
 assert.ok(/@media \(max-width: 780px\)[\s\S]*?\.project-dashboard[\s\S]*?grid-template-columns:\s*1fr/.test(styles), 'project dashboard should stack on mobile')
 assert.ok(app.includes('connectionState'), 'sessions view should track connection state separately from one-off runtime errors')
 assert.ok(app.includes('backgroundFailureCountRef.current += 1'), 'background refresh should count failures before showing persistent offline errors')
-assert.ok(app.includes('backgroundFailureCountRef.current >= 3'), 'transient 1-2 refresh failures should not immediately show the red runtime error')
 assert.ok(app.includes('connection-pending'), 'initial slow connection should show an explicit loading state instead of an empty sessions list')
 assert.ok(app.includes("t('connection.reconnecting')"), 'slow reconnecting state should be translated and shown quietly')
 assert.ok(styles.includes('.connection-status'), 'connection status should have a dedicated non-error visual treatment')
@@ -226,12 +228,12 @@ assert.ok(styles.includes('-webkit-tap-highlight-color: transparent'), 'the plat
 assert.ok(styles.includes('overscroll-behavior: contain'), 'scrolling to the end of a list should not drag the page')
 assert.match(styles, /button\.compact \{[\s\S]*?min-height: 44px/, 'a compact button is still a thumb target')
 
-// With the server unreachable the app used to show four hopeful messages and a developer-facing
-// error at the same time, for about ten seconds, and kept a stale list that could not be opened.
+// A phone returning from standby can miss a couple of polls while Wi-Fi and the server wake up.
+// Keep the last valid UI and show a quiet reconnect state before presenting the offline screen.
 assert.ok(app.includes('const isOffline = connectionState === "offline"'), 'offline should be one named state')
 assert.ok(
-  app.includes("backgroundFailureCountRef.current === 1 && sessions.length > 0"),
-  'tolerating failures protects an existing list; on the first load it only delays the truth'
+  app.includes('if (backgroundFailureCountRef.current < 3)'),
+  'background refreshes should retry twice before declaring the server offline'
 )
 assert.ok(app.includes('eventStreamText = isOffline'), 'the event stream must not claim to be reconnecting while the connection is down')
 assert.ok(

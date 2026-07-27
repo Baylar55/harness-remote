@@ -1557,6 +1557,7 @@ const MessageArticle = memo(function MessageArticle({
  *  on every keystroke. */
 const MessagesPane = memo(function MessagesPane({
   loadingSessionID,
+  loadedSessionID,
   selectedID,
   renderedMessages,
   timelineGroups,
@@ -1574,6 +1575,7 @@ const MessagesPane = memo(function MessagesPane({
   onJumpToBottom
 }: {
   loadingSessionID: string | null
+  loadedSessionID: string | null
   selectedID: string | null
   renderedMessages: (MessageEnvelope & { text: string })[]
   timelineGroups: RenderGroup[]
@@ -1593,7 +1595,7 @@ const MessagesPane = memo(function MessagesPane({
   return (
     <div className="messages-wrap">
       <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-        {loadingSessionID === selectedID ? (
+        {loadingSessionID === selectedID || (selectedID !== null && loadedSessionID !== selectedID) ? (
           <div className="empty-state compact">
             <LoadingIcon size={32} />
             <p>{t('detail.loading')}</p>
@@ -1763,6 +1765,8 @@ function App() {
   const [composer, setComposer] = useState("")
   const [busySending, setBusySending] = useState(false)
   const [loadingSessionID, setLoadingSessionID] = useState<string | null>(null)
+  /** The empty transcript state is only meaningful after this session's first history snapshot succeeds. */
+  const [loadedSessionID, setLoadedSessionID] = useState<string | null>(null)
   const [testingConnection, setTestingConnection] = useState(false)
   const [creatingSession, setCreatingSession] = useState(false)
   const [refreshingSessions, setRefreshingSessions] = useState(false)
@@ -1955,6 +1959,7 @@ function App() {
     setModelOptions([])
     setMessages([])
     loadedMessagesRef.current = []
+    setLoadedSessionID(null)
     setOptimisticUserMessages([])
     setTodos([])
     setDiffFiles([])
@@ -1983,6 +1988,7 @@ function App() {
       setSessions([])
       setSelectedID(null)
       setMessages([])
+      setLoadedSessionID(null)
       loadedMessagesRef.current = []
       setOptimisticUserMessages([])
       setTodos([])
@@ -2072,20 +2078,18 @@ function App() {
       }
 
       backgroundFailureCountRef.current += 1
-      // Tolerating a few failures avoids flapping when a working connection hiccups — but on the
-      // first load there is no good state to protect, and pretending to still be connecting while
-      // an error is already on screen is what made the app look like it contradicted itself.
-      if (backgroundFailureCountRef.current === 1 && sessions.length > 0) {
-        setConnectionState("reconnecting")
-        setConnectionMessage(t('connection.reconnecting'))
+      // A device returning from standby commonly loses one or two polling rounds while Wi-Fi and
+      // the server wake up. Keep the last known state and retry quietly before calling it offline.
+      if (backgroundFailureCountRef.current < 3) {
+        const isInitialLoad = initialSessionLoadRef.current && sessions.length === 0
+        setConnectionState(isInitialLoad ? "connecting" : "reconnecting")
+        setConnectionMessage(isInitialLoad ? t('connection.loadingSessions') : t('connection.reconnecting'))
         return
       }
 
       setConnectionState("offline")
       setConnectionMessage(t('connection.offline'))
-      if (backgroundFailureCountRef.current >= 3) {
-        setRuntimeError(message)
-      }
+      setRuntimeError(message)
       initialSessionLoadRef.current = false
     }
   }
@@ -2201,6 +2205,7 @@ function App() {
       capabilities.questions ? api.loadQuestions(config, directory).catch(() => []) : Promise.resolve([])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
+    setLoadedSessionID(sessionID)
     const current = loadedMessagesRef.current
     // A snapshot carrying less assistant text than is already on screen used to be rejected wholesale, to
     // avoid erasing streamed content. But the optimistic user bubble below is cleared against this same
@@ -2396,6 +2401,7 @@ function App() {
       })
       setSelectedID(created.id)
       setMessages([])
+      setLoadedSessionID(null)
       setOptimisticUserMessages([])
       setTodos([])
       setDiffFiles([])
@@ -3652,6 +3658,7 @@ function App() {
 
           <MessagesPane
             loadingSessionID={loadingSessionID}
+            loadedSessionID={loadedSessionID}
             selectedID={selectedID}
             renderedMessages={renderedMessages}
             timelineGroups={timelineGroups}
