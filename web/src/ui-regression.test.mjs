@@ -43,6 +43,12 @@ assert.ok(app.includes('if (requestID !== loadSelectedRequestRef.current) return
 assert.ok(app.includes('loadedSessionID'), 'the message pane should track whether the selected session history has loaded')
 assert.ok(app.includes('loadedSessionID !== selectedID'), 'an unloaded selected session must render the loading state instead of an empty transcript')
 assert.ok(app.includes('setLoadedSessionID(sessionID)'), 'a successful selected-session snapshot should unlock the empty transcript state')
+// The desktop layout renders the chat pane with no session selected, which mobile never does: both
+// load checks compare against selectedID, so a null one satisfied them and spun "loading" forever.
+assert.ok(
+  /selectedID === null \?[\s\S]*?t\('detail\.selectSession'\)[\s\S]*?loadingSessionID === selectedID/.test(app),
+  'no selected session must render its own empty state, ahead of and separate from the loading state'
+)
 assert.ok(app.includes('reconcileStreamedPart'), 'message refresh should not regress streamed assistant output back to a leaner snapshot')
 assert.ok(
   /function reconcileStreamedPart[\s\S]*?incomingText\.length >= previousText\.length \? incoming/.test(app),

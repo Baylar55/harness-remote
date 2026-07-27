@@ -1595,7 +1595,15 @@ const MessagesPane = memo(function MessagesPane({
   return (
     <div className="messages-wrap">
       <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-        {loadingSessionID === selectedID || (selectedID !== null && loadedSessionID !== selectedID) ? (
+        {/* Nothing selected is its own state, not a load in progress. Both of the tests below compare
+            against selectedID, so a null one used to satisfy them and left the desktop layout — which
+            renders this pane with no session, unlike mobile — spinning "loading" forever. */}
+        {selectedID === null ? (
+          <div className="empty-state compact">
+            <ChatIcon size={40} className="icon-empty-state" />
+            <p>{t('detail.selectSession')}</p>
+          </div>
+        ) : loadingSessionID === selectedID || loadedSessionID !== selectedID ? (
           <div className="empty-state compact">
             <LoadingIcon size={32} />
             <p>{t('detail.loading')}</p>
