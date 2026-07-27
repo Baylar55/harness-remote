@@ -1,11 +1,12 @@
 const CACHE_NAME = "harness-remote-v1"
-const APP_SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"]
 
 self.addEventListener("install", (event) => {
+  const scope = self.registration.scope
+  const appShell = [scope, `${scope}manifest.webmanifest`, `${scope}icon-192.png`, `${scope}icon-512.png`]
   event.waitUntil(
     caches
       .open(CACHE_NAME)
-      .then((cache) => cache.addAll(APP_SHELL))
+      .then((cache) => cache.addAll(appShell))
       .then(() => self.skipWaiting())
   )
 })
@@ -26,14 +27,15 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return
 
   if (request.mode === "navigate") {
+    const scope = self.registration.scope
     event.respondWith(
       fetch(request)
         .then((response) => {
           const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put("/", copy))
+          caches.open(CACHE_NAME).then((cache) => cache.put(scope, copy))
           return response
         })
-        .catch(() => caches.match("/"))
+        .catch(() => caches.match(scope))
     )
     return
   }
