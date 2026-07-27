@@ -49,6 +49,11 @@ const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
 type Translator = ReturnType<typeof createTranslator>
 
+/** One pixel past the stylesheet's `@media (max-width: 780px)` block, so the JS layout switches on
+ *  exactly the width the CSS does. Named because the Help page quotes the number back to the user. */
+const DESKTOP_MIN_WIDTH = 781
+const DESKTOP_MEDIA_QUERY = `(min-width: ${DESKTOP_MIN_WIDTH}px)`
+
 const SIDEBAR_WIDTH_MIN = 220
 const SIDEBAR_WIDTH_MAX = 480
 const SIDEBAR_WIDTH_DEFAULT = 280
@@ -1595,7 +1600,15 @@ const MessagesPane = memo(function MessagesPane({
   return (
     <div className="messages-wrap">
       <div className="messages" ref={messagesRef} onScroll={onMessagesScroll}>
-        {loadingSessionID === selectedID || (selectedID !== null && loadedSessionID !== selectedID) ? (
+        {/* Nothing selected is its own state, not a load in progress. Both of the tests below compare
+            against selectedID, so a null one used to satisfy them and left the desktop layout — which
+            renders this pane with no session, unlike mobile — spinning "loading" forever. */}
+        {selectedID === null ? (
+          <div className="empty-state compact">
+            <ChatIcon size={40} className="icon-empty-state" />
+            <p>{t('detail.selectSession')}</p>
+          </div>
+        ) : loadingSessionID === selectedID || loadedSessionID !== selectedID ? (
           <div className="empty-state compact">
             <LoadingIcon size={32} />
             <p>{t('detail.loading')}</p>
@@ -1685,9 +1698,9 @@ function App() {
   })
   // Desktop gets a persistent left sidebar instead of the mobile top bar/bottom nav; this mirrors
   // the existing 780px CSS breakpoint so JS layout and stylesheet layout never disagree.
-  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia("(min-width: 781px)").matches)
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_MEDIA_QUERY).matches)
   useEffect(() => {
-    const query = window.matchMedia("(min-width: 781px)")
+    const query = window.matchMedia(DESKTOP_MEDIA_QUERY)
     const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches)
     query.addEventListener("change", onChange)
     return () => query.removeEventListener("change", onChange)
@@ -3962,12 +3975,34 @@ function App() {
                 <li><strong>Configure Server:</strong> Use Settings to enter host, port, username and password</li>
                 <li><strong>Test Connection:</strong> Press Test to validate server connectivity</li>
                 <li><strong>Configuration:</strong> Changes are saved automatically and applied after you pause typing.</li>
-                <li><strong>Browse Sessions:</strong> View and manage sessions from the Sessions tab</li>
-                <li><strong>Interact:</strong> Open a session and chat in the Detail view</li>
+                {/* Told in terms of what is actually on screen: the same two steps are a tab and a
+                    view on a phone, and two panes side by side on a desktop. */}
+                <li><strong>Browse Sessions:</strong> {isDesktop
+                  ? "Pick a session from the sidebar on the left"
+                  : "View and manage sessions from the Sessions tab"}</li>
+                <li><strong>Interact:</strong> {isDesktop
+                  ? "Read and reply in the conversation beside it"
+                  : "Open a session and chat in the Detail view"}</li>
                 <li><strong>Quick Input:</strong> Press Enter to send, Shift+Enter for new lines</li>
                 <li><strong>Slash Commands:</strong> Text starting with <code>/</code> is sent as a command</li>
               </ul>
-              
+
+              {/* Window width alone picks the layout, so the one thing worth stating is where the
+                  boundary is: otherwise a resized window looks like the app lost its sidebar. */}
+              <h3>Desktop Layout</h3>
+              <p>
+                A window at least {DESKTOP_MIN_WIDTH}px wide shows the sessions sidebar and the
+                conversation side by side.{isDesktop
+                  ? " Narrow it below that and the single-view mobile layout comes back."
+                  : " This window is narrower than that, which is why you are seeing one view at a time."}
+              </p>
+              <ul>
+                <li><strong>Resize:</strong> Drag the sidebar's outer edge, the divider between the panes, or the conversation's outer edge. Both widths are remembered.</li>
+                <li><strong>Rename or delete:</strong> Hover a sidebar row to reveal its icons.</li>
+                <li><strong>Working sessions:</strong> A moving accent bar down the left of a row replaces the status pill.</li>
+                <li><strong>Settings and Help:</strong> Open over the conversation, so it stays where you left it.</li>
+              </ul>
+
               <h3>Key Features</h3>
               <ul>
                 <li>🔄 Real-time session monitoring</li>
@@ -3975,6 +4010,7 @@ function App() {
                 <li>📋 Todo tracking display</li>
                 <li>⚡ Instant session control</li>
                 <li>🔔 Completion notifications</li>
+                <li>↕️ Jump to either end of a long conversation</li>
               </ul>
             </div>
           )}

@@ -1,9 +1,9 @@
 # Contributing to Harness Remote
 
 Thanks for wanting to work on this. Harness Remote is a companion app for driving coding-agent
-harnesses from a phone. It is deliberately harness-agnostic: OpenCode, Oh My Pi (OMP) and PI are
-supported today. Adding a harness should mean adding a profile entry and its setup section, never a
-special case threaded through the app.
+harnesses from a phone or a desktop browser. It is deliberately harness-agnostic: OpenCode, Oh My Pi
+(OMP) and PI are supported today. Adding a harness should mean adding a profile entry and its setup
+section, never a special case threaded through the app.
 
 This document is long on purpose. Read the section that matches what you are touching, or all of it
 if you are having an agent do the work.
@@ -116,6 +116,26 @@ Do not add a third pattern where an unimplemented endpoint surfaces an error to 
 When a feature is genuinely unavailable on a backend, say so in the README's harness section rather
 than leaving the user to discover a dead button.
 
+## The other rule: every UI change lives in two layouts
+
+Below 781px the app is a single view with bottom navigation; above it, a permanent sidebar sits next
+to the chat. `App.tsx` keeps an `isDesktop` flag from a `matchMedia` query on that exact breakpoint,
+so the JS layout and the stylesheet's `@media (max-width: 780px)` block never disagree. Change one
+and you have to change the other.
+
+Two things make this easy to get wrong:
+
+- **The scroller moves.** On mobile the page scrolls and `.messages` is a plain block; on desktop the
+  chat pane is height-bounded and `.messages` is the scroller. Anything reading or setting scroll
+  position has to ask which one is live rather than assuming — `scrollsItself()` and
+  `messagesScrollMetrics()` exist for that.
+- **The session list is rendered twice.** `renderSessionCard` is shared by the mobile panel and the
+  desktop sidebar, with the sidebar's compact row shape coming from CSS overrides under
+  `.sidebar-sessions`. Add a field to the card and check it in both, rather than forking the markup.
+
+Resize the browser window across 781px before opening a PR that touches layout. It is the cheapest
+check in this document and it catches most of these.
+
 ## How the tests work here, and how to change one
 
 The suites under `web/src/*-regression.test.mjs` are unusual: they assert against the **source text**
@@ -223,10 +243,10 @@ that needs changing afterwards goes in separate commits on top. Squashing is up 
 
 ## Where to start
 
-- [#36](https://github.com/giuliastro/harness-remote/issues/36) — **PI support**, the next planned
-  harness, with the groundwork mapped out including the two hard-coded assumptions in the bridge
-  that need generalising.
-- Issues labelled [`help wanted`](https://github.com/giuliastro/harness-remote/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+- [Open issues](https://github.com/giuliastro/harness-remote/issues), especially any labelled
+  [`help wanted`](https://github.com/giuliastro/harness-remote/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+  A fourth harness is the obvious next step: the profile mechanism in `bridge/src/harness-profiles.js`
+  is what PI was added through, so it is a well-worn path rather than new ground.
 - Bug reports from real use are genuinely valuable here, for the reason in
   [Test against a real agent](#test-against-a-real-agent).
 - Translations, if the UI does not speak your language.
