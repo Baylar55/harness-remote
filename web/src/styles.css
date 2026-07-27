@@ -526,8 +526,14 @@ p {
   grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: var(--space-3);
+  min-width: 0;
 }
 
+.session-card h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .session-card-main p,
 .session-card > p {
   margin-top: var(--space-1);
