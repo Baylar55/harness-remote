@@ -23,6 +23,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Release notes are built from the tag's own annotation and the tag before it, and a
+          # depth-1 clone has neither.
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -155,6 +159,40 @@ jobs:
           name: harness-remote-release-apk-v${{ steps.version.outputs.app_version }}
           path: ${{ steps.apk.outputs.path }}
 
+      # The release summary and its credits come from the annotated tag message, written by hand when
+      # the release is cut. generate_release_notes is deliberately off: it lists one line per pull
+      # request attributed to whoever merged it, which credits the maintainer for work contributors
+      # did. CI cannot tell those apart, so it does not try — it publishes the curated text and links
+      # the full changelog for anyone who wants the commit-level detail.
+      - name: Compose release notes
+        id: notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          SUMMARY=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 --exclude="$GITHUB_REF_NAME" 2>/dev/null || true)
+          {
+            echo 'body<<HARNESS_RELEASE_NOTES_EOF'
+            echo '## Release'
+            echo
+            echo "Stable Android release APK for Harness Remote \`${{ steps.version.outputs.app_version }}\`."
+            # A lightweight tag, or an annotation with only a subject line, leaves this empty. Better a
+            # terse release than a failed one, so it is skipped rather than treated as an error.
+            if [ -n "$SUMMARY" ]; then
+              echo
+              echo "$SUMMARY"
+            fi
+            echo
+            echo '## Notes'
+            echo
+            echo "- Built from \`$GITHUB_SHA\`"
+            echo "- Version code \`${{ steps.version.outputs.version_code }}\`"
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo
+              echo "**Full changelog**: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$PREVIOUS_TAG...$GITHUB_REF_NAME"
+            fi
+            echo 'HARNESS_RELEASE_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Publish GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -162,11 +200,5 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Harness Remote v${{ steps.version.outputs.app_version }}
           files: ${{ steps.apk.outputs.path }}
-          generate_release_notes: true
-          body: |
-            ## Release
-            Stable Android release APK for Harness Remote `${{ steps.version.outputs.app_version }}`.
-
-            ## Notes
-            - Built from `${{ github.sha }}`
-            - Version code `${{ steps.version.outputs.version_code }}`
+          generate_release_notes: false
+          body: ${{ steps.notes.outputs.body }}
