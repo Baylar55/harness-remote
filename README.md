@@ -33,9 +33,44 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 - open a session and read messages, todo items, and progress
 - send prompts (and `/commands`) directly from the chat input
 - stop running work when necessary
-- use Android-friendly bottom navigation for quick access to Sessions, Detail, Settings, and Help
+- adapt to the screen: Android-friendly bottom navigation on a phone, a two-pane sidebar layout on a
+  wide screen (see [Desktop Mode](#desktop-mode))
+- jump to the top or the bottom of a long transcript or session list without dragging through it
 - play completion feedback sound when a running session finishes
 - switch UI language between English, Italian, and Traditional Chinese
+
+## Desktop Mode
+
+The app is one build with two layouts. There is no switch to flip and no separate desktop
+download: open it in a window at least 781px wide and it rearranges itself into a two-pane
+desktop layout. Narrow the window below that and it goes back to the phone layout, live.
+
+| | Phone layout | Desktop layout |
+|---|---|---|
+| Navigation | bottom nav, one view at a time | permanent left sidebar next to the chat |
+| Sessions | full-screen list, tap to open | compact rows in the sidebar, always visible |
+| Settings / Help | own full-screen views | modal over the chat, so the session stays put |
+| Session status | `idle` / `busy` / `retry` pill | animated accent bar on the row, only while busy or retrying |
+
+### Using it
+
+1. Serve the web app — `npm run dev` in `web/` during development, or any static host for a
+   `npm run build` bundle. The Android APK uses the same code and switches layout on a tablet or
+   a large foldable.
+2. Open it in a desktop browser. Above 781px the sidebar appears and the first session opens by
+   itself, so you land in a conversation rather than on an empty pane.
+3. Pick sessions from the sidebar. Hovering a row reveals its rename and delete icons; the
+   session you are reading stays highlighted while you browse the rest.
+4. Drag any of the three vertical borders to resize: the sidebar's outer edge, the divider between
+   the two panes, and the chat's outer edge. The sidebar accepts 220–480px and the chat 420–1400px.
+   Both widths are remembered per browser and are clamped back inside the window if you later open
+   the app on a smaller screen.
+5. Use the floating arrow buttons at the bottom right of a long transcript or session list to jump
+   to either end. They only appear when there is enough scrolling left to be worth it, and jumping
+   to the top also releases the chat's auto-follow so incoming output stops yanking the view down.
+
+Everything else — prompts, slash commands, stopping a run, model and agent selection, todos,
+diffs — behaves exactly as it does on a phone. The backend setup below is identical either way.
 
 ## Technology Stack
 
@@ -244,7 +279,8 @@ cd web
 npm install
 npm run dev
 ```
-Open the shown URL from your browser (or your phone on the same LAN).
+Open the shown URL from your browser (or your phone on the same LAN). A desktop browser window
+gets the two-pane layout described in [Desktop Mode](#desktop-mode); a phone gets the mobile one.
 
 ## Android APK Build (Cloud, no local SDK required)
 
@@ -291,9 +327,8 @@ The app is not limited to LAN. You can also use it over WAN/VPN if your network 
 
 ## Contributing
 
-Setup, the checks CI expects, how the regression suites work, and the rule that every change has to
-hold on more than one harness are all in [CONTRIBUTING.md](CONTRIBUTING.md).
-[#36](https://github.com/giuliastro/harness-remote/issues/36) (PI support) is open and unassigned.
+Setup, the checks CI expects, how the regression suites work, and the rules that every change has to
+hold on more than one harness and in both layouts are all in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Contributors
 
