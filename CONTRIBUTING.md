@@ -221,15 +221,32 @@ git tag -a v2.4.0 -F release-notes.txt
 git push origin main && git push origin v2.4.0
 ```
 
-**The tag annotation is the release notes.** CI publishes its body verbatim, so write it for someone
-deciding whether to update: what changed, then who to thank.
+**The tag annotation is the release notes.** CI publishes its body verbatim between its own
+`## Release` heading and the build notes, so write those two sections as bullets and nothing else:
+
+```
+Harness Remote v2.4.0
+
+## What's Changed
+
+* One line per user-visible change, most interesting first
+* No "by @someone", no pull request numbers
+
+## Contributors
+
+* **Special thanks to [@handle](https://github.com/handle)** (Real Name) — what they built, and why it stands out
+* [@handle](https://github.com/handle) (Real Name) — what they contributed
+```
+
+The first line is the subject and is dropped from the body, so it can repeat the version.
 
 **Credit contributors, not the merge.** GitHub's generated notes are switched off deliberately. They
-list one line per pull request attributed to whoever pressed merge, which on this repo means the
-maintainer collects credit for work other people did. So do not enumerate pull requests or say who
-did what task by task. Name the people whose work is in the release, say what they contributed, and
-give the largest contribution a `Special thanks`. Anyone who wants commit-level detail has the full
-changelog link that CI appends.
+list one bullet per pull request ending in `by @<whoever pressed merge>`, which on this repo means
+the maintainer collects credit for work other people did — v2.3.0 read as though the maintainer had
+written the desktop layout. Keep the bullets; they are the right format. Just describe the change and
+stop there. Then name the people whose work is in the release, say what each contributed, and give
+the largest contribution a `Special thanks`. Anyone who wants it attributed commit by commit has the
+full changelog link that CI appends.
 
 ## The bridge is a network service
 
