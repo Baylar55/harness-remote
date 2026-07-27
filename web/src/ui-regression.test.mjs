@@ -11,7 +11,18 @@ assert.ok(refreshButton, 'sessions refresh button should call refreshSessionsWit
 assert.ok(refreshButton[0].includes('RefreshIcon'), 'idle sessions refresh button should render a non-spinning RefreshIcon')
 assert.ok(refreshButton[0].includes('refreshingSessions ? <LoadingIcon'), 'refresh button should spin only during an active manual refresh')
 assert.match(styles, /\.session-card-main\s*\{[\s\S]*?min-width:\s*0;/, 'session card content should be allowed to shrink inside narrow layouts')
-assert.match(styles, /\.session-card h3\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?text-overflow:\s*ellipsis;[\s\S]*?white-space:\s*nowrap;/, 'long session titles should stay within their card and show an ellipsis')
+// The invariant is that a long title cannot widen its card, not how that is achieved. Asserting the
+// nowrap/ellipsis spelling instead pinned a truncation the mobile cards never had: their titles wrap,
+// and the README screenshots show it. Breaking the word contains the overflow and keeps the wrapping.
+// Anchored to line start, and each match kept inside one rule block with [^}]: an unanchored
+// `.session-card h3` also matches the tail of `.sidebar-sessions .session-card h3`, which made the
+// negative assertion below fire on the sidebar's deliberate nowrap.
+assert.match(styles, /^\.session-card h3\s*\{[^}]*overflow-wrap:\s*(break-word|anywhere);/m, 'a long session title must break rather than widen its card')
+assert.ok(
+  !/^\.session-card h3\s*\{[^}]*white-space:\s*nowrap/m.test(styles),
+  'the mobile session card title must stay free to wrap; only the compact desktop sidebar row truncates it'
+)
+assert.match(styles, /^\.sidebar-sessions \.session-card h3\s*\{[^}]*white-space:\s*nowrap;/m, 'the desktop sidebar row keeps its single-line ellipsised title')
 
 assert.ok(app.includes('messageScrollSignature'), 'conversation auto-scroll should react to message content changes, not only message count')
 assert.ok(

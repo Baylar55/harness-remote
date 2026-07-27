@@ -529,11 +529,18 @@ p {
   min-width: 0;
 }
 
+/* A long title must not widen the card: that is what overflowed the whole mobile layout, together
+   with the min-width above. Breaking it is enough to contain it, and keeps the wrapped two-line
+   titles the cards have always shown — `white-space: nowrap` with an ellipsis contains it just as
+   well, but collapses every one of them to a single truncated line, which costs real information on
+   a phone where session titles are long and the card has the room. break-word also covers the one
+   case plain wrapping cannot: a title that is a single unbroken token.
+   The desktop sidebar overrides this back to one ellipsised line on purpose — a compact row is the
+   point there, and the full title is in the tooltip. */
 .session-card h3 {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
+
 .session-card-main p,
 .session-card > p {
   margin-top: var(--space-1);
