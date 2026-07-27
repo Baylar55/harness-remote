@@ -210,6 +210,27 @@ npm run cap:sync:android
 A plain `npx cap sync android` does **not** copy those Java sources into the generated project, so
 your change is silently dropped and the app runs the previous version of the native plugin.
 
+## Cutting a release
+
+Bump `version` in `web/package.json`, commit it as `chore: release vX.Y.Z`, then tag that commit and
+push both. Everything else — the version code, the Android metadata, the signed APK, the GitHub
+release — is derived from that one field by CI.
+
+```bash
+git tag -a v2.4.0 -F release-notes.txt
+git push origin main && git push origin v2.4.0
+```
+
+**The tag annotation is the release notes.** CI publishes its body verbatim, so write it for someone
+deciding whether to update: what changed, then who to thank.
+
+**Credit contributors, not the merge.** GitHub's generated notes are switched off deliberately. They
+list one line per pull request attributed to whoever pressed merge, which on this repo means the
+maintainer collects credit for work other people did. So do not enumerate pull requests or say who
+did what task by task. Name the people whose work is in the release, say what they contributed, and
+give the largest contribution a `Special thanks`. Anyone who wants commit-level detail has the full
+changelog link that CI appends.
+
 ## The bridge is a network service
 
 Treat these three areas as security-sensitive and explain your reasoning in the PR when you change
