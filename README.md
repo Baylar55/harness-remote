@@ -22,9 +22,22 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 
 ## Screenshots
 
-| Sessions | Detail |
-|---|---|
-| ![](docs/screenshots/sessions.jpg) | ![](docs/screenshots/detail.jpg) |
+<!-- A raw table with 50% columns, rather than a markdown one: GitHub sizes markdown table columns
+     from their content, and "Sessions" is a wider heading than "Detail", so that column took ~14px
+     more and each screenshot scaled to fill whichever column it landed in — the right one rendered
+     visibly smaller. Pinning the columns keeps the pair identical at any viewport width, which a
+     fixed width on the images alone does not: max-width: 100% still clamps each to its own cell. -->
+
+<table>
+  <tr>
+    <th width="50%">Sessions</th>
+    <th width="50%">Detail</th>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/sessions.jpg" alt="Sessions list showing connection status, session cards with relative timestamps, and rename and delete actions"></td>
+    <td><img src="docs/screenshots/detail.jpg" alt="Session detail showing the model chip, a collapsed reasoning bubble, an assistant reply, and the composer"></td>
+  </tr>
+</table>
 
 ## What It Can Do
 
@@ -329,10 +342,3 @@ The app is not limited to LAN. You can also use it over WAN/VPN if your network 
 
 Setup, the checks CI expects, how the regression suites work, and the rules that every change has to
 hold on more than one harness and in both layouts are all in [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Contributors
-
-<a href="https://github.com/giuliastro"><img src="https://github.com/giuliastro.png" width="40" height="40" alt="giuliastro" title="giuliastro" /></a>
-<a href="https://github.com/gervaso-assistant"><img src="https://github.com/gervaso-assistant.png" width="40" height="40" alt="Gervaso" title="Gervaso" /></a>
-<a href="https://github.com/ergs0204"><img src="https://github.com/ergs0204.png" width="40" height="40" alt="Eric-Yeh" title="Eric-Yeh" /></a>
-<a href="https://github.com/birabittoh"><img src="https://github.com/birabittoh.png" width="40" height="40" alt="birabittoh" title="birabittoh" /></a>
