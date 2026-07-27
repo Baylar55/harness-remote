@@ -2928,7 +2928,7 @@ function App() {
   }, [assistantResponseSignature, awaitingAssistantReply])
 
   useEffect(() => {
-    completionAudioRef.current = new Audio("/audio/staplebops-01.aac")
+    completionAudioRef.current = new Audio(`${import.meta.env.BASE_URL}audio/staplebops-01.aac`)
     completionAudioRef.current.preload = "auto"
   }, [])
 
@@ -3092,7 +3092,7 @@ function App() {
         <header className="top-nav fade-in">
           <div className="brand-section">
             <div className="brand-title">
-              <img src="/app-icon.png" alt="" className="app-icon" />
+              <img src={`${import.meta.env.BASE_URL}app-icon.png`} alt="" className="app-icon" />
               <div className="brand-text">
                 <h1>{t('app.title')}</h1>
                 {/* The harness matters more than the address: the same host can serve a different
@@ -3116,7 +3116,7 @@ function App() {
           <div className="resize-handle resize-handle--start" onPointerDown={dragSidebarLeft} role="separator" aria-orientation="vertical" aria-label="Resize sessions panel" />
           <div className="resize-handle resize-handle--end" onPointerDown={dragPanelDivider} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
           <div className="sidebar-brand">
-            <img src="/app-icon.png" alt="" className="app-icon" />
+            <img src={`${import.meta.env.BASE_URL}app-icon.png`} alt="" className="app-icon" />
             <div className="brand-text">
               <h1>{t('app.title')}</h1>
               <p className="brand-meta">
