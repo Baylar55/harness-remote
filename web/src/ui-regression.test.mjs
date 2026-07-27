@@ -40,7 +40,15 @@ assert.ok(app.includes('completionShouldPlayRef.current = true'), 'completion so
 assert.ok(app.includes('wasAwaitingAssistantReplyRef.current && !awaitingAssistantReply && completionShouldPlayRef.current'), 'completion sound should play only when assistant waiting ends, not when the user bubble renders')
 assert.ok(app.includes('loadSelectedRequestRef'), 'session message refreshes should ignore stale overlapping polling responses')
 assert.ok(app.includes('if (requestID !== loadSelectedRequestRef.current) return'), 'older loadSelected requests must not overwrite newer assistant output')
-assert.ok(app.includes('assistantPayloadLength(current) <= assistantPayloadLength(msg)'), 'message refresh should not regress from assistant output back to user-only history')
+assert.ok(app.includes('reconcileStreamedPart'), 'message refresh should not regress streamed assistant output back to a leaner snapshot')
+assert.ok(
+  /function reconcileStreamedPart[\s\S]*?incomingText\.length >= previousText\.length \? incoming/.test(app),
+  'a snapshot with shorter text than what is already shown must keep the longer text'
+)
+assert.ok(
+  !/assistantPayloadLength\(current\) <= assistantPayloadLength\(msg\)/.test(app),
+  'a leaner snapshot must not be rejected wholesale: the optimistic user bubble is cleared against that same snapshot, so dropping it makes a just-sent message vanish and latches every later message out of the transcript until the session is reopened'
+)
 assert.ok(app.includes('SendIcon') && app.includes('<SendIcon size={18} />'), 'composer send button should use the clear paper-plane SendIcon')
 assert.ok(app.includes('StopCircleIcon') && app.includes('<StopCircleIcon size={18} />'), 'composer waiting button should use a clear stop-task icon')
 assert.match(icons, /export const StopCircleIcon/, 'StopCircleIcon should exist in the shared SVG icon set')
@@ -141,7 +149,10 @@ for (const capability of ['agents', 'models', 'todos', 'diff', 'questions', 'ses
 // A follow-up prompt can be queued while the agent is still working.
 assert.ok(app.includes('const showStopAction = isWorking && !composer.trim()'), 'stop should be offered only when there is nothing to send')
 assert.equal(app.includes('disabled={!selectedSession || isWorking}'), false, 'the composer must stay usable while the agent works')
-assert.ok(app.includes("authoritativeExternalHistory || assistantPayloadLength(current) <= assistantPayloadLength(msg)"), "external OMP history must replace stale cached ordering even when the corrected payload is shorter")
+// External OMP history must replace stale cached ordering even when the corrected payload is shorter.
+// This no longer needs its own escape hatch: every fetched snapshot is now applied, and only same-id
+// same-type text is held back from shrinking, so a corrected external history replaces the cache.
+assert.ok(app.includes("if (!messagesHaveSameContent(current, msg)) {"), "a fetched snapshot must be applied whenever it differs from what is on screen")
 // The marker moved from below the messages, where the sticky composer cut it in half, into the
 // header. What matters is that an external session is still marked and still explained, not where.
 assert.ok(app.includes("selectedSession.external && ("), "a session from another client must be marked as such")

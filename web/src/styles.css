@@ -357,6 +357,19 @@ p {
   margin-top: var(--space-4);
 }
 
+/* Settings only ever puts one button (Test connection) in .actions, so it should span the row
+   instead of sitting in the first half of a two-column grid meant for pairs of buttons. */
+.settings .actions,
+.settings .connection-help {
+  grid-template-columns: 1fr;
+}
+
+/* Password is the seventh (odd) field in the two-column form-grid, so it lands alone in the
+   last row occupying only the first column — span the full row instead. */
+.settings .form-grid label[for="password"] {
+  grid-column: 1 / -1;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -862,6 +875,56 @@ p {
   padding: var(--space-2) var(--space-1);
   padding-bottom: var(--chat-bottom-clearance, 140px);
   scroll-padding-bottom: var(--chat-bottom-clearance, 140px);
+}
+
+/* Floating scroll affordances, stacked just above the composer. Absolute against .messages-wrap in
+   the desktop layout, where .messages is the scroller and the wrap itself stays put. */
+.jump-controls {
+  position: absolute;
+  right: var(--space-3);
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* The column spans dead space between the two buttons; don't let it eat clicks on the chat. */
+  pointer-events: none;
+}
+
+/* The clearance is measured from the composer, which already folds in its own bottom offset. */
+.jump-controls--chat {
+  bottom: var(--chat-bottom-clearance, 140px);
+}
+
+/* No composer on a plain page list, so it only has to sit clear of the bottom nav. */
+.jump-controls--page {
+  bottom: var(--space-3);
+}
+
+/* Anchored to the sidebar (not to .sidebar-sessions, which is the scroller and would carry the
+   buttons away with the rows), so it has to clear the footer's buttons and padding. */
+.jump-controls--sidebar {
+  right: var(--space-2);
+  bottom: calc(44px + var(--space-3) * 2 + var(--space-5));
+}
+
+.jump-button {
+  pointer-events: auto;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--nav-bg);
+  color: var(--muted);
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(14px);
+}
+
+.jump-button:hover {
+  color: var(--text);
 }
 
 .messages-end {
@@ -1606,6 +1669,466 @@ button.compact {
   }
 }
 
+/* Desktop-only left sidebar, replacing the top header bar above the 780px breakpoint. The
+   sidebar element only exists in the DOM when App.tsx's isDesktop check is true, so this rule
+   never touches layout on mobile. */
+.desktop-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  flex: 0 0 280px;
+  position: sticky;
+  top: var(--space-4);
+  align-self: flex-start;
+  max-height: calc(100dvh - var(--space-4) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--nav-bg);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(14px);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.sidebar-brand .brand-text {
+  min-width: 0;
+}
+
+.sidebar-brand h1,
+.sidebar-brand .subtle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-toolbar .search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-sessions {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sidebar-empty {
+  padding: var(--space-3);
+}
+
+/* Desktop sidebar sessions render as compact single-line rows rather than the card grid the
+   mobile sessions panel uses — same markup (renderSessionCard), scoped override here. */
+.sidebar-sessions {
+  gap: 2px;
+  /* Reserve a button stack's worth of room past the last row. Raising the floating jump buttons
+     alone only changes which row they cover — the overlay sits over the scroller either way,
+     swallowing that row's hover actions. Letting the list scroll further means no row has to sit
+     underneath them. Must stay after the base rule's `padding` shorthand, which would reset this. */
+  padding-bottom: calc(88px + var(--space-3));
+}
+
+.sidebar-sessions .session-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "title  actions"
+    "meta   actions";
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: 1px;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+}
+
+/* On desktop the pill is dropped in favor of a left-border flag: a session is assumed idle
+   unless it's actively busy/retrying, which is the only state worth calling out at a glance. The
+   border uses the site's own accent color (rather than an off-palette warning yellow) and sweeps
+   like an indeterminate progress bar so a working session reads as "in motion" at a glance. */
+.sidebar-sessions .session-card.busy::before,
+.sidebar-sessions .session-card.retry::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
+  bottom: var(--space-1);
+  width: 3px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(var(--primary-soft), var(--primary), var(--primary-soft));
+  background-size: 100% 24px;
+  background-repeat: repeat-y;
+  animation: session-busy-sweep 1s linear infinite;
+}
+
+/* A plain pixel-length shift (one full tile per loop) rather than a percentage-based one: with a
+   background taller than its element, percentage background-position isn't a simple fraction of
+   the tile size, so the loop never quite lined back up with itself and visibly hitched on every
+   repeat. */
+@keyframes session-busy-sweep {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 24px;
+  }
+}
+
+.sidebar-sessions .session-card:hover,
+.sidebar-sessions .session-card:focus-visible {
+  background: var(--surface-subtle);
+  box-shadow: none;
+}
+
+.sidebar-sessions .session-card.active {
+  background: var(--primary-soft);
+}
+
+.sidebar-sessions .session-card-main {
+  grid-area: title;
+  display: block;
+  min-width: 0;
+}
+
+.sidebar-sessions .session-card-main > div {
+  min-width: 0;
+}
+
+.sidebar-sessions .session-card h3 {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-sessions .session-card-main p,
+.sidebar-sessions .session-card > p {
+  display: none;
+}
+
+/* The full directory path lives in the now-hidden <p> above; the compact sidebar row surfaces a
+   shortened copy inline next to the relative timestamp instead. */
+.session-directory-compact {
+  display: none;
+}
+
+.sidebar-sessions .session-directory-compact {
+  display: inline;
+}
+
+/* .session-stats becomes a transparent box so its children (the "updated" timestamp and the
+   status pill) can be placed directly into the row's grid areas, next to the title. */
+.sidebar-sessions .session-stats {
+  display: contents;
+}
+
+.sidebar-sessions .session-stats .change-summary {
+  display: none;
+}
+
+.sidebar-sessions .session-stats > .subtle {
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+
+/* The directory and relative-time spans live inside a single flex row (rather than each being a
+   grid item in its own right) so they sit side by side instead of stacking on top of each other
+   in the "meta" grid area. */
+.session-meta-line {
+  display: flex;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.sidebar-sessions .session-directory-compact {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-sessions .session-directory-compact::after {
+  content: "\00b7";
+  margin-left: var(--space-1);
+}
+
+.sidebar-sessions .session-stats .pill {
+  display: none;
+}
+
+.sidebar-sessions .inline-actions {
+  grid-area: actions;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 2px;
+  width: 0;
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* Collapsed to zero width so the title's grid column reclaims the space instead of just hiding
+   the (still layout-reserving) buttons behind invisible pixels. */
+.sidebar-sessions .session-card:hover .inline-actions,
+.sidebar-sessions .session-card:focus-within .inline-actions {
+  width: auto;
+  opacity: 1;
+}
+
+/* Bare icons, not bordered buttons — a desktop sidebar is mouse-driven, and the icon alone reads
+   fine at this size without the extra chrome a touch target needs. */
+.sidebar-sessions .inline-actions button {
+  font-size: 0;
+  min-height: 0;
+  height: 22px;
+  width: 22px;
+  padding: 0;
+  gap: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+.sidebar-sessions .inline-actions button:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.sidebar-sessions .inline-actions button.btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+/* While renaming, the rename/delete icons would just sit on top of (or squeeze) the rename
+   input — hide them until the rename is confirmed or cancelled. */
+.sidebar-sessions .session-card.renaming .inline-actions {
+  display: none;
+}
+
+/* The title area only spans the row's first column (the actions column sits to its right) — but
+   while renaming, actions is hidden and empty, so let the title area claim the full row width.
+   Otherwise the save/cancel buttons would end at the title column's edge instead of the row's,
+   misaligned with where the rename/delete icons themselves sit. */
+.sidebar-sessions .session-card.renaming .session-card-main {
+  grid-column: 1 / -1;
+}
+
+/* The rename input and its save/cancel buttons default to full-size (44px-tall buttons, a
+   140px-min-width input) sized for the session detail header, not a ~40px-tall sidebar row —
+   shrink everything to fit. */
+.sidebar-sessions .rename-inline {
+  width: 100%;
+  gap: 4px;
+}
+
+.sidebar-sessions .rename-input {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 20px;
+  padding: 0 var(--space-1);
+  font-size: 0.78rem;
+}
+
+.sidebar-sessions .rename-inline button {
+  flex: 0 0 auto;
+  min-height: 0;
+  height: 22px;
+  width: 22px;
+  padding: 0;
+  font-size: 0;
+  border: none;
+  background: transparent;
+  color: var(--muted-strong);
+  box-shadow: none;
+}
+
+.sidebar-sessions .rename-inline button:hover:not(:disabled) {
+  background: var(--surface-subtle);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.sidebar-sessions .rename-inline button.btn-primary {
+  color: var(--primary);
+}
+
+.sidebar-footer {
+  container-type: inline-size;
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-footer button {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+}
+
+.sidebar-footer button svg {
+  flex-shrink: 0;
+}
+
+/* Once the sidebar is narrow enough that "Help"/"Settings" would get cramped or truncated, drop
+   the labels entirely and fall back to icon-only buttons (the tooltip still carries the text). */
+@container (max-width: 260px) {
+  .sidebar-footer-label {
+    display: none;
+  }
+}
+
+.app-shell-desktop {
+  flex-direction: row;
+  align-items: flex-start;
+  /* The sidebar and main pane both carry an explicit resizable width, so the shell should hug
+     their combined width (up to the viewport) rather than stretching to a fixed max — otherwise
+     dragging a panel's outer edge would leave dead space instead of visibly resizing anything. */
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* Bound the chat pane to the viewport the same way .desktop-sidebar bounds itself, so .messages is
+   the scroller rather than the page. Without this the pane grows to fit the whole transcript: the
+   page scrolls instead, .messages-wrap ends up as tall as the transcript, and the floating jump
+   buttons — absolute against that wrap — anchor to the bottom of the content instead of the pane,
+   landing at the very bottom of the page behind the composer. */
+.app-shell-desktop .detail {
+  height: calc(100dvh - var(--space-4) * 2);
+  min-height: 0;
+}
+
+/* The message list is the only part that may absorb the bound. Everything else in the pane — topbar,
+   header, context strip, todo box, composer — is fixed-size chrome that would otherwise shrink and
+   clip its own contents once the transcript got long. */
+.app-shell-desktop .detail > * {
+  flex: 0 0 auto;
+}
+
+/* min-height: 0 is what lets these flex children shrink below their content so the bound reaches
+   .messages and it actually overflows. */
+.app-shell-desktop .messages-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The composer sits below the list in flow here rather than floating over it, so the list needs no
+   clearance reserved beneath it and the jump buttons only have to clear the list's own bottom edge.
+   Set explicitly rather than by overriding --chat-bottom-clearance: syncChatBottomClearance writes
+   that as an inline style on .messages-wrap, which would win over any rule here. */
+.app-shell-desktop .messages {
+  min-height: 0;
+  padding-bottom: var(--space-2);
+  scroll-padding-bottom: var(--space-2);
+}
+
+.app-shell-desktop .messages-end {
+  scroll-margin-bottom: 0;
+}
+
+.app-shell-desktop .jump-controls--chat {
+  bottom: var(--space-3);
+}
+
+.main-content {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Draggable borders for the desktop sidebar/main-pane layout: a thin invisible strip straddling
+   the panel edge, widened on hover/drag so it's easy to grab without adding visible chrome. */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+
+.resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: transparent;
+}
+
+.resize-handle:hover::after,
+.resize-handle:active::after {
+  background: var(--primary);
+}
+
+.resize-handle--start {
+  left: 0;
+  transform: translateX(-50%);
+}
+
+.resize-handle--end {
+  right: 0;
+  transform: translateX(50%);
+}
+
+.desktop-panel-modal {
+  position: relative;
+  width: min(92vw, 720px);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.desktop-panel-modal > .panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.desktop-modal-close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  padding: 0;
+}
+
 @media (max-width: 780px) {
   .app-shell {
     padding: var(--space-3);
@@ -1689,9 +2212,34 @@ button.compact {
     align-self: flex-start;
   }
 
+  /* On mobile the whole page scrolls (the composer is pinned with fixed positioning), so the list
+     must not be a scroll container of its own: nothing bounds its height here, so it would never
+     overflow, and a scroll container with nothing to scroll swallows the swipe instead of letting
+     it reach the document. Keeping it a plain block also lets the header and topbar scroll away. */
   .messages {
     min-height: 240px;
+    overflow: visible;
     padding: 0;
+    /* The side padding goes away here, but the bottom clearance must not: the composer is sticky at
+       an offset above the page bottom, so without it the newest messages settle underneath it and
+       the page has no room left to scroll them clear. */
+    padding-bottom: var(--chat-bottom-clearance, 140px);
+    scroll-padding-bottom: var(--chat-bottom-clearance, 140px);
+  }
+
+  /* The page is the scroller here, so the wrap scrolls away with it — pin to the viewport instead.
+     The clearance already folds in the composer's own bottom offset, so it clears the nav too. */
+  .jump-controls {
+    position: fixed;
+  }
+
+  .jump-controls--page {
+    bottom: calc(72px + var(--space-2) + env(safe-area-inset-bottom));
+  }
+
+  .jump-button {
+    width: 44px;
+    height: 44px;
   }
 
   .message {
@@ -1941,7 +2489,9 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
-.messages,
+/* Deliberately excludes .messages: outside the desktop layout its height is unbounded, so it never
+   overflows, and containment on a scroll container with nothing to scroll blocks the swipe from
+   chaining to the page that does scroll. These others are all genuinely bounded scrollers. */
 .model-option-list,
 .folder-list,
 .bottom-sheet,
@@ -2004,7 +2554,7 @@ button.compact {
    unlabelled glyphs. The title carries the action now, so the target is the width of the title. */
 .session-title-button {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   min-width: 0;
   min-height: 44px;
@@ -2026,13 +2576,13 @@ button.compact {
 
 .session-title-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
+  white-space: normal;
 }
 
 .session-title-pencil {
   flex: 0 0 auto;
+  margin-top: 0.2em;
   color: var(--muted);
 }
 

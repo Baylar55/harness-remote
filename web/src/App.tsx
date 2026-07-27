@@ -21,6 +21,8 @@ import {
   SettingsIcon,
   FolderIcon,
   ChatIcon,
+  JumpToTopIcon,
+  JumpToBottomIcon,
   HelpIcon,
   PlusIcon,
   TrashIcon,
@@ -41,9 +43,57 @@ const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
 const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
+const SIDEBAR_WIDTH_STORAGE_KEY = "opencode.remote.desktopSidebarWidth"
+const MAIN_WIDTH_STORAGE_KEY = "opencode.remote.desktopMainWidth"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
 type Translator = ReturnType<typeof createTranslator>
+
+const SIDEBAR_WIDTH_MIN = 220
+const SIDEBAR_WIDTH_MAX = 480
+const SIDEBAR_WIDTH_DEFAULT = 280
+const MAIN_WIDTH_MIN = 420
+const MAIN_WIDTH_MAX = 1400
+const MAIN_WIDTH_DEFAULT = 820
+// The app-shell's own horizontal padding plus the gap between the sidebar and main pane
+// (2 * --space-4 + --space-4, all 1rem) — how much of the viewport the two resizable panels
+// never get to claim, even before a scrollbar takes its own slice.
+const DESKTOP_LAYOUT_CHROME_WIDTH = 64
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+/** The most the sidebar and main pane may occupy together without overflowing the viewport. */
+function maxCombinedPanelWidth(): number {
+  return Math.max(SIDEBAR_WIDTH_MIN + MAIN_WIDTH_MIN, window.innerWidth - DESKTOP_LAYOUT_CHROME_WIDTH)
+}
+
+function readStoredWidth(key: string, fallback: number, min: number, max: number): number {
+  const raw = Number(localStorage.getItem(key))
+  return Number.isFinite(raw) && raw > 0 ? clamp(raw, min, max) : fallback
+}
+
+/** Drags a horizontal panel border: reports the pointer's horizontal movement since the previous
+ *  event (not since drag start), so callers can just add/subtract the delta from their own state
+ *  without tracking a separate drag-start snapshot. */
+function useHorizontalDrag(onDeltaX: (deltaX: number) => void): (event: React.PointerEvent) => void {
+  return useCallback((event: React.PointerEvent) => {
+    event.preventDefault()
+    let lastX = event.clientX
+    const onMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - lastX
+      lastX = moveEvent.clientX
+      if (deltaX !== 0) onDeltaX(deltaX)
+    }
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+    }
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }, [onDeltaX])
+}
 
 function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
   return backend === "omp" || backend === "pi"
@@ -109,6 +159,29 @@ function formatTime(epoch: number): string {
   return new Date(epoch).toLocaleString()
 }
 
+const RELATIVE_TIME_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ["year", 60 * 60 * 24 * 365],
+  ["month", 60 * 60 * 24 * 30],
+  ["week", 60 * 60 * 24 * 7],
+  ["day", 60 * 60 * 24],
+  ["hour", 60 * 60],
+  ["minute", 60]
+]
+
+/** Compact, locale-translated "13 min ago" / "13 minuti fa" style string — falls back to
+ *  "just now" (via the 0-second `second` bucket) rather than "-1 minutes ago" for very recent times. */
+function formatRelativeTime(epoch: number, locale: LanguageCode): string {
+  if (!epoch) return "-"
+  const deltaSeconds = Math.round((epoch - Date.now()) / 1000)
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "short" })
+  for (const [unit, secondsInUnit] of RELATIVE_TIME_UNITS) {
+    if (Math.abs(deltaSeconds) >= secondsInUnit) {
+      return formatter.format(Math.round(deltaSeconds / secondsInUnit), unit)
+    }
+  }
+  return formatter.format(deltaSeconds, "second")
+}
+
 function extractText(msg: MessageEnvelope): string {
   return msg.parts
     .filter((part) => part.type === "text" && part.text)
@@ -129,12 +202,6 @@ function toRenderedMessage(message: MessageEnvelope): MessageEnvelope & { text: 
   const wrapped = { ...message, text: extractText(message) }
   renderedMessageCache.set(message, wrapped)
   return wrapped
-}
-
-function assistantPayloadLength(items: MessageEnvelope[]): number {
-  return items
-    .filter((message) => message.info.role !== "user")
-    .reduce((sum, message) => sum + extractText(message).length, 0)
 }
 
 function messagesHaveSameContent(left: MessageEnvelope[], right: MessageEnvelope[]): boolean {
@@ -470,6 +537,130 @@ function PatchPartView({
 
 const BOTTOM_STICK_THRESHOLD = 80
 
+/** How far from an end a list must be scrolled before its jump button appears, at most. */
+const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
+/** Below this much total travel, jumping saves nobody a scroll and the buttons are pure clutter. */
+const JUMP_AFFORDANCE_MIN_RANGE = 240
+
+type JumpAffordances = { top: boolean; bottom: boolean }
+type ScrollMetrics = { fromTop: number; fromBottom: number }
+
+const NO_JUMP_AFFORDANCES: JumpAffordances = { top: false, bottom: false }
+
+/** Which jump buttons are worth showing at this scroll position.
+ *
+ *  The threshold has to scale with the total scroll range rather than being a flat 320px. Measured
+ *  absolutely, a list that only scrolls ~600px has no position where both ends are more than 320px
+ *  away, and its jump-to-top only appears in the last 320px of travel — which reads as "the buttons
+ *  only show up at the very bottom". Anything scrolling less than 320px got no buttons at all. */
+function jumpAffordancesFor({ fromTop, fromBottom }: ScrollMetrics): JumpAffordances {
+  const range = fromTop + fromBottom
+  if (range < JUMP_AFFORDANCE_MIN_RANGE) return NO_JUMP_AFFORDANCES
+  const threshold = Math.min(JUMP_AFFORDANCE_MAX_THRESHOLD, range * 0.25)
+  return { top: fromTop > threshold, bottom: fromBottom > threshold }
+}
+
+function windowScrollMetrics(): ScrollMetrics {
+  const doc = document.documentElement
+  return { fromTop: window.scrollY, fromBottom: doc.scrollHeight - window.scrollY - window.innerHeight }
+}
+
+function elementScrollMetrics(element: HTMLElement | null): ScrollMetrics {
+  if (!element) return { fromTop: 0, fromBottom: 0 }
+  return {
+    fromTop: element.scrollTop,
+    fromBottom: element.scrollHeight - element.scrollTop - element.clientHeight
+  }
+}
+
+/** True when the element is a real scroller rather than one that grows to fit its content. Geometry
+ *  alone is not enough: scrollHeight also exceeds clientHeight on an overflow: visible element whose
+ *  content spills, which is exactly what the mobile message list is, and treating that as a scroller
+ *  reads a scrollTop that is permanently 0. */
+function scrollsItself(element: HTMLElement | null): element is HTMLElement {
+  if (!element || element.scrollHeight <= element.clientHeight + 1) return false
+  const overflowY = window.getComputedStyle(element).overflowY
+  return overflowY === "auto" || overflowY === "scroll"
+}
+
+/** Watches how far a list sits from each end and reports which jump buttons are worth showing.
+ *  `getMetrics` is injected because the scroller varies: the chat scrolls its own pane in the
+ *  desktop layout, while every mobile list lets the page scroll instead. Returns a `refresh` to
+ *  call from an element's own onScroll and whenever content changes the distances without a
+ *  scroll event. */
+function useJumpAffordances(active: boolean, getMetrics: () => ScrollMetrics): [JumpAffordances, () => void] {
+  const [affordances, setAffordances] = useState<JumpAffordances>(NO_JUMP_AFFORDANCES)
+  const getMetricsRef = useRef(getMetrics)
+  getMetricsRef.current = getMetrics
+
+  const refresh = useCallback(() => {
+    const next = jumpAffordancesFor(getMetricsRef.current())
+    setAffordances((current) => (current.top === next.top && current.bottom === next.bottom ? current : next))
+  }, [])
+
+  useEffect(() => {
+    if (!active) {
+      setAffordances(NO_JUMP_AFFORDANCES)
+      return
+    }
+    window.addEventListener("scroll", refresh, { passive: true })
+    window.addEventListener("resize", refresh)
+    // Layout settles a frame after the view mounts, so the first read has to wait for it.
+    const frame = requestAnimationFrame(refresh)
+    return () => {
+      window.removeEventListener("scroll", refresh)
+      window.removeEventListener("resize", refresh)
+      cancelAnimationFrame(frame)
+    }
+  }, [active, refresh])
+
+  return [affordances, refresh]
+}
+
+/** Floating jump-to-top/bottom buttons for a long list. */
+function JumpControls({
+  affordances,
+  onJumpToTop,
+  onJumpToBottom,
+  variant = "chat",
+  t
+}: {
+  affordances: JumpAffordances
+  onJumpToTop: () => void
+  onJumpToBottom: () => void
+  /** "chat" clears the composer, "page" the bottom nav, "sidebar" the desktop sidebar footer. */
+  variant?: "chat" | "page" | "sidebar"
+  t: Translator
+}) {
+  if (!affordances.top && !affordances.bottom) return null
+  return (
+    <div className={`jump-controls jump-controls--${variant}`}>
+      {affordances.top && (
+        <button
+          type="button"
+          className="jump-button fade-in"
+          onClick={onJumpToTop}
+          title={t('app.jumpToTop')}
+          aria-label={t('app.jumpToTop')}
+        >
+          <JumpToTopIcon size={18} />
+        </button>
+      )}
+      {affordances.bottom && (
+        <button
+          type="button"
+          className="jump-button fade-in"
+          onClick={onJumpToBottom}
+          title={t('app.jumpToBottom')}
+          aria-label={t('app.jumpToBottom')}
+        >
+          <JumpToBottomIcon size={18} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 let modalTitleSequence = 0
 
 /** Shared full-detail modal — everything that isn't the primary output text (thoughts, tool calls, edits) is
@@ -507,6 +698,51 @@ function Modal({
           </button>
         </div>
         <div className="diff-modal-body">{children}</div>
+      </section>
+    </div>
+  )
+}
+
+/** Wraps children with `wrapper(children)` only when `condition` holds, otherwise renders children
+ *  as-is. Lets a panel's body be written once and reused unmodified in both its mobile inline form
+ *  and its desktop modal form. */
+function ConditionalWrapper({
+  condition,
+  wrapper,
+  children
+}: {
+  condition: boolean
+  wrapper: (children: ReactNode) => ReactNode
+  children: ReactNode
+}) {
+  return <>{condition ? wrapper(children) : children}</>
+}
+
+/** Desktop-only modal shell for panels (settings, help) that already render their own heading —
+ *  unlike Modal, it has no title bar of its own, just a close affordance, so the panel's existing
+ *  content isn't duplicated under a second title. */
+function DesktopModalOverlay({
+  onClose,
+  ariaLabel,
+  children
+}: {
+  onClose: () => void
+  ariaLabel: string
+  children: ReactNode
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal-card desktop-panel-modal fade-in"
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button type="button" className="btn-secondary desktop-modal-close" onClick={onClose} aria-label={ariaLabel}>
+          <CloseIcon size={16} />
+        </button>
+        {children}
       </section>
     </div>
   )
@@ -1091,9 +1327,12 @@ function createLocalAssistantMessage(sessionID: string, text: string): MessageEn
   }
 }
 
-/** Reasoning text should only ever grow while streaming — if an incoming snapshot is shorter than what's already shown, a reset/truncated event landed; keep the longer text instead of visibly erasing it. */
-function reconcileReasoningPart(previous: MessagePart | undefined, incoming: MessagePart): MessagePart {
-  if (incoming.type !== "reasoning" || !previous || previous.type !== "reasoning") return incoming
+/** Streamed text should only ever grow — if an incoming snapshot is shorter than what's already shown, a
+ *  reset/truncated event landed; keep the longer text instead of visibly erasing it. Applied per part rather
+ *  than by rejecting the whole snapshot, so a lean refetch can still deliver the messages that came with it. */
+function reconcileStreamedPart(previous: MessagePart | undefined, incoming: MessagePart): MessagePart {
+  if (!previous || previous.type !== incoming.type) return incoming
+  if (incoming.type !== "reasoning" && incoming.type !== "text") return incoming
   const previousText = previous.text ?? ""
   const incomingText = incoming.text ?? ""
   return incomingText.length >= previousText.length ? incoming : { ...incoming, text: previousText }
@@ -1114,7 +1353,7 @@ function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelo
     const previous = currentByID.get(message.info.id)
     if (!previous) return message
     const previousPartsByID = new Map(previous.parts.map((part) => [part.id, part]))
-    const parts = message.parts.map((part) => reconcileReasoningPart(previousPartsByID.get(part.id), part))
+    const parts = message.parts.map((part) => reconcileStreamedPart(previousPartsByID.get(part.id), part))
     const fetchedPartIDs = new Set(message.parts.map((part) => part.id))
     const missingReasoning = previous.parts.filter((part) => part.type === "reasoning" && !fetchedPartIDs.has(part.id))
     const mergedParts = missingReasoning.length === 0 ? parts : [...missingReasoning, ...parts]
@@ -1129,7 +1368,7 @@ function applyStreamedPartUpdate(messages: MessageEnvelope[], sessionID: string,
     changed = true
     const exists = message.parts.some((existing) => existing.id === part.id)
     const parts = exists
-      ? message.parts.map((existing) => (existing.id === part.id ? reconcileReasoningPart(existing, part) : existing))
+      ? message.parts.map((existing) => (existing.id === part.id ? reconcileStreamedPart(existing, part) : existing))
       : [...message.parts, part]
     return { ...message, parts }
   })
@@ -1329,7 +1568,10 @@ const MessagesPane = memo(function MessagesPane({
   messagesRef,
   messagesEndRef,
   onMessagesScroll,
-  onQuestionResolved
+  onQuestionResolved,
+  jumpAffordances,
+  onJumpToTop,
+  onJumpToBottom
 }: {
   loadingSessionID: string | null
   selectedID: string | null
@@ -1344,6 +1586,9 @@ const MessagesPane = memo(function MessagesPane({
   messagesEndRef: RefObject<HTMLDivElement>
   onMessagesScroll: () => void
   onQuestionResolved: (id: string) => void
+  jumpAffordances: { top: boolean; bottom: boolean }
+  onJumpToTop: () => void
+  onJumpToBottom: () => void
 }) {
   return (
     <div className="messages-wrap">
@@ -1400,6 +1645,7 @@ const MessagesPane = memo(function MessagesPane({
           </>
         )}
       </div>
+      <JumpControls affordances={jumpAffordances} onJumpToTop={onJumpToTop} onJumpToBottom={onJumpToBottom} t={t} />
     </div>
   )
 })
@@ -1435,6 +1681,65 @@ function App() {
   const [view, setView] = useState<"settings" | "sessions" | "detail" | "help">(() => {
     return config.host && config.port > 0 ? "sessions" : "settings"
   })
+  // Desktop gets a persistent left sidebar instead of the mobile top bar/bottom nav; this mirrors
+  // the existing 780px CSS breakpoint so JS layout and stylesheet layout never disagree.
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia("(min-width: 781px)").matches)
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 781px)")
+    const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches)
+    query.addEventListener("change", onChange)
+    return () => query.removeEventListener("change", onChange)
+  }, [])
+  // On desktop the sidebar always shows sessions, so the main pane falls back to the chat view
+  // instead of duplicating the session list there.
+  const mainView = isDesktop && view === "sessions" ? "detail" : view
+
+  // Desktop panel widths: the sidebar (sessions) and main pane (chat) each get an explicit pixel
+  // width instead of the main pane simply filling whatever space is left, so both edges and the
+  // divider between them are independently draggable.
+  const [sidebarWidth, setSidebarWidth] = useState(() =>
+    readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX)
+  )
+  const [mainWidth, setMainWidth] = useState(() =>
+    readStoredWidth(MAIN_WIDTH_STORAGE_KEY, MAIN_WIDTH_DEFAULT, MAIN_WIDTH_MIN, MAIN_WIDTH_MAX)
+  )
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
+  }, [sidebarWidth])
+  useEffect(() => {
+    localStorage.setItem(MAIN_WIDTH_STORAGE_KEY, String(mainWidth))
+  }, [mainWidth])
+  const dragSidebarLeft = useHorizontalDrag((deltaX) => {
+    // Dragging the sidebar's left edge left (negative deltaX) grows it. Growing it can't push the
+    // combined width past the viewport, since the main pane doesn't move to make room.
+    setSidebarWidth((width) => clamp(width - deltaX, SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, maxCombinedPanelWidth() - mainWidth)))
+  })
+  const dragPanelDivider = useHorizontalDrag((deltaX) => {
+    // The divider trades width between the two panels, so their combined width never changes —
+    // no viewport cap needed here beyond each panel's own min/max.
+    setSidebarWidth((width) => clamp(width + deltaX, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX))
+    setMainWidth((width) => clamp(width - deltaX, MAIN_WIDTH_MIN, MAIN_WIDTH_MAX))
+  })
+  const dragMainRight = useHorizontalDrag((deltaX) => {
+    setMainWidth((width) => clamp(width + deltaX, MAIN_WIDTH_MIN, Math.min(MAIN_WIDTH_MAX, maxCombinedPanelWidth() - sidebarWidth)))
+  })
+  // Restores/keeps the combined panel width within the viewport: on first mount (a stored width
+  // from a wider screen), and again whenever the window is resized narrower than the current
+  // total. Shrinks the main pane first since it has more room to give before hitting its floor.
+  useEffect(() => {
+    if (!isDesktop) return
+    const clampToViewport = () => {
+      const overflow = sidebarWidth + mainWidth - maxCombinedPanelWidth()
+      if (overflow <= 0) return
+      const mainShrink = Math.min(overflow, mainWidth - MAIN_WIDTH_MIN)
+      if (mainShrink > 0) setMainWidth((width) => clamp(width - mainShrink, MAIN_WIDTH_MIN, MAIN_WIDTH_MAX))
+      const sidebarShrink = overflow - mainShrink
+      if (sidebarShrink > 0) setSidebarWidth((width) => clamp(width - sidebarShrink, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX))
+    }
+    clampToViewport()
+    window.addEventListener("resize", clampToViewport)
+    return () => window.removeEventListener("resize", clampToViewport)
+  }, [isDesktop, sidebarWidth, mainWidth])
 
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [selectedID, setSelectedID] = useState<string | null>(null)
@@ -1474,6 +1779,7 @@ function App() {
   const [lastTestedConfigKey, setLastTestedConfigKey] = useState<string | null>(null)
   const [sessionToDelete, setSessionToDelete] = useState<SessionView | null>(null)
   const [renamingSessionID, setRenamingSessionID] = useState<string | null>(null)
+  const [renameSource, setRenameSource] = useState<"list" | "header" | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const [activeDetailSheet, setActiveDetailSheet] = useState<null | "ai" | "details">(null)
@@ -1481,6 +1787,22 @@ function App() {
   const stickToBottomRef = useRef(true)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLDivElement | null>(null)
+  // Both gate on mainView, not view: on desktop, picking a session leaves view === "sessions" while
+  // the chat is what's actually rendered, so gating on view left the buttons permanently inactive.
+  const [jumpAffordances, refreshChatJumps] = useJumpAffordances(mainView === "detail", () =>
+    messagesScrollMetrics()
+  )
+  // mainView is never "sessions" on desktop — there the list is the sidebar below — so this is
+  // implicitly the mobile page-scrolled list.
+  const [sessionJumpAffordances, refreshSessionJumps] = useJumpAffordances(
+    mainView === "sessions",
+    windowScrollMetrics
+  )
+  // The desktop sidebar list scrolls itself, so it needs its own instance reading that element.
+  const sidebarSessionsRef = useRef<HTMLDivElement | null>(null)
+  const [sidebarJumpAffordances, refreshSidebarJumps] = useJumpAffordances(isDesktop, () =>
+    elementScrollMetrics(sidebarSessionsRef.current)
+  )
   const completionAudioRef = useRef<HTMLAudioElement | null>(null)
   const completionShouldPlayRef = useRef(false)
   const wasAwaitingAssistantReplyRef = useRef(false)
@@ -1539,6 +1861,16 @@ function App() {
     if (!text) return modelOptions
     return modelOptions.filter((option) => modelSearchText(option).includes(text))
   }, [modelOptions, modelQuery])
+
+  // On desktop there's always a sidebar listing sessions, so an empty main pane just says
+  // "select a session" for no reason — auto-open the first one instead. Only attempted once per
+  // server connection so it doesn't fight a session the user deliberately closed back out of.
+  const autoSelectAttemptedRef = useRef(false)
+  useEffect(() => {
+    if (!isDesktop || autoSelectAttemptedRef.current || selectedID || sessions.length === 0) return
+    autoSelectAttemptedRef.current = true
+    openSession(sessions[0].id, sessions[0].directory).catch(() => undefined)
+  }, [isDesktop, selectedID, sessions])
 
   const filteredSessions = useMemo(() => {
     const text = query.trim().toLowerCase()
@@ -1647,6 +1979,7 @@ function App() {
     if (serverChanged) {
       loadSelectedRequestRef.current += 1
       loadModelsRequestRef.current += 1
+      autoSelectAttemptedRef.current = false
       setSessions([])
       setSelectedID(null)
       setMessages([])
@@ -1869,11 +2202,13 @@ function App() {
     ])
     if (requestID !== loadSelectedRequestRef.current) return
     const current = loadedMessagesRef.current
-    const authoritativeExternalHistory = selectedSessionRef.current?.id === sessionID && selectedSessionRef.current.external
-    if (
-      !messagesHaveSameContent(current, msg) &&
-      (authoritativeExternalHistory || assistantPayloadLength(current) <= assistantPayloadLength(msg))
-    ) {
+    // A snapshot carrying less assistant text than is already on screen used to be rejected wholesale, to
+    // avoid erasing streamed content. But the optimistic user bubble below is cleared against this same
+    // snapshot either way, so rejecting it made a just-sent message vanish — and since the rejected
+    // snapshot never reached state, the comparison stayed true and swallowed every later message too,
+    // until the session was reopened. Shrinking text is now held back per part in mergeFetchedMessages
+    // instead, which keeps the streamed text without ever dropping the messages that came with it.
+    if (!messagesHaveSameContent(current, msg)) {
       shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isNearMessagesBottom()
       loadedMessagesRef.current = msg
       setMessages((prev) => mergeFetchedMessages(prev, msg))
@@ -1908,7 +2243,17 @@ function App() {
     const composerStyles = window.getComputedStyle(composer)
     const composerBottom = Number.parseFloat(composerStyles.bottom) || 0
     const clearance = Math.ceil(composerRect.height + composerBottom + 16)
-    container.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
+    // Scoped to the wrap rather than the list itself so the jump buttons, which are siblings of the
+    // list, can sit on top of the same clearance the list reserves for the composer.
+    const scope = container.parentElement ?? container
+    scope.style.setProperty("--chat-bottom-clearance", `${clearance}px`)
+  }
+
+  /** The chat is its own scroller in the desktop layout but lets the page scroll on mobile, so
+   *  anything reading scroll position has to look at whichever of the two actually scrolls. */
+  function messagesScrollMetrics(): ScrollMetrics {
+    const container = messagesRef.current
+    return scrollsItself(container) ? elementScrollMetrics(container) : windowScrollMetrics()
   }
 
   function isNearMessagesBottom(): boolean {
@@ -1925,6 +2270,7 @@ function App() {
 
   const handleMessagesScroll = useCallback(() => {
     stickToBottomRef.current = isNearMessagesBottom()
+    refreshChatJumps()
   }, [])
 
   const handleQuestionResolved = useCallback((id: string) => {
@@ -1951,6 +2297,43 @@ function App() {
       })
     })
   }
+
+  // Memoised so they don't defeat MessageList's memo on every render.
+  const handleJumpToTop = useCallback(() => {
+    // Jumping to the oldest message is an explicit "leave the live tail" gesture, so drop the pin;
+    // otherwise the next incoming message would yank the view straight back down.
+    stickToBottomRef.current = false
+    const container = messagesRef.current
+    if (scrollsItself(container)) {
+      container.scrollTo({ top: 0, behavior: "smooth" })
+      return
+    }
+    // The page is the scroller, so go to the actual top — scrolling the list into view instead
+    // would strand the header above the fold and leave this button showing with nowhere to go.
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
+  const handleJumpToBottom = useCallback(() => {
+    stickToBottomRef.current = true
+    scrollMessagesToBottom("smooth")
+  }, [])
+
+  const handleSessionsJumpToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
+  const handleSessionsJumpToBottom = useCallback(() => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" })
+  }, [])
+
+  const handleSidebarJumpToTop = useCallback(() => {
+    sidebarSessionsRef.current?.scrollTo({ top: 0, behavior: "smooth" })
+  }, [])
+
+  const handleSidebarJumpToBottom = useCallback(() => {
+    const list = sidebarSessionsRef.current
+    list?.scrollTo({ top: list.scrollHeight, behavior: "smooth" })
+  }, [])
 
   async function browseNewSessionDirectory(path: string) {
     setPickerLoading(true)
@@ -2183,9 +2566,15 @@ function App() {
     }
   }
 
-  function startRename(session: SessionView) {
+  // The session list (mobile panel and desktop sidebar) and the detail header both offer a rename
+  // affordance for the same session — on desktop the sidebar always shows the open session, so
+  // without this, renaming from either place would flip both into edit mode at once (and fight
+  // over the single renameInputRef). Track which one is active so only that side switches to the
+  // input.
+  function startRename(session: SessionView, source: "list" | "header" = "list") {
     setRenameValue(session.title)
     setRenamingSessionID(session.id)
+    setRenameSource(source)
     // Focus the input after render
     setTimeout(() => {
       renameInputRef.current?.focus()
@@ -2195,6 +2584,7 @@ function App() {
 
   function cancelRename() {
     setRenamingSessionID(null)
+    setRenameSource(null)
     setRenameValue("")
   }
 
@@ -2444,8 +2834,12 @@ function App() {
     }
   }, [hasConfiguredServer])
 
+  // useJumpAffordances watches window scroll for the jump buttons already; this listener is here for
+  // the auto-scroll pin, which must also break when the user scrolls the page rather than the list.
   useEffect(() => {
-    const onWindowScroll = () => handleMessagesScroll()
+    const onWindowScroll = () => {
+      stickToBottomRef.current = isNearMessagesBottom()
+    }
     window.addEventListener("scroll", onWindowScroll, { passive: true })
     return () => window.removeEventListener("scroll", onWindowScroll)
   }, [])
@@ -2455,6 +2849,29 @@ function App() {
     if (!stickToBottomRef.current) return
     scrollMessagesToBottom("auto")
   }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions])
+
+  // Growing or swapping the transcript changes the distance to each end without any scroll event
+  // firing, so the jump buttons have to be re-evaluated off the content too.
+  useEffect(() => {
+    if (mainView !== "detail") return
+    const frame = requestAnimationFrame(refreshChatJumps)
+    return () => cancelAnimationFrame(frame)
+  }, [mainView, selectedID, messageScrollSignature, refreshChatJumps])
+
+  // Same for the sessions list: filtering or a refresh changes its length under a static scroll offset.
+  useEffect(() => {
+    if (mainView !== "sessions") return
+    const frame = requestAnimationFrame(refreshSessionJumps)
+    return () => cancelAnimationFrame(frame)
+  }, [mainView, query, filteredSessions.length, refreshSessionJumps])
+
+  // The desktop sidebar list is always on screen, so it only depends on its own length, and on the
+  // sidebar width, which reflows the rows.
+  useEffect(() => {
+    if (!isDesktop) return
+    const frame = requestAnimationFrame(refreshSidebarJumps)
+    return () => cancelAnimationFrame(frame)
+  }, [isDesktop, query, filteredSessions.length, sidebarWidth, refreshSidebarJumps])
 
   useEffect(() => {
     if (view !== "detail" || !selectedID) return
@@ -2516,6 +2933,133 @@ function App() {
     wasRunningRef.current = ["busy", "retry"].includes(selectedSession.status)
   }, [selectedSession?.id, selectedSession?.status])
 
+  // Shared between the mobile sessions panel and the desktop sidebar so both list sessions
+  // identically instead of maintaining two copies of this markup.
+  const renderSessionCard = (session: SessionView) => (
+    <article
+      key={session.id}
+      className={`session-card ${session.status} ${selectedID === session.id ? "active" : ""} ${renamingSessionID === session.id && renameSource === "list" ? "renaming" : ""} fade-in`}
+      onClick={() => openSession(session.id, session.directory).catch(() => undefined)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          openSession(session.id, session.directory).catch(() => undefined)
+        }
+      }}
+    >
+      <div className="session-card-main">
+        <div>
+          {renamingSessionID === session.id && renameSource === "list" ? (
+            <div
+              className="rename-inline"
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <input
+                ref={renameInputRef}
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onKeyDown={(event) => {
+                  event.stopPropagation()
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    renameSession(session.id, renameValue, session.directory).catch(() => undefined)
+                  } else if (event.key === "Escape") {
+                    cancelRename()
+                  }
+                }}
+                onBlur={() => {
+                  // Only cancel if not clicked on save button
+                  if (renameValue === session.title || !renameValue.trim()) {
+                    cancelRename()
+                  }
+                }}
+                placeholder={t('session.renamePlaceholder')}
+                enterKeyHint="done"
+                autoCorrect="off"
+                spellCheck={false}
+                className="rename-input"
+                autoComplete="off"
+              />
+              <button
+                className="btn-primary compact"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  renameSession(session.id, renameValue, session.directory).catch(() => undefined)
+                }}
+                onMouseDown={(event) => event.preventDefault()}
+                title={t('session.renameConfirm')}
+              >
+                <SaveIcon size={16} />
+              </button>
+              <button
+                className="btn-secondary compact"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  cancelRename()
+                }}
+                title={t('session.cancel')}
+              >
+                <CloseIcon size={16} />
+              </button>
+            </div>
+          ) : (
+            <h3 title={session.title}>{session.title}</h3>
+          )}
+          <p title={session.directory}>{shortDirectory(session.directory)}</p>
+        </div>
+      </div>
+      <div className="session-stats">
+        {/* "No file changes" is said by its absence: one line fewer on a phone. */}
+        {(session.files > 0 || session.additions > 0 || session.deletions > 0) && (
+          <span className="change-summary">
+            <strong>{session.files}</strong> files
+            <strong className="positive">+{session.additions}</strong>
+            <strong className="negative">-{session.deletions}</strong>
+          </span>
+        )}
+        <span className="subtle session-meta-line">
+          <span className="session-directory-compact" title={session.directory}>{shortDirectory(session.directory)}</span>
+          <span title={formatTime(session.updated)}>
+            {t('sessions.updated', { time: formatRelativeTime(session.updated, language) })}
+          </span>
+        </span>
+        <span className={`pill ${session.status}`}>{session.status}</span>
+      </div>
+      <div className="inline-actions">
+        {capabilities.sessionRename && capabilities.sessionDelete && (
+          <>
+            <button
+              className="btn-secondary"
+              onClick={(event) => {
+                event.stopPropagation()
+                startRename(session)
+              }}
+              title={t('session.renameTitle')}
+              aria-label={t('session.renameTitle')}
+            >
+              <PencilIcon size={16} />
+              {t('session.renameConfirm')}
+            </button>
+            <button
+              className="btn-danger"
+              onClick={(event) => {
+                event.stopPropagation()
+                setSessionToDelete(session)
+              }}
+              title={t('sessions.delete')}
+            >
+              <TrashIcon size={16} />
+              {t('sessions.delete')}
+            </button>
+          </>
+        )}
+      </div>
+    </article>
+  )
+
   const navItems = [
     { view: "sessions" as const, label: t('nav.sessions'), icon: <FolderIcon size={19} />, disabled: !hasConfiguredServer },
     { view: "detail" as const, label: t('nav.detail'), icon: <ChatIcon size={19} />, disabled: !selectedSession },
@@ -2524,15 +3068,38 @@ function App() {
   ]
 
   return (
-    <div className="app-shell">
-      <header className="top-nav fade-in">
-        <div className="brand-section">
-          <div className="brand-title">
+    <div className={`app-shell${isDesktop ? " app-shell-desktop" : ""}`}>
+      {!isDesktop && (
+        <header className="top-nav fade-in">
+          <div className="brand-section">
+            <div className="brand-title">
+              <img src="/app-icon.png" alt="" className="app-icon" />
+              <div className="brand-text">
+                <h1>{t('app.title')}</h1>
+                {/* The harness matters more than the address: the same host can serve a different
+                    one, and every backend-specific limitation follows from which it is. */}
+                <p className="brand-meta">
+                  <span className={`harness-badge harness-${config.backend}`}>
+                    {backendDisplayName(config.backend)}
+                  </span>
+                  <span className="brand-server">
+                    {hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.title')}
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </header>
+      )}
+
+      {isDesktop && (
+        <aside className="desktop-sidebar fade-in" style={{ width: sidebarWidth, flex: `0 0 ${sidebarWidth}px` }}>
+          <div className="resize-handle resize-handle--start" onPointerDown={dragSidebarLeft} role="separator" aria-orientation="vertical" aria-label="Resize sessions panel" />
+          <div className="resize-handle resize-handle--end" onPointerDown={dragPanelDivider} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
+          <div className="sidebar-brand">
             <img src="/app-icon.png" alt="" className="app-icon" />
             <div className="brand-text">
               <h1>{t('app.title')}</h1>
-              {/* The harness matters more than the address: the same host can serve a different
-                  one, and every backend-specific limitation follows from which it is. */}
               <p className="brand-meta">
                 <span className={`harness-badge harness-${config.backend}`}>
                   {backendDisplayName(config.backend)}
@@ -2543,25 +3110,81 @@ function App() {
               </p>
             </div>
           </div>
-        </div>
 
-        <nav className="desktop-nav tab-row" role="navigation" aria-label="Main navigation">
-          {navItems.map((item) => (
+          <div className="sidebar-toolbar">
+            <input
+              placeholder={t('sessions.searchPlaceholder')}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="search"
+            />
             <button
-              key={item.view}
-              className={view === item.view ? "active" : ""}
-              onClick={() => setView(item.view)}
-              disabled={item.disabled}
-              aria-label={item.label}
+              onClick={refreshSessionsWithIndicator}
+              className="btn-secondary"
+              disabled={refreshingSessions}
+              aria-label={t('sessions.refresh')}
+              title={t('sessions.refresh')}
             >
-              {item.icon}
-              <span>{item.label}</span>
+              {refreshingSessions ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
             </button>
-          ))}
-        </nav>
-      </header>
+            <button
+              onClick={openNewSessionPicker}
+              className="btn-primary"
+              disabled={creatingSession || isOffline}
+              aria-label={t('sessions.new')}
+              title={isOffline ? t('sessions.offlineHint') : t('sessions.new')}
+            >
+              {creatingSession ? <LoadingIcon size={16} /> : <PlusIcon size={16} />}
+            </button>
+          </div>
 
-      {view === "settings" && (
+          <div className="sidebar-sessions" ref={sidebarSessionsRef} onScroll={refreshSidebarJumps}>
+            {filteredSessions.length === 0 ? (
+              <p className="subtle sidebar-empty">
+                {isOffline ? t('sessions.offlineHint') : t('sessions.emptyTitle')}
+              </p>
+            ) : (
+              filteredSessions.map(renderSessionCard)
+            )}
+          </div>
+
+          <JumpControls
+            affordances={sidebarJumpAffordances}
+            onJumpToTop={handleSidebarJumpToTop}
+            onJumpToBottom={handleSidebarJumpToBottom}
+            variant="sidebar"
+            t={t}
+          />
+
+          <div className="sidebar-footer">
+            <button type="button" className="btn-secondary" onClick={() => setView("help")} title={t('nav.help')}>
+              <HelpIcon size={18} />
+              <span className="sidebar-footer-label">{t('nav.help')}</span>
+            </button>
+            <button type="button" className="btn-secondary" onClick={() => setView("settings")} title={t('nav.settings')}>
+              <SettingsIcon size={18} />
+              <span className="sidebar-footer-label">{t('nav.settings')}</span>
+            </button>
+          </div>
+        </aside>
+      )}
+
+      <div
+        className="main-content"
+        style={isDesktop ? { width: mainWidth, flex: `0 0 ${mainWidth}px`, position: "relative" } : undefined}
+      >
+      {isDesktop && (
+        <div className="resize-handle resize-handle--end" onPointerDown={dragMainRight} role="separator" aria-orientation="vertical" aria-label="Resize detail panel" />
+      )}
+      {mainView === "settings" && (
+        <ConditionalWrapper
+          condition={isDesktop}
+          wrapper={(children) => (
+            <DesktopModalOverlay onClose={() => setView("detail")} ariaLabel={t('settings.title')}>
+              {children}
+            </DesktopModalOverlay>
+          )}
+        >
         <section className="panel settings fade-in">
           <div className="section-heading">
             <div>
@@ -2710,9 +3333,10 @@ function App() {
             </div>
           )}
         </section>
+        </ConditionalWrapper>
       )}
 
-      {view === "sessions" && (
+      {mainView === "sessions" && (
         <section className="panel sessions fade-in">
           <div className="section-heading">
             <div>
@@ -2799,133 +3423,23 @@ function App() {
                 <p className="subtle">{t('sessions.emptyHint')}</p>
               </div>
             ) : (
-              filteredSessions.map((session) => (
-                <article 
-                  key={session.id} 
-                  className={`session-card ${selectedID === session.id ? "active" : ""} fade-in`}
-                  onClick={() => openSession(session.id, session.directory).catch(() => undefined)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault()
-                      openSession(session.id, session.directory).catch(() => undefined)
-                    }
-                  }}
-                >
-                  <div className="session-card-main">
-                    <div>
-                      {renamingSessionID === session.id ? (
-                        <div
-                          className="rename-inline"
-                          onClick={(event) => event.stopPropagation()}
-                          onMouseDown={(event) => event.stopPropagation()}
-                        >
-                          <input
-                            ref={renameInputRef}
-                            value={renameValue}
-                            onChange={(event) => setRenameValue(event.target.value)}
-                            onKeyDown={(event) => {
-                              event.stopPropagation()
-                              if (event.key === "Enter") {
-                                event.preventDefault()
-                                renameSession(session.id, renameValue, session.directory).catch(() => undefined)
-                              } else if (event.key === "Escape") {
-                                cancelRename()
-                              }
-                            }}
-                            onBlur={() => {
-                              // Only cancel if not clicked on save button
-                              if (renameValue === session.title || !renameValue.trim()) {
-                                cancelRename()
-                              }
-                            }}
-                            placeholder={t('session.renamePlaceholder')}
-                            enterKeyHint="done"
-                            autoCorrect="off"
-                            spellCheck={false}
-                            className="rename-input"
-                            autoComplete="off"
-                          />
-                          <button
-                            className="btn-primary compact"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              renameSession(session.id, renameValue, session.directory).catch(() => undefined)
-                            }}
-                            onMouseDown={(event) => event.preventDefault()}
-                            title={t('session.renameConfirm')}
-                          >
-                            <SaveIcon size={14} />
-                          </button>
-                          <button
-                            className="btn-secondary compact"
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              cancelRename()
-                            }}
-                            title={t('session.cancel')}
-                          >
-                            <CloseIcon size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <h3>{session.title}</h3>
-                      )}
-                      <p title={session.directory}>{shortDirectory(session.directory)}</p>
-                    </div>
-                  </div>
-                  <div className="session-stats">
-                    {/* "No file changes" is said by its absence: one line fewer on a phone. */}
-                    {(session.files > 0 || session.additions > 0 || session.deletions > 0) && (
-                      <span className="change-summary">
-                        <strong>{session.files}</strong> files
-                        <strong className="positive">+{session.additions}</strong>
-                        <strong className="negative">-{session.deletions}</strong>
-                      </span>
-                    )}
-                    <span className="subtle">{t('sessions.updated', { time: formatTime(session.updated) })}</span>
-                    <span className={`pill ${session.status}`}>{session.status}</span>
-                  </div>
-                  <div className="inline-actions">
-                    {capabilities.sessionRename && capabilities.sessionDelete && (
-                      <>
-                        <button
-                          className="btn-secondary"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            startRename(session)
-                          }}
-                          title={t('session.renameTitle')}
-                          aria-label={t('session.renameTitle')}
-                        >
-                          <PencilIcon size={16} />
-                          {t('session.renameConfirm')}
-                        </button>
-                        <button
-                          className="btn-danger"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setSessionToDelete(session)
-                          }}
-                          title={t('sessions.delete')}
-                        >
-                          <TrashIcon size={16} />
-                          {t('sessions.delete')}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </article>
-              ))
+              filteredSessions.map(renderSessionCard)
             )}
           </div>
-          
+
           {/* The offline empty state already explains this and offers the two useful actions;
               repeating the raw transport error underneath is the second voice again. */}
           {runtimeError && !(isOffline && filteredSessions.length === 0) && (
             <div className="error fade-in">✗ {runtimeError}</div>
           )}
+
+          <JumpControls
+            affordances={sessionJumpAffordances}
+            onJumpToTop={handleSessionsJumpToTop}
+            onJumpToBottom={handleSessionsJumpToBottom}
+            variant="page"
+            t={t}
+          />
         </section>
       )}
 
@@ -2985,15 +3499,14 @@ function App() {
         </div>
       )}
 
-      {view === "detail" && (
+      {mainView === "detail" && (
         <main className="panel detail fade-in">
           <div className="detail-topbar">
-            <button className="btn-secondary" onClick={() => {
-              setView("sessions");
-              requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
-            }}>{t('detail.backToSessions')}</button>
-            {selectedSession && (
-              <span className={`pill ${selectedSession.status}`}>{selectedSession.status}</span>
+            {!isDesktop && (
+              <button className="btn-secondary" onClick={() => {
+                setView("sessions");
+                requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
+              }}>{t('detail.backToSessions')}</button>
             )}
           </div>
           <div className="header-row detail-header">
@@ -3001,8 +3514,7 @@ function App() {
               <h2>
                 {selectedSession ? (
                   <div className="detail-title-row">
-                    <ChatIcon size={24} className="icon-inline-heading" />
-                    {renamingSessionID === selectedSession.id ? (
+                    {renamingSessionID === selectedSession.id && renameSource === "header" ? (
                       <div className="rename-inline">
                         <input
                           ref={renameInputRef}
@@ -3028,13 +3540,14 @@ function App() {
                         {/* Two unlabelled 14px glyphs asked the user to guess which one commits.
                             One labelled primary action, and cancel as the quieter icon. */}
                         <button
-                          className="btn-primary compact rename-save"
+                          className="btn-icon btn-primary compact rename-save"
                           onClick={() => renameSession(selectedSession.id, renameValue, selectedSession.directory).catch(() => undefined)}
                           onMouseDown={(event) => event.preventDefault()}
                           disabled={!renameValue.trim() || renameValue === selectedSession.title}
+                          title={t('session.renameConfirm')}
+                          aria-label={t('session.renameConfirm')}
                         >
                           <SaveIcon size={16} />
-                          {t('session.renameConfirm')}
                         </button>
                         <button
                           className="btn-icon btn-secondary compact"
@@ -3054,7 +3567,7 @@ function App() {
                           <button
                             type="button"
                             className="session-title-button"
-                            onClick={() => startRename(selectedSession)}
+                            onClick={() => startRename(selectedSession, "header")}
                             title={t('session.renameTitle')}
                             aria-label={t('session.renameTitle')}
                           >
@@ -3147,6 +3660,9 @@ function App() {
             config={config}
             directory={selectedSession?.directory}
             t={t}
+            jumpAffordances={jumpAffordances}
+            onJumpToTop={handleJumpToTop}
+            onJumpToBottom={handleJumpToBottom}
             messagesRef={messagesRef}
             messagesEndRef={messagesEndRef}
             onMessagesScroll={handleMessagesScroll}
@@ -3378,12 +3894,17 @@ function App() {
         </div>
       )}
 
-      {view === "help" && (
+      {mainView === "help" && (
+        <ConditionalWrapper
+          condition={isDesktop}
+          wrapper={(children) => (
+            <DesktopModalOverlay onClose={() => setView("detail")} ariaLabel={t('help.title')}>
+              {children}
+            </DesktopModalOverlay>
+          )}
+        >
         <section className="panel help fade-in">
-          <h2>
-            <HelpIcon size={24} className="icon-inline-heading" />
-            {t('help.title')}
-          </h2>
+          <h2>{t('help.title')}</h2>
           <div className="help-tabs" role="tablist">
             <button 
               className={helpPage === "overview" ? "active" : ""} 
@@ -3610,7 +4131,9 @@ http://YOUR_PC_IP:4096/global/health</pre>
           )}
           {runtimeError && <p className="error">{runtimeError}</p>}
         </section>
+        </ConditionalWrapper>
       )}
+      </div>
 
       <nav className="bottom-nav" role="navigation" aria-label="Mobile navigation">
         {navItems.map((item) => (
