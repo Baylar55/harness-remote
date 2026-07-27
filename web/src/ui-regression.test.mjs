@@ -10,6 +10,8 @@ const refreshButton = app.match(/<button onClick=\{refreshSessionsWithIndicator\
 assert.ok(refreshButton, 'sessions refresh button should call refreshSessionsWithIndicator')
 assert.ok(refreshButton[0].includes('RefreshIcon'), 'idle sessions refresh button should render a non-spinning RefreshIcon')
 assert.ok(refreshButton[0].includes('refreshingSessions ? <LoadingIcon'), 'refresh button should spin only during an active manual refresh')
+assert.match(styles, /\.session-card-main\s*\{[\s\S]*?min-width:\s*0;/, 'session card content should be allowed to shrink inside narrow layouts')
+assert.match(styles, /\.session-card h3\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?text-overflow:\s*ellipsis;[\s\S]*?white-space:\s*nowrap;/, 'long session titles should stay within their card and show an ellipsis')
 
 assert.ok(app.includes('messageScrollSignature'), 'conversation auto-scroll should react to message content changes, not only message count')
 assert.ok(
