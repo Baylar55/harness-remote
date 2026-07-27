@@ -2220,6 +2220,11 @@ button.compact {
     min-height: 240px;
     overflow: visible;
     padding: 0;
+    /* The side padding goes away here, but the bottom clearance must not: the composer is sticky at
+       an offset above the page bottom, so without it the newest messages settle underneath it and
+       the page has no room left to scroll them clear. */
+    padding-bottom: var(--chat-bottom-clearance, 140px);
+    scroll-padding-bottom: var(--chat-bottom-clearance, 140px);
   }
 
   /* The page is the scroller here, so the wrap scrolls away with it — pin to the viewport instead.

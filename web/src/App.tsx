@@ -204,12 +204,6 @@ function toRenderedMessage(message: MessageEnvelope): MessageEnvelope & { text: 
   return wrapped
 }
 
-function assistantPayloadLength(items: MessageEnvelope[]): number {
-  return items
-    .filter((message) => message.info.role !== "user")
-    .reduce((sum, message) => sum + extractText(message).length, 0)
-}
-
 function messagesHaveSameContent(left: MessageEnvelope[], right: MessageEnvelope[]): boolean {
   return left.length === right.length && left.every((message, index) => {
     const candidate = right[index]
@@ -1333,9 +1327,12 @@ function createLocalAssistantMessage(sessionID: string, text: string): MessageEn
   }
 }
 
-/** Reasoning text should only ever grow while streaming — if an incoming snapshot is shorter than what's already shown, a reset/truncated event landed; keep the longer text instead of visibly erasing it. */
-function reconcileReasoningPart(previous: MessagePart | undefined, incoming: MessagePart): MessagePart {
-  if (incoming.type !== "reasoning" || !previous || previous.type !== "reasoning") return incoming
+/** Streamed text should only ever grow — if an incoming snapshot is shorter than what's already shown, a
+ *  reset/truncated event landed; keep the longer text instead of visibly erasing it. Applied per part rather
+ *  than by rejecting the whole snapshot, so a lean refetch can still deliver the messages that came with it. */
+function reconcileStreamedPart(previous: MessagePart | undefined, incoming: MessagePart): MessagePart {
+  if (!previous || previous.type !== incoming.type) return incoming
+  if (incoming.type !== "reasoning" && incoming.type !== "text") return incoming
   const previousText = previous.text ?? ""
   const incomingText = incoming.text ?? ""
   return incomingText.length >= previousText.length ? incoming : { ...incoming, text: previousText }
@@ -1356,7 +1353,7 @@ function mergeFetchedMessages(current: MessageEnvelope[], fetched: MessageEnvelo
     const previous = currentByID.get(message.info.id)
     if (!previous) return message
     const previousPartsByID = new Map(previous.parts.map((part) => [part.id, part]))
-    const parts = message.parts.map((part) => reconcileReasoningPart(previousPartsByID.get(part.id), part))
+    const parts = message.parts.map((part) => reconcileStreamedPart(previousPartsByID.get(part.id), part))
     const fetchedPartIDs = new Set(message.parts.map((part) => part.id))
     const missingReasoning = previous.parts.filter((part) => part.type === "reasoning" && !fetchedPartIDs.has(part.id))
     const mergedParts = missingReasoning.length === 0 ? parts : [...missingReasoning, ...parts]
@@ -1371,7 +1368,7 @@ function applyStreamedPartUpdate(messages: MessageEnvelope[], sessionID: string,
     changed = true
     const exists = message.parts.some((existing) => existing.id === part.id)
     const parts = exists
-      ? message.parts.map((existing) => (existing.id === part.id ? reconcileReasoningPart(existing, part) : existing))
+      ? message.parts.map((existing) => (existing.id === part.id ? reconcileStreamedPart(existing, part) : existing))
       : [...message.parts, part]
     return { ...message, parts }
   })
@@ -2205,11 +2202,13 @@ function App() {
     ])
     if (requestID !== loadSelectedRequestRef.current) return
     const current = loadedMessagesRef.current
-    const authoritativeExternalHistory = selectedSessionRef.current?.id === sessionID && selectedSessionRef.current.external
-    if (
-      !messagesHaveSameContent(current, msg) &&
-      (authoritativeExternalHistory || assistantPayloadLength(current) <= assistantPayloadLength(msg))
-    ) {
+    // A snapshot carrying less assistant text than is already on screen used to be rejected wholesale, to
+    // avoid erasing streamed content. But the optimistic user bubble below is cleared against this same
+    // snapshot either way, so rejecting it made a just-sent message vanish — and since the rejected
+    // snapshot never reached state, the comparison stayed true and swallowed every later message too,
+    // until the session was reopened. Shrinking text is now held back per part in mergeFetchedMessages
+    // instead, which keeps the streamed text without ever dropping the messages that came with it.
+    if (!messagesHaveSameContent(current, msg)) {
       shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isNearMessagesBottom()
       loadedMessagesRef.current = msg
       setMessages((prev) => mergeFetchedMessages(prev, msg))
