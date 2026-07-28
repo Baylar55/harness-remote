@@ -67,7 +67,9 @@ export const HARNESS_PROFILES = {
     reloadOnHistoryRefresh: false,
     capabilities: {
       ...COMMON_CAPABILITIES,
-      models: false,
+      // The adapter advertises a `model` config option like OMP and PI do; its values are bare ids
+      // rather than `provider/model`, which is handled where the response is built.
+      models: true,
       todos: true,
       commands: false,
       sessionRename: true,

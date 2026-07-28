@@ -51,7 +51,7 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     prompt: true,
     abort: true,
     streaming: true,
-    models: false,
+    models: true,
     agents: false,
     todos: true,
     diff: false,
