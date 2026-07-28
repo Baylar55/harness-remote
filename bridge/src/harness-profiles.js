@@ -23,7 +23,7 @@ export const HARNESS_PROFILES = {
     historyLoader: createOmpHistoryLoader(),
     capabilities: {
       ...COMMON_CAPABILITIES,
-      models: false,
+      models: true,
       todos: true,
       commands: false,
       sessionRename: true,
@@ -46,7 +46,9 @@ export const HARNESS_PROFILES = {
       ...COMMON_CAPABILITIES,
       models: true,
       todos: false,
-      commands: true
+      commands: true,
+      sessionRename: true,
+      sessionDelete: true
     }
   },
   claude: {
