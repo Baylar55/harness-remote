@@ -25,7 +25,9 @@ export const HARNESS_PROFILES = {
       ...COMMON_CAPABILITIES,
       models: true,
       todos: true,
-      commands: false
+      commands: false,
+      sessionRename: true,
+      sessionDelete: true
     }
   },
   pi: {
@@ -38,11 +40,15 @@ export const HARNESS_PROFILES = {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     args: ["-y", "@automatalabs/pi-acp@0.2.5"],
     permissionMode: "allow",
+    preserveListedTimestamps: true,
+    reloadOnHistoryRefresh: false,
     capabilities: {
       ...COMMON_CAPABILITIES,
       models: true,
       todos: false,
-      commands: true
+      commands: true,
+      sessionRename: true,
+      sessionDelete: true
     }
   }
 }

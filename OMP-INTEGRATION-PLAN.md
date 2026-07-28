@@ -134,7 +134,7 @@ Completato:
 - bridge `v0.1.7`: snapshot persistiti separati dallo streaming live; il polling non forza più `session/load`;
 - smoke reale contro OMP `v17.0.8` completato su due sessioni e sei cicli di polling.
 
-Ancora intenzionalmente non supportato: rinomina/eliminazione persistente di una sessione OMP, comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite.
+Ancora intenzionalmente non supportato: comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite. Rinomina ed eliminazione sono metadati locali del bridge: il rename è un nickname e il delete nasconde la sessione solo da quel bridge. Sono salvati nello state directory; se viene svuotato o sostituito, titoli nativi e sessioni nascoste riappaiono. ACP non offre un'operazione di eliminazione fisica, quindi la cronologia nativa dell'harness resta intatta.
 
 **Limite ACP verificato:** lo stream SSE del bridge riporta l'attività generata dal suo processo `omp acp`. OMP non espone al bridge eventi globali né lo stato `busy` di una sessione eseguita da un altro client desktop/harness; quella sessione può essere elencata e riaperta, ma non può avere sincronizzazione live affidabile senza un'API OMP dedicata o un relay nel runtime host.
 

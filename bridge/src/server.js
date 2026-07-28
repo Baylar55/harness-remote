@@ -30,7 +30,7 @@ function applyCorsHeaders(request, response, config) {
   response.setHeader("Access-Control-Allow-Origin", origin)
   response.setHeader("Access-Control-Allow-Credentials", "true")
   response.setHeader("Access-Control-Allow-Headers", "authorization, content-type")
-  response.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+  response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 }
 
 function matchesCredentials(request, config) {
@@ -174,6 +174,16 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
       const sessionMatch = /^\/session\/([^/]+)(?:\/(message|prompt_async|abort|todo|diff))?$/.exec(url.pathname)
       if (sessionMatch) {
         const [, sessionID, operation] = sessionMatch
+        if (request.method === "PATCH" && !operation) {
+          const body = await readBody(request)
+          writeJSON(response, 200, await service.renameSession(sessionID, typeof body.title === "string" ? body.title : ""))
+          return
+        }
+        if (request.method === "DELETE" && !operation) {
+          await service.deleteSession(sessionID)
+          writeJSON(response, 200, true)
+          return
+        }
         if (request.method === "GET" && operation === "message") {
           writeJSON(response, 200, await service.messages(sessionID, url.searchParams.get("refresh") === "1"))
           return

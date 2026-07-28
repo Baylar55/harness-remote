@@ -108,6 +108,7 @@ export class AcpService {
   #ownedSessions = new Set()
   #promptAcknowledgements = new Map()
   #titles = new Map()
+  #deletedSessions = new Set()
   #queues = new Map()
   #active = new Set()
   #listeners = new Set()
@@ -119,10 +120,14 @@ export class AcpService {
   #restoredSnapshots = new Set()
   #dirtySnapshots = new Set()
   #snapshotWrites = new Map()
-  constructor(acp, { snapshotDirectory, historyLoader } = {}) {
+  #preserveListedTimestamps
+  #reloadOnHistoryRefresh
+  constructor(acp, { snapshotDirectory, historyLoader, preserveListedTimestamps = false, reloadOnHistoryRefresh = true } = {}) {
     this.#acp = acp
     this.#snapshotDirectory = snapshotDirectory
     this.#historyLoader = historyLoader
+    this.#preserveListedTimestamps = preserveListedTimestamps
+    this.#reloadOnHistoryRefresh = reloadOnHistoryRefresh
     acp.on("notification", (notification) => this.#handleNotification(notification))
   }
 
@@ -137,6 +142,7 @@ export class AcpService {
     await Promise.all(sessions.map((session) => this.#restoreSnapshot(session.sessionId)))
     return sessions
       .filter((session) => !directory || sameDirectory(session.cwd, directory))
+      .filter((session) => !this.#deletedSessions.has(session.sessionId))
       .map((session) => sessionView(
         session,
         this.#isBusy(session.sessionId) ? "busy" : "idle",
@@ -152,7 +158,7 @@ export class AcpService {
     const session = {
       sessionId: result.sessionId,
       cwd: directory,
-      title: title || "Mobile session",
+      title: title || "Remote session",
       updatedAt: new Date().toISOString(),
       _meta: { messageCount: 0 }
     }
@@ -168,11 +174,44 @@ export class AcpService {
     return sessionView(session, "idle", this.#titleFor(session.sessionId))
   }
 
+  async renameSession(sessionID, title) {
+    const normalized = title.trim()
+    if (!normalized) throw new Error("A session title is required")
+    await this.#requireSession(sessionID)
+    this.#titles.set(sessionID, normalized)
+    this.#persistSnapshot(sessionID)
+    this.#emit("session.updated", sessionID)
+    return sessionView(
+      this.#sessions.get(sessionID),
+      this.#isBusy(sessionID) ? "busy" : "idle",
+      normalized,
+      Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
+    )
+  }
+
+  async deleteSession(sessionID) {
+    await this.#requireSession(sessionID)
+    if (this.#isBusy(sessionID)) this.abort(sessionID)
+    this.#deletedSessions.add(sessionID)
+    this.#messages.delete(sessionID)
+    this.#todos.delete(sessionID)
+    this.#titles.delete(sessionID)
+    this.#configOptions.delete(sessionID)
+    this.#loaded.delete(sessionID)
+    this.#ownedSessions.delete(sessionID)
+    this.#promptAcknowledgements.delete(sessionID)
+    this.#chunkMessageIDs.delete(`${sessionID}:user`)
+    this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+    this.#emit("session.deleted", sessionID)
+    this.#persistSnapshot(sessionID)
+  }
+
   async messages(sessionID, refresh = false) {
     await this.#refreshSessions()
     await this.#restoreSnapshot(sessionID)
     const externalHistory = Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
-    await this.#load(sessionID, refresh || externalHistory)
+    const reloadHistory = refresh && this.#reloadOnHistoryRefresh
+    await this.#load(sessionID, reloadHistory || externalHistory)
     return this.#messages.get(sessionID) ?? []
   }
 
@@ -321,6 +360,7 @@ export class AcpService {
       if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, snapshot.messages)
       if (Array.isArray(snapshot.todos)) this.#todos.set(sessionID, snapshot.todos)
       if (typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
+      if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
     } catch (error) {
       if (error?.code !== "ENOENT") this.#emit("session.error", sessionID, { message: "Stored session snapshot is unreadable" })
     }
@@ -337,7 +377,8 @@ export class AcpService {
           version: 1,
           messages: this.#messages.get(sessionID) ?? [],
           todos: this.#todos.get(sessionID) ?? [],
-          title: this.#titleFor(sessionID)
+          title: this.#titleFor(sessionID),
+          deleted: this.#deletedSessions.has(sessionID)
         })
         const target = this.#snapshotPath(sessionID)
         const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
@@ -369,8 +410,17 @@ export class AcpService {
     await this.#load(sessionID, true, true)
   }
 
+  async #requireSession(sessionID) {
+    await this.#refreshSessions()
+    await this.#restoreSnapshot(sessionID)
+    if (this.#deletedSessions.has(sessionID) || !this.#sessions.has(sessionID)) {
+      throw new Error("Harness session not found")
+    }
+  }
+
   async #load(sessionID, force = false, requireConfigOptions = false) {
     if (!this.#sessions.has(sessionID)) await this.listSessions()
+    if (this.#deletedSessions.has(sessionID)) throw new Error("Harness session not found")
     const session = this.#sessions.get(sessionID)
     if (!session) throw new Error("Harness session not found")
     if (!force && this.#loaded.has(sessionID)) return
@@ -435,8 +485,21 @@ export class AcpService {
   async #refreshSessions() {
     if (!this.#sessionListing) {
       this.#sessionListing = this.#acp.listSessions().then((sessions) => {
-        for (const session of sessions) this.#sessions.set(session.sessionId, session)
-        return sessions
+        const listed = new Set()
+        const refreshed = sessions.map((session) => {
+          listed.add(session.sessionId)
+          const known = this.#sessions.get(session.sessionId)
+          const updatedAt = this.#preserveListedTimestamps && known?.updatedAt
+            ? known.updatedAt
+            : session.updatedAt ?? known?.updatedAt ?? new Date().toISOString()
+          const normalized = { ...session, updatedAt }
+          this.#sessions.set(normalized.sessionId, normalized)
+          return normalized
+        })
+        for (const [sessionID, session] of this.#sessions) {
+          if (this.#ownedSessions.has(sessionID) && !listed.has(sessionID)) refreshed.push(session)
+        }
+        return refreshed
       }).finally(() => {
         this.#sessionListing = undefined
       })
@@ -489,7 +552,6 @@ export class AcpService {
     const { sessionId, update } = params
     const replaying = this.#replaying.has(sessionId)
     const session = this.#sessions.get(sessionId)
-    if (!replaying && session) session.updatedAt = new Date().toISOString()
     if (update.sessionUpdate === "plan") {
       const todos = update.entries.map((entry, index) => ({
         id: `${sessionId}:${index}`,
@@ -498,6 +560,7 @@ export class AcpService {
         priority: entry.priority ?? "medium"
       }))
       this.#todos.set(sessionId, todos)
+      if (!replaying && session) session.updatedAt = new Date().toISOString()
       if (!replaying) this.#emit("todo.updated", sessionId)
       if (!replaying) this.#persistSnapshot(sessionId)
       return
@@ -509,6 +572,7 @@ export class AcpService {
     if (role === "assistant" && !replaying && this.#cancelledSessions.has(sessionId)) return
     if (!update.messageId && role === "assistant" && !replaying && !this.#active.has(sessionId) && !this.#promptedSessions.has(sessionId)) return
     if (role === "user" && !replaying && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
+    if (!replaying && session) session.updatedAt = new Date().toISOString()
     const chunkKey = `${sessionId}:${role}`
     let messageID = update.messageId
     if (!messageID && replaying) {
