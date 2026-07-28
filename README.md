@@ -107,6 +107,29 @@ in `--cors`:
 npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://giuliastro.github.io
 ```
 
+### The hosted PWA cannot reach a plain-http server on your LAN
+
+CORS is only the second obstacle. The first is that the hosted app is served over HTTPS, and an
+HTTPS page is not allowed to talk to an `http://` address unless that address is loopback:
+
+- `http://localhost:4096` and `http://127.0.0.1:4096` work — browsers treat loopback as
+  trustworthy. Good enough when the server runs on the same machine as the browser.
+- `http://192.168.1.64:4096` is refused as mixed content, *before the request is sent*. The
+  server never sees it, so no amount of `--cors` helps, and the app can only report
+  `Failed to fetch`. Settings shows a warning next to the host field when the address you typed
+  falls into this case.
+
+So the phone-to-PC setup — the reason this app exists — needs one of:
+
+- **the Android app** from [Releases](https://github.com/giuliastro/harness-remote/releases/latest),
+  which is not a web page and has no such restriction. This stays the recommended route.
+- **HTTPS on the server**, via a reverse proxy holding a certificate the phone trusts.
+- **a tunnel** (Tailscale Serve, Cloudflare Tunnel, ngrok) that gives the server its own HTTPS
+  origin — remember to add that origin to `--cors`.
+- **self-hosting this build over plain http** on your LAN, e.g. `npm run preview -- --host` in
+  `web/`. An `http://` page may talk to an `http://` server freely; you lose installability and
+  the service worker, both of which require a secure context.
+
 ## Technology Stack
 
 - frontend: React + TypeScript + Vite
