@@ -85,6 +85,28 @@ desktop layout. Narrow the window below that and it goes back to the phone layou
 Everything else — prompts, slash commands, stopping a run, model and agent selection, todos,
 diffs — behaves exactly as it does on a phone. The backend setup below is identical either way.
 
+## Progressive Web App (PWA)
+
+The web app is installable and is published straight from this repo via GitHub Pages, at
+https://giuliastro.github.io/harness-remote/. Open that URL over HTTPS and browsers will offer to
+add it to the home screen / app list, opening in its own standalone window.
+
+- A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
+  same-origin static assets on a stale-while-revalidate basis, so the UI still loads offline or on
+  a flaky connection after the first visit.
+- Requests to your opencode/bridge server are never cached — they go to whatever host you
+  configured in Settings, cross-origin from wherever the PWA itself is hosted, so session data
+  always comes from the live server.
+- The service worker is skipped entirely in the native Android app (Capacitor) and in local dev
+  builds; it only registers in production web builds.
+
+Because the app talks to your server cross-origin, the server needs the PWA's origin listed
+in `--cors`:
+
+```bash
+npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://giuliastro.github.io
+```
+
 ## Technology Stack
 
 - frontend: React + TypeScript + Vite
