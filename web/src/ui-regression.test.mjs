@@ -281,4 +281,26 @@ assert.match(
   'choosing an option in a single-answer question must clear the typed answer, so only one of the two is submitted'
 )
 
+// A backend is reachable only if every layer knows it. Declaring a `BackendKind` and wiring the
+// bridge profile, capabilities and storage key is not enough: without an <option> in the Settings
+// picker there is no way to select it, and the README ends up documenting a backend the app cannot
+// open. Derived from the union rather than hard-coded, so adding a harness fails here until the
+// picker, the display name and the persisted-value guards all accept it.
+const types = readFileSync(new URL('./types.ts', import.meta.url), 'utf8')
+const backendKinds = (types.match(/export type BackendKind =([^\n]+)/)?.[1] ?? '')
+  .split('|')
+  .map((kind) => kind.trim().replace(/"/g, ''))
+  .filter(Boolean)
+assert.ok(backendKinds.length >= 3, `BackendKind should parse into its members, got ${JSON.stringify(backendKinds)}`)
+for (const kind of backendKinds) {
+  assert.ok(
+    app.includes(`<option value="${kind}">`),
+    `backend "${kind}" is declared in BackendKind but has no option in the Settings picker, so it cannot be selected`
+  )
+  assert.ok(
+    app.includes(`=== "${kind}"`),
+    `backend "${kind}" is declared in BackendKind but never compared against in App.tsx, so stored values and display names will not accept it`
+  )
+}
+
 console.log('ui regression tests passed')

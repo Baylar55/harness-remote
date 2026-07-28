@@ -12,12 +12,11 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
 | [Oh My Pi (OMP)](https://omp.sh/) | supported | through the local bridge included in this repository |
 | [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
-| [Claude Code](https://code.claude.com/) | supported | through the local ACP bridge and the [`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp) adapter |
 
 What each harness actually provides, the assumptions the code makes about it, and what to re-check
 when one of them changes are recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
-Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), [PI](#pi-bridge-setup), and [Claude Code](#claude-code-bridge-setup) sections below document the setup and per-backend limitations.
+Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), and [PI](#pi-bridge-setup) sections below document the setup and per-backend limitations.
 
 > **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
@@ -46,7 +45,7 @@ Everything in the first group works on all three harnesses. The rest depends on 
 exposes, so each entry says where it applies; the app hides what a backend cannot do rather than
 offering a control that fails.
 
-- configure and test the connection to any supported harness — OpenCode, OMP, PI, or Claude Code — each with its
+- configure and test the connection to any supported harness — OpenCode, OMP, or PI — each with its
   own saved credentials
 - browse and monitor sessions (`idle`, `busy`, `retry`)
 - open a session and read messages and progress
@@ -64,11 +63,12 @@ offering a control that fails.
 Depending on the harness:
 
 - answer the questions the agent asks, options or free text, without leaving the app — OpenCode
-- follow todo/plan updates as the agent works — OpenCode, OMP, Claude Code
+- follow todo/plan updates as the agent works — OpenCode, OMP
 - send server `/commands` — OpenCode
 - choose the agent a session runs as — OpenCode
 - review changed files and their diffs — OpenCode
-- rename and delete sessions so they stay renamed and deleted — OpenCode
+- rename and delete sessions — OpenCode changes them in the harness; on OMP and PI the same controls
+  keep a bridge-local nickname and hide the session from that bridge only
 
 ## Desktop Mode
 
@@ -265,19 +265,19 @@ Expected response:
 {"healthy":true,"backend":"omp","version":"…"}
 ```
 
-OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Agent selection, persistent session rename/delete, server slash commands, and VCS/diff are intentionally unavailable.
+OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Agent selection, server slash commands, and VCS/diff are intentionally unavailable.
 
 A prompt sent while the agent is still working is queued rather than refused: it appears in the conversation
 straight away and runs when the current turn ends. Stopping the session discards anything still queued.
 
 Session titles come from the title you give a session in the app, otherwise from its first prompt; sessions created outside the app are listed with a generated `Session <id>` title when the ACP listing carries no title.
 
-2: Ancora intenzionalmente non supportato: comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite. Rinomina ed eliminazione sono metadati locali del bridge: il rename è un nickname e il delete nasconde la sessione solo da quel bridge. Sono salvati nello state directory; se viene svuotato o sostituito, titoli nativi e sessioni nascoste riappaiono. ACP non offre un'operazione di eliminazione fisica, quindi la cronologia nativa dell'harness resta intatta.
-3: Rename and delete use the same controls as OpenCode, but are bridge-local metadata: a rename is a nickname and delete hides the session only from this bridge. Both are stored under its state directory, so clearing or moving `--state-dir` restores the harness title and makes hidden sessions visible again. ACP does not define physical session deletion; the native OMP history remains untouched and visible to desktop clients.
-4: queued follow-up prompts, model selection, and bridge-local rename/delete.
-The nickname and hidden-session records live under the bridge state directory:
-clearing or moving it restores PI's native title and listing. ACP does not define
-physical session deletion, so deleted sessions remain in PI's own history.
+Rename and delete use the same controls as OpenCode, but they are bridge-local metadata: a rename is a
+nickname and a delete hides the session from this bridge only. Both live under the bridge's state
+directory, so clearing or moving `--state-dir` restores the harness title and makes hidden sessions
+visible again. ACP defines no physical session deletion, so the native OMP history stays intact and
+remains visible to desktop clients.
+
 #### What `--root` does and does not restrict
 
 `--root` restricts the bridge's own surface: which directories the app may browse (`/file`, `/path`) and which working directory a new session may use. It is not a sandbox for the agent. Once a session is running, OMP executes with your full user privileges and approves its own tool calls, so it can read and write outside the configured roots exactly as it would on the desktop. Point the bridge only at machines and accounts where you would already let OMP work unattended.
@@ -341,9 +341,10 @@ and password. A successful health check reports `backend: "pi"` and the
 adapter version.
 
 PI supports session listing, history replay, streaming prompts, cancellation,
-2: Ancora intenzionalmente non supportato: comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite. Rinomina ed eliminazione sono metadati locali del bridge: il rename è un nickname e il delete nasconde la sessione solo da quel bridge. Sono salvati nello state directory; se viene svuotato o sostituito, titoli nativi e sessioni nascoste riappaiono. ACP non offre un'operazione di eliminazione fisica, quindi la cronologia nativa dell'harness resta intatta.
-3: Rename and delete use the same controls as OpenCode, but are bridge-local metadata: a rename is a nickname and delete hides the session only from this bridge. Both are stored under its state directory, so clearing or moving `--state-dir` restores the harness title and makes hidden sessions visible again. ACP does not define physical session deletion; the native OMP history remains untouched and visible to desktop clients.
-4: queued follow-up prompts, model selection, and bridge-local rename/delete.
+queued follow-up prompts, model selection, and bridge-local rename/delete.
+Plan/todo updates, server slash commands, and VCS/diff are not currently exposed
+through this bridge.
+
 The nickname and hidden-session records live under the bridge state directory:
 clearing or moving it restores PI's native title and listing. ACP does not define
 physical session deletion, so deleted sessions remain in PI's own history.
@@ -357,68 +358,6 @@ agent reached through this bridge edits files unattended.
 The bridge's `--root` restriction applies to directory browsing and new-session
 selection; it is not a sandbox for PI. The adapter still runs with the full
 filesystem privileges of the account that launched it. Do not expose the
-bridge directly to the Internet; use a trusted LAN, VPN, or TLS-terminating
-reverse proxy.
-
-### Claude Code Bridge Setup
-
-Harness Remote connects to Claude Code through the same ACP bridge, using the official
-[`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
-adapter, which wraps the Claude Agent SDK and speaks ACP over stdio.
-
-#### Prerequisites
-
-- Node.js 22 or newer (same requirement as the PI adapter);
-- a working `claude` command, authenticated via `claude login` (OAuth) — a subscription login
-  is sufficient and does not require `ANTHROPIC_API_KEY`;
-- a checkout of this repository on the computer that runs Claude Code.
-
-Start the bridge from the repository root:
-
-```bash
-npx --yes ./bridge \
-  --backend claude \
-  --host 0.0.0.0 \
-  --port 4097 \
-  --username claude \
-  --password "use-a-long-unique-password" \
-  --root "$HOME/Software"
-```
-
-The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.63.0`.
-The version is pinned to avoid the same `notarget` issue that motivated pinning the PI
-adapter. Use `--acp-command` and repeated `--acp-arg` options to track a newer adapter.
-The first start downloads the adapter, which is why the handshake allows 90s.
-
-In the app, select **Claude Code (ACP bridge)** and enter the same host, port,
-username, and password. A successful health check reports `backend: "claude"`
-and the adapter version.
-
-Claude Code supports session listing, history replay, streaming prompts,
-cancellation, queued follow-up prompts, and todo/plan updates as the agent works.
-Model selection, agent selection, server slash commands, and VCS/diff are not
-currently exposed through this bridge.
-
-**Rename and delete are bridge-local.** Renames persist in `~/.harness-remote/claude/`
-and survive bridge restarts, but are not propagated to the `claude` CLI itself.
-Deletion hides the session from this bridge and clears its cached data; it does
-not erase Claude Code's own history on disk. Deleted sessions reappear if the
-bridge is started from a fresh state directory.
-
-**Session visibility is not restricted by `--root`.** Unlike directory browsing
-and new-session cwd, the session list is not filtered against the configured
-roots. The bridge enumerates all Claude Code sessions on the machine, which may
-span every repository the user has ever worked in. Anyone holding the bridge
-credentials can list and read every past conversation.
-
-Like PI, the Claude Code adapter asks before each tool call. **The bridge grants
-those requests automatically** — there is no way to prompt on the phone mid-turn
-and a refusal would silently prevent the agent from working. An agent reached
-through this bridge edits files unattended.
-
-The bridge's `--root` restriction applies to directory browsing and new-session
-selection; it is not a sandbox for the agent. The adapter still runs with the
-full filesystem privileges of the account that launched it. Do not expose the
 bridge directly to the Internet; use a trusted LAN, VPN, or TLS-terminating
 reverse proxy.
 
@@ -464,7 +403,7 @@ Use your server values:
 
 - Backend: the harness you are connecting to, which also decides the default port
 - Host: computer LAN IP (for example `192.168.1.20`)
-- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP, PI, or Claude Code
+- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP or PI
 - Username/password: the Basic Auth credentials you started that server or bridge with
 
 Each backend keeps its own saved connection, so switching between them in Settings does not make you
