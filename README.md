@@ -110,8 +110,13 @@ The web app is installable and is published straight from this repo via GitHub P
 https://giuliastro.github.io/harness-remote/. Open that URL over HTTPS and browsers will offer to
 add it to the home screen / app list, opening in its own standalone window.
 
-It is deployed from `v*` tags, the same tags that publish the APK, so the hosted app is always the
-current release rather than the tip of `main`.
+It is redeployed on every merge to `main` that touches `web/`, so it carries the current tip of the
+branch rather than the last release. That is the point: it is where a change gets tried on a real
+phone against a real server before it ships. The Android APK in [Releases](https://github.com/giuliastro/harness-remote/releases/latest)
+is the stable channel and still comes only from `v*` tags — if you want a version that was cut
+deliberately, install that one.
+
+The deploy runs the web regression suites first, so a merge that breaks them does not reach the URL.
 
 - A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
   same-origin static assets on a stale-while-revalidate basis, so the UI still loads offline or on

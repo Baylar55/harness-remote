@@ -1,14 +1,17 @@
 name: Deploy web app to GitHub Pages
 
-# Tags only, to match how the APK is published: built on every push, released only on a `v*` tag.
-# Deploying from main would make the public app track the tip of the branch while the public APK
-# tracks releases — two channels telling users two different stories, and every merge live with no
-# step in between. `workflow_dispatch` stays for a manual redeploy.
+# Every merge to main, deliberately. The hosted app is the staging surface: the point is to exercise
+# what just landed on a real phone against a real server, which only works if it is there without
+# waiting for a release. The APK stays release-only, so the two are not redundant — one is what
+# people install, this is what we test. The suites below gate it, so a broken merge does not deploy.
 "on":
   workflow_dispatch: {}
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+    paths:
+      - "web/**"
+      - ".github/workflows/gh-pages.yml"
 
 permissions:
   contents: read
@@ -41,8 +44,8 @@ jobs:
         run: npx tsc -b
         working-directory: web
 
-      # This job now publishes to users, so it gates on the same suites as the APK release rather
-      # than on the type-check alone.
+      # Deploying on every merge only works if a bad merge cannot reach the URL, so this gates on the
+      # same suites as the APK release rather than on the type-check alone.
       - name: Run web regression tests
         run: |
           npm run test:i18n
