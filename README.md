@@ -407,8 +407,10 @@ Against an OpenCode server, spoken directly: `/global/health`, `/global/event`, 
 `/config/providers`, `/command`, `/agent`, `/project/current`, `/vcs`, `/path`, `/file*`, and
 `/question*`.
 
-The bridge answers the same shapes for OMP and PI, plus `/v1/health` and `/v1/capabilities`, which is
-how the app learns what that harness can do and hides the rest.
+For OMP and PI the bridge implements a deliberate subset of those paths, plus its own `/v1/health`
+and `/v1/capabilities` — which is how the app learns what a harness can do and hides the rest, rather
+than calling something that 404s. [CONTRIBUTING.md](CONTRIBUTING.md) lists exactly what the bridge
+does and does not answer.
 
 What each harness actually provides behind those paths, and what to re-check when one of them
 changes, is in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
