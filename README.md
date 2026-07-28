@@ -370,10 +370,9 @@ adapter, which wraps the Claude Agent SDK and speaks ACP over stdio.
 
 #### Prerequisites
 
-- Node.js 20 or newer;
-- a working `claude` command, authenticated via `claude login` (OAuth) or with
-  `ANTHROPIC_API_KEY` set in the environment — the adapter inherits credentials from the
-  Claude Code CLI installation;
+- Node.js 22 or newer (same requirement as the PI adapter);
+- a working `claude` command, authenticated via `claude login` (OAuth) — a subscription login
+  is sufficient and does not require `ANTHROPIC_API_KEY`;
 - a checkout of this repository on the computer that runs Claude Code.
 
 Start the bridge from the repository root:
@@ -388,35 +387,40 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.59.0`.
-This version is pinned to mirror PI's stability choice and avoid issues with
-unpublished releases. Use `--acp-command` and repeated `--acp-arg` options to
-track a newer adapter. The first start downloads the adapter, so the handshake
-allows 90s.
+The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.63.0`.
+The version is pinned to avoid the same `notarget` issue that motivated pinning the
+PI adapter. Use `--acp-command` and repeated `--acp-arg` options to track a newer
+adapter. The first start downloads the adapter, which is why the handshake allows 90s.
 
 In the app, select **Claude Code (ACP bridge)** and enter the same host, port,
 username, and password. A successful health check reports `backend: "claude"`
 and the adapter version.
 
 Claude Code supports session listing, history replay, streaming prompts,
-cancellation, queued follow-up prompts, and persistent local rename/delete.
-Plan/todo updates are shown as the agent works. Model selection, agent selection,
-server slash commands, and VCS/diff are not currently exposed through this bridge.
-ACP does not define physical session deletion: deleted sessions remain in Claude
-Code's own history but are hidden from this bridge.
+cancellation, queued follow-up prompts, and todo/plan updates as the agent works.
+Model selection, agent selection, server slash commands, and VCS/diff are not
+currently exposed through this bridge.
+
+**Rename and delete are bridge-local.** Renames persist in `~/.harness-remote/claude/`
+and survive bridge restarts, but are not propagated to the `claude` CLI itself.
+Deletion hides the session from this bridge and clears its cached data; it does
+not erase Claude Code's own history on disk. Deleted sessions reappear if the
+bridge is started from a fresh state directory.
+
+**Session visibility is not restricted by `--root`.** The bridge enumerates all
+Claude Code sessions on the machine, potentially spanning every repository the
+user has ever worked in. Anyone holding the bridge credentials can list and read
+every past conversation. The `--root` option only governs directory browsing and
+new-session cwd, not which sessions are visible.
 
 Like PI, the Claude Code adapter asks before each tool call. **The bridge grants
-those requests automatically**, choosing the broadest allow option the adapter
-offers, because there is no way to prompt on the phone mid-turn and a refusal
-would silently prevent the agent from working. The practical effect matches OMP,
-which approves its own tool calls without asking: an agent reached through this
-bridge edits files unattended.
+those requests automatically** — there is no way to prompt on the phone mid-turn
+and a refusal would silently prevent the agent from working. An agent reached
+through this bridge edits files unattended.
 
-The bridge's `--root` restriction applies to directory browsing and new-session
-selection; it is not a sandbox for the agent. The adapter still runs with the
-full filesystem privileges of the account that launched it. Do not expose the
-bridge directly to the Internet; use a trusted LAN, VPN, or TLS-terminating
-reverse proxy.
+The adapter still runs with the full filesystem privileges of the account that
+launched it. Do not expose the bridge directly to the Internet; use a trusted
+LAN, VPN, or TLS-terminating reverse proxy.
 
 ## Run Locally (Web)
 
