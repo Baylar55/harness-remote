@@ -9,8 +9,8 @@ const COMMON_CAPABILITIES = {
   diff: false,
   filesystemBrowser: true,
   questions: false,
-  sessionRename: false,
-  sessionDelete: false
+  sessionRename: true,
+  sessionDelete: true
 }
 
 export const HARNESS_PROFILES = {
@@ -38,6 +38,8 @@ export const HARNESS_PROFILES = {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     args: ["-y", "@automatalabs/pi-acp@0.2.5"],
     permissionMode: "allow",
+    preserveListedTimestamps: true,
+    reloadOnHistoryRefresh: false,
     capabilities: {
       ...COMMON_CAPABILITIES,
       models: true,

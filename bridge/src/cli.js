@@ -26,7 +26,9 @@ if (config) {
     acp,
     serviceOptions: {
       snapshotDirectory: path.join(config.stateDirectory, profile.id),
-      historyLoader: profile.historyLoader
+      historyLoader: profile.historyLoader,
+      preserveListedTimestamps: profile.preserveListedTimestamps,
+      reloadOnHistoryRefresh: profile.reloadOnHistoryRefresh
     }
   })
   let shuttingDown = false

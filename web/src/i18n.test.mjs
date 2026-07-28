@@ -14,6 +14,10 @@ assert.equal(en('sessions.title'), 'Sessions')
 assert.equal(it('sessions.title'), 'Sessioni')
 assert.equal(zh('sessions.title'), '工作階段')
 
+assert.equal(en('sessions.remoteSessionTitle'), 'Remote session')
+assert.equal(it('sessions.remoteSessionTitle'), 'Sessione remota')
+assert.equal(zh('sessions.remoteSessionTitle'), '遠端工作階段')
+
 assert.equal(en('session.deleteTitle'), 'Delete session?')
 assert.equal(it('session.deleteTitle'), 'Eliminare la sessione?')
 assert.equal(zh('session.deleteTitle'), '刪除工作階段？')

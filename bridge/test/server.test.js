@@ -565,6 +565,101 @@ test("reports capabilities from the selected harness profile", async () => {
   }
 })
 
+test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
+  const bridge = await startServer()
+  try {
+    const renamed = await fetch(`${bridge.baseURL}/session/session-1`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Renamed from mobile" })
+    })
+    assert.equal(renamed.status, 200)
+    assert.equal((await renamed.json()).title, "Renamed from mobile")
+    assert.equal((await readJSON(bridge.baseURL, "/session"))[0].title, "Renamed from mobile")
+
+    const deleted = await fetch(`${bridge.baseURL}/session/session-1`, {
+      method: "DELETE",
+      headers: authHeaders()
+    })
+    assert.equal(deleted.status, 200)
+    assert.equal(await deleted.json(), true)
+    assert.deepEqual(await readJSON(bridge.baseURL, "/session"), [])
+
+    const messages = await fetch(`${bridge.baseURL}/session/session-1/message`, { headers: authHeaders() })
+    assert.equal(messages.status, 400)
+    assert.match((await messages.json()).error, /Harness session not found/)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("persists renamed and deleted sessions across bridge restarts", async () => {
+  const snapshotDirectory = await mkdtemp(path.join(tmpdir(), "harness-remote-session-state-"))
+  try {
+    const renamed = new AcpService(new FakeAcp(), { snapshotDirectory })
+    await renamed.renameSession("session-1", "Persistent title")
+    await renamed.flushSnapshots()
+
+    const deleted = new AcpService(new FakeAcp(), { snapshotDirectory })
+    assert.equal((await deleted.listSessions())[0].title, "Persistent title")
+    await deleted.deleteSession("session-1")
+    await deleted.flushSnapshots()
+
+    const restored = new AcpService(new FakeAcp(), { snapshotDirectory })
+    assert.deepEqual(await restored.listSessions(), [])
+  } finally {
+    await rm(snapshotDirectory, { recursive: true, force: true })
+  }
+})
+
+test("keeps a newly created ACP session usable while the app requests refreshed history", async () => {
+  class NewSessionAcp extends EventEmitter {
+    async start() {}
+    async listSessions() {
+      return []
+    }
+    async request(method) {
+      if (method === "session/new") return { sessionId: "new-session", configOptions: [] }
+      if (method === "session/load") throw new Error("a newly created session must not be loaded again")
+      return {}
+    }
+    notify() {}
+  }
+
+  const service = new AcpService(new NewSessionAcp(), { reloadOnHistoryRefresh: false })
+  await service.createSession({ directory: process.cwd(), title: "New session" })
+  assert.deepEqual(await service.messages("new-session", true), [])
+  assert.equal((await service.listSessions()).at(0)?.id, "new-session")
+})
+
+test("keeps PI session ordering stable when the adapter refreshes every timestamp", async () => {
+  class VolatileTimestampAcp extends EventEmitter {
+    timestamp = "2026-07-28T13:00:00.000Z"
+    async listSessions() {
+      return [{ sessionId: "session-1", cwd: process.cwd(), updatedAt: this.timestamp }]
+    }
+    notify() {}
+  }
+
+  const acp = new VolatileTimestampAcp()
+  const service = new AcpService(acp, { preserveListedTimestamps: true })
+  const initial = (await service.listSessions())[0].time.updated
+  acp.timestamp = "2026-07-28T13:00:01.000Z"
+  assert.equal((await service.listSessions())[0].time.updated, initial)
+})
+
+test("assigns a stable timestamp when PI omits session update times", async () => {
+  class UntimedAcp extends EventEmitter {
+    async listSessions() {
+      return [{ sessionId: "session-1", cwd: process.cwd() }]
+    }
+    notify() {}
+  }
+
+  const service = new AcpService(new UntimedAcp(), { preserveListedTimestamps: true })
+  const initial = (await service.listSessions())[0].time.updated
+  assert.equal((await service.listSessions())[0].time.updated, initial)
+})
 test("confines file browsing to configured roots", async () => {
   const bridge = await startServer()
   try {

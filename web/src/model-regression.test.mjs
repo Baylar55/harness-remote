@@ -34,7 +34,7 @@ assert.ok(app.includes("t('detail.modelHint')"), 'model picker should explain wh
 assert.ok(app.includes('disabled={isWorking}'), 'model picker should be disabled while a session is running')
 assert.ok(app.includes('modelSearchText'), 'model picker should support searching models')
 assert.ok(app.includes('id="model-search"'), 'model picker should render a searchable model input')
-assert.ok(app.includes('api.createSession(config, "Mobile session", activeModel, directory)'), 'new sessions should inherit the selected model')
+assert.ok(app.includes("api.createSession(config, t('sessions.remoteSessionTitle'), activeModel, directory)"), 'new sessions should inherit the selected model and use a translated remote title')
 assert.ok(app.includes('diffFiles.length > 0 ? t(\'detail.filesCount\''), 'details sheet should summarize file diffs only when diff data exists')
 assert.ok(!app.includes('showFilesChip = diffFiles.length > 0'), 'file diff chip should stay removed from the context strip')
 assert.ok(i18n.includes("'detail.contextStripLabel'"), 'context chip strings should be translated')

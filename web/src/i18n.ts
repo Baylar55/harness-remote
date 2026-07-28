@@ -70,6 +70,7 @@ type TranslationKey =
   | 'sessions.projectDirectoryActive'
   | 'sessions.projectDirectoryDefault'
   | 'sessions.newSessionTitle'
+  | 'sessions.remoteSessionTitle'
   | 'sessions.useServerDefault'
   | 'sessions.useThisFolder'
   | 'sessions.parentFolder'
@@ -284,6 +285,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'sessions.projectDirectoryActive': 'New sessions use {directory}.',
     'sessions.projectDirectoryDefault': 'Choose the folder for this new session, or use the server default directory.',
     'sessions.newSessionTitle': 'New session folder',
+    'sessions.remoteSessionTitle': 'Remote session',
     'sessions.useServerDefault': 'Use server default',
     'sessions.useThisFolder': 'Create here',
     'sessions.parentFolder': 'Parent folder',
@@ -500,6 +502,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'sessions.projectDirectoryActive': 'La nuova sessione userà {directory}.',
     'sessions.projectDirectoryDefault': 'Scegli la cartella per questa nuova sessione, oppure usa la directory predefinita del server.',
     'sessions.newSessionTitle': 'Cartella nuova sessione',
+    'sessions.remoteSessionTitle': 'Sessione remota',
     'sessions.useServerDefault': 'Usa default server',
     'sessions.useThisFolder': 'Crea qui',
     'sessions.parentFolder': 'Cartella superiore',
@@ -716,6 +719,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'sessions.projectDirectoryActive': '新工作階段會使用 {directory}。',
     'sessions.projectDirectoryDefault': '為這個新工作階段選擇資料夾，或使用伺服器預設目錄。',
     'sessions.newSessionTitle': '新工作階段資料夾',
+    'sessions.remoteSessionTitle': '遠端工作階段',
     'sessions.useServerDefault': '使用伺服器預設',
     'sessions.useThisFolder': '在這裡建立',
     'sessions.parentFolder': '上一層資料夾',

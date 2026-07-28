@@ -2434,7 +2434,7 @@ function App() {
           throw new Error(t('sessions.projectDirectoryInvalid', { directory }))
         }
       }
-      const created = await api.createSession(config, "Mobile session", activeModel, directory)
+      const created = await api.createSession(config, t('sessions.remoteSessionTitle'), activeModel, directory)
       const createdView = toSessionView(created)
       if (directory) {
         setNewSessionDirectory(directory)

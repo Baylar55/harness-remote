@@ -107,7 +107,7 @@ assert.ok(app.includes('showNewSessionPicker'), 'New Session should open a per-s
 assert.ok(app.includes('api.loadPath(config, selectedNewSessionDirectory)'), 'folder picker should start from OpenCode /path')
 assert.ok(api.includes('listFiles(config: ServerConfig, path: string, directory?: string)'), 'API should expose OpenCode /file for directory browsing')
 assert.ok(app.includes("t('sessions.projectDirectoryLabel')"), 'folder picker should be localized')
-assert.ok(app.includes('api.createSession(config, "Mobile session", activeModel, directory)'), 'new sessions should pass only the picked directory to OpenCode')
+assert.ok(app.includes("api.createSession(config, t('sessions.remoteSessionTitle'), activeModel, directory)"), 'new sessions should pass the translated remote title and only the picked directory to OpenCode')
 assert.ok(app.includes("t('sessions.projectDirectoryInvalid'"), 'picked folders should be validated before creating unusable global sessions')
 assert.ok(app.includes('if (!isProjectDirectory(pathInfo))'), 'new session creation should reject folders that OpenCode resolves to the global project')
 assert.ok(app.includes('if (current.some((session) => session.id === created.id)) return current'), 'newly created sessions should be inserted before any refresh')
