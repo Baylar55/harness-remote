@@ -94,6 +94,22 @@ function mergeTodos(previous, replayed) {
   })
 }
 
+/**
+ * Some harnesses inject their own bookkeeping into the model's context as user-role turns —
+ * background-task notifications and system reminders — and the ACP adapter forwards them as
+ * `user_message_chunk` because that is what they are at the protocol level. Rendered faithfully,
+ * the app then shows harness internals in a bubble attributed to the person holding the phone,
+ * text they never wrote and cannot see anywhere else.
+ *
+ * Matched only when the chunk is *entirely* one or more such blocks, so a message where someone
+ * quotes one while asking about it stays visible — which is exactly how this was reported.
+ */
+const HARNESS_INJECTED_BLOCK = /^(?:\s*<(task-notification|system-reminder)>[\s\S]*?<\/\1>\s*)+$/
+
+export function isHarnessInjectedText(text) {
+  return HARNESS_INJECTED_BLOCK.test(text)
+}
+
 export class AcpService {
   #acp
   #sessions = new Map()
@@ -572,6 +588,7 @@ export class AcpService {
     if (role === "assistant" && !replaying && this.#cancelledSessions.has(sessionId)) return
     if (!update.messageId && role === "assistant" && !replaying && !this.#active.has(sessionId) && !this.#promptedSessions.has(sessionId)) return
     if (role === "user" && !replaying && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
+    if (role === "user" && isHarnessInjectedText(update.content.text)) return
     if (!replaying && session) session.updatedAt = new Date().toISOString()
     const chunkKey = `${sessionId}:${role}`
     let messageID = update.messageId

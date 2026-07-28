@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { createBridgeServer } from "../src/server.js"
-import { AcpService } from "../src/acp-service.js"
+import { AcpService, isHarnessInjectedText } from "../src/acp-service.js"
 
 class FakeAcp extends EventEmitter {
   agentInfo = { version: "17.0.7" }
@@ -1140,4 +1140,59 @@ test("continues sessions created by another OMP client and reacquires them after
   assert.deepEqual(acp.prompts, ["desktop-session", "mobile-session"])
   await restarted.flushSnapshots()
   await rm(snapshotDirectory, { recursive: true, force: true })
+})
+
+// A harness that injects its own bookkeeping into the model's context sends it as a user turn, and
+// the adapter forwards it as a user_message_chunk. Rendered as-is the app attributes harness
+// internals to the person holding the phone: observed live on the Claude Code backend, where a
+// background-task notification appeared as a message the user had supposedly written.
+test("hides harness-injected blocks from the transcript without hiding a message that quotes one", () => {
+  assert.equal(isHarnessInjectedText("<task-notification><task-id>abc</task-id></task-notification>"), true)
+  assert.equal(isHarnessInjectedText("  <system-reminder>remember this</system-reminder>\n"), true)
+  assert.equal(
+    isHarnessInjectedText("<task-notification>a</task-notification><system-reminder>b</system-reminder>"),
+    true,
+    "several blocks back to back are still nothing but bookkeeping"
+  )
+  // The report itself was a message quoting one of these while asking about it. That must survive.
+  assert.equal(
+    isHarnessInjectedText("this appeared as if I wrote it: <task-notification>x</task-notification> why?"),
+    false
+  )
+  assert.equal(isHarnessInjectedText("deploy the <task-notification> tag docs"), false)
+  assert.equal(isHarnessInjectedText("ordinary prompt"), false)
+})
+
+test("drops an injected user chunk while keeping the surrounding conversation", async () => {
+  class ChatAcp extends EventEmitter {
+    agentInfo = { version: "0.63.0" }
+    async start() {}
+    async listSessions() {
+      return [{ sessionId: "session-1", cwd: process.cwd(), updatedAt: "2026-07-28T00:00:00.000Z" }]
+    }
+    async request() {
+      return {}
+    }
+    notify() {}
+  }
+
+  const acp = new ChatAcp()
+  const service = new AcpService(acp)
+  await service.listSessions()
+  const send = (messageId, text) => acp.emit("notification", {
+    method: "session/update",
+    params: {
+      sessionId: "session-1",
+      update: { sessionUpdate: "user_message_chunk", messageId, content: { type: "text", text } }
+    }
+  })
+
+  send("u1", "a real question")
+  send("u2", "<task-notification><task-id>abc</task-id><status>stopped</status></task-notification>")
+  send("u3", "and a follow-up")
+
+  const texts = (await service.messages("session-1")).map((message) =>
+    message.parts.filter((part) => part.type === "text").map((part) => part.text).join("")
+  )
+  assert.deepEqual(texts, ["a real question", "and a follow-up"], "the injected block must not become a user message")
 })

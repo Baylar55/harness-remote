@@ -1994,9 +1994,16 @@ function App() {
   const totalDiffAdditions = diffFiles.reduce((sum, file) => sum + file.additions, 0)
   const totalDiffDeletions = diffFiles.reduce((sum, file) => sum + file.deletions, 0)
   const showModelChip = modelOptions.length > 1 || Boolean(activeModelOption) || primaryAgentOptions.length > 0
-  /** Without this a failed model fetch is indistinguishable from one still in flight. */
+  /**
+   * Three distinct states, and conflating any two of them reads as a hang: a fetch in flight, a
+   * fetch that failed, and a harness that has no model list to fetch. `loadModels` returns early
+   * when the backend does not expose one, so without the first branch the label would sit on
+   * "loading" forever — which is what the Claude Code backend did.
+   */
   const modelStatusLabel = activeModelOption?.modelName
-    ?? (modelLoadError ? t('detail.modelUnavailable') : t('detail.modelLoading'))
+    ?? (!capabilities.models
+      ? t('detail.modelNotSupported')
+      : modelLoadError ? t('detail.modelUnavailable') : t('detail.modelLoading'))
 
   async function openSession(sessionID: string, directory: string) {
     setSelectedID(sessionID)
@@ -3880,7 +3887,11 @@ function App() {
                     )}
                   </div>
                 ) : (
-                  <p className="subtle">{modelLoadError ? t('detail.modelLoadError', { message: modelLoadError }) : t('detail.modelLoading')}</p>
+                  <p className="subtle">
+                    {!capabilities.models
+                      ? t('detail.modelNotSupported')
+                      : modelLoadError ? t('detail.modelLoadError', { message: modelLoadError }) : t('detail.modelLoading')}
+                  </p>
                 )}
               </div>
             )}
