@@ -263,4 +263,22 @@ assert.ok(app.includes("t('sessions.retry')"), 'an offline state should offer a 
 assert.ok(app.includes('disabled={creatingSession || isOffline}'), 'an action that cannot succeed offline must not be offered')
 assert.ok(styles.includes('.empty-state-actions'), 'the offline actions should be styled')
 
+// The question tool's own parameter schema has no `custom` field at all, so a question always
+// arrives with it undefined and the documented default of `true` applies. Testing it for
+// truthiness therefore hid the free-text answer on every question ever asked.
+assert.ok(
+  app.includes('question.custom !== false'),
+  'the free-text answer must be offered unless a question opts out of it explicitly'
+)
+assert.equal(
+  /question\.custom &&/.test(app),
+  false,
+  'a missing `custom` flag means enabled, so it must never be read as a boolean'
+)
+assert.match(
+  app,
+  /if \(!multiple\) \{[\s\S]*?setCustomValues\(/,
+  'choosing an option in a single-answer question must clear the typed answer, so only one of the two is submitted'
+)
+
 console.log('ui regression tests passed')

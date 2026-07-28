@@ -1,9 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
-import type { PluginListenerHandle } from "@capacitor/core"
+import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { api, isValidServerConfig } from "./api"
+import { api, isMixedContentBlocked, isValidServerConfig } from "./api"
 import { ACTIVE_BACKEND_STORAGE_KEY, BACKEND_STORAGE_KEYS, LEGACY_STORAGE_KEY } from "./storageKeys"
 import {
   createFetchOpenCodeEventSubscription,
@@ -1950,6 +1950,12 @@ function App() {
 
   const hasConfiguredServer = isValidServerConfig(config)
   const draftConfigKey = configKey(draftConfig)
+  // The address is typed here but rejected by the browser, so the warning belongs next to the
+  // field rather than in the failure notice, where it would only appear after a pointless test.
+  // The native build goes through CapacitorHttp instead of the WebView and is never subject to
+  // this, whatever scheme `androidScheme` happens to serve the bundle under.
+  const draftBlockedByMixedContent = !Capacitor.isNativePlatform()
+    && isMixedContentBlocked(draftConfig, window.location.protocol)
   const canTestDraft = canTestConfig(draftConfig)
   const testAlreadyPassedForDraft = lastTestedConfigKey === draftConfigKey
   const connectionStatusText = connectionMessage || (connectionState === "connecting"
@@ -3282,7 +3288,7 @@ function App() {
             </select>
           </label>
 
-          <label htmlFor="host">
+          <label htmlFor="host" className={draftBlockedByMixedContent ? "field-row-span" : undefined}>
             {t('settings.host')}
             <input
               id="host"
@@ -3295,8 +3301,11 @@ function App() {
               spellCheck={false}
               autoComplete="off"
             />
+            {draftBlockedByMixedContent && (
+              <span className="field-warning">{t('settings.insecureHostWarning')}</span>
+            )}
           </label>
-          
+
           <label htmlFor="port">
             {t('settings.port')}
             <input

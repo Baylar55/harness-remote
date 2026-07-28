@@ -20,6 +20,15 @@ self.addEventListener("activate", (event) => {
   )
 })
 
+/**
+ * A worker may be killed as soon as it has answered, so a cache write started inside the
+ * response chain is not guaranteed to finish: it has to be kept alive by the event itself.
+ */
+function storeInCache(event, key, response) {
+  const copy = response.clone()
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.put(key, copy)))
+}
+
 self.addEventListener("fetch", (event) => {
   const request = event.request
   if (request.method !== "GET") return
@@ -31,8 +40,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(scope, copy))
+          storeInCache(event, scope, response)
           return response
         })
         .catch(() => caches.match(scope))
@@ -44,10 +52,7 @@ self.addEventListener("fetch", (event) => {
     caches.match(request).then((cached) => {
       const network = fetch(request)
         .then((response) => {
-          if (response.ok) {
-            const copy = response.clone()
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
-          }
+          if (response.ok) storeInCache(event, request, response)
           return response
         })
         .catch(() => cached)
