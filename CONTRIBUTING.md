@@ -217,8 +217,16 @@ push both. Everything else — the version code, the Android metadata, the signe
 release — is derived from that one field by CI.
 
 ```bash
-git tag -a v2.4.0 -F release-notes.txt
+git tag -a v2.4.0 --cleanup=verbatim -F release-notes.txt
 git push origin main && git push origin v2.4.0
+```
+
+**`--cleanup=verbatim` is not optional.** Git's default cleanup strips every line that starts with
+`#` as a comment, which silently deletes both `##` headings out of the message below — the tag looks
+fine, and the release renders two bullet lists with nothing naming them. Check before pushing:
+
+```bash
+git tag -l --format='%(contents:body)' v2.4.0
 ```
 
 **The tag annotation is the release notes.** CI publishes its body verbatim between its own
