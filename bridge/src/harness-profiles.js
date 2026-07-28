@@ -50,6 +50,29 @@ export const HARNESS_PROFILES = {
       sessionRename: true,
       sessionDelete: true
     }
+  },
+  claude: {
+    id: "claude",
+    label: "Claude Code",
+    // Uses the official ACP adapter for the Claude Agent SDK. The adapter speaks ACP JSON-RPC
+    // over stdio and wraps @anthropic-ai/claude-agent-sdk under the hood. The user must have
+    // run `claude login` or set ANTHROPIC_API_KEY before starting the bridge.
+    // Requires Node 22+ (same as the PI adapter it mirrors).
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
+    // release appeared in the registry index before its tarball could be fetched.
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.63.0"],
+    permissionMode: "allow",
+    preserveListedTimestamps: true,
+    reloadOnHistoryRefresh: false,
+    capabilities: {
+      ...COMMON_CAPABILITIES,
+      models: false,
+      todos: true,
+      commands: false,
+      sessionRename: true,
+      sessionDelete: true
+    }
   }
 }
 

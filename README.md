@@ -12,11 +12,12 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
 | [Oh My Pi (OMP)](https://omp.sh/) | supported | through the local bridge included in this repository |
 | [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
+| [Claude Code](https://code.claude.com/) | supported | through the local ACP bridge and the [`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp) adapter |
 
 What each harness actually provides, the assumptions the code makes about it, and what to re-check
 when one of them changes are recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
-Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), and [PI](#pi-bridge-setup) sections below document the setup and per-backend limitations.
+Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), [PI](#pi-bridge-setup), and [Claude Code](#claude-code-bridge-setup) sections below document the setup and per-backend limitations.
 
 > **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
@@ -41,11 +42,11 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 
 ## What It Can Do
 
-Everything in the first group works on all three harnesses. The rest depends on what the harness
+Everything in the first group works on all four harnesses. The rest depends on what the harness
 exposes, so each entry says where it applies; the app hides what a backend cannot do rather than
 offering a control that fails.
 
-- configure and test the connection to any supported harness — OpenCode, OMP, or PI — each with its
+- configure and test the connection to any supported harness — OpenCode, OMP, PI, or Claude Code — each with its
   own saved credentials
 - browse and monitor sessions (`idle`, `busy`, `retry`)
 - open a session and read messages and progress
@@ -63,12 +64,12 @@ offering a control that fails.
 Depending on the harness:
 
 - answer the questions the agent asks, options or free text, without leaving the app — OpenCode
-- follow todo/plan updates as the agent works — OpenCode, OMP
+- follow todo/plan updates as the agent works — OpenCode, OMP, Claude Code
 - send server `/commands` — OpenCode
 - choose the agent a session runs as — OpenCode
 - review changed files and their diffs — OpenCode
-- rename and delete sessions — OpenCode changes them in the harness; on OMP and PI the same controls
-  keep a bridge-local nickname and hide the session from that bridge only
+- rename and delete sessions — OpenCode changes them in the harness; on OMP, PI and Claude Code the
+  same controls keep a bridge-local nickname and hide the session from that bridge only
 
 ## Desktop Mode
 
@@ -361,6 +362,66 @@ filesystem privileges of the account that launched it. Do not expose the
 bridge directly to the Internet; use a trusted LAN, VPN, or TLS-terminating
 reverse proxy.
 
+### Claude Code Bridge Setup
+
+Harness Remote connects to Claude Code through the same ACP bridge, using the official
+[`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
+adapter, which wraps the Claude Agent SDK and speaks ACP over stdio.
+
+#### Prerequisites
+
+- Node.js 22 or newer (same requirement as the PI adapter);
+- a working `claude` command, authenticated via `claude login` (OAuth) — a subscription login
+  is sufficient and does not require `ANTHROPIC_API_KEY`;
+- a checkout of this repository on the computer that runs Claude Code.
+
+Start the bridge from the repository root:
+
+```bash
+npx --yes ./bridge \
+  --backend claude \
+  --host 0.0.0.0 \
+  --port 4097 \
+  --username claude \
+  --password "use-a-long-unique-password" \
+  --root "$HOME/Software"
+```
+
+The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.63.0`.
+The version is pinned to avoid the same `notarget` issue that motivated pinning the
+PI adapter. Use `--acp-command` and repeated `--acp-arg` options to track a newer
+adapter. The first start downloads the adapter, which is why the handshake allows 90s.
+
+In the app, select **Claude Code (ACP bridge)** and enter the same host, port,
+username, and password. A successful health check reports `backend: "claude"`
+and the adapter version.
+
+Claude Code supports session listing, history replay, streaming prompts,
+cancellation, queued follow-up prompts, and todo/plan updates as the agent works.
+Model selection, agent selection, server slash commands, and VCS/diff are not
+currently exposed through this bridge.
+
+**Rename and delete are bridge-local.** Renames persist in `~/.harness-remote/claude/`
+and survive bridge restarts, but are not propagated to the `claude` CLI itself.
+Deletion hides the session from this bridge and clears its cached data; it does
+not erase Claude Code's own history on disk. Deleted sessions reappear if the
+bridge is started from a fresh state directory.
+
+**Session visibility is not restricted by `--root`.** The bridge enumerates all
+Claude Code sessions on the machine, potentially spanning every repository the
+user has ever worked in. Anyone holding the bridge credentials can list and read
+every past conversation. The `--root` option only governs directory browsing and
+new-session cwd, not which sessions are visible.
+
+Like PI, the Claude Code adapter asks before each tool call. **The bridge grants
+those requests automatically** — there is no way to prompt on the phone mid-turn
+and a refusal would silently prevent the agent from working. An agent reached
+through this bridge edits files unattended.
+
+The adapter still runs with the full filesystem privileges of the account that
+launched it. Do not expose the bridge directly to the Internet; use a trusted
+LAN, VPN, or TLS-terminating reverse proxy.
+
 ## Run Locally (Web)
 
 ```bash
@@ -403,7 +464,7 @@ Use your server values:
 
 - Backend: the harness you are connecting to, which also decides the default port
 - Host: computer LAN IP (for example `192.168.1.20`)
-- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP or PI
+- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP, PI, or Claude Code
 - Username/password: the Basic Auth credentials you started that server or bridge with
 
 Each backend keeps its own saved connection, so switching between them in Settings does not make you

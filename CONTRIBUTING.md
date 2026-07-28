@@ -21,7 +21,7 @@ if you are having an agent do the work.
 
 ## Prerequisites
 
-- **Node.js 20 or newer.** `web/` needs `npm install`; `bridge/` has no dependencies at all and
+- **Node.js 22 or newer.** `web/` needs `npm install`; `bridge/` has no dependencies at all and
   runs on the standard library, so do not look for a lockfile there.
 - **A harness to talk to.** An OpenCode server, a working `omp` command, or PI. You can develop
   UI-only changes without one, but see [Test against a real agent](#test-against-a-real-agent)

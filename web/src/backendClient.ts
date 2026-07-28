@@ -17,5 +17,9 @@ export const BACKEND_CLIENTS: Record<BackendKind, BackendClient> = {
   pi: {
     modelSelectionRequiresSession: true,
     messageRefreshSupported: true
+  },
+  claude: {
+    modelSelectionRequiresSession: true,
+    messageRefreshSupported: true
   }
 }
