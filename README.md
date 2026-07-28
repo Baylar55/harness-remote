@@ -402,9 +402,14 @@ username, and password. A successful health check reports `backend: "claude"`
 and the adapter version.
 
 Claude Code supports session listing, history replay, streaming prompts,
-cancellation, queued follow-up prompts, and todo/plan updates as the agent works.
-Model selection, agent selection, server slash commands, and VCS/diff are not
-currently exposed through this bridge.
+cancellation, queued follow-up prompts, todo/plan updates as the agent works, and
+model selection. The picker offers whatever the adapter reports — Default, Sonnet,
+Fable, Opus with 1M context, Haiku — each with the version it stands for, so
+"Sonnet" reads as `Sonnet 5 · Efficient for routine tasks`. Agent selection, server
+slash commands, and VCS/diff are not currently exposed through this bridge.
+
+The adapter also advertises a permission `mode` and an `effort` level, which the app
+does not use yet.
 
 **Rename and delete are bridge-local.** Renames persist in `~/.harness-remote/claude/`
 and survive bridge restarts, but are not propagated to the `claude` CLI itself.
