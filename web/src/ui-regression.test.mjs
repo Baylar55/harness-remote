@@ -199,8 +199,10 @@ assert.ok(
 
 // A model list that never arrived used to render as "loading" forever, which reads as a slow
 // server rather than a failure — the reason a misconfigured server looked like a broken feature.
+// Asserted on the failure branch alone: the label now has three states, and pinning the whole
+// expression would break again the next time one is added.
 assert.ok(
-  app.includes("?? (modelLoadError ? t('detail.modelUnavailable') : t('detail.modelLoading'))"),
+  app.includes("modelLoadError ? t('detail.modelUnavailable') : t('detail.modelLoading')"),
   'a failed model fetch must be named, not shown as still loading'
 )
 assert.ok(
@@ -302,5 +304,21 @@ for (const kind of backendKinds) {
     `backend "${kind}" is declared in BackendKind but never compared against in App.tsx, so stored values and display names will not accept it`
   )
 }
+
+// `loadModels` returns early when the harness exposes no model list, so anything that reports
+// progress has to distinguish "nothing to load" from "still loading" or it sits on the loading text
+// forever. The Claude Code backend did exactly that: `models: false`, and an AI panel that claimed
+// to be loading for the life of the session.
+// Matched with \s+ rather than a literal newline: these sources are checked out with CRLF endings.
+assert.match(
+  app,
+  /\?\?\s*\(!capabilities\.models\s+\?\s*t\('detail\.modelNotSupported'\)/,
+  'the model status label must say a harness has no model selection rather than claiming to load'
+)
+assert.match(
+  app,
+  /\{!capabilities\.models\s+\?\s*t\('detail\.modelNotSupported'\)/,
+  'the AI panel must say a harness has no model selection rather than claiming to load'
+)
 
 console.log('ui regression tests passed')

@@ -132,6 +132,7 @@ type TranslationKey =
   | 'detail.modelToolsNo'
   | 'detail.modelVariant'
   | 'detail.modelLoading'
+  | 'detail.modelNotSupported'
   | 'detail.modelUnavailable'
   | 'detail.modelLoadError'
   | 'detail.contextStripLabel'
@@ -350,6 +351,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.modelToolsNo': 'No tools',
     'detail.modelVariant': 'Variant: {variant}',
     'detail.modelLoading': 'Loading configured models...',
+    'detail.modelNotSupported': 'This harness does not expose model selection',
     'detail.modelUnavailable': 'Models unavailable — check the server',
     'detail.modelLoadError': 'Cannot load models: {message}',
     'detail.contextStripLabel': 'Session context shortcuts',
@@ -567,6 +569,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.modelToolsNo': 'Nessun tool',
     'detail.modelVariant': 'Variante: {variant}',
     'detail.modelLoading': 'Caricamento modelli configurati...',
+    'detail.modelNotSupported': 'Questo harness non espone la scelta del modello',
     'detail.modelUnavailable': 'Modelli non disponibili — controlla il server',
     'detail.modelLoadError': 'Impossibile caricare i modelli: {message}',
     'detail.contextStripLabel': 'Scorciatoie contesto sessione',
@@ -784,6 +787,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.modelToolsNo': '無工具',
     'detail.modelVariant': '變體：{variant}',
     'detail.modelLoading': '正在載入已設定模型...',
+    'detail.modelNotSupported': '此 harness 未提供模型選擇',
     'detail.modelUnavailable': '無法取得模型 — 請檢查伺服器',
     'detail.modelLoadError': '無法載入模型：{message}',
     'detail.contextStripLabel': '工作階段情境捷徑',
