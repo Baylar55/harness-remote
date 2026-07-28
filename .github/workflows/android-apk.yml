@@ -28,6 +28,14 @@ jobs:
           # depth-1 clone has neither.
           fetch-depth: 0
 
+      # checkout writes the tag ref pointing at the commit rather than at the tag object, so the
+      # annotation is not in the clone even with fetch-depth: 0. `git describe` keeps working — it is
+      # happy with a lightweight tag — which is how v2.4.0 published a release carrying the full
+      # changelog link and none of the curated notes. Re-fetching the tags brings the objects back.
+      - name: Restore annotated tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: git fetch --tags --force
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -170,17 +178,22 @@ jobs:
         run: |
           SUMMARY=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 --exclude="$GITHUB_REF_NAME" 2>/dev/null || true)
+          # An empty summary used to be tolerated, on the grounds that a terse release beats a failed
+          # one. v2.4.0 showed what that actually produces: a release with no changes listed and no
+          # contributors named, which is the one outcome the whole convention exists to prevent, and
+          # nobody notices until someone reads the release. A failure here is cheap — fix the tag and
+          # re-run — so it fails.
+          if [ -z "$SUMMARY" ]; then
+            echo "::error::$GITHUB_REF_NAME carries no annotation body, so the release would have no notes and credit nobody. Re-create it with 'git tag -a -F <file> --cleanup=verbatim' and force-push the tag." >&2
+            exit 1
+          fi
           {
             echo 'body<<HARNESS_RELEASE_NOTES_EOF'
             echo '## Release'
             echo
             echo "Stable Android release APK for Harness Remote \`${{ steps.version.outputs.app_version }}\`."
-            # A lightweight tag, or an annotation with only a subject line, leaves this empty. Better a
-            # terse release than a failed one, so it is skipped rather than treated as an error.
-            if [ -n "$SUMMARY" ]; then
-              echo
-              echo "$SUMMARY"
-            fi
+            echo
+            echo "$SUMMARY"
             echo
             echo '## Notes'
             echo
