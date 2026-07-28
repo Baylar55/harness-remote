@@ -101,7 +101,7 @@ function useHorizontalDrag(onDeltaX: (deltaX: number) => void): (event: React.Po
 }
 
 function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
-  return backend === "omp" || backend === "pi"
+  return backend === "omp" || backend === "pi" || backend === "claude"
 }
 
 /**
@@ -118,6 +118,7 @@ function shortDirectory(directory: string): string {
 function backendDisplayName(backend: ServerConfig["backend"]): string {
   if (backend === "omp") return "Oh My Pi"
   if (backend === "pi") return "PI"
+  if (backend === "claude") return "Claude Code"
   return "OpenCode"
 }
 
@@ -135,7 +136,7 @@ function parseStoredConfig(value: string | null, backend: ServerConfig["backend"
   if (!value) return null
   try {
     const parsed = JSON.parse(value) as Partial<ServerConfig>
-    const storedBackend = parsed.backend === "omp" || parsed.backend === "opencode" || parsed.backend === "pi" ? parsed.backend : backend
+    const storedBackend = parsed.backend === "omp" || parsed.backend === "opencode" || parsed.backend === "pi" || parsed.backend === "claude" ? parsed.backend : backend
     return { ...defaultConfig(storedBackend), ...parsed, backend: storedBackend }
   } catch {
     return null
@@ -152,7 +153,7 @@ function readConfig(backend: ServerConfig["backend"]): ServerConfig {
 function initialConfig(): ServerConfig {
   const legacy = parseStoredConfig(localStorage.getItem(LEGACY_STORAGE_KEY), "opencode")
   const storedBackend = localStorage.getItem(ACTIVE_BACKEND_STORAGE_KEY)
-  const backend = storedBackend === "omp" || storedBackend === "opencode" || storedBackend === "pi" ? storedBackend : legacy?.backend ?? "opencode"
+  const backend = storedBackend === "omp" || storedBackend === "opencode" || storedBackend === "pi" || storedBackend === "claude" ? storedBackend : legacy?.backend ?? "opencode"
   const config = readConfig(backend)
   localStorage.setItem(BACKEND_STORAGE_KEYS[backend], JSON.stringify(config))
   localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, backend)
@@ -3285,6 +3286,7 @@ function App() {
               <option value="opencode">OpenCode</option>
               <option value="omp">Oh My Pi (bridge)</option>
               <option value="pi">PI (ACP bridge)</option>
+              <option value="claude">Claude Code (ACP bridge)</option>
             </select>
           </label>
 
@@ -4068,6 +4070,12 @@ function App() {
                     <h4>PI bridge (macOS / Linux)</h4>
                     <pre>npx --yes ./bridge --backend pi --host 0.0.0.0 --port 4097 --username pi --password your-password --root "$PWD"</pre>
                   </>
+                ) : config.backend === "claude" ? (
+                  <>
+                    <h4>Claude Code bridge (macOS / Linux)</h4>
+                    <pre>npx --yes ./bridge --backend claude --host 0.0.0.0 --port 4097 --username claude --password your-password --root "$PWD"</pre>
+                    <p className="note">Requires <code>claude login</code> or <code>ANTHROPIC_API_KEY</code> on the host machine.</p>
+                  </>
                 ) : (
                   <>
                     <h4>OpenCode server (macOS / Linux)</h4>
@@ -4077,7 +4085,7 @@ function App() {
               </div>
               <p>
                 <a
-                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "opencode" ? "opencode-server-setup" : config.backend === "pi" ? "pi-bridge-setup" : "oh-my-pi-bridge-setup"}`}
+                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "opencode" ? "opencode-server-setup" : config.backend === "pi" ? "pi-bridge-setup" : config.backend === "claude" ? "claude-code-bridge-setup" : "oh-my-pi-bridge-setup"}`}
                   target="_blank"
                   rel="noreferrer"
                 >

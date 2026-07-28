@@ -9,8 +9,8 @@ const COMMON_CAPABILITIES = {
   diff: false,
   filesystemBrowser: true,
   questions: false,
-  sessionRename: false,
-  sessionDelete: false
+  sessionRename: true,
+  sessionDelete: true
 }
 
 export const HARNESS_PROFILES = {
@@ -49,6 +49,24 @@ export const HARNESS_PROFILES = {
       commands: true,
       sessionRename: true,
       sessionDelete: true
+    }
+  },
+  claude: {
+    id: "claude",
+    label: "Claude Code",
+    // Uses the official ACP adapter for the Claude Agent SDK. The adapter speaks ACP JSON-RPC
+    // over stdio and wraps @anthropic-ai/claude-agent-sdk under the hood. The user must have
+    // run `claude login` or set ANTHROPIC_API_KEY before starting the bridge.
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
+    // release appeared in the registry index before its tarball could be fetched.
+    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.59.0"],
+    permissionMode: "allow",
+    capabilities: {
+      ...COMMON_CAPABILITIES,
+      models: false,
+      todos: true,
+      commands: false
     }
   }
 }

@@ -4,7 +4,8 @@ export const ACTIVE_BACKEND_STORAGE_KEY = "opencode.remote.backend"
 export const BACKEND_STORAGE_KEYS = {
   opencode: "opencode.remote.server.opencode",
   omp: "opencode.remote.server.omp",
-  pi: "opencode.remote.server.pi"
+  pi: "opencode.remote.server.pi",
+  claude: "opencode.remote.server.claude"
 } as const
 
 /** Everything that describes a backend connection; language and theme are deliberately excluded. */
@@ -14,6 +15,7 @@ export const SERVER_STORAGE_KEYS = [
   BACKEND_STORAGE_KEYS.opencode,
   BACKEND_STORAGE_KEYS.omp,
   BACKEND_STORAGE_KEYS.pi,
+  BACKEND_STORAGE_KEYS.claude,
   "opencode.remote.model",
   "opencode.remote.agent",
   "opencode.remote.newSessionDirectory"

@@ -1606,6 +1606,12 @@ button.compact {
   margin-bottom: var(--space-2);
 }
 
+.help-content .note {
+  margin-top: var(--space-2);
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
 .help ul,
 .help ol {
   margin-top: var(--space-2);
