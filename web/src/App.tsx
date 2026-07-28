@@ -428,25 +428,37 @@ function TodoListView({ items }: { items: TodoItem[] }) {
   )
 }
 
-function QuestionListView({ questions }: { questions: QuestionInfo[] }) {
+function QuestionListView({ questions, answers }: { questions: QuestionInfo[]; answers?: string[][] }) {
   return (
     <div className="question-options">
-      {questions.map((question, index) => (
-        <div key={index} className="question-block">
-          <div className="question-header">{question.header}</div>
-          <p className="question-text">{question.question}</p>
-          {question.options.length > 0 && (
-            <div className="question-options">
-              {question.options.map((option) => (
-                <div key={option.label} className="question-option static">
-                  <span className="question-option-label">{option.label}</span>
-                  {option.description && <span className="question-option-description">{option.description}</span>}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
+      {questions.map((question, index) => {
+        const chosen = answers?.[index] ?? []
+        const customAnswer = chosen.find((value) => !question.options.some((option) => option.label === value))
+        return (
+          <div key={index} className="question-block">
+            <div className="question-header">{question.header}</div>
+            <p className="question-text">{question.question}</p>
+            {question.options.length > 0 && (
+              <div className="question-options">
+                {question.options.map((option) => (
+                  <div
+                    key={option.label}
+                    className={`question-option static ${chosen.includes(option.label) ? "selected" : ""}`}
+                  >
+                    <span className="question-option-label">{option.label}</span>
+                    {option.description && <span className="question-option-description">{option.description}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {customAnswer && (
+              <div className="question-option static selected">
+                <span className="question-option-label">{customAnswer}</span>
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -784,18 +796,32 @@ function QuestionCard({
           : [label]
       return next
     })
+    if (!multiple) {
+      setCustomValues((current) => {
+        const next = [...current]
+        next[questionIndex] = ""
+        return next
+      })
+    }
   }
 
-  function setCustomValue(questionIndex: number, value: string) {
+  function setCustomValue(questionIndex: number, value: string, multiple: boolean) {
     setCustomValues((current) => {
       const next = [...current]
       next[questionIndex] = value
       return next
     })
+    if (!multiple && value) {
+      setSelections((current) => {
+        const next = [...current]
+        next[questionIndex] = []
+        return next
+      })
+    }
   }
 
   const canSubmit = request.questions.every((question, index) => {
-    return selections[index].length > 0 || (question.custom && customValues[index].trim().length > 0)
+    return selections[index].length > 0 || (question.custom !== false && customValues[index].trim().length > 0)
   })
 
   async function submit() {
@@ -846,13 +872,13 @@ function QuestionCard({
               </button>
             ))}
           </div>
-          {question.custom && (
+          {question.custom !== false && (
             <input
               type="text"
               className="question-custom-input"
               placeholder={t('question.otherPlaceholder')}
               value={customValues[index]}
-              onChange={(event) => setCustomValue(index, event.target.value)}
+              onChange={(event) => setCustomValue(index, event.target.value, Boolean(question.multiple))}
               disabled={submitting}
             />
           )}
@@ -925,7 +951,7 @@ function ToolPartView({
           {todos ? (
             <TodoListView items={todos} />
           ) : questions ? (
-            <QuestionListView questions={questions} />
+            <QuestionListView questions={questions} answers={part.state?.metadata?.answers} />
           ) : (
             <>
               <pre className="message-tool-command">{command}</pre>

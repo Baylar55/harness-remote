@@ -95,6 +95,7 @@ export type ToolState = {
   output?: string
   error?: string
   time?: { start: number; end?: number }
+  metadata?: { answers?: string[][] }
 }
 
 export type MessagePart = {
