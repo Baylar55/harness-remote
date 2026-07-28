@@ -272,6 +272,12 @@ straight away and runs when the current turn ends. Stopping the session discards
 
 Session titles come from the title you give a session in the app, otherwise from its first prompt; sessions created outside the app are listed with a generated `Session <id>` title when the ACP listing carries no title.
 
+2: Ancora intenzionalmente non supportato: comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite. Rinomina ed eliminazione sono metadati locali del bridge: il rename è un nickname e il delete nasconde la sessione solo da quel bridge. Sono salvati nello state directory; se viene svuotato o sostituito, titoli nativi e sessioni nascoste riappaiono. ACP non offre un'operazione di eliminazione fisica, quindi la cronologia nativa dell'harness resta intatta.
+3: Rename and delete use the same controls as OpenCode, but are bridge-local metadata: a rename is a nickname and delete hides the session only from this bridge. Both are stored under its state directory, so clearing or moving `--state-dir` restores the harness title and makes hidden sessions visible again. ACP does not define physical session deletion; the native OMP history remains untouched and visible to desktop clients.
+4: queued follow-up prompts, model selection, and bridge-local rename/delete.
+The nickname and hidden-session records live under the bridge state directory:
+clearing or moving it restores PI's native title and listing. ACP does not define
+physical session deletion, so deleted sessions remain in PI's own history.
 #### What `--root` does and does not restrict
 
 `--root` restricts the bridge's own surface: which directories the app may browse (`/file`, `/path`) and which working directory a new session may use. It is not a sandbox for the agent. Once a session is running, OMP executes with your full user privileges and approves its own tool calls, so it can read and write outside the configured roots exactly as it would on the desktop. Point the bridge only at machines and accounts where you would already let OMP work unattended.
@@ -291,7 +297,7 @@ The bridge streams `busy`, assistant chunks, todos, and completion for work star
 
 OMP ACP does not expose a global cross-client event feed, shared running-status API, or session lock. Concurrent desktop and app turns are accepted, and the bridge merges newly persisted OMP transcript branches into the app during polling so neither client's messages disappear. The two agent processes still run independently: response order and the context seen by each turn can branch. Sequential hand-off is deterministic; simultaneous use is supported for visibility but cannot provide server-level turn serialization.
 
-The bridge keeps its last successful message/todo snapshot under `~/.harness-remote/<backend>/`. This prevents an empty or partial ACP replay from erasing the app's conversation after navigation or a bridge restart. Use `--state-dir <path>` or `HARNESS_REMOTE_STATE_DIR` to relocate this state.
+The bridge keeps its last successful message/todo snapshot and bridge-local session nicknames/archive state under `~/.harness-remote/<backend>/`. This prevents an empty or partial ACP replay from erasing the app's conversation after navigation or a bridge restart. Use `--state-dir <path>` or `HARNESS_REMOTE_STATE_DIR` to relocate this state; deleting or replacing that directory also discards bridge-local renames and hidden-session records.
 
 Do not expose the bridge directly to the Internet. Use Tailscale, another VPN, or a TLS-terminating reverse proxy, and open port `4097` only to the network that needs it.
 
@@ -335,9 +341,12 @@ and password. A successful health check reports `backend: "pi"` and the
 adapter version.
 
 PI supports session listing, history replay, streaming prompts, cancellation,
-queued follow-up prompts, and model selection. Plan/todo updates, persistent
-session rename/delete, server slash commands, and VCS/diff are not currently
-exposed through this bridge.
+2: Ancora intenzionalmente non supportato: comandi server OpenCode, agenti OMP configurabili, diff/VCS e accesso filesystem fuori dalle root consentite. Rinomina ed eliminazione sono metadati locali del bridge: il rename è un nickname e il delete nasconde la sessione solo da quel bridge. Sono salvati nello state directory; se viene svuotato o sostituito, titoli nativi e sessioni nascoste riappaiono. ACP non offre un'operazione di eliminazione fisica, quindi la cronologia nativa dell'harness resta intatta.
+3: Rename and delete use the same controls as OpenCode, but are bridge-local metadata: a rename is a nickname and delete hides the session only from this bridge. Both are stored under its state directory, so clearing or moving `--state-dir` restores the harness title and makes hidden sessions visible again. ACP does not define physical session deletion; the native OMP history remains untouched and visible to desktop clients.
+4: queued follow-up prompts, model selection, and bridge-local rename/delete.
+The nickname and hidden-session records live under the bridge state directory:
+clearing or moving it restores PI's native title and listing. ACP does not define
+physical session deletion, so deleted sessions remain in PI's own history.
 
 Unlike OMP, PI's adapter asks before each tool call. **The bridge grants those requests
 automatically**, choosing the broadest allow option the adapter offers, because there is no way
