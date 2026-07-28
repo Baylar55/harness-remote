@@ -1,13 +1,14 @@
 name: Deploy web app to GitHub Pages
 
+# Tags only, to match how the APK is published: built on every push, released only on a `v*` tag.
+# Deploying from main would make the public app track the tip of the branch while the public APK
+# tracks releases — two channels telling users two different stories, and every merge live with no
+# step in between. `workflow_dispatch` stays for a manual redeploy.
 "on":
   workflow_dispatch: {}
   push:
-    branches:
-      - main
-    paths:
-      - "web/**"
-      - ".github/workflows/gh-pages.yml"
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -38,6 +39,18 @@ jobs:
 
       - name: Type-check
         run: npx tsc -b
+        working-directory: web
+
+      # This job now publishes to users, so it gates on the same suites as the APK release rather
+      # than on the type-check alone.
+      - name: Run web regression tests
+        run: |
+          npm run test:i18n
+          npm run test:config
+          npm run test:ui
+          npm run test:settings
+          npm run test:model
+          npm run test:events
         working-directory: web
 
       - name: Build web app

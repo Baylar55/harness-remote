@@ -91,6 +91,9 @@ The web app is installable and is published straight from this repo via GitHub P
 https://giuliastro.github.io/harness-remote/. Open that URL over HTTPS and browsers will offer to
 add it to the home screen / app list, opening in its own standalone window.
 
+It is deployed from `v*` tags, the same tags that publish the APK, so the hosted app is always the
+current release rather than the tip of `main`.
+
 - A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
   same-origin static assets on a stale-while-revalidate basis, so the UI still loads offline or on
   a flaky connection after the first visit.
