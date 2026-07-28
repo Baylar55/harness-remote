@@ -8,7 +8,7 @@ It is designed to make daily usage simple: connect to a backend, check active se
 The app is backend-agnostic: you pick the harness in **Settings** and each one keeps its own saved connection, so you can switch between them without re-entering anything.
 
 | Harness | Status | How it connects |
-|---|---|---|---|
+|---|---|---|
 | [OpenCode](https://github.com/sst/opencode) | supported | directly to the OpenCode HTTP server |
 | [Oh My Pi (OMP)](https://omp.sh/) | supported | through the local bridge included in this repository |
 | [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
@@ -42,7 +42,7 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 
 ## What It Can Do
 
-Everything in the first group works on all three harnesses. The rest depends on what the harness
+Everything in the first group works on all four harnesses. The rest depends on what the harness
 exposes, so each entry says where it applies; the app hides what a backend cannot do rather than
 offering a control that fails.
 
@@ -68,8 +68,8 @@ Depending on the harness:
 - send server `/commands` — OpenCode
 - choose the agent a session runs as — OpenCode
 - review changed files and their diffs — OpenCode
-- rename and delete sessions — OpenCode changes them in the harness; on OMP and PI the same controls
-  keep a bridge-local nickname and hide the session from that bridge only
+- rename and delete sessions — OpenCode changes them in the harness; on OMP, PI and Claude Code the
+  same controls keep a bridge-local nickname and hide the session from that bridge only
 
 ## Desktop Mode
 
