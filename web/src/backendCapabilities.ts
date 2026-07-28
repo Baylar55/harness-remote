@@ -28,8 +28,8 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: false,
     commands: false,
-    sessionRename: true,
-    sessionDelete: true
+    sessionRename: false,
+    sessionDelete: false
   },
   pi: {
     sessions: true,
@@ -43,6 +43,21 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: false,
     commands: true,
+    sessionRename: false,
+    sessionDelete: false
+  },
+  claude: {
+    sessions: true,
+    prompt: true,
+    abort: true,
+    streaming: true,
+    models: false,
+    agents: false,
+    todos: true,
+    diff: false,
+    filesystemBrowser: true,
+    questions: false,
+    commands: false,
     sessionRename: true,
     sessionDelete: true
   }
