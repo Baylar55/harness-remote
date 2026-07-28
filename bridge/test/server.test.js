@@ -1219,9 +1219,9 @@ class FlatModelAcp extends EventEmitter {
           id: "model",
           currentValue: "default",
           options: [
-            { value: "default", name: "Default (recommended)" },
-            { value: "sonnet", name: "Sonnet" },
-            { value: "opus[1m]", name: "Opus (1M context)" }
+            { value: "default", name: "Default (recommended)", description: "Sonnet 5 · Efficient for routine tasks" },
+            { value: "sonnet", name: "Sonnet", description: "Sonnet 5 · Efficient for routine tasks" },
+            { value: "opus[1m]", name: "Opus (1M context)", description: "Opus 5 with 1M context" }
           ]
         }]
       }
@@ -1249,6 +1249,10 @@ test("offers models a harness names without a provider prefix, and sets them bac
     assert.equal(provider.name, "claude")
     assert.deepEqual(Object.keys(provider.models).sort(), ["default", "opus[1m]", "sonnet"])
     assert.equal(provider.models.sonnet.name, "Sonnet")
+    // The harness puts the model version in the description; dropping it left the picker showing
+    // "Sonnet" with no way to tell which Sonnet.
+    assert.equal(provider.models["opus[1m]"].description, "Opus 5 with 1M context")
+    assert.equal(provider.models.sonnet.description, "Sonnet 5 · Efficient for routine tasks")
     assert.equal(body.default[provider.id], "default", "the current model is reported as the default")
 
     // The app sends back the pair it was given; the agent must receive the original ACP value.
@@ -1274,6 +1278,7 @@ test("keeps provider/model values untouched for the harnesses that use them", as
     assert.equal(body.providers[0].id, "omp", "a value with a provider part still yields that provider")
     assert.equal(body.providers[0].name, "omp")
     assert.deepEqual(Object.keys(body.providers[0].models).sort(), ["first", "second"])
+    assert.equal(body.providers[0].models.first.description, undefined, "a harness that describes nothing must not gain an empty line")
   } finally {
     await bridge.close()
   }

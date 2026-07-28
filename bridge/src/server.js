@@ -89,7 +89,13 @@ function providersResponse(models, fallbackProviderID) {
     const modelID = flat ? option.value : option.value.slice(separator + 1)
     if (!providerID || !modelID) continue
     const provider = providers.get(providerID) ?? { id: providerID, name: providerID, models: {} }
-    provider.models[modelID] = { id: modelID, name: option.name ?? modelID, status: "active" }
+    provider.models[modelID] = {
+      id: modelID,
+      name: option.name ?? modelID,
+      // Where the harness puts the version: "Sonnet 5 · Efficient for routine tasks".
+      description: option.description || undefined,
+      status: "active"
+    }
     providers.set(providerID, provider)
     if (option.currentValue) defaults[providerID] = modelID
   }

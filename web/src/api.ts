@@ -75,6 +75,7 @@ type ConfigProvidersResponse = {
     models: Record<string, {
       id?: string
       name?: string
+      description?: string
       status?: string
       capabilities?: {
         attachment?: boolean
@@ -265,6 +266,7 @@ export const api = {
           providerName: provider.name || provider.id,
           modelID: model.id || modelID,
           modelName: model.name || model.id || modelID,
+          description: model.description,
           status: model.status,
           contextLimit: model.limit?.context,
           outputLimit: model.limit?.output,
