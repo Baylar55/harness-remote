@@ -41,16 +41,33 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 
 ## What It Can Do
 
-- configure and test connection to a supported harness (OpenCode server or OMP bridge)
+Everything in the first group works on all three harnesses. The rest depends on what the harness
+exposes, so each entry says where it applies; the app hides what a backend cannot do rather than
+offering a control that fails.
+
+- configure and test the connection to any supported harness — OpenCode, OMP, or PI — each with its
+  own saved credentials
 - browse and monitor sessions (`idle`, `busy`, `retry`)
-- open a session and read messages, todo items, and progress
-- send prompts (and `/commands`) directly from the chat input
+- open a session and read messages and progress
+- send prompts from the chat input, including a follow-up typed while the agent is still working
 - stop running work when necessary
+- pick the model a session uses
+- browse the filesystem to choose the working directory for a new session
 - adapt to the screen: Android-friendly bottom navigation on a phone, a two-pane sidebar layout on a
   wide screen (see [Desktop Mode](#desktop-mode))
 - jump to the top or the bottom of a long transcript or session list without dragging through it
-- play completion feedback sound when a running session finishes
-- switch UI language between English, Italian, and Traditional Chinese
+- play a completion sound when a running session finishes
+- switch UI language between English, Italian, and Traditional Chinese, and the theme between light,
+  dark, and system
+
+Depending on the harness:
+
+- answer the questions the agent asks, options or free text, without leaving the app — OpenCode
+- follow todo/plan updates as the agent works — OpenCode, OMP
+- send server `/commands` — OpenCode
+- choose the agent a session runs as — OpenCode
+- review changed files and their diffs — OpenCode
+- rename and delete sessions so they stay renamed and deleted — OpenCode
 
 ## Desktop Mode
 
@@ -97,9 +114,9 @@ current release rather than the tip of `main`.
 - A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
   same-origin static assets on a stale-while-revalidate basis, so the UI still loads offline or on
   a flaky connection after the first visit.
-- Requests to your opencode/bridge server are never cached — they go to whatever host you
-  configured in Settings, cross-origin from wherever the PWA itself is hosted, so session data
-  always comes from the live server.
+- Requests to your harness server are never cached — they go to whatever host you configured in
+  Settings, cross-origin from wherever the PWA itself is hosted, so session data always comes from
+  the live server.
 - The service worker is skipped entirely in the native Android app (Capacitor) and in local dev
   builds; it only registers in production web builds.
 
@@ -137,7 +154,7 @@ So the phone-to-PC setup — the reason this app exists — needs one of:
 
 - frontend: React + TypeScript + Vite
 - mobile packaging: Capacitor (Android APK)
-- networking: per-harness transports behind one app-side API — the OpenCode HTTP API, and the local OMP HTTP/SSE bridge in `bridge/`
+- networking: per-harness transports behind one app-side API — the OpenCode HTTP API spoken directly, and the local HTTP/SSE bridge in `bridge/` that fronts both OMP and PI over ACP
 - CI/CD: GitHub Actions for cloud APK builds
 - i18n: lightweight custom i18n module with English, Italian, and Traditional Chinese
 
@@ -373,18 +390,28 @@ Then open `web/android` in Android Studio if you want local native debugging.
 
 Use your server values:
 
+- Backend: the harness you are connecting to, which also decides the default port
 - Host: computer LAN IP (for example `192.168.1.20`)
-- Port: `4096`
-- Username/password: Basic Auth credentials used to start OpenCode server
+- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP or PI
+- Username/password: the Basic Auth credentials you started that server or bridge with
+
+Each backend keeps its own saved connection, so switching between them in Settings does not make you
+retype anything.
 
 The app is not limited to LAN. You can also use it over WAN/VPN if your network routing (NAT/firewall) and security setup are configured correctly.
 
 ## Main Endpoints Used
 
-- `/global/health`
-- `/session`, `/session/status`, `/session/:id`
-- `/session/:id/message`, `/session/:id/command`, `/session/:id/abort`
-- `/session/:id/todo`, `/session/:id/diff`
+Against an OpenCode server, spoken directly: `/global/health`, `/global/event`, `/session*`
+(including `/session/:id/message`, `/command`, `/abort`, `/todo`, `/diff`), `/experimental/session`,
+`/config/providers`, `/command`, `/agent`, `/project/current`, `/vcs`, `/path`, `/file*`, and
+`/question*`.
+
+The bridge answers the same shapes for OMP and PI, plus `/v1/health` and `/v1/capabilities`, which is
+how the app learns what that harness can do and hides the rest.
+
+What each harness actually provides behind those paths, and what to re-check when one of them
+changes, is in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
 ## Contributing
 
