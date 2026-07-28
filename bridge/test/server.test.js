@@ -1196,3 +1196,85 @@ test("drops an injected user chunk while keeping the surrounding conversation", 
   )
   assert.deepEqual(texts, ["a real question", "and a follow-up"], "the injected block must not become a user message")
 })
+
+// Claude Code's adapter names models with bare ids rather than `provider/model`. The response
+// builder split on "/" and required both halves, so every option was dropped and the backend looked
+// like it exposed no models — the reason its profile carried `models: false`. Both directions are
+// asserted here: the list the app receives, and the value that reaches the agent when one is picked.
+class FlatModelAcp extends EventEmitter {
+  agentInfo = { version: "0.63.0" }
+  models = []
+
+  async start() {}
+
+  async listSessions() {
+    return [{ sessionId: "session-1", cwd: process.cwd(), updatedAt: "2026-07-28T00:00:00.000Z" }]
+  }
+
+  async request(method, params) {
+    if (method === "session/load" || method === "session/new") {
+      return {
+        sessionId: "session-1",
+        configOptions: [{
+          id: "model",
+          currentValue: "default",
+          options: [
+            { value: "default", name: "Default (recommended)" },
+            { value: "sonnet", name: "Sonnet" },
+            { value: "opus[1m]", name: "Opus (1M context)" }
+          ]
+        }]
+      }
+    }
+    if (method === "session/set_config_option") {
+      this.models.push(params.value)
+      return {}
+    }
+    if (method === "session/prompt") return { stopReason: "end_turn" }
+    return {}
+  }
+
+  notify() {}
+}
+
+test("offers models a harness names without a provider prefix, and sets them back verbatim", async () => {
+  const acp = new FlatModelAcp()
+  const bridge = await startServer({ acp, backend: "claude" })
+  try {
+    const listed = await fetch(`${bridge.baseURL}/config/providers?sessionID=session-1`, { headers: authHeaders() })
+    const body = await listed.json()
+    assert.equal(body.providers.length, 1, "bare ids must not be discarded")
+    const provider = body.providers[0]
+    assert.equal(provider.id, "claude", "a bare id is presented under the backend's own name")
+    assert.equal(provider.name, "claude")
+    assert.deepEqual(Object.keys(provider.models).sort(), ["default", "opus[1m]", "sonnet"])
+    assert.equal(provider.models.sonnet.name, "Sonnet")
+    assert.equal(body.default[provider.id], "default", "the current model is reported as the default")
+
+    // The app sends back the pair it was given; the agent must receive the original ACP value.
+    const prompted = await fetch(`${bridge.baseURL}/session/session-1/prompt_async`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ parts: [{ type: "text", text: "hello" }], model: { providerID: provider.id, modelID: "opus[1m]" } })
+    })
+    assert.equal(prompted.status, 200)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(acp.models, ["opus[1m]"], "a bare id must not be re-joined into provider/model")
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("keeps provider/model values untouched for the harnesses that use them", async () => {
+  const acp = new HeldTurnOmpAcp()
+  const bridge = await startServer({ acp })
+  try {
+    const listed = await fetch(`${bridge.baseURL}/config/providers?sessionID=session-1`, { headers: authHeaders() })
+    const body = await listed.json()
+    assert.equal(body.providers[0].id, "omp", "a value with a provider part still yields that provider")
+    assert.equal(body.providers[0].name, "omp")
+    assert.deepEqual(Object.keys(body.providers[0].models).sort(), ["first", "second"])
+  } finally {
+    await bridge.close()
+  }
+})

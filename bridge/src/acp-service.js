@@ -248,11 +248,16 @@ export class AcpService {
   async setModel(sessionID, model) {
     await this.#loadForConfigOptions(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
-    if (!option?.options?.some((candidate) => candidate.value === model)) {
-      throw new Error(`Harness model is not available: ${model}`)
-    }
-    await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value: model })
-    option.currentValue = model
+    // The app addresses models as `provider/model` because that is what OpenCode's API does, but a
+    // harness whose ids carry no provider — Claude Code's `sonnet`, `opus[1m]` — is shown under the
+    // backend's name to keep it consistent. Resolve against what the agent actually offered rather
+    // than trusting either spelling: exact first, then the part after the synthesised provider.
+    const value = option?.options?.some((candidate) => candidate.value === model)
+      ? model
+      : option?.options?.find((candidate) => candidate.value === model.slice(model.indexOf("/") + 1))?.value
+    if (!value) throw new Error(`Harness model is not available: ${model}`)
+    await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value })
+    option.currentValue = value
   }
 
   /**

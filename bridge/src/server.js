@@ -70,12 +70,23 @@ function modelWireName(model) {
   return model.providerID && modelID ? `${model.providerID}/${modelID}` : undefined
 }
 
-function providersResponse(models) {
+/**
+ * The app's model API is OpenCode's, which names a model `provider/model`. ACP has no such rule:
+ * OMP and PI happen to use that shape, while Claude Code's adapter offers bare ids — `sonnet`,
+ * `opus[1m]`. Splitting on "/" and requiring both halves silently dropped every one of them, which
+ * is why that backend looked like it exposed no models at all.
+ *
+ * A bare id is presented under the backend's own name instead, so it reads and behaves like the
+ * others — `claude/sonnet`. `AcpService.setModel` puts it back to the id the agent knows.
+ */
+function providersResponse(models, fallbackProviderID) {
   const providers = new Map()
   const defaults = {}
   for (const option of models) {
-    const [providerID, ...modelParts] = option.value.split("/")
-    const modelID = modelParts.join("/")
+    const separator = option.value.indexOf("/")
+    const flat = separator <= 0
+    const providerID = flat ? fallbackProviderID : option.value.slice(0, separator)
+    const modelID = flat ? option.value : option.value.slice(separator + 1)
     if (!providerID || !modelID) continue
     const provider = providers.get(providerID) ?? { id: providerID, name: providerID, models: {} }
     provider.models[modelID] = { id: modelID, name: option.name ?? modelID, status: "active" }
@@ -224,7 +235,7 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
           writeJSON(response, 200, { providers: [], default: {} })
           return
         }
-        writeJSON(response, 200, providersResponse(await service.models(sessionID)))
+        writeJSON(response, 200, providersResponse(await service.models(sessionID), backend))
         return
       }
       writeJSON(response, 404, { error: "Not found" })
