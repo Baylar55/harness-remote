@@ -18,5 +18,7 @@ export const SERVER_STORAGE_KEYS = [
   BACKEND_STORAGE_KEYS.claude,
   "opencode.remote.model",
   "opencode.remote.agent",
-  "opencode.remote.newSessionDirectory"
+  "opencode.remote.newSessionDirectory",
+  "opencode.remote.serverProfiles",
+  "opencode.remote.activeServerProfile"
 ]
