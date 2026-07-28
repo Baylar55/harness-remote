@@ -321,4 +321,13 @@ assert.match(
   'the AI panel must say a harness has no model selection rather than claiming to load'
 )
 
+// The harness names a model "Sonnet" and puts which Sonnet in the description. Showing the provider
+// there instead was fine when it distinguished anything; with one synthesised provider it read as
+// "claude" on all five rows while the version stayed invisible.
+assert.match(
+  app,
+  /\[option\.description \?\? option\.providerName, option\.variant\]/,
+  "the model picker's secondary line must prefer the harness description, falling back to the provider"
+)
+
 console.log('ui regression tests passed')

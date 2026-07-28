@@ -47,6 +47,8 @@ export type AgentOption = {
 export type ModelOption = ModelSelection & {
   providerName: string
   modelName: string
+  /** Present when the harness describes its models, as the ACP adapters do; OpenCode does not. */
+  description?: string
   status?: string
   contextLimit?: number
   outputLimit?: number

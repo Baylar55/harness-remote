@@ -3867,7 +3867,13 @@ function App() {
                             >
                               <span>
                                 <strong>{option.modelName}</strong>
-                                <small>{option.providerName}{option.variant ? ` · ${option.variant}` : ""}</small>
+                                {/* The harness's own description carries the version — "Sonnet 5 ·
+                                    Efficient for routine tasks" — which is what someone picking a
+                                    model wants. The provider only earns the line when there is
+                                    nothing better, as with OpenCode. */}
+                                <small>
+                                  {[option.description ?? option.providerName, option.variant].filter(Boolean).join(" · ")}
+                                </small>
                               </span>
                               {option.isDefault && <em>{t('detail.modelDefault')}</em>}
                             </button>
