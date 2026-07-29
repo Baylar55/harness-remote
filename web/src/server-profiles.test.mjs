@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 const storage = new Map()
 globalThis.localStorage = {
@@ -30,5 +31,14 @@ persistServerProfiles(profiles, added.id)
 assert.equal(JSON.parse(storage.get(SERVER_PROFILES_STORAGE_KEY)).length, 3, 'saved profiles should persist as one collection')
 assert.equal(storage.get(ACTIVE_PROFILE_STORAGE_KEY), added.id, 'the selected server should persist independently')
 assert.equal(loadActiveServerProfile(loadServerProfiles()).name, 'Work PI', 'the saved selection should be restored at launch')
+
+// A crash caused by a bad saved server has to be recoverable, so the reset must clear the profiles
+// too: leaving them behind would restore the same broken connection on every retry. The reset list is
+// asserted as source text because storageKeys.ts imports this module with an extensionless specifier,
+// which the node test runner cannot resolve.
+const storageKeys = readFileSync(new URL('./storageKeys.ts', import.meta.url), 'utf8')
+assert.match(storageKeys, /SERVER_PROFILES_STORAGE_KEY/, 'the crash-recovery reset must clear saved servers')
+assert.match(storageKeys, /ACTIVE_PROFILE_STORAGE_KEY/, 'the crash-recovery reset must clear the selected server')
+assert.ok(!/"opencode\.remote\.(serverProfiles|activeServerProfile)"/.test(storageKeys), 'storage keys must have a single definition')
 
 console.log('server profile tests passed')

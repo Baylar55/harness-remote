@@ -1,7 +1,11 @@
 import type { BackendKind, ServerConfig } from "./types"
-const LEGACY_STORAGE_KEY = "opencode.remote.server"
-const ACTIVE_BACKEND_STORAGE_KEY = "opencode.remote.backend"
-const BACKEND_STORAGE_KEYS = {
+
+/** Every server storage key lives here: the crash-recovery reset in storageKeys.ts composes them,
+    and only this module reads or writes them. Keep this file free of runtime sibling imports so the
+    node test runner, which cannot resolve extensionless specifiers, can load it directly. */
+export const LEGACY_STORAGE_KEY = "opencode.remote.server"
+export const ACTIVE_BACKEND_STORAGE_KEY = "opencode.remote.backend"
+export const BACKEND_STORAGE_KEYS = {
   opencode: "opencode.remote.server.opencode",
   omp: "opencode.remote.server.omp",
   pi: "opencode.remote.server.pi",

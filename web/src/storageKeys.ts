@@ -1,14 +1,14 @@
-/** Storage keys are shared with the crash-recovery reset, so they live outside App.tsx. */
-export const LEGACY_STORAGE_KEY = "opencode.remote.server"
-export const ACTIVE_BACKEND_STORAGE_KEY = "opencode.remote.backend"
-export const BACKEND_STORAGE_KEYS = {
-  opencode: "opencode.remote.server.opencode",
-  omp: "opencode.remote.server.omp",
-  pi: "opencode.remote.server.pi",
-  claude: "opencode.remote.server.claude"
-} as const
+import {
+  ACTIVE_BACKEND_STORAGE_KEY,
+  ACTIVE_PROFILE_STORAGE_KEY,
+  BACKEND_STORAGE_KEYS,
+  LEGACY_STORAGE_KEY,
+  SERVER_PROFILES_STORAGE_KEY
+} from "./serverProfiles"
 
-/** Everything that describes a backend connection; language and theme are deliberately excluded. */
+/** Everything that describes a backend connection; language and theme are deliberately excluded. The
+    keys themselves belong to serverProfiles.ts, the only module that reads or writes them: this list
+    exists so the crash-recovery reset can clear a broken connection without importing App.tsx. */
 export const SERVER_STORAGE_KEYS = [
   LEGACY_STORAGE_KEY,
   ACTIVE_BACKEND_STORAGE_KEY,
@@ -19,6 +19,6 @@ export const SERVER_STORAGE_KEYS = [
   "opencode.remote.model",
   "opencode.remote.agent",
   "opencode.remote.newSessionDirectory",
-  "opencode.remote.serverProfiles",
-  "opencode.remote.activeServerProfile"
+  SERVER_PROFILES_STORAGE_KEY,
+  ACTIVE_PROFILE_STORAGE_KEY
 ]

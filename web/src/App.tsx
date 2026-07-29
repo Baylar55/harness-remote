@@ -4,7 +4,6 @@ import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { api, isMixedContentBlocked, isValidServerConfig } from "./api"
-import { BACKEND_STORAGE_KEYS } from "./storageKeys"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
@@ -2033,7 +2032,6 @@ function App() {
     persistServerProfiles(nextProfiles, profileID)
     setDraftConfig(nextConfig)
     setConfig(nextConfig)
-    localStorage.setItem(BACKEND_STORAGE_KEYS[nextConfig.backend], JSON.stringify(nextConfig))
     setSettingsNotice({ type: "success", text: t('settings.saved') })
     setConnectionState("connecting")
     setConnectionMessage(t('connection.connecting'))
