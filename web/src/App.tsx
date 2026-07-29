@@ -1667,6 +1667,7 @@ function App() {
   const [activeProfileID, setActiveProfileID] = useState(initialProfile.id)
   const [config, setConfig] = useState<ServerConfig>(initialProfile.config)
   const [draftProfileName, setDraftProfileName] = useState(initialProfile.name)
+  const [profileToDelete, setProfileToDelete] = useState<SavedServerProfile | null>(null)
   const [language, setLanguage] = useState<LanguageCode>(() => {
     return normalizeLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || navigator.language)
   })
@@ -2058,6 +2059,7 @@ function App() {
   }
 
   function deleteActiveProfile() {
+    setProfileToDelete(null)
     if (profiles.length === 1) return
     const nextProfiles = profiles.filter((profile) => profile.id !== activeProfileID)
     const nextProfile = nextProfiles[0]
@@ -3129,15 +3131,16 @@ function App() {
     { view: "settings" as const, label: t('nav.settings'), icon: <SettingsIcon size={19} />, disabled: false },
     { view: "help" as const, label: t('nav.help'), icon: <HelpIcon size={19} />, disabled: false }
   ]
+  /* The select carries its own accessible name: a visible caption above it would spend a line of the
+     header on a word the chosen option already implies. */
   const profilePicker = (
-    <label className="server-profile-picker">
-      <span className="sr-only">{t('settings.serverProfile')}</span>
+    <div className="server-profile-picker">
       <select aria-label={t('settings.serverProfile')} value={activeProfileID} onChange={(event) => activateProfile(event.target.value)}>
         {profiles.map((profile) => (
           <option key={profile.id} value={profile.id}>{profile.name}</option>
         ))}
       </select>
-    </label>
+    </div>
   )
 
   return (
@@ -3262,12 +3265,14 @@ function App() {
         >
         <section className="panel settings fade-in">
           <div className="section-heading">
-            <div>
+            <div className="section-heading-text">
               <h2>{t('settings.title')}</h2>
               <p className="subtle">{hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.hostPlaceholder')}</p>
               <p className="subtle">{t('settings.draftHint')}</p>
             </div>
-            <div className="inline-actions">
+            {/* Aligned to the bottom of the heading text: the pair costs no height of its own there,
+                and it stays clear of the corner the modal's close button occupies. */}
+            <div className="server-profile-actions">
               <button type="button" className="btn-secondary" onClick={addProfile}>
                 <PlusIcon size={16} />
                 {t('settings.addServer')}
@@ -3275,7 +3280,7 @@ function App() {
               <button
                 type="button"
                 className="btn-danger"
-                onClick={deleteActiveProfile}
+                onClick={() => setProfileToDelete(profiles.find((profile) => profile.id === activeProfileID) ?? null)}
                 disabled={profiles.length === 1}
                 title={profiles.length === 1 ? t('settings.deleteLastServerHint') : undefined}
               >
@@ -3984,6 +3989,39 @@ function App() {
                 </div>
               </div>
             )}
+          </section>
+        </div>
+      )}
+
+      {/* Deleting a saved server throws away a host, a username and a password that cannot be
+          recovered, so it is confirmed exactly like deleting a session. */}
+      {profileToDelete && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setProfileToDelete(null)}>
+          <section
+            className="modal-card fade-in"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-server-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="delete-server-title">{t('settings.deleteServerTitle')}</h2>
+            <p>
+              {t('session.deleteBodyPrefix')} <strong>{profileToDelete.name}</strong>.
+            </p>
+            {/* A server saved but never filled in has no address to show, and the placeholder that
+                stands in for one inside the form reads as an actual host here. */}
+            {profileToDelete.config.host && (
+              <p className="subtle">{`${profileToDelete.config.host}:${profileToDelete.config.port}`}</p>
+            )}
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setProfileToDelete(null)}>
+                {t('session.cancel')}
+              </button>
+              <button className="btn-danger" onClick={deleteActiveProfile}>
+                <TrashIcon size={16} />
+                {t('settings.deleteServer')}
+              </button>
+            </div>
           </section>
         </div>
       )}

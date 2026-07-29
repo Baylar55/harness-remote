@@ -43,4 +43,8 @@ assert.equal(en('action.preparingTool', { tool: 'write' }), 'Preparing write')
 assert.equal(it('action.preparingTool', { tool: 'write' }), 'Preparazione di write')
 assert.equal(zh('action.preparingTool', { tool: 'write' }), '正在準備 write')
 
+assert.equal(en('settings.deleteServerTitle'), 'Delete saved server?')
+assert.equal(it('settings.deleteServerTitle'), 'Eliminare il server salvato?')
+assert.equal(zh('settings.deleteServerTitle'), '刪除已儲存的伺服器？')
+
 console.log('i18n tests passed')
