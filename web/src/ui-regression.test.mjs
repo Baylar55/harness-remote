@@ -330,4 +330,18 @@ assert.match(
   "the model picker's secondary line must prefer the harness description, falling back to the provider"
 )
 
+// A tool event is created before its streamed arguments arrive. Calling that action complete (or
+// exposing its empty `{}` payload) falsely signals that the tool has already run.
+assert.match(
+  app,
+  /const isPreparing = \(status === "pending" \|\| status === "running"\) && Object\.keys\(input\)\.length === 0/,
+  'an active tool with no streamed input must remain in its preparing state'
+)
+assert.match(
+  app,
+  /const displayLabel = isPreparing \? t\('action\.preparingTool', \{ tool: part\.tool \|\| t\('action\.actionsFallback'\) \}\) : label/,
+  'preparing tools must identify the pending tool instead of presenting an empty call as complete'
+)
+assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show the preparing label')
+
 console.log('ui regression tests passed')

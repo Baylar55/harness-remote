@@ -39,4 +39,8 @@ assert.equal(it('settings.themeDark'), 'Scuro')
 assert.equal(zh('settings.themeSystem'), '跟隨系統')
 assert.equal(en('todo.title'), 'Todo Items')
 
+assert.equal(en('action.preparingTool', { tool: 'write' }), 'Preparing write')
+assert.equal(it('action.preparingTool', { tool: 'write' }), 'Preparazione di write')
+assert.equal(zh('action.preparingTool', { tool: 'write' }), '正在準備 write')
+
 console.log('i18n tests passed')

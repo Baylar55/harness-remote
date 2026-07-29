@@ -915,6 +915,8 @@ function ToolPartView({
   const { label, diff } = describeToolAction(part, directory, t)
   const tool = (part.tool || "").toLowerCase()
   const input = (part.state?.input ?? {}) as Record<string, unknown>
+  const isPreparing = (status === "pending" || status === "running") && Object.keys(input).length === 0
+  const displayLabel = isPreparing ? t('action.preparingTool', { tool: part.tool || t('action.actionsFallback') }) : label
   let patch: string | null = null
   if (tool === "edit" && typeof input.oldString === "string" && typeof input.newString === "string") {
     patch = buildSimpleDiff(input.oldString, input.newString)
@@ -926,7 +928,7 @@ function ToolPartView({
   return (
     <>
       <button type="button" className={`message-tool-summary message-tool-${status}`} onClick={() => setOpen(true)}>
-        <span className="message-tool-label">{label}</span>
+        <span className="message-tool-label">{displayLabel}</span>
         <span className="message-tool-meta">
           {diff && (diff.additions > 0 || diff.deletions > 0) && (
             <span className="message-tool-diff-stats">
@@ -948,7 +950,7 @@ function ToolPartView({
       </button>
 
       {open && (
-        <Modal title={truncateForTitle(label)} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
+        <Modal title={truncateForTitle(displayLabel)} timestamp={timestamp} onClose={() => setOpen(false)} t={t}>
           {todos ? (
             <TodoListView items={todos} />
           ) : questions ? (

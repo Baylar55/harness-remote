@@ -188,6 +188,7 @@ type TranslationKey =
   | 'action.usedSkillNamed'
   | 'action.toolFailed'
   | 'action.running'
+  | 'action.preparingTool'
   | 'action.showDiffFor'
   | 'action.actionsFallback'
   | 'action.countReadOne'
@@ -407,6 +408,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.usedSkillNamed': 'Used skill: {name}',
     'action.toolFailed': 'Tool failed',
     'action.running': 'Running…',
+    'action.preparingTool': 'Preparing {tool}',
     'action.showDiffFor': 'Show diff for {file}',
     'action.actionsFallback': 'Actions',
     'action.countReadOne': 'read 1 file',
@@ -625,6 +627,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.usedSkillNamed': 'Usata skill: {name}',
     'action.toolFailed': 'Tool fallito',
     'action.running': 'In esecuzione…',
+    'action.preparingTool': 'Preparazione di {tool}',
     'action.showDiffFor': 'Mostra diff per {file}',
     'action.actionsFallback': 'Azioni',
     'action.countReadOne': 'letto 1 file',
@@ -843,6 +846,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'action.usedSkillNamed': '已使用技能：{name}',
     'action.toolFailed': '工具失敗',
     'action.running': '執行中…',
+    'action.preparingTool': '正在準備 {tool}',
     'action.showDiffFor': '顯示 {file} 的差異',
     'action.actionsFallback': '動作',
     'action.countReadOne': '讀取 1 個檔案',
