@@ -14,6 +14,12 @@ type TranslationKey =
   | 'menu.detailDescription'
   | 'menu.helpDescription'
   | 'settings.title'
+  | 'settings.serverProfile'
+  | 'settings.serverName'
+  | 'settings.newServerName'
+  | 'settings.addServer'
+  | 'settings.deleteServer'
+  | 'settings.deleteLastServerHint'
   | 'settings.backend'
   | 'settings.host'
   | 'settings.hostPlaceholder'
@@ -235,6 +241,12 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'menu.detailDescription': 'Chat with your selected backend',
     'menu.helpDescription': 'Documentation & support',
     'settings.title': 'Server Configuration',
+    'settings.serverProfile': 'Saved server',
+    'settings.serverName': 'Server name',
+    'settings.newServerName': 'New server',
+    'settings.addServer': 'Add server',
+    'settings.deleteServer': 'Delete server',
+    'settings.deleteLastServerHint': 'Keep at least one server configuration.',
     'settings.backend': 'Backend',
     'settings.host': 'Host Address',
     'settings.hostPlaceholder': '192.168.1.100, localhost, or https://example.com',
@@ -454,6 +466,12 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'menu.detailDescription': 'Chatta con il backend selezionato',
     'menu.helpDescription': 'Documentazione e supporto',
     'settings.title': 'Configurazione server',
+    'settings.serverProfile': 'Server salvato',
+    'settings.serverName': 'Nome server',
+    'settings.newServerName': 'Nuovo server',
+    'settings.addServer': 'Aggiungi server',
+    'settings.deleteServer': 'Elimina server',
+    'settings.deleteLastServerHint': 'Mantieni almeno una configurazione server.',
     'settings.backend': 'Backend',
     'settings.host': 'Indirizzo host',
     'settings.hostPlaceholder': '192.168.1.100, localhost o https://example.com',
@@ -673,6 +691,12 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'menu.detailDescription': '與已選後端對話',
     'menu.helpDescription': '文件與支援',
     'settings.title': '伺服器設定',
+    'settings.serverProfile': '已儲存的伺服器',
+    'settings.serverName': '伺服器名稱',
+    'settings.newServerName': '新伺服器',
+    'settings.addServer': '新增伺服器',
+    'settings.deleteServer': '刪除伺服器',
+    'settings.deleteLastServerHint': '請至少保留一個伺服器設定。',
     'settings.backend': '後端',
     'settings.host': '主機位址',
     'settings.hostPlaceholder': '192.168.1.100、localhost 或 https://example.com',

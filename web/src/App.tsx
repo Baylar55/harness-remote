@@ -4,7 +4,7 @@ import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { api, isMixedContentBlocked, isValidServerConfig } from "./api"
-import { ACTIVE_BACKEND_STORAGE_KEY, BACKEND_STORAGE_KEYS, LEGACY_STORAGE_KEY } from "./storageKeys"
+import { BACKEND_STORAGE_KEYS } from "./storageKeys"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
@@ -16,6 +16,7 @@ import {
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
 import { DEFAULT_HARNESS_CAPABILITIES } from "./backendCapabilities"
 import { BACKEND_CLIENTS } from "./backendClient"
+import { createServerProfile, loadActiveServerProfile, loadServerProfiles, persistServerProfiles, type SavedServerProfile } from "./serverProfiles"
 import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
@@ -122,43 +123,6 @@ function backendDisplayName(backend: ServerConfig["backend"]): string {
   return "OpenCode"
 }
 
-function defaultConfig(backend: ServerConfig["backend"]): ServerConfig {
-  return {
-    backend,
-    host: "",
-    port: backend === "opencode" ? 4096 : 4097,
-    username: backend === "opencode" ? "opencode" : backend,
-    password: ""
-  }
-}
-
-function parseStoredConfig(value: string | null, backend: ServerConfig["backend"]): ServerConfig | null {
-  if (!value) return null
-  try {
-    const parsed = JSON.parse(value) as Partial<ServerConfig>
-    const storedBackend = parsed.backend === "omp" || parsed.backend === "opencode" || parsed.backend === "pi" || parsed.backend === "claude" ? parsed.backend : backend
-    return { ...defaultConfig(storedBackend), ...parsed, backend: storedBackend }
-  } catch {
-    return null
-  }
-}
-
-function readConfig(backend: ServerConfig["backend"]): ServerConfig {
-  const saved = parseStoredConfig(localStorage.getItem(BACKEND_STORAGE_KEYS[backend]), backend)
-  if (saved) return { ...saved, backend }
-  const legacy = parseStoredConfig(localStorage.getItem(LEGACY_STORAGE_KEY), "opencode")
-  return legacy?.backend === backend ? legacy : defaultConfig(backend)
-}
-
-function initialConfig(): ServerConfig {
-  const legacy = parseStoredConfig(localStorage.getItem(LEGACY_STORAGE_KEY), "opencode")
-  const storedBackend = localStorage.getItem(ACTIVE_BACKEND_STORAGE_KEY)
-  const backend = storedBackend === "omp" || storedBackend === "opencode" || storedBackend === "pi" || storedBackend === "claude" ? storedBackend : legacy?.backend ?? "opencode"
-  const config = readConfig(backend)
-  localStorage.setItem(BACKEND_STORAGE_KEYS[backend], JSON.stringify(config))
-  localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, backend)
-  return config
-}
 
 function formatTime(epoch: number): string {
   if (!epoch) return "-"
@@ -1697,7 +1661,12 @@ const MessagesPane = memo(function MessagesPane({
 function App() {
   type NoticeType = "info" | "success" | "error"
   type ThemePreference = "system" | "light" | "dark"
-  const [config, setConfig] = useState<ServerConfig>(initialConfig)
+  const initialProfiles = useMemo(loadServerProfiles, [])
+  const initialProfile = useMemo(() => loadActiveServerProfile(initialProfiles), [initialProfiles])
+  const [profiles, setProfiles] = useState<SavedServerProfile[]>(initialProfiles)
+  const [activeProfileID, setActiveProfileID] = useState(initialProfile.id)
+  const [config, setConfig] = useState<ServerConfig>(initialProfile.config)
+  const [draftProfileName, setDraftProfileName] = useState(initialProfile.name)
   const [language, setLanguage] = useState<LanguageCode>(() => {
     return normalizeLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || navigator.language)
   })
@@ -2034,7 +2003,7 @@ function App() {
     setLoadingSessionID((activeID) => (activeID === sessionID ? null : activeID))
   }
 
-  function applyConfig(nextConfig: ServerConfig) {
+  function applyConfig(nextConfig: ServerConfig, profileID = activeProfileID, sourceProfiles = profiles) {
     const serverChanged = configKey(nextConfig) !== configKey(config)
     if (serverChanged) {
       loadSelectedRequestRef.current += 1
@@ -2057,15 +2026,44 @@ function App() {
       setModelOptions([])
       setSelectedModelKey(readStoredModel(nextConfig.backend))
     }
+    const nextProfiles = sourceProfiles.map((profile) => profile.id === profileID ? { ...profile, config: nextConfig } : profile)
+    setProfiles(nextProfiles)
+    setActiveProfileID(profileID)
+    persistServerProfiles(nextProfiles, profileID)
+    setDraftConfig(nextConfig)
     setConfig(nextConfig)
     localStorage.setItem(BACKEND_STORAGE_KEYS[nextConfig.backend], JSON.stringify(nextConfig))
-    localStorage.setItem(ACTIVE_BACKEND_STORAGE_KEY, nextConfig.backend)
     setSettingsNotice({ type: "success", text: t('settings.saved') })
     setConnectionState("connecting")
     setConnectionMessage(t('connection.connecting'))
     setRuntimeError(null)
     backgroundFailureCountRef.current = 0
     initialSessionLoadRef.current = true
+  }
+
+  function activateProfile(profileID: string) {
+    const profile = profiles.find((candidate) => candidate.id === profileID)
+    if (!profile || profile.id === activeProfileID) return
+    setDraftProfileName(profile.name)
+    setDraftConfig(profile.config)
+    applyConfig(profile.config, profile.id)
+  }
+
+  function addProfile() {
+    const profile = createServerProfile(t('settings.newServerName'), "opencode")
+    const nextProfiles = [...profiles, profile]
+    setDraftProfileName(profile.name)
+    applyConfig(profile.config, profile.id, nextProfiles)
+    setView("settings")
+  }
+
+  function deleteActiveProfile() {
+    if (profiles.length === 1) return
+    const nextProfiles = profiles.filter((profile) => profile.id !== activeProfileID)
+    const nextProfile = nextProfiles[0]
+    setDraftProfileName(nextProfile.name)
+    setDraftConfig(nextProfile.config)
+    applyConfig(nextProfile.config, nextProfile.id, nextProfiles)
   }
   async function testConnection(configToTest: ServerConfig) {
     setTestingConnection(true)
@@ -2721,6 +2719,10 @@ function App() {
   }, [theme])
 
   useEffect(() => {
+    persistServerProfiles(profiles, activeProfileID)
+  }, [])
+
+  useEffect(() => {
     localStorage.setItem(NEW_SESSION_DIRECTORY_STORAGE_KEY, newSessionDirectory)
   }, [newSessionDirectory])
 
@@ -3127,6 +3129,16 @@ function App() {
     { view: "settings" as const, label: t('nav.settings'), icon: <SettingsIcon size={19} />, disabled: false },
     { view: "help" as const, label: t('nav.help'), icon: <HelpIcon size={19} />, disabled: false }
   ]
+  const profilePicker = (
+    <label className="server-profile-picker">
+      <span className="sr-only">{t('settings.serverProfile')}</span>
+      <select aria-label={t('settings.serverProfile')} value={activeProfileID} onChange={(event) => activateProfile(event.target.value)}>
+        {profiles.map((profile) => (
+          <option key={profile.id} value={profile.id}>{profile.name}</option>
+        ))}
+      </select>
+    </label>
+  )
 
   return (
     <div className={`app-shell${isDesktop ? " app-shell-desktop" : ""}`}>
@@ -3150,6 +3162,7 @@ function App() {
               </div>
             </div>
           </div>
+          {profilePicker}
         </header>
       )}
 
@@ -3171,6 +3184,7 @@ function App() {
               </p>
             </div>
           </div>
+          {profilePicker}
 
           <div className="sidebar-toolbar">
             <input
@@ -3253,9 +3267,40 @@ function App() {
               <p className="subtle">{hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.hostPlaceholder')}</p>
               <p className="subtle">{t('settings.draftHint')}</p>
             </div>
+            <div className="inline-actions">
+              <button type="button" className="btn-secondary" onClick={addProfile}>
+                <PlusIcon size={16} />
+                {t('settings.addServer')}
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={deleteActiveProfile}
+                disabled={profiles.length === 1}
+                title={profiles.length === 1 ? t('settings.deleteLastServerHint') : undefined}
+              >
+                <TrashIcon size={16} />
+                {t('settings.deleteServer')}
+              </button>
+            </div>
           </div>
 
           <div className="form-grid">
+          <label htmlFor="server-name" className="field-row-span">
+            {t('settings.serverName')}
+            <input
+              id="server-name"
+              value={draftProfileName}
+              onChange={(event) => {
+                const name = event.target.value
+                setDraftProfileName(name)
+                const nextProfiles = profiles.map((profile) => profile.id === activeProfileID ? { ...profile, name } : profile)
+                setProfiles(nextProfiles)
+                persistServerProfiles(nextProfiles, activeProfileID)
+              }}
+              autoComplete="off"
+            />
+          </label>
           <label htmlFor="language">
             {t('settings.language')}
             <select
@@ -3289,7 +3334,7 @@ function App() {
               value={draftConfig.backend}
               onChange={(event) => {
                 const backend = event.target.value as ServerConfig["backend"]
-                setDraftConfig(readConfig(backend))
+                setDraftConfig(createServerProfile("", backend).config)
               }}
             >
               <option value="opencode">OpenCode</option>
