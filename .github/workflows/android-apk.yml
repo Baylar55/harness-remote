@@ -58,6 +58,7 @@ jobs:
           npm run test:settings
           npm run test:model
           npm run test:events
+          npm run test:profiles
         working-directory: web
 
       - name: Run bridge tests
