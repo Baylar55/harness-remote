@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
 const i18n = readFileSync(new URL('./i18n.ts', import.meta.url), 'utf8')
+const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
 const testConnection = app.match(/async function testConnection[\s\S]*?async function refreshSessions/)
 assert.ok(testConnection, 'testConnection function should be present')
@@ -26,5 +27,26 @@ assert.ok(app.includes('<option value="pi">PI (ACP bridge)</option>'), 'Settings
 assert.ok(app.includes('health.backend && health.backend !== configToTest.backend'), 'Connection tests should reject a bridge for the wrong backend')
 assert.ok(app.includes('https://github.com/giuliastro/harness-remote#'), 'Help should link to the canonical repository')
 assert.equal(app.includes('https://github.com/gervaso-assistant/opencode-remote-android#'), false, 'Help must not link to the obsolete repository owner')
+
+// The server picker used to caption itself with a visually-hidden span, but no rule ever hid it: the
+// caption rendered as stray text above the header. Every class the picker and its actions rely on has
+// to exist in the stylesheet, or the layout falls back to whatever the bare markup does.
+for (const className of ['server-profile-picker', 'server-profile-actions', 'section-heading-text']) {
+  assert.ok(app.includes(`className="${className}"`), `${className} should be used by the saved-server UI`)
+  assert.ok(styles.includes(`.${className}`), `${className} should be styled instead of relying on default rendering`)
+}
+assert.equal(/className="sr-only"/.test(app), false, 'a caption the stylesheet cannot hide must not be rendered at all')
+
+// Sized to their labels the two actions came out visibly different widths, and a full row of their own
+// pushed a form that already fills the height cap into scrolling for a few pixels.
+assert.match(styles, /\.server-profile-actions\s*\{[^}]*grid-auto-columns:\s*1fr/, 'the saved-server actions must be equal width')
+assert.match(styles, /\.server-profile-actions\s*\{[^}]*align-self:\s*flex-end/, 'the saved-server actions must sit on the last line of the heading instead of taking a row')
+assert.match(styles, /\.desktop-panel-modal\s*\{[^}]*max-height:\s*calc\(100vh - 2 \* var\(--modal-margin\) - 2px\)/, 'a panel modal must claim every pixel the backdrop margin leaves so a form that fits does not scroll')
+assert.match(styles, /\.desktop-panel-modal > \.panel\s*\{[^}]*border:\s*0/, 'the panel inside a modal must not draw a second frame inside the card')
+
+// Deleting a saved server discards a host, a username and a password with no way back.
+assert.ok(app.includes('setProfileToDelete(profiles.find((profile) => profile.id === activeProfileID) ?? null)'), 'deleting a saved server must ask first')
+assert.ok(app.includes('aria-labelledby="delete-server-title"'), 'the saved-server deletion must be confirmed in a dialog')
+assert.ok(i18n.includes("'settings.deleteServerTitle'"), 'the deletion dialog needs a translated title')
 
 console.log('settings regression tests passed')

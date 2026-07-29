@@ -1499,7 +1499,10 @@ p {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-4);
+  /* The gap a modal keeps from the screen edge, published so a card that caps its own height can
+     claim exactly the rest of the viewport instead of guessing and scrolling for the difference. */
+  --modal-margin: var(--space-3);
+  padding: var(--modal-margin);
   background: var(--modal-backdrop);
 }
 
@@ -2144,16 +2147,25 @@ button.compact {
 .desktop-panel-modal {
   position: relative;
   width: min(92vw, 720px);
-  max-height: 85vh;
+  /* Everything the backdrop's margin leaves: at 85vh the settings form missed fitting by a handful of
+     pixels and scrolled for them. The borders come off too, so the cap bounds the content, not the box. */
+  max-height: calc(100vh - 2 * var(--modal-margin) - 2px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* The panel inside brings its own padding, border and radius: keeping the card's as well drew a
+     frame inside a frame and spent 32px of the height cap on nothing, which is enough to make a form
+     that fits scroll anyway. */
+  padding: 0;
 }
 
 .desktop-panel-modal > .panel {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  border: 0;
+  border-radius: inherit;
+  box-shadow: none;
 }
 
 .desktop-modal-close {
@@ -2486,8 +2498,62 @@ button.compact {
   font-weight: 700;
 }
 
+/* A share of the bar rather than a width of its own: sized to the chosen name, a long one pushed the
+   app title into an ellipsis, and the name is the part the open dropdown shows in full anyway. */
 .top-nav .server-profile-picker {
-  flex: 0 1 12rem;
+  flex: 0 1 40%;
+  max-width: 12rem;
+  min-width: 0;
+}
+
+/* Below roughly 344px even 40% of the bar leaves the title short of the width it needs, and a clipped
+   product name is worse than one more row on the narrowest phones. */
+@media (max-width: 360px) {
+  .top-nav {
+    flex-wrap: wrap;
+  }
+
+  .top-nav .server-profile-picker {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}
+
+/* The pair sits on the last line of the heading text rather than beside the title, so it neither
+   reaches the modal's close button nor spends a row of a form that already fills the height cap.
+   Both buttons keep their full label on one line; the heading text is what gives way. */
+.server-profile-actions {
+  display: grid;
+  grid-auto-flow: column;
+  /* Equal columns as wide as the longer label: two buttons acting on the same server should not be
+     two different sizes because one word is shorter than the other. */
+  grid-auto-columns: 1fr;
+  align-self: flex-end;
+  flex-shrink: 0;
+  gap: var(--space-3);
+}
+
+.server-profile-actions button {
+  white-space: nowrap;
+}
+
+.settings .section-heading-text {
+  min-width: 0;
+}
+
+/* Declared after the rule above so it actually overrides it: the phone block earlier in this file
+   loses to any later rule of the same specificity. The heading is a column at this width, so there is
+   no last line to sit on — the pair takes its own row and splits it in equal halves. */
+@media (max-width: 780px) {
+  .server-profile-actions {
+    grid-auto-flow: row;
+    grid-template-columns: 1fr 1fr;
+    align-self: stretch;
+  }
+
+  .server-profile-actions button {
+    white-space: normal;
+  }
 }
 
 .harness-badge.harness-omp {

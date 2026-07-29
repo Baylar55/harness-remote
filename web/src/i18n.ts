@@ -19,6 +19,7 @@ type TranslationKey =
   | 'settings.newServerName'
   | 'settings.addServer'
   | 'settings.deleteServer'
+  | 'settings.deleteServerTitle'
   | 'settings.deleteLastServerHint'
   | 'settings.backend'
   | 'settings.host'
@@ -246,6 +247,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.newServerName': 'New server',
     'settings.addServer': 'Add server',
     'settings.deleteServer': 'Delete server',
+    'settings.deleteServerTitle': 'Delete saved server?',
     'settings.deleteLastServerHint': 'Keep at least one server configuration.',
     'settings.backend': 'Backend',
     'settings.host': 'Host Address',
@@ -471,6 +473,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.newServerName': 'Nuovo server',
     'settings.addServer': 'Aggiungi server',
     'settings.deleteServer': 'Elimina server',
+    'settings.deleteServerTitle': 'Eliminare il server salvato?',
     'settings.deleteLastServerHint': 'Mantieni almeno una configurazione server.',
     'settings.backend': 'Backend',
     'settings.host': 'Indirizzo host',
@@ -696,6 +699,7 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.newServerName': '新伺服器',
     'settings.addServer': '新增伺服器',
     'settings.deleteServer': '刪除伺服器',
+    'settings.deleteServerTitle': '刪除已儲存的伺服器？',
     'settings.deleteLastServerHint': '請至少保留一個伺服器設定。',
     'settings.backend': '後端',
     'settings.host': '主機位址',
