@@ -344,6 +344,15 @@ assert.match(
 )
 assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show the preparing label')
 
+// The rule was written for a field that no longer exists, but the class outlived it: dropping the
+// declaration with its original caller left the server name silently back in half a row.
+if (app.includes('className="field-row-span"')) {
+  assert.match(
+    styles,
+    /\.field-row-span\s*\{[^}]*grid-column:\s*1 \/ -1;/,
+    'a field asking for the whole settings row needs the rule that grants it'
+  )
+}
 
 assert.match(
   app,

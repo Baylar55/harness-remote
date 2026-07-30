@@ -24,7 +24,6 @@ type TranslationKey =
   | 'settings.backend'
   | 'settings.host'
   | 'settings.hostPlaceholder'
-  | 'settings.insecureHostWarning'
   | 'settings.port'
   | 'settings.username'
   | 'settings.password'
@@ -252,7 +251,6 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': 'Backend',
     'settings.host': 'Host Address',
     'settings.hostPlaceholder': '192.168.1.100, localhost, or https://example.com',
-    'settings.insecureHostWarning': 'This app is served over HTTPS, so the browser will refuse a plain http:// server unless it runs on this same device. Serve the server over HTTPS, reach it through a tunnel, or use the installed Android app.',
     'settings.port': 'Port',
     'settings.username': 'Username',
     'settings.password': 'Password',
@@ -478,7 +476,6 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': 'Backend',
     'settings.host': 'Indirizzo host',
     'settings.hostPlaceholder': '192.168.1.100, localhost o https://example.com',
-    'settings.insecureHostWarning': 'Questa app è servita in HTTPS, quindi il browser rifiuta un server http:// che non sia su questo stesso dispositivo. Esponi il server in HTTPS, raggiungilo tramite un tunnel oppure usa l\'app Android installata.',
     'settings.port': 'Porta',
     'settings.username': 'Username',
     'settings.password': 'Password',
@@ -704,7 +701,6 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'settings.backend': '後端',
     'settings.host': '主機位址',
     'settings.hostPlaceholder': '192.168.1.100、localhost 或 https://example.com',
-    'settings.insecureHostWarning': '本應用透過 HTTPS 提供，因此除非伺服器就在這台裝置上，瀏覽器會拒絕連線至 http:// 伺服器。請改用 HTTPS 提供伺服器、透過通道連線，或使用已安裝的 Android 應用程式。',
     'settings.port': '連接埠',
     'settings.username': '使用者名稱',
     'settings.password': '密碼',

@@ -4,13 +4,18 @@ import { homedir } from "node:os"
 import path from "node:path"
 import { createInterface } from "node:readline"
 
-function messageText(content) {
-  if (typeof content === "string") return content
-  if (!Array.isArray(content)) return ""
-  return content
-    .filter((item) => item?.type === "text" && typeof item.text === "string")
-    .map((item) => item.text)
-    .join("")
+function messageParts(content, messageID) {
+  if (typeof content === "string") return [{ id: `${messageID}:text:0`, messageID, type: "text", text: content }]
+  if (!Array.isArray(content)) return []
+  return content.flatMap((item, index) => {
+    if (item?.type === "text" && typeof item.text === "string" && item.text) {
+      return [{ id: `${messageID}:text:${index}`, messageID, type: "text", text: item.text }]
+    }
+    if (item?.type === "thinking" && typeof item.thinking === "string" && item.thinking) {
+      return [{ id: `${messageID}:reasoning:${index}`, messageID, type: "reasoning", text: item.thinking }]
+    }
+    return []
+  })
 }
 
 export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp", "agent", "sessions")) {
@@ -49,9 +54,9 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
       if (record?.type !== "message") continue
       const role = record.message?.role
       if (role !== "user" && role !== "assistant") continue
-      const text = messageText(record.message.content)
-      if (!text) continue
       const messageID = record.id ?? `${sessionID}:${messages.length}`
+      const parts = messageParts(record.message.content, messageID)
+      if (parts.length === 0) continue
       const created = Date.parse(record.timestamp ?? "")
       messages.push({
         info: {
@@ -60,7 +65,7 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
           sessionID,
           time: { created: Number.isFinite(created) ? created : Date.now() }
         },
-        parts: [{ id: `${messageID}:text`, type: "text", text }]
+        parts
       })
     }
     return messages
