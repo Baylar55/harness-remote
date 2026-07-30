@@ -1455,6 +1455,39 @@ function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[])
   return groups
 }
 
+/**
+ * The Clipboard API is secure-context only, and this app is also meant to be served over plain http
+ * on a LAN, where `navigator.clipboard` is not rejected but absent: reaching through it throws
+ * before there is a promise to catch, so the copy fails with nothing in the clipboard and nothing on
+ * screen. The deprecated selection copy is the only thing that still works there.
+ */
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+  } catch {
+    // A missing API and a refused write need the same fallback from here.
+  }
+  const carrier = document.createElement("textarea")
+  carrier.value = text
+  carrier.setAttribute("readonly", "")
+  carrier.style.position = "fixed"
+  carrier.style.top = "0"
+  carrier.style.opacity = "0"
+  document.body.appendChild(carrier)
+  carrier.select()
+  carrier.setSelectionRange(0, text.length)
+  try {
+    document.execCommand("copy")
+  } catch {
+    // Out of options: both paths are gone.
+  } finally {
+    carrier.remove()
+  }
+}
+
 function MessageContextMenu({
   message,
   className,
@@ -1468,22 +1501,43 @@ function MessageContextMenu({
 }) {
   const [position, setPosition] = useState<{ x: number, y: number } | null>(null)
   const longPressTimer = useRef<number | undefined>(undefined)
-  const close = () => {
+  const cancelLongPress = () => {
     if (longPressTimer.current !== undefined) window.clearTimeout(longPressTimer.current)
     longPressTimer.current = undefined
   }
   const open = (x: number, y: number) => {
-    close()
+    cancelLongPress()
     setPosition({
       x: Math.max(8, Math.min(x, window.innerWidth - 220)),
       y: Math.max(8, Math.min(y, window.innerHeight - 104))
     })
   }
   const copy = (markdown: boolean) => {
-    const text = markdown ? normalizeMessageMarkdown(message.text) : message.text
-    void navigator.clipboard.writeText(text).catch(() => undefined)
+    void copyToClipboard(markdown ? normalizeMessageMarkdown(message.text) : message.text)
     setPosition(null)
   }
+  // Everything that means "not this" has to put the menu away: a press anywhere else, Escape, the
+  // transcript scrolling out from under a fixed menu, a resize moving the coordinates it was pinned
+  // to. Each bubble owns its own menu state, so without this a second right-click adds a second menu
+  // instead of moving the first, and neither ever leaves until an item is chosen.
+  useEffect(() => {
+    if (!position) return
+    const dismiss = () => setPosition(null)
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismiss()
+    }
+    window.addEventListener("pointerdown", dismiss)
+    window.addEventListener("keydown", dismissOnEscape)
+    window.addEventListener("resize", dismiss)
+    // The transcript scrolls inside its own pane, and a scroll there never reaches window by itself.
+    window.addEventListener("scroll", dismiss, true)
+    return () => {
+      window.removeEventListener("pointerdown", dismiss)
+      window.removeEventListener("keydown", dismissOnEscape)
+      window.removeEventListener("resize", dismiss)
+      window.removeEventListener("scroll", dismiss, true)
+    }
+  }, [position])
   return (
     <article
       className={className}
@@ -1496,12 +1550,19 @@ function MessageContextMenu({
         const { clientX, clientY } = event
         longPressTimer.current = window.setTimeout(() => open(clientX, clientY), 500)
       }}
-      onPointerUp={close}
-      onPointerCancel={close}
+      onPointerUp={cancelLongPress}
+      onPointerCancel={cancelLongPress}
     >
       {children}
       {position && (
-        <div className="message-context-menu" role="menu" style={{ left: position.x, top: position.y }}>
+        // Pressing an item must not read as pressing "anywhere else": the dismissal above would
+        // unmount the menu on pointerdown and the click would never reach the button.
+        <div
+          className="message-context-menu"
+          role="menu"
+          style={{ left: position.x, top: position.y }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <button type="button" role="menuitem" onClick={() => copy(false)}>{t('detail.copyText')}</button>
           <button type="button" role="menuitem" onClick={() => copy(true)}>{t('detail.copyMarkdown')}</button>
         </div>
