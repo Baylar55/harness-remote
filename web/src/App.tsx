@@ -1,9 +1,9 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
-import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
+import { type PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { api, isMixedContentBlocked, isValidServerConfig } from "./api"
+import { api, isValidServerConfig } from "./api"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
@@ -102,6 +102,10 @@ function useHorizontalDrag(onDeltaX: (deltaX: number) => void): (event: React.Po
 
 function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
   return backend === "omp" || backend === "pi" || backend === "claude"
+}
+
+function isSessionWorking(status: string): boolean {
+  return status === "busy" || status === "retry" || status === "waiting"
 }
 
 /**
@@ -2038,12 +2042,6 @@ function App() {
 
   const hasConfiguredServer = isValidServerConfig(config)
   const draftConfigKey = configKey(draftConfig)
-  // The address is typed here but rejected by the browser, so the warning belongs next to the
-  // field rather than in the failure notice, where it would only appear after a pointless test.
-  // The native build goes through CapacitorHttp instead of the WebView and is never subject to
-  // this, whatever scheme `androidScheme` happens to serve the bundle under.
-  const draftBlockedByMixedContent = !Capacitor.isNativePlatform()
-    && isMixedContentBlocked(draftConfig, window.location.protocol)
   const canTestDraft = canTestConfig(draftConfig)
   const testAlreadyPassedForDraft = lastTestedConfigKey === draftConfigKey
   const connectionStatusText = connectionMessage || (connectionState === "connecting"
@@ -2069,12 +2067,12 @@ function App() {
         : eventStreamState === "fallback"
           ? t('events.fallback', { error: liveEventError ?? t('events.unknownError') })
           : ""
-  const isSessionRunning = Boolean(selectedSession && ["busy", "retry"].includes(selectedSession.status))
+  const isSessionRunning = Boolean(selectedSession && isSessionWorking(selectedSession.status))
   const isWaitingForOpenCodeReply = awaitingAssistantReply || busySending || isSessionRunning
   const isWorking = isWaitingForOpenCodeReply
   const showStopAction = isWorking && !composer.trim()
   const showTypingBubble = Boolean(selectedSession) && isWaitingForOpenCodeReply
-  const activeSessions = sessions.filter((session) => ["busy", "retry"].includes(session.status)).length
+  const activeSessions = sessions.filter((session) => isSessionWorking(session.status)).length
   const changedSessions = sessions.filter(
     (session) => session.files > 0 || session.additions > 0 || session.deletions > 0
   ).length
@@ -3103,13 +3101,12 @@ function App() {
     }
     wasAwaitingAssistantReplyRef.current = awaitingAssistantReply
   }, [awaitingAssistantReply])
-
   useEffect(() => {
     if (!selectedSession) {
       wasRunningRef.current = false
       return
     }
-    wasRunningRef.current = ["busy", "retry"].includes(selectedSession.status)
+    wasRunningRef.current = isSessionWorking(selectedSession.status)
   }, [selectedSession?.id, selectedSession?.status])
 
   // Shared between the mobile sessions panel and the desktop sidebar so both list sessions
@@ -3463,7 +3460,7 @@ function App() {
             </select>
           </label>
 
-          <label htmlFor="host" className={draftBlockedByMixedContent ? "field-row-span" : undefined}>
+          <label htmlFor="host">
             {t('settings.host')}
             <input
               id="host"
@@ -3476,9 +3473,6 @@ function App() {
               spellCheck={false}
               autoComplete="off"
             />
-            {draftBlockedByMixedContent && (
-              <span className="field-warning">{t('settings.insecureHostWarning')}</span>
-            )}
           </label>
 
           <label htmlFor="port">

@@ -78,8 +78,43 @@ class ReplayAcp extends EventEmitter {
         params: {
           sessionId: "session-1",
           update: {
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: "Check persisted state." }
+          }
+        }
+      })
+      this.emit("notification", {
+        method: "session/update",
+        params: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-1",
+            title: "read",
+            status: "pending",
+            rawInput: { path: "/tmp/state" },
+            _meta: { toolName: "read" }
+          }
+        }
+      })
+      this.emit("notification", {
+        method: "session/update",
+        params: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tool-1",
+            status: "completed",
+            content: [{ type: "content", content: { type: "text", text: "persisted state" } }]
+          }
+        }
+      })
+      this.emit("notification", {
+        method: "session/update",
+        params: {
+          sessionId: "session-1",
+          update: {
             sessionUpdate: "agent_message_chunk",
-            messageId: "persisted-assistant",
             content: { type: "text", text: "Persist this response" }
           }
         }
@@ -760,13 +795,28 @@ test("replays persistent user and assistant history when reopening an OMP sessio
   const bridge = await startServer({ acp: new ReplayAcp() })
   try {
     const response = await fetch(`${bridge.baseURL}/session/session-1/message`, { headers: authHeaders() })
-    assert.deepEqual((await response.json()).map((message) => ({
+    const messages = await response.json()
+    assert.deepEqual(messages.map((message) => ({
       role: message.info.role,
-      text: message.parts[0].text
+      parts: message.parts.map((part) => ({ type: part.type, text: part.text }))
     })), [
-      { role: "user", text: "Persist this prompt" },
-      { role: "assistant", text: "Persist this response" }
+      { role: "user", parts: [{ type: "text", text: "Persist this prompt" }] },
+      {
+        role: "assistant",
+        parts: [
+          { type: "reasoning", text: "Check persisted state." },
+          { type: "tool", text: undefined },
+          { type: "text", text: "Persist this response" }
+        ]
+      }
     ])
+    assert.deepEqual(messages[1].parts[1].state, {
+      status: "completed",
+      input: { path: "/tmp/state" },
+      title: "read",
+      output: "persisted state",
+      time: messages[1].parts[1].state.time
+    })
   } finally {
     await bridge.close()
   }
