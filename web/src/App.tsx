@@ -665,7 +665,15 @@ function Modal({
 }) {
   const [titleID] = useState(() => `modal-title-${++modalTitleSequence}`)
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div
+      className="modal-backdrop"
+      role="presentation"
+      onClick={(event) => {
+        // Only a direct backdrop click closes the panel. This prevents clicks in
+        // a re-rendering settings form from being mistaken for a modal dismissal.
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
       <section
         className="modal-card diff-modal fade-in"
         role="dialog"
@@ -2066,6 +2074,7 @@ function App() {
 
   const hasConfiguredServer = isValidServerConfig(config)
   const draftConfigKey = configKey(draftConfig)
+  const hasUnsavedDraft = draftConfigKey !== configKey(config)
   const canTestDraft = canTestConfig(draftConfig)
   const testAlreadyPassedForDraft = lastTestedConfigKey === draftConfigKey
   const connectionStatusText = connectionMessage || (connectionState === "connecting"
@@ -2192,6 +2201,11 @@ function App() {
     setDraftProfileName(profile.name)
     applyConfig(profile.config, profile.id, nextProfiles)
     setView("settings")
+  }
+
+  function saveConfig() {
+    if (!isValidServerConfig(draftConfig)) return
+    applyConfig(draftConfig)
   }
 
   function deleteActiveProfile() {
@@ -2873,15 +2887,6 @@ function App() {
   }, [eventStreamState])
 
   useEffect(() => {
-    if (configKey(draftConfig) === configKey(config)) return
-    // A half-typed host such as `http://` cannot be turned into a URL. Persisting it
-    // would also poison the next launch, so incomplete drafts are simply not applied.
-    if (draftConfig.host.trim() && !isValidServerConfig(draftConfig)) return
-    const timer = setTimeout(() => applyConfig(draftConfig), 500)
-    return () => clearTimeout(timer)
-  }, [draftConfig, config])
-
-  useEffect(() => {
     if (!selectedSession) {
       setModelOptions([])
       setModelLoadError(null)
@@ -3540,7 +3545,17 @@ function App() {
           </div>
           
           <div className="actions">
+            <button
+              type="button"
+              onClick={saveConfig}
+              className="btn-primary"
+              disabled={!hasUnsavedDraft || !isValidServerConfig(draftConfig)}
+              title={!isValidServerConfig(draftConfig) ? t('settings.testNeedsFields') : undefined}
+            >
+              {hasUnsavedDraft ? t('settings.save') : t('settings.savedButton')}
+            </button>
             <button 
+              type="button"
               onClick={() => testConnection(draftConfig)} 
               className="btn-secondary"
               disabled={testingConnection || !canTestDraft || testAlreadyPassedForDraft}
