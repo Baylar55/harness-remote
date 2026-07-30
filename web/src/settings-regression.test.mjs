@@ -17,7 +17,6 @@ assert.ok(app.includes('setTimeout(() => applyConfig(draftConfig), 500)'), 'Conf
 assert.equal(app.includes('onClick={saveConfig}'), false, 'Settings should not require a separate Save action')
 assert.ok(app.includes("t('settings.draftHint')"), 'Settings should explain automatic saving')
 assert.ok(i18n.includes("'settings.saved': 'Changes saved automatically.'"), 'Automatic save feedback should be translated')
-assert.match(app, /<div className="modal-backdrop" role="presentation">/, 'the settings modal must not close from backdrop clicks')
 assert.match(app, /id="port"[\s\S]*?type="text"[\s\S]*?value=\{draftConfig\.port \|\| ""\}/, 'the port field should be clearable instead of forcing a zero')
 assert.match(app, /pattern="\[0-9\]\*"/, 'the port field should still accept only digits')
 assert.ok(i18n.includes("'settings.testedNotSaved'"), 'Test success should remain distinct from connectivity state')

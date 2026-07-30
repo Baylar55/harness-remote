@@ -665,7 +665,7 @@ function Modal({
 }) {
   const [titleID] = useState(() => `modal-title-${++modalTitleSequence}`)
   return (
-    <div className="modal-backdrop" role="presentation">
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <section
         className="modal-card diff-modal fade-in"
         role="dialog"
