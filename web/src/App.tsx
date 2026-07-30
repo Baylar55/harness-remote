@@ -104,6 +104,10 @@ function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
   return backend === "omp" || backend === "pi" || backend === "claude"
 }
 
+function isSessionWorking(status: string): boolean {
+  return status === "busy" || status === "retry" || status === "waiting"
+}
+
 /**
  * A session card showed the whole absolute path, which on a phone wrapped to three lines and
  * took a third of the card. The last segments are what identifies a project; the full path stays
@@ -1947,12 +1951,12 @@ function App() {
         : eventStreamState === "fallback"
           ? t('events.fallback', { error: liveEventError ?? t('events.unknownError') })
           : ""
-  const isSessionRunning = Boolean(selectedSession && ["busy", "retry"].includes(selectedSession.status))
+  const isSessionRunning = Boolean(selectedSession && isSessionWorking(selectedSession.status))
   const isWaitingForOpenCodeReply = awaitingAssistantReply || busySending || isSessionRunning
   const isWorking = isWaitingForOpenCodeReply
   const showStopAction = isWorking && !composer.trim()
   const showTypingBubble = Boolean(selectedSession) && isWaitingForOpenCodeReply
-  const activeSessions = sessions.filter((session) => ["busy", "retry"].includes(session.status)).length
+  const activeSessions = sessions.filter((session) => isSessionWorking(session.status)).length
   const changedSessions = sessions.filter(
     (session) => session.files > 0 || session.additions > 0 || session.deletions > 0
   ).length
@@ -2981,13 +2985,12 @@ function App() {
     }
     wasAwaitingAssistantReplyRef.current = awaitingAssistantReply
   }, [awaitingAssistantReply])
-
   useEffect(() => {
     if (!selectedSession) {
       wasRunningRef.current = false
       return
     }
-    wasRunningRef.current = ["busy", "retry"].includes(selectedSession.status)
+    wasRunningRef.current = isSessionWorking(selectedSession.status)
   }, [selectedSession?.id, selectedSession?.status])
 
   // Shared between the mobile sessions panel and the desktop sidebar so both list sessions
