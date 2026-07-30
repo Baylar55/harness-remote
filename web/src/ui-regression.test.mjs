@@ -352,4 +352,24 @@ assert.match(
 )
 assert.match(styles, /\.pill\.waiting\s*\{[^}]*background:\s*var\(--primary-soft\)/, 'waiting sessions need a distinct status pill')
 assert.match(styles, /\.session-card\.waiting::before\s*\{[\s\S]*?animation-name:\s*session-waiting-sweep/, 'desktop waiting sessions need their own animation')
+
+// The waiting marker first shipped naming two colours the palette never declared, and the
+// assertions above could not tell: they read the rule as text. A `var()` with no fallback pointing
+// at nothing is invalid at computed-value time, so the browser drops the whole declaration and the
+// marker paints nothing at all. Checked over the sheet rather than that one rule, since any other
+// token typo fails exactly as quietly.
+const declaredTokens = new Set([...styles.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]))
+const undeclaredTokens = [...new Set(
+  [...styles.matchAll(/var\((--[a-z0-9-]+)\s*\)/g)]
+    .map((match) => match[1])
+    .filter((token) => !declaredTokens.has(token))
+)]
+assert.deepEqual(undeclaredTokens, [], 'a custom property used without a fallback must be declared')
+// Declared in one theme only fails just as silently, and half of it is invisible to whoever is not
+// using that theme. The dark block overrides `:root`, so every name it carries has to exist there.
+const themeTokens = (block) => new Set([...block.matchAll(/^\s*(--[a-z0-9-]+)\s*:/gm)].map((match) => match[1]))
+const rootTokens = themeTokens(styles.match(/^:root \{([\s\S]*?)^\}/m)[1])
+const darkOnlyTokens = [...themeTokens(styles.match(/color-scheme: dark;([\s\S]*?)^\}/m)[1])].filter((token) => !rootTokens.has(token))
+assert.deepEqual(darkOnlyTokens, [], 'a custom property overridden for dark mode must have a light-mode value too')
+
 console.log('ui regression tests passed')

@@ -11,6 +11,11 @@
   --primary: #1769e0;
   --primary-strong: #0f55bd;
   --primary-soft: #e7f0ff;
+  /* The second accent exists for states that are neither the primary action nor a warning — a
+     session waiting on a subagent is working, so it must read as active without borrowing the
+     colour that means "this session is running its own turn". */
+  --secondary: #7c3aed;
+  --secondary-soft: #f1e9ff;
   --success: #12805c;
   --success-soft: #e6f5ef;
   --danger: #c2413b;
@@ -65,6 +70,8 @@
   --primary: #60a5fa;
   --primary-strong: #93c5fd;
   --primary-soft: rgba(96, 165, 250, 0.16);
+  --secondary: #c4b5fd;
+  --secondary-soft: rgba(124, 58, 237, 0.22);
   --success: #34d399;
   --success-soft: rgba(18, 128, 92, 0.2);
   --danger: #f87171;
@@ -1617,7 +1624,7 @@ button.compact {
 .help-content .note {
   margin-top: var(--space-2);
   font-size: 0.88rem;
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 .help ul,
