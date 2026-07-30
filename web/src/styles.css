@@ -51,6 +51,9 @@
   --radius-lg: 0.75rem;
   --shadow-sm: 0 1px 2px rgba(20, 32, 51, 0.05);
   --shadow-md: 0 12px 28px rgba(20, 32, 51, 0.08);
+  /* One step above a card, for the things that float over the transcript instead of sitting in it
+     and need an edge of their own against whatever they happen to cover. */
+  --shadow-lg: 0 18px 42px rgba(20, 32, 51, 0.16);
   --z-sticky: 20;
   --z-modal-backdrop: 40;
   --z-modal: 50;
@@ -95,6 +98,7 @@
   --sheet-backdrop: rgba(2, 6, 23, 0.58);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 12px 28px rgba(0, 0, 0, 0.38);
+  --shadow-lg: 0 18px 42px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -982,6 +986,34 @@ p {
 .message.assistant {
   align-self: flex-start;
   background: var(--surface-subtle);
+}
+
+.message-context-menu {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  min-width: 212px;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.message-context-menu button {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+}
+
+.message-context-menu button:hover,
+.message-context-menu button:focus-visible {
+  background: var(--surface-strong);
 }
 
 .typing-bubble {

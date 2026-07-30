@@ -344,6 +344,21 @@ assert.match(
 )
 assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show the preparing label')
 
+
+assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY\)/, 'right-clicking a message must open its action menu')
+assert.match(app, /event\.pointerType !== "touch"/, 'touch messages must support long-press actions')
+assert.match(app, /navigator\.clipboard\?\.writeText/, 'message actions must copy to the system clipboard')
+assert.match(app, /markdown \? normalizeMessageMarkdown\(message\.text\) : message\.text/, 'the menu must distinguish plain-text and markdown copies')
+assert.match(styles, /\.message-context-menu\s*\{[\s\S]*?position:\s*fixed/, 'message actions must render above the scrolling transcript')
+// A menu that only closes on its own items is a menu that stacks: the state is per bubble, so a
+// right-click on a second message left the first one hanging over the transcript.
+assert.match(app, /window\.addEventListener\("pointerdown", dismiss\)/, 'pressing outside an open message menu must dismiss it')
+assert.match(app, /if \(event\.key === "Escape"\) dismiss\(\)/, 'Escape must dismiss an open message menu')
+assert.match(app, /window\.addEventListener\("scroll", dismiss, true\)/, 'a fixed menu must not stay behind while the transcript scrolls under it')
+assert.match(app, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/, 'choosing an item must not count as pressing outside, or the menu unmounts before the click lands')
+// The Clipboard API needs a secure context, and the app is reachable over plain http on a LAN,
+// where `navigator.clipboard` is undefined and reaching into it throws past any `.catch()`.
+assert.match(app, /document\.execCommand\("copy"\)/, 'copying must still work where the Clipboard API is unavailable')
 // The rule was written for a field that no longer exists, but the class outlived it: dropping the
 // declaration with its original caller left the server name silently back in half a row.
 if (app.includes('className="field-row-span"')) {
