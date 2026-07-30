@@ -3503,11 +3503,17 @@ function App() {
             {t('settings.port')}
             <input
               id="port"
-              type="number"
-              value={draftConfig.port}
-              onChange={(event) => setDraftConfig({ ...draftConfig, port: Number(event.target.value || 0) })}
+              type="text"
+              value={draftConfig.port || ""}
+              onChange={(event) => {
+                const value = event.target.value.trim()
+                if (value === "" || /^\d+$/.test(value)) {
+                  setDraftConfig({ ...draftConfig, port: value === "" ? 0 : Number(value) })
+                }
+              }}
               placeholder="4096"
               inputMode="numeric"
+              pattern="[0-9]*"
               autoComplete="off"
             />
           </label>
@@ -3541,6 +3547,7 @@ function App() {
           
           <div className="actions">
             <button 
+              type="button"
               onClick={() => testConnection(draftConfig)} 
               className="btn-secondary"
               disabled={testingConnection || !canTestDraft || testAlreadyPassedForDraft}

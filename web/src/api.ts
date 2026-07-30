@@ -158,11 +158,12 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
   if (!response.ok) {
     let detail = `HTTP ${response.status}`
     try {
-      const body = await response.json()
+      // A Response body is a one-shot stream. Read it once and let responseDetail
+      // parse JSON when applicable, so a plain-text server error remains useful.
+      const body = await response.text()
       detail = responseDetail(body) ?? detail
     } catch {
-      const text = await response.text()
-      if (text) detail = text
+      // Keep the HTTP status when an interrupted stream cannot be read.
     }
     throw new Error(detail)
   }

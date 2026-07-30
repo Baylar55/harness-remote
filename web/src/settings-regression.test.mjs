@@ -17,6 +17,8 @@ assert.ok(app.includes('setTimeout(() => applyConfig(draftConfig), 500)'), 'Conf
 assert.equal(app.includes('onClick={saveConfig}'), false, 'Settings should not require a separate Save action')
 assert.ok(app.includes("t('settings.draftHint')"), 'Settings should explain automatic saving')
 assert.ok(i18n.includes("'settings.saved': 'Changes saved automatically.'"), 'Automatic save feedback should be translated')
+assert.match(app, /id="port"[\s\S]*?type="text"[\s\S]*?value=\{draftConfig\.port \|\| ""\}/, 'the port field should be clearable instead of forcing a zero')
+assert.match(app, /pattern="\[0-9\]\*"/, 'the port field should still accept only digits')
 assert.ok(i18n.includes("'settings.testedNotSaved'"), 'Test success should remain distinct from connectivity state')
 assert.ok(app.includes('function canTestConfig'), 'Settings should have a central testability check for required connection fields')
 assert.ok(app.includes('disabled={testingConnection || !canTestDraft || testAlreadyPassedForDraft}'), 'Test button should be disabled when fields are missing, testing is active, or the unchanged configuration already passed')

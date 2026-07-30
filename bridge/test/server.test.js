@@ -513,11 +513,16 @@ test("allows only explicitly configured browser origins", async () => {
   try {
     const preflight = await fetch(`${bridge.baseURL}/session`, {
       method: "OPTIONS",
-      headers: { origin: "http://192.168.1.64:5199", "access-control-request-method": "GET" }
+      headers: {
+        origin: "http://192.168.1.64:5199",
+        "access-control-request-method": "GET",
+        "access-control-request-private-network": "true"
+      }
     })
     assert.equal(preflight.status, 204, "the preflight must succeed without credentials")
     assert.equal(preflight.headers.get("access-control-allow-origin"), "http://192.168.1.64:5199")
     assert.equal(preflight.headers.get("access-control-allow-credentials"), "true")
+    assert.equal(preflight.headers.get("access-control-allow-private-network"), "true")
     assert.equal(preflight.headers.get("vary"), "Origin")
 
     const allowed = await fetch(`${bridge.baseURL}/global/health`, {

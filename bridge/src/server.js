@@ -31,6 +31,11 @@ function applyCorsHeaders(request, response, config) {
   response.setHeader("Access-Control-Allow-Credentials", "true")
   response.setHeader("Access-Control-Allow-Headers", "authorization, content-type")
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+  // Chromium's Private Network Access preflight is sent when this public PWA
+  // connects to a local bridge (for example github.io -> localhost).
+  if (request.headers["access-control-request-private-network"] === "true") {
+    response.setHeader("Access-Control-Allow-Private-Network", "true")
+  }
 }
 
 function matchesCredentials(request, config) {
