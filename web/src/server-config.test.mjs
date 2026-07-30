@@ -38,8 +38,8 @@ assert.equal(
 )
 assert.match(
   app,
-  /function saveConfig\(\) \{\s+if \(!isValidServerConfig\(draftConfig\)\) return\s+applyConfig\(draftConfig\)/,
-  'only an explicit save may apply a valid draft configuration'
+  /if \(draftConfig\.host\.trim\(\) && !isValidServerConfig\(draftConfig\)\) return/,
+  'automatic saving must refuse a half-typed configuration instead of persisting a crash'
 )
 assert.equal(
   app.includes('if (!config.host || config.port <= 0)'),
