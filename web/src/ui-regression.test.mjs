@@ -348,7 +348,7 @@ assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show th
 assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY\)/, 'right-clicking a message must open its action menu')
 assert.match(app, /event\.pointerType !== "touch"/, 'touch messages must support long-press actions')
 assert.match(app, /navigator\.clipboard\?\.writeText/, 'message actions must copy to the system clipboard')
-assert.match(app, /markdown \? normalizeMessageMarkdown\(message\.text\) : message\.text/, 'the menu must distinguish plain-text and markdown copies')
+assert.match(app, /markdown \? normalizeMessageMarkdown\(text\) : text/, 'the menu must distinguish plain-text and markdown copies')
 assert.match(styles, /\.message-context-menu\s*\{[\s\S]*?position:\s*fixed/, 'message actions must render above the scrolling transcript')
 // A menu that only closes on its own items is a menu that stacks: the state is per bubble, so a
 // right-click on a second message left the first one hanging over the transcript.
@@ -359,6 +359,23 @@ assert.match(app, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/, '
 // The Clipboard API needs a secure context, and the app is reachable over plain http on a LAN,
 // where `navigator.clipboard` is undefined and reaching into it throws past any `.catch()`.
 assert.match(app, /document\.execCommand\("copy"\)/, 'copying must still work where the Clipboard API is unavailable')
+// Both copy options did nothing on any bubble whose parts carry no text — a run ending on a tool
+// call, an agent turn that only worked and never spoke. The menu was handed the run's last message,
+// and `extractText` returns "" for those, so the copy wrote an empty string: the paste came back
+// empty and whatever the user had in the clipboard was gone with it.
+assert.match(
+  app,
+  /const runText = \[\.\.\.messagesByID\.values\(\)\]\.map\(\(message\) => message\.text\)\.filter\(Boolean\)\.join\("\\n\\n"\)/,
+  'a run bubble must copy every message it shows, not just the last one'
+)
+assert.match(app, /<MessageContextMenu text=\{runText\}/, 'the run bubble must hand the menu the whole run text')
+assert.ok(
+  !/<MessageContextMenu message=/.test(app),
+  'the menu takes the text to copy: passing a message let a bubble that shows several, or none, claim one'
+)
+assert.match(app, /if \(!text\) return <article className=\{className\}>\{children\}<\/article>/, 'a bubble with nothing to copy must not offer the menu, nor take over the browser one')
+assert.match(app, /if \(!text\) return\s*\n\s*try \{/, 'an empty copy must not replace what the user already had in the clipboard')
+assert.match(app, /selection\.addRange\(previousRange\)/, 'the fallback carrier must give the selection back after stealing it')
 // The rule was written for a field that no longer exists, but the class outlived it: dropping the
 // declaration with its original caller left the server name silently back in half a row.
 if (app.includes('className="field-row-span"')) {

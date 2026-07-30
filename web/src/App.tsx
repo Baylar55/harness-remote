@@ -1466,6 +1466,10 @@ function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[])
  * screen. The deprecated selection copy is the only thing that still works there.
  */
 async function copyToClipboard(text: string): Promise<void> {
+  // Writing an empty string is not a harmless no-op: it succeeds, and it replaces whatever the user
+  // had in the clipboard with nothing. Refusing it keeps a bubble with no text from quietly wiping a
+  // selection the user copied a moment earlier.
+  if (!text) return
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
@@ -1481,6 +1485,11 @@ async function copyToClipboard(text: string): Promise<void> {
   carrier.style.top = "0"
   carrier.style.opacity = "0"
   document.body.appendChild(carrier)
+  // The carrier has to own the selection to be copied, which takes it away from whatever the user
+  // had highlighted. Their range is put back afterwards, so falling back does not also cost them
+  // the selection they made.
+  const selection = window.getSelection()
+  const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
   carrier.select()
   carrier.setSelectionRange(0, text.length)
   try {
@@ -1489,16 +1498,22 @@ async function copyToClipboard(text: string): Promise<void> {
     // Out of options: both paths are gone.
   } finally {
     carrier.remove()
+    if (previousRange && selection) {
+      selection.removeAllRanges()
+      selection.addRange(previousRange)
+    }
   }
 }
 
+/** Wraps a bubble in the copy menu. Takes the text to copy rather than a message, because what a
+ *  bubble shows is not always one message's text: a run merges several, and some carry none at all. */
 function MessageContextMenu({
-  message,
+  text,
   className,
   t,
   children
 }: {
-  message: MessageEnvelope & { text: string }
+  text: string
   className: string
   t: Translator
   children: ReactNode
@@ -1517,7 +1532,7 @@ function MessageContextMenu({
     })
   }
   const copy = (markdown: boolean) => {
-    void copyToClipboard(markdown ? normalizeMessageMarkdown(message.text) : message.text)
+    void copyToClipboard(markdown ? normalizeMessageMarkdown(text) : text)
     setPosition(null)
   }
   // Everything that means "not this" has to put the menu away: a press anywhere else, Escape, the
@@ -1542,6 +1557,11 @@ function MessageContextMenu({
       window.removeEventListener("scroll", dismiss, true)
     }
   }, [position])
+  // A bubble made only of tool calls and thinking has no message text to hand over. Offering the menu
+  // anyway gave two items that could do nothing, and taking over the context menu to show them also
+  // took away the browser's own — with its Copy, the one thing that would have worked on a selection
+  // the user made by hand. With nothing to copy, the bubble stays out of the way.
+  if (!text) return <article className={className}>{children}</article>
   return (
     <article
       className={className}
@@ -1597,8 +1617,12 @@ function ConversationRunView({
     const owner = (part.messageID && messagesByID.get(part.messageID)) || fallback
     return owner ? formatTime(owner.info.time.created) : undefined
   }
+  // The bubble shows the whole run, so copying it means copying every message in it. Handing over the
+  // last one copied a fraction of what is on screen, and nothing at all whenever the run happened to
+  // end on a tool call — which is most of the time.
+  const runText = [...messagesByID.values()].map((message) => message.text).filter(Boolean).join("\n\n")
   return (
-    <MessageContextMenu message={fallback!} className="message assistant fade-in" t={t}>
+    <MessageContextMenu text={runText} className="message assistant fade-in" t={t}>
       {items.map((item) =>
         item.kind === "action-group" ? (
           <ActionGroupView
@@ -1641,7 +1665,7 @@ const MessageArticle = memo(function MessageArticle({
   t: Translator
 }) {
   return (
-    <MessageContextMenu message={message} className={`message ${message.info.role} fade-in`} t={t}>
+    <MessageContextMenu text={message.text} className={`message ${message.info.role} fade-in`} t={t}>
       {buildMessageTimeline(message.parts).map((item) =>
         item.kind === "action-group" ? (
           <ActionGroupView
