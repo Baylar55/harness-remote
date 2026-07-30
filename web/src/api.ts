@@ -1,6 +1,6 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { streamURL } from "./opencode-events"
-import { baseUrl, isMixedContentBlocked, isValidServerConfig } from "./serverConfig"
+import { baseUrl, isValidServerConfig } from "./serverConfig"
 import type {
   AgentOption,
   CommandInfo,
@@ -26,7 +26,7 @@ function authHeader(config: ServerConfig): string {
   return `Basic ${btoa(`${config.username}:${config.password}`)}`
 }
 
-export { baseUrl, isMixedContentBlocked, isValidServerConfig }
+export { baseUrl, isValidServerConfig }
 
 function withDirectory(path: string, directory?: string): string {
   if (!directory) return path
