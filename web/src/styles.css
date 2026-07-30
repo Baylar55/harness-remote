@@ -619,6 +619,11 @@ p {
   background: var(--warning-soft);
 }
 
+.pill.waiting {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
 .detail {
   min-height: calc(100dvh - 132px);
   display: flex;
@@ -1802,12 +1807,12 @@ button.compact {
   background: transparent;
 }
 
-/* On desktop the pill is dropped in favor of a left-border flag: a session is assumed idle
-   unless it's actively busy/retrying, which is the only state worth calling out at a glance. The
-   border uses the site's own accent color (rather than an off-palette warning yellow) and sweeps
-   like an indeterminate progress bar so a working session reads as "in motion" at a glance. */
+/* On desktop the pill is dropped in favor of a left-border flag. Busy/retrying sessions use
+   the primary accent; a session waiting on a subagent uses an animated violet marker so it stays
+   visibly distinct without pretending that the whole session is idle. */
 .sidebar-sessions .session-card.busy::before,
-.sidebar-sessions .session-card.retry::before {
+.sidebar-sessions .session-card.retry::before,
+.sidebar-sessions .session-card.waiting::before {
   content: "";
   position: absolute;
   left: 0;
@@ -1819,6 +1824,20 @@ button.compact {
   background-size: 100% 24px;
   background-repeat: repeat-y;
   animation: session-busy-sweep 1s linear infinite;
+}
+
+.sidebar-sessions .session-card.waiting::before {
+  background-image: linear-gradient(var(--secondary-soft), var(--secondary), var(--secondary-soft));
+  animation-name: session-waiting-sweep;
+}
+
+@keyframes session-waiting-sweep {
+  from {
+    background-position: 0 24px;
+  }
+  to {
+    background-position: 0 0;
+  }
 }
 
 /* A plain pixel-length shift (one full tile per loop) rather than a percentage-based one: with a

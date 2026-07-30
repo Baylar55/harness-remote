@@ -344,4 +344,12 @@ assert.match(
 )
 assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show the preparing label')
 
+
+assert.match(
+  app,
+  /function isSessionWorking\(status: string\): boolean \{\s*return status === "busy" \|\| status === "retry" \|\| status === "waiting"/,
+  'waiting sessions must remain working sessions rather than becoming idle'
+)
+assert.match(styles, /\.pill\.waiting\s*\{[^}]*background:\s*var\(--primary-soft\)/, 'waiting sessions need a distinct status pill')
+assert.match(styles, /\.session-card\.waiting::before\s*\{[\s\S]*?animation-name:\s*session-waiting-sweep/, 'desktop waiting sessions need their own animation')
 console.log('ui regression tests passed')
