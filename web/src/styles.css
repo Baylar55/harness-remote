@@ -370,6 +370,11 @@ p {
   grid-column: 1 / -1;
 }
 
+/* The server name heads the form and names the whole profile, so it reads as a title over the
+   pairs below rather than as the left half of a row shared with the backend picker. */
+.settings .form-grid label.field-row-span {
+  grid-column: 1 / -1;
+}
 
 .form-grid {
   display: grid;
