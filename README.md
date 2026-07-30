@@ -48,8 +48,14 @@ offering a control that fails.
 
 - configure and test the connection to any supported harness — OpenCode, OMP, PI, or Claude Code — each with its
   own saved credentials
-- browse and monitor sessions (`idle`, `busy`, `retry`)
-- open a session and read messages and progress
+- keep several servers saved under names of your own and switch between them from the header, rather
+  than retyping a host every time you move between machines
+- browse and monitor sessions (`idle`, `busy`, `retry`, `waiting`) — a session a harness reports as
+  waiting, on a subagent for instance, reads as working rather than idle, and carries its own marker
+  on a wide screen
+- open a session and read messages and progress, thinking and tool calls included, each as its own
+  step rather than folded into the reply
+- copy a message: right-click it, or long-press on a phone, for its text or its markdown
 - send prompts from the chat input, including a follow-up typed while the agent is still working
 - stop running work when necessary
 - pick the model a session uses
