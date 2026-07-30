@@ -344,4 +344,10 @@ assert.match(
 )
 assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show the preparing label')
 
+
+assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY\)/, 'right-clicking a message must open its action menu')
+assert.match(app, /event\.pointerType !== "touch"/, 'touch messages must support long-press actions')
+assert.match(app, /navigator\.clipboard\.writeText\(text\)/, 'message actions must copy to the system clipboard')
+assert.match(app, /markdown \? normalizeMessageMarkdown\(message\.text\) : message\.text/, 'the menu must distinguish plain-text and markdown copies')
+assert.match(styles, /\.message-context-menu\s*\{[\s\S]*?position:\s*fixed/, 'message actions must render above the scrolling transcript')
 console.log('ui regression tests passed')

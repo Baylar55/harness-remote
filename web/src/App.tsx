@@ -1455,6 +1455,61 @@ function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[])
   return groups
 }
 
+function MessageContextMenu({
+  message,
+  className,
+  t,
+  children
+}: {
+  message: MessageEnvelope & { text: string }
+  className: string
+  t: Translator
+  children: ReactNode
+}) {
+  const [position, setPosition] = useState<{ x: number, y: number } | null>(null)
+  const longPressTimer = useRef<number | undefined>(undefined)
+  const close = () => {
+    if (longPressTimer.current !== undefined) window.clearTimeout(longPressTimer.current)
+    longPressTimer.current = undefined
+  }
+  const open = (x: number, y: number) => {
+    close()
+    setPosition({
+      x: Math.max(8, Math.min(x, window.innerWidth - 220)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 104))
+    })
+  }
+  const copy = (markdown: boolean) => {
+    const text = markdown ? normalizeMessageMarkdown(message.text) : message.text
+    void navigator.clipboard.writeText(text).catch(() => undefined)
+    setPosition(null)
+  }
+  return (
+    <article
+      className={className}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        open(event.clientX, event.clientY)
+      }}
+      onPointerDown={(event) => {
+        if (event.pointerType !== "touch") return
+        const { clientX, clientY } = event
+        longPressTimer.current = window.setTimeout(() => open(clientX, clientY), 500)
+      }}
+      onPointerUp={close}
+      onPointerCancel={close}
+    >
+      {children}
+      {position && (
+        <div className="message-context-menu" role="menu" style={{ left: position.x, top: position.y }}>
+          <button type="button" role="menuitem" onClick={() => copy(false)}>{t('detail.copyText')}</button>
+          <button type="button" role="menuitem" onClick={() => copy(true)}>{t('detail.copyMarkdown')}</button>
+        </div>
+      )}
+    </article>
+  )
+}
+
 /** Renders one run's continuous timeline (see groupRenderedMessages) as a single message bubble, resolving
  *  each item's timestamp to the specific message that produced it. */
 function ConversationRunView({
@@ -1478,7 +1533,7 @@ function ConversationRunView({
     return owner ? formatTime(owner.info.time.created) : undefined
   }
   return (
-    <article className="message assistant fade-in">
+    <MessageContextMenu message={fallback!} className="message assistant fade-in" t={t}>
       {items.map((item) =>
         item.kind === "action-group" ? (
           <ActionGroupView
@@ -1502,7 +1557,7 @@ function ConversationRunView({
           />
         )
       )}
-    </article>
+    </MessageContextMenu>
   )
 }
 
@@ -1521,7 +1576,7 @@ const MessageArticle = memo(function MessageArticle({
   t: Translator
 }) {
   return (
-    <article className={`message ${message.info.role} fade-in`}>
+    <MessageContextMenu message={message} className={`message ${message.info.role} fade-in`} t={t}>
       {buildMessageTimeline(message.parts).map((item) =>
         item.kind === "action-group" ? (
           <ActionGroupView
@@ -1545,7 +1600,7 @@ const MessageArticle = memo(function MessageArticle({
           />
         )
       )}
-    </article>
+    </MessageContextMenu>
   )
 })
 

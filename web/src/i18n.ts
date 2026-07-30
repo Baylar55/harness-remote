@@ -100,6 +100,8 @@ type TranslationKey =
   | 'detail.composerPlaceholder'
   | 'detail.externalSession'
   | 'detail.waiting'
+  | 'detail.copyText'
+  | 'detail.copyMarkdown'
   | 'detail.send'
   | 'detail.jumpToLatest'
   | 'detail.you'
@@ -327,6 +329,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.composerPlaceholder': 'Prompt, or / for commands',
     'detail.externalSession': 'Started by another client',
     'detail.waiting': 'Waiting...',
+    'detail.copyText': 'Copy text',
+    'detail.copyMarkdown': 'Copy as markdown',
     'detail.send': 'Send',
     'detail.jumpToLatest': 'Go to latest',
     'detail.you': '👤 You',
@@ -553,6 +557,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.composerPlaceholder': 'Prompt, o / per i comandi',
     'detail.externalSession': 'Avviata da un altro client',
     'detail.waiting': 'Attesa...',
+    'detail.copyText': 'Copia testo',
+    'detail.copyMarkdown': 'Copia come Markdown',
     'detail.send': 'Invia',
     'detail.jumpToLatest': 'Vai alla fine',
     'detail.you': '👤 Tu',
@@ -779,6 +785,8 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.composerPlaceholder': '輸入提示，或以 / 下命令',
     'detail.externalSession': '由其他用戶端啟動',
     'detail.waiting': '等待中...',
+    'detail.copyText': '複製文字',
+    'detail.copyMarkdown': '複製為 Markdown',
     'detail.send': '傳送',
     'detail.jumpToLatest': '前往最新',
     'detail.you': '👤 你',

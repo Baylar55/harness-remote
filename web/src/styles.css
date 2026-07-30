@@ -984,6 +984,34 @@ p {
   background: var(--surface-subtle);
 }
 
+.message-context-menu {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  min-width: 212px;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.message-context-menu button {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: start;
+}
+
+.message-context-menu button:hover,
+.message-context-menu button:focus-visible {
+  background: var(--surface-strong);
+}
+
 .typing-bubble {
   width: auto;
   padding: 0.75rem 1rem;
