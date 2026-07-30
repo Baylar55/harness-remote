@@ -586,37 +586,94 @@ export class AcpService {
       if (!replaying) this.#persistSnapshot(sessionId)
       return
     }
-    if (update.sessionUpdate !== "user_message_chunk" && update.sessionUpdate !== "agent_message_chunk") return
+    if (update.sessionUpdate === "tool_call") {
+      if (!replaying && (!this.#active.has(sessionId) || this.#cancelledSessions.has(sessionId))) return
+      const chunkKey = `${sessionId}:assistant`
+      const messageID = this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
+      this.#chunkMessageIDs.set(chunkKey, messageID)
+      const messages = this.#messages.get(sessionId) ?? []
+      this.#messages.set(sessionId, messages)
+      let message = messages.find((item) => item.info.id === messageID)
+      if (!message) {
+        message = {
+          info: { id: messageID, role: "assistant", sessionID: sessionId, time: { created: Date.now() } },
+          parts: []
+        }
+        messages.push(message)
+      }
+      message.parts.push({
+        id: update.toolCallId,
+        messageID,
+        type: "tool",
+        tool: update._meta?.toolName ?? update.title,
+        callID: update.toolCallId,
+        state: {
+          status: update.status === "in_progress" ? "running" : update.status,
+          input: update.rawInput,
+          title: update.title,
+          time: { start: Date.now() }
+        }
+      })
+      if (!replaying) this.#emit("message.updated", sessionId)
+      return
+    }
+    if (update.sessionUpdate === "tool_call_update") {
+      const tool = (this.#messages.get(sessionId) ?? [])
+        .flatMap((message) => message.parts)
+        .find((part) => part.type === "tool" && part.callID === update.toolCallId)
+      if (!tool?.state) return
+      const output = update.rawOutput ?? update.content
+        ?.flatMap((item) => item.type === "content" && item.content?.type === "text" ? [item.content.text] : [])
+        .join("")
+      tool.state.status = update.status === "in_progress" ? "running" : update.status === "failed" ? "error" : update.status
+      if (output) tool.state.output = typeof output === "string" ? output : JSON.stringify(output)
+      if (tool.state.time && ["completed", "error"].includes(tool.state.status)) tool.state.time.end = Date.now()
+      if (!replaying) this.#emit("message.updated", sessionId)
+      return
+    }
+    const thought = update.sessionUpdate === "agent_thought_chunk"
+    const messageChunk = update.sessionUpdate === "user_message_chunk" || update.sessionUpdate === "agent_message_chunk"
+    if (!thought && !messageChunk) return
     if (update.content?.type !== "text" || !update.content.text) return
     const role = update.sessionUpdate === "user_message_chunk" ? "user" : "assistant"
+    const partType = thought ? "reasoning" : "text"
     // Acknowledgements only suppress a live echo of the prompt we just recorded;
     if (role === "assistant" && !replaying && this.#cancelledSessions.has(sessionId)) return
-    if (!update.messageId && role === "assistant" && !replaying && !this.#active.has(sessionId) && !this.#promptedSessions.has(sessionId)) return
+    if (role === "assistant" && !replaying && !this.#active.has(sessionId) && !this.#promptedSessions.has(sessionId)) return
     if (role === "user" && !replaying && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
     if (role === "user" && isHarnessInjectedText(update.content.text)) return
     if (!replaying && session) session.updatedAt = new Date().toISOString()
+    const counterpartKey = `${sessionId}:${role === "user" ? "assistant" : "user"}`
+    this.#chunkMessageIDs.delete(counterpartKey)
     const chunkKey = `${sessionId}:${role}`
-    let messageID = update.messageId
-    if (!messageID && replaying) {
-      // ACP has no message-boundary identifier. PI's adapter emits one full persisted
-      // text block per replay update, so keeping each update separate is safer than
-      // concatenating unrelated consecutive user or assistant messages.
-      messageID = randomUUID()
-    } else if (!messageID) {
-      messageID = this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
-      this.#chunkMessageIDs.set(chunkKey, messageID)
-    }
+    const messageID = update.messageId ?? this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
+    this.#chunkMessageIDs.set(chunkKey, messageID)
     const messages = this.#messages.get(sessionId) ?? []
     this.#messages.set(sessionId, messages)
     let message = messages.find((item) => item.info.id === messageID)
     if (!message) {
       message = {
         info: { id: messageID, role, sessionID: sessionId, time: { created: Date.now() } },
-        parts: [{ id: `${messageID}:text`, type: "text", text: "" }]
+        parts: []
       }
       messages.push(message)
     }
-    message.parts[0].text += update.content.text
+    const previous = message.parts.at(-1)
+    const now = Date.now()
+    if (previous?.type === "reasoning" && partType !== "reasoning" && previous.time && !previous.time.end) {
+      previous.time.end = now
+    }
+    if (previous?.type === partType) {
+      previous.text += update.content.text
+    } else {
+      message.parts.push({
+        id: `${messageID}:${partType}:${message.parts.length}`,
+        messageID,
+        type: partType,
+        text: update.content.text,
+        ...(partType === "reasoning" ? { time: { start: now } } : {})
+      })
+    }
     if (!replaying) this.#emit("message.updated", sessionId)
   }
 

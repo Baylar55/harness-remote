@@ -21,10 +21,10 @@ test("reads persisted user and assistant text from an OMP session transcript", a
   try {
     const loadHistory = createOmpHistoryLoader(root)
     const messages = await loadHistory(sessionID)
-    assert.deepEqual(messages.map((message) => [message.info.role, message.parts[0].text]), [
-      ["user", "Question"],
-      ["assistant", "Abandoned answer"],
-      ["assistant", "Answer"]
+    assert.deepEqual(messages.map((message) => [message.info.role, message.parts.map((part) => [part.type, part.text])]), [
+      ["user", [["text", "Question"]]],
+      ["assistant", [["text", "Abandoned answer"]]],
+      ["assistant", [["reasoning", "hidden"], ["text", "Answer"]]]
     ])
   } finally {
     await rm(root, { recursive: true, force: true })
