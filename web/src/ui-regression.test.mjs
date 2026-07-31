@@ -348,11 +348,15 @@ assert.match(
 assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show the preparing label')
 
 
-assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY\)/, 'right-clicking a message must open its action menu')
+assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY, window\.matchMedia/, 'right-clicking a message must open its action menu')
 assert.match(app, /event\.pointerType !== "touch"/, 'touch messages must support long-press actions')
 assert.match(app, /navigator\.clipboard\?\.writeText/, 'message actions must copy to the system clipboard')
 assert.match(app, /markdown \? normalizeMessageMarkdown\(text\) : text/, 'the menu must distinguish plain-text and markdown copies')
 assert.match(styles, /\.message-context-menu\s*\{[\s\S]*?position:\s*fixed/, 'message actions must render above the scrolling transcript')
+assert.match(app, /window\.matchMedia\("\(pointer: coarse\)"\)\.matches/, 'a touch context-menu event must keep the mobile menu layout')
+assert.match(app, /Math\.hypot\(movedX, movedY\) > 10/, 'moving to scroll must cancel the pending long-press menu')
+assert.match(styles, /\.message-context-menu--touch\s*\{[\s\S]*?bottom:\s*max\(/, 'the touch menu must render as a reachable bottom sheet')
+assert.match(styles, /@media \(pointer: coarse\)\s*\{[\s\S]*?\.message\s*\{[\s\S]*?user-select:\s*none/, 'mobile long-press must not also select message text')
 // A menu that only closes on its own items is a menu that stacks: the state is per bubble, so a
 // right-click on a second message left the first one hanging over the transcript.
 assert.match(app, /window\.addEventListener\("pointerdown", dismiss\)/, 'pressing outside an open message menu must dismiss it')
