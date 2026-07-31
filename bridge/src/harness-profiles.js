@@ -1,4 +1,5 @@
 import { createOmpHistoryLoader } from "./omp-session-history.js"
+import { OMP_EXTENSION_ACTION_PROVIDERS } from "./extension-actions.js"
 
 const COMMON_CAPABILITIES = {
   sessions: true,
@@ -26,9 +27,11 @@ export const HARNESS_PROFILES = {
       models: true,
       todos: true,
       commands: false,
+      actions: true,
       sessionRename: true,
       sessionDelete: true
-    }
+    },
+    actionProviders: OMP_EXTENSION_ACTION_PROVIDERS
   },
   pi: {
     id: "pi",
@@ -47,6 +50,7 @@ export const HARNESS_PROFILES = {
       models: true,
       todos: false,
       commands: true,
+      actions: false,
       sessionRename: true,
       sessionDelete: true
     }
@@ -72,6 +76,7 @@ export const HARNESS_PROFILES = {
       models: true,
       todos: true,
       commands: false,
+      actions: false,
       sessionRename: true,
       sessionDelete: true
     }

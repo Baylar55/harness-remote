@@ -32,9 +32,18 @@ First-party command, no third party in the path. The bridge uses `session/new`, 
 | Chunks carry a `messageId` | without one, chunk aggregation falls back to per-turn tracking |
 | No `agent_plan` is emitted | the todo panel stays empty by design |
 | The agent approves its own tool calls and never sends `session/request_permission` | the permission path would start being exercised |
+| `available_commands_update` is emitted after extension initialization and contains registered command names | optional extension actions are not discovered |
 
-**Watch:** any of the above, and new `sessionUpdate` kinds we silently ignore (`tool_call`,
-`tool_call_update` and `agent_thought_chunk` are dropped today).
+**Watch:** any of the above and new `sessionUpdate` kinds; unknown updates are ignored by design.
+
+#### Optional OMP extension actions
+
+The bridge recognizes [`@baylarsadigov/omp-undo-redo`](https://www.npmjs.com/package/@baylarsadigov/omp-undo-redo)
+only when the active `omp acp` session advertises both `undo` and `redo`. The package remains a
+host-side OMP plugin; it is not an app or bridge dependency. Its command catalog proves that the
+handlers were registered in that runtime, while the bridge keeps the initial session-specific Redo
+state locally. A bridge restart or Undo/Redo performed elsewhere can therefore leave that enabled
+state stale until a new action or prompt updates it.
 
 ### PI — ACP over stdio, via a third-party adapter
 

@@ -76,6 +76,9 @@ Depending on the harness:
 - review changed files and their diffs — OpenCode
 - rename and delete sessions — OpenCode changes them in the harness; on OMP, PI and Claude Code the
   same controls keep a bridge-local nickname and hide the session from that bridge only
+- use Undo and Redo for OMP sessions when the host has loaded the optional
+  `@baylarsadigov/omp-undo-redo` extension; the bridge discovers and invokes it without bundling it
+  into the app
 
 ## Desktop Mode
 
@@ -472,10 +475,12 @@ Against an OpenCode server, spoken directly: `/global/health`, `/global/event`, 
 `/config/providers`, `/command`, `/agent`, `/project/current`, `/vcs`, `/path`, `/file*`, and
 `/question*`.
 
-For OMP and PI the bridge implements a deliberate subset of those paths, plus its own `/v1/health`
-and `/v1/capabilities` — which is how the app learns what a harness can do and hides the rest, rather
-than calling something that 404s. [CONTRIBUTING.md](CONTRIBUTING.md) lists exactly what the bridge
-does and does not answer.
+For OMP, PI, and Claude Code the bridge implements a deliberate subset of those paths, plus its own
+`/v1/health` and `/v1/capabilities`. OMP also exposes generic session action discovery and invocation
+through `/session/:id/action` and `/session/:id/action/:name` when a known host extension is loaded.
+Capabilities tell the app which APIs are supported so it hides the rest rather than calling
+something that 404s. [CONTRIBUTING.md](CONTRIBUTING.md) lists exactly what the bridge does and does
+not answer.
 
 What each harness actually provides behind those paths, and what to re-check when one of them
 changes, is in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).

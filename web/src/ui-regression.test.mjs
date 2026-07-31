@@ -387,8 +387,8 @@ assert.match(app, /supported\.has\("undo"\)/, 'Undo must appear only when the co
 assert.match(app, /supported\.has\("redo"\)/, 'Redo must appear only when the connected harness exposes the command')
 assert.match(app, /api\.revertMessage\(config, selectedSession\.id, messageID/, 'OpenCode message actions must use its targeted revert endpoint')
 assert.match(app, /message\.info\.id < revertMessageID/, 'a staged OpenCode revert must hide messages from its boundary onward')
-assert.match(app, /const hasRedo = config\.backend !== "opencode" \|\| !!revertMessageID/, 'OpenCode Redo must only appear while a revert is staged')
-assert.match(app, /const supportsRedo = config\.backend === "opencode" \|\| supported\.has\("redo"\)/, 'OpenCode native history actions must not depend on the server command list')
+assert.match(app, /const hasRedo = config\.backend === "opencode" \? !!revertMessageID : redoAction \? redoAction\.enabled : true/, 'OpenCode Redo must only appear while a revert is staged and extension Redo must follow session state')
+assert.match(app, /const supportsRedo = config\.backend === "opencode" \|\| !!redoAction \|\| supported\.has\("redo"\)/, 'OpenCode native history actions must not depend on the server command list')
 assert.match(app, /message-context-menu__separator/, 'harness actions must be visually separated from copy actions')
 assert.match(styles, /\.message-context-menu button\s*\{[\s\S]*?justify-content:\s*flex-start[\s\S]*?text-align:\s*left/, 'message action labels must align to the menu edge')
 // The rule was written for a field that no longer exists, but the class outlived it: dropping the
@@ -427,5 +427,12 @@ const themeTokens = (block) => new Set([...block.matchAll(/^\s*(--[a-z0-9-]+)\s*
 const rootTokens = themeTokens(styles.match(/^:root \{([\s\S]*?)^\}/m)[1])
 const darkOnlyTokens = [...themeTokens(styles.match(/color-scheme: dark;([\s\S]*?)^\}/m)[1])].filter((token) => !rootTokens.has(token))
 assert.deepEqual(darkOnlyTokens, [], 'a custom property overridden for dark mode must have a light-mode value too')
+
+assert.ok(api.includes('`/session/${sessionID}/action`'), 'session action discovery should use the generic bridge endpoint')
+assert.ok(api.includes('`/session/${sessionID}/action/${encodeURIComponent(actionID)}`'), 'action execution should use a structured endpoint rather than a chat prompt')
+assert.ok(app.includes('capabilities.actions ? api.listActions'), 'the selected session should discover actions only when the bridge supports them')
+assert.ok(app.includes('api.invokeAction(config, selectedSession.id, command, selectedSession.directory)'), 'OMP Undo/Redo should execute through the action API')
+assert.ok(app.includes('replaceMessages ? msg : mergeFetchedMessages(prev, msg)'), 'a successful Undo must be allowed to shrink the rendered conversation')
+assert.ok(app.includes('setExtensionActions(result.actions)'), 'action execution should apply the returned session-specific enabled state immediately')
 
 console.log('ui regression tests passed')
