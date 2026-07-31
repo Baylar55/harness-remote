@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
 import {
-  applyExtensionActionSuccess,
   listExtensionActions,
+  loadExtensionActionState,
   resetExtensionActionState,
   resolveExtensionAction
 } from "./extension-actions.js"
@@ -153,6 +153,7 @@ export class AcpService {
   #commandCatalogs = new Map()
   #commandCatalogWaiters = new Map()
   #actionStates = new Map()
+  #authoritativeActionStates = new Map()
   #actionProviders
   #loaded = new Set()
   #loads = new Map()
@@ -262,6 +263,7 @@ export class AcpService {
     for (const resolve of this.#commandCatalogWaiters.get(sessionID) ?? []) resolve()
     this.#commandCatalogWaiters.delete(sessionID)
     this.#actionStates.delete(sessionID)
+    this.#authoritativeActionStates.delete(sessionID)
     this.#loaded.delete(sessionID)
     this.#ownedSessions.delete(sessionID)
     this.#promptAcknowledgements.delete(sessionID)
@@ -299,6 +301,7 @@ export class AcpService {
       await this.#load(sessionID, true, true)
       await this.#waitForCommandCatalog(sessionID)
     }
+    await this.#refreshActionState(sessionID)
     return this.#availableActions(sessionID)
   }
 
@@ -332,26 +335,55 @@ export class AcpService {
     )
     if (!resolved) throw new Error(`Harness action is not available: ${actionID}`)
 
-    const before = semanticHistorySignature(this.#messages.get(sessionID) ?? [])
+    const beforeState = this.#authoritativeActionStates.get(sessionID)
     this.#ownedSessions.add(sessionID)
     this.#active.add(sessionID)
     this.#emit("session.updated", sessionID)
-    let applied = false
+    let applied = null
+    let authoritativeState
     try {
       await this.#acp.request("session/prompt", {
         sessionId: sessionID,
         prompt: [{ type: "text", text: `/${resolved.action.command}` }]
       }, 300_000)
+      authoritativeState = await this.#refreshActionState(sessionID)
+      if (
+        authoritativeState?.actionResult?.id === actionID &&
+        authoritativeState.actionResult.token !== beforeState?.actionResult?.token
+      ) {
+        applied = authoritativeState.actionResult.applied
+      } else if (
+        typeof beforeState?.sessionRevision === "string" &&
+        typeof authoritativeState?.sessionRevision === "string"
+      ) {
+        applied = authoritativeState.sessionRevision !== beforeState.sessionRevision
+      }
       await this.#loadSession(sessionID, true, true)
-      applied = semanticHistorySignature(this.#messages.get(sessionID) ?? []) !== before
-      if (applied) applyExtensionActionSuccess(this.#actionState(sessionID), resolved.action)
       this.#emit("message.updated", sessionID)
       this.#persistSnapshot(sessionID)
     } finally {
       this.#active.delete(sessionID)
       this.#emit("session.updated", sessionID)
     }
-    return { action: actionID, applied, actions: this.#availableActions(sessionID) }
+    return {
+      action: actionID,
+      applied,
+      actions: this.#availableActions(sessionID),
+      ...(authoritativeState?.sessionRevision ? { sessionRevision: authoritativeState.sessionRevision } : {})
+    }
+  }
+
+  async #refreshActionState(sessionID, requireCommands = true) {
+    const session = this.#sessions.get(sessionID)
+    if (!session) return undefined
+    const state = await loadExtensionActionState(
+      this.#actionProviders,
+      requireCommands ? this.#commandCatalogs.get(sessionID) ?? [] : undefined,
+      { sessionID, directory: session.cwd }
+    )
+    if (state) this.#authoritativeActionStates.set(sessionID, state)
+    else this.#authoritativeActionStates.delete(sessionID)
+    return state
   }
 
   #actionState(sessionID) {
@@ -368,7 +400,8 @@ export class AcpService {
       this.#actionProviders,
       this.#commandCatalogs.get(sessionID) ?? [],
       this.#actionState(sessionID),
-      this.#isBusy(sessionID)
+      this.#isBusy(sessionID),
+      this.#authoritativeActionStates.get(sessionID)
     )
   }
 
@@ -597,14 +630,19 @@ export class AcpService {
     const session = this.#sessions.get(sessionID)
     if (!session) throw new Error("Harness session not found")
     await this.#restoreSnapshot(sessionID)
+    const authoritativeState = await this.#refreshActionState(sessionID, false)
     let previousMessages = this.#messages.get(sessionID) ?? []
     const previousTodos = this.#todos.get(sessionID) ?? []
     const previousMessageSnapshot = semanticHistorySignature(previousMessages)
     if (this.#historyLoader) {
       try {
-        const persistedMessages = await this.#historyLoader(sessionID)
-        if (persistedMessages.length > 0) {
-          previousMessages = mergeExternalHistory(persistedMessages, previousMessages)
+        const persistedMessages = await this.#historyLoader(sessionID, {
+          activeSessionLeaf: authoritativeState?.activeSessionLeaf
+        })
+        if (persistedMessages.length > 0 || authoritativeState) {
+          previousMessages = authoritativeState
+            ? persistedMessages
+            : mergeExternalHistory(persistedMessages, previousMessages)
           this.#messages.set(sessionID, previousMessages)
           if (!this.#ownedSessions.has(sessionID) && !requireConfigOptions) {
             this.#todos.set(sessionID, [])

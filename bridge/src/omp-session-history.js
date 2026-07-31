@@ -39,10 +39,11 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     }
   }
 
-  return async function loadOmpHistory(sessionID) {
+  return async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
     const file = await locateSession(sessionID)
     if (!file) return []
-    const messages = []
+    const records = []
+    const entries = new Map()
     const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity })
     for await (const line of lines) {
       let record
@@ -51,7 +52,33 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
       } catch {
         continue
       }
-      if (record?.type !== "message") continue
+      if (typeof record?.id === "string") {
+        records.push(record)
+        entries.set(record.id, record)
+      }
+    }
+
+    const selected = []
+    const leafID = activeSessionLeaf !== undefined ? activeSessionLeaf : records.at(-1)?.id
+    if (leafID === null) {
+      // The extension selected the session root.
+    } else if (leafID && entries.has(leafID)) {
+      const branch = []
+      const visited = new Set()
+      let entry = entries.get(leafID)
+      while (entry && !visited.has(entry.id)) {
+        visited.add(entry.id)
+        branch.push(entry)
+        entry = typeof entry.parentId === "string" ? entries.get(entry.parentId) : undefined
+      }
+      selected.push(...branch.reverse())
+    } else {
+      selected.push(...records)
+    }
+
+    const messages = []
+    for (const record of selected) {
+      if (record.type !== "message") continue
       const role = record.message?.role
       if (role !== "user" && role !== "assistant") continue
       const messageID = record.id ?? `${sessionID}:${messages.length}`

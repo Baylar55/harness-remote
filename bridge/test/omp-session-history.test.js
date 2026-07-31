@@ -23,9 +23,11 @@ test("reads persisted user and assistant text from an OMP session transcript", a
     const messages = await loadHistory(sessionID)
     assert.deepEqual(messages.map((message) => [message.info.role, message.parts.map((part) => [part.type, part.text])]), [
       ["user", [["text", "Question"]]],
-      ["assistant", [["text", "Abandoned answer"]]],
       ["assistant", [["reasoning", "hidden"], ["text", "Answer"]]]
-    ])
+    ], "the latest active branch must exclude abandoned siblings")
+
+    const undone = await loadHistory(sessionID, { activeSessionLeaf: "user-1" })
+    assert.deepEqual(undone.map((message) => message.parts[0].text), ["Question"])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

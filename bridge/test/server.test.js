@@ -689,7 +689,7 @@ test("does not advertise extension actions when OMP did not load their commands"
   }
 })
 
-test("reports a repeated Undo at the history boundary as a semantic no-op", async () => {
+test("does not infer extension action success from transcript changes", async () => {
   const acp = new ExtensionActionAcp()
   const bridge = await startServer({ acp })
   try {
@@ -705,66 +705,106 @@ test("reports a repeated Undo at the history boundary as a semantic no-op", asyn
       body: "{}"
     })
 
-    assert.equal(first.applied, true)
-    assert.equal(second.applied, false, "replayed timestamps and message ids must not make unchanged history look applied")
-    assert.equal(second.actions.find((action) => action.id === "redo").enabled, true)
+    assert.equal(first.applied, null)
+    assert.equal(second.applied, null)
+    assert.equal(second.actions.find((action) => action.id === "redo").enabled, false)
   } finally {
     await bridge.close()
   }
 })
 
-test("invokes loaded OMP extension actions and keeps Redo state session-specific", async () => {
+test("uses extension revisions and availability as authoritative action state", async () => {
   const acp = new ExtensionActionAcp()
-  const bridge = await startServer({ acp })
-  try {
-    assert.deepEqual(await readJSON(bridge.baseURL, "/session/session-1/action"), [
-      { id: "undo", source: "omp-undo-redo", enabled: true },
-      { id: "redo", source: "omp-undo-redo", enabled: false }
-    ])
-
-    const undo = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: "{}"
-    })
-    assert.equal(undo.applied, true)
-    assert.equal(undo.actions.find((action) => action.id === "redo").enabled, true)
-    assert.deepEqual(acp.prompts, ["/undo"])
-    assert.deepEqual(conversation(await readJSON(bridge.baseURL, "/session/session-1/message")), [
-      "user: Change the file"
-    ], "the structured action must not appear as a user prompt")
-
-    const redo = await readJSON(bridge.baseURL, "/session/session-1/action/redo", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: "{}"
-    })
-    assert.equal(redo.applied, true)
-    assert.equal(redo.actions.find((action) => action.id === "redo").enabled, false)
-    assert.deepEqual(acp.prompts, ["/undo", "/redo"])
-    assert.deepEqual(conversation(await readJSON(bridge.baseURL, "/session/session-1/message")), [
-      "user: Change the file",
-      "assistant: Changed the file"
-    ])
-
-    await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: "{}"
-    })
-    assert.equal((await readJSON(bridge.baseURL, "/session/session-1/action"))
-      .find((action) => action.id === "redo").enabled, true)
-    await readJSON(bridge.baseURL, "/session/session-1/prompt_async", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: JSON.stringify({ parts: [{ type: "text", text: "Start a new branch" }] })
-    })
-    await waitForIdle(bridge.baseURL, "session-1")
-    assert.equal((await readJSON(bridge.baseURL, "/session/session-1/action"))
-      .find((action) => action.id === "redo").enabled, false, "a new prompt must invalidate bridge-local Redo")
-  } finally {
-    await bridge.close()
+  let actionState = {
+    actions: [{ id: "undo", enabled: true }, { id: "redo", enabled: false }],
+    sessionRevision: "1:assistant-1",
+    activeSessionLeaf: "assistant-1"
   }
+  let nextUndoIsNoOp = false
+  const request = acp.request.bind(acp)
+  acp.request = async (method, params) => {
+    const result = await request(method, params)
+    if (method !== "session/prompt") return result
+    const command = params.prompt[0].text
+    if (command === "/undo") {
+      acp.history = [...acp.fullHistory]
+      actionState = nextUndoIsNoOp
+        ? {
+            ...actionState,
+            actionResult: { id: "undo", applied: false, token: "action-no-op" }
+          }
+        : {
+            actions: [{ id: "undo", enabled: false }, { id: "redo", enabled: true }],
+            sessionRevision: "0:user-1",
+            activeSessionLeaf: "user-1"
+          }
+    } else if (command === "/redo") {
+      actionState = {
+        actions: [{ id: "undo", enabled: true }, { id: "redo", enabled: false }],
+        sessionRevision: "1:assistant-1",
+        activeSessionLeaf: "assistant-1"
+      }
+    }
+    return result
+  }
+  const provider = {
+    id: "omp-undo-redo",
+    requiredCommands: ["undo", "redo"],
+    actions: [
+      { id: "undo", command: "undo", enabledByDefault: true },
+      { id: "redo", command: "redo", enabledByDefault: false }
+    ],
+    loadState: async () => actionState
+  }
+  const service = new AcpService(acp, { actionProviders: [provider] })
+
+  assert.deepEqual(await service.actions("session-1"), [
+    { id: "undo", source: "omp-undo-redo", enabled: true },
+    { id: "redo", source: "omp-undo-redo", enabled: false }
+  ])
+  const undo = await service.invokeAction("session-1", "undo")
+  assert.equal(undo.applied, true, "the revision change is authoritative even when replayed text is unchanged")
+  assert.equal(undo.sessionRevision, "0:user-1")
+  assert.equal(undo.actions.find((action) => action.id === "redo").enabled, true)
+  assert.deepEqual((await service.messages("session-1")).map((message) => message.parts[0].text), [
+    "Change the file",
+    "Changed the file"
+  ])
+
+  const redo = await service.invokeAction("session-1", "redo")
+  assert.equal(redo.applied, true)
+  assert.equal(redo.actions.find((action) => action.id === "redo").enabled, false)
+
+  nextUndoIsNoOp = true
+  const noOp = await service.invokeAction("session-1", "undo")
+  assert.equal(noOp.applied, false, "a fresh explicit extension result must report a no-op")
+})
+
+test("loads an external session from the extension-selected tree leaf", async () => {
+  const acp = new ExtensionActionAcp()
+  let selectedLeaf
+  const provider = {
+    id: "omp-undo-redo",
+    requiredCommands: ["undo", "redo"],
+    actions: [],
+    loadState: async () => ({
+      actions: [{ id: "undo", enabled: false }, { id: "redo", enabled: true }],
+      sessionRevision: "0:user-1",
+      activeSessionLeaf: "user-1"
+    })
+  }
+  const historyLoader = async (_sessionID, options) => {
+    selectedLeaf = options.activeSessionLeaf
+    return [{
+      info: { id: "user-1", role: "user", sessionID: "session-1", time: { created: Date.now() } },
+      parts: [{ id: "user-1:text", type: "text", text: "Change the file" }]
+    }]
+  }
+  const service = new AcpService(acp, { actionProviders: [provider], historyLoader })
+
+  assert.deepEqual((await service.messages("session-1")).map((message) => message.parts[0].text), ["Change the file"])
+  assert.equal(selectedLeaf, "user-1")
+  assert.equal(acp.loads, 0, "external history should not activate or replay the ACP session")
 })
 
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
