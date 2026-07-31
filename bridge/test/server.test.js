@@ -299,6 +299,7 @@ class ExtensionActionAcp extends EventEmitter {
   agentInfo = { version: "17.1.3" }
   prompts = []
   commands
+  loads = 0
   fullHistory = [
     { role: "user", id: "user-1", text: "Change the file" },
     { role: "assistant", id: "assistant-1", text: "Changed the file" }
@@ -325,6 +326,7 @@ class ExtensionActionAcp extends EventEmitter {
       return { stopReason: "end_turn" }
     }
     if (method !== "session/load") return {}
+    this.loads += 1
     this.emit("notification", {
       method: "session/update",
       params: {
@@ -347,7 +349,7 @@ class ExtensionActionAcp extends EventEmitter {
           sessionId: "session-1",
           update: {
             sessionUpdate: message.role === "user" ? "user_message_chunk" : "agent_message_chunk",
-            messageId: message.id,
+            messageId: `${message.id}-replay-${this.loads}`,
             content: { type: "text", text: message.text }
           }
         }
@@ -682,6 +684,30 @@ test("does not advertise extension actions when OMP did not load their commands"
     })
     assert.equal(response.status, 400)
     assert.match((await response.json()).error, /not available/)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("reports a repeated Undo at the history boundary as a semantic no-op", async () => {
+  const acp = new ExtensionActionAcp()
+  const bridge = await startServer({ acp })
+  try {
+    await readJSON(bridge.baseURL, "/session/session-1/action")
+    const first = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+    const second = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+
+    assert.equal(first.applied, true)
+    assert.equal(second.applied, false, "replayed timestamps and message ids must not make unchanged history look applied")
+    assert.equal(second.actions.find((action) => action.id === "redo").enabled, true)
   } finally {
     await bridge.close()
   }

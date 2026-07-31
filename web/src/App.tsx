@@ -1980,6 +1980,7 @@ function App() {
   const [awaitingAssistantReply, setAwaitingAssistantReply] = useState(false)
   const [settingsNotice, setSettingsNotice] = useState<{ type: NoticeType; text: string } | null>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [connectionState, setConnectionState] = useState<"idle" | "connecting" | "connected" | "reconnecting" | "offline">(
     config.host && config.port > 0 ? "connecting" : "idle"
   )
@@ -2201,6 +2202,7 @@ function App() {
     setDashboardError(null)
     setAwaitingAssistantReply(false)
     setRuntimeError(null)
+    setActionNotice(null)
     setView("detail")
     setLoadingSessionID(sessionID)
     try {
@@ -2232,6 +2234,7 @@ function App() {
       setConnectedVersion("")
       setCommands([])
       setExtensionActions([])
+      setActionNotice(null)
       setAgentOptions([])
       setModelOptions([])
       setSelectedModelKey(readStoredModel(nextConfig.backend))
@@ -2496,6 +2499,7 @@ function App() {
 
     setBusySending(true)
     setRuntimeError(null)
+    setActionNotice(null)
     try {
       let revertedSession: Session | undefined
       if (config.backend === "opencode") {
@@ -2514,6 +2518,9 @@ function App() {
       } else if (capabilities.actions && extensionActions.some((action) => action.id === command)) {
         const result = await api.invokeAction(config, selectedSession.id, command, selectedSession.directory)
         setExtensionActions(result.actions)
+        if (!result.applied) {
+          setActionNotice(t(command === "undo" ? 'detail.nothingToUndo' : 'detail.nothingToRedo'))
+        }
         await loadSelected(selectedSession.id, selectedSession.directory, true, result.applied)
       } else {
         await api.sendCommand(config, selectedSession.id, command, "", selectedSession.directory, activeModel, activeAgentID)
@@ -2756,6 +2763,7 @@ function App() {
     if (!selectedSession) return
     const text = composer.trim()
     if (!text) return
+    setActionNotice(null)
 
     if (text.startsWith("/")) {
       const normalized = text.slice(1)
@@ -4102,6 +4110,7 @@ function App() {
           </div>
 
           {runtimeError && <div className="error fade-in">✗ {runtimeError}</div>}
+          {actionNotice && <div className="notice info fade-in">ℹ {actionNotice}</div>}
         </main>
       )}
 

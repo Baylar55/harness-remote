@@ -22,6 +22,10 @@ assert.equal(en('session.deleteTitle'), 'Delete session?')
 assert.equal(it('session.deleteTitle'), 'Eliminare la sessione?')
 assert.equal(zh('session.deleteTitle'), '刪除工作階段？')
 
+assert.equal(en('detail.nothingToUndo'), 'Nothing to undo in this session.')
+assert.equal(it('detail.nothingToRedo'), 'Non c’è nulla da ripristinare in questa sessione.')
+assert.equal(zh('detail.nothingToUndo'), '此工作階段沒有可復原的內容。')
+
 // Unknown keys should remain visible during development instead of rendering blank UI.
 assert.equal(en('missing.key'), 'missing.key')
 assert.equal(en('detail.opencode'), '🤖 OpenCode')

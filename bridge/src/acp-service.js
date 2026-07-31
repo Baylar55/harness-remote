@@ -38,6 +38,34 @@ function sessionView(session, status = "idle", title = session.title, external =
 function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
 }
+function stableSemanticValue(value) {
+  if (Array.isArray(value)) return value.map(stableSemanticValue)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableSemanticValue(value[key])]))
+}
+
+function semanticMessagePart(part) {
+  if (!part || typeof part !== "object") return part
+  const semantic = {}
+  for (const key of Object.keys(part).sort()) {
+    if (["id", "messageID", "sessionID", "callID", "time"].includes(key)) continue
+    if (key === "state" && part.state && typeof part.state === "object") {
+      const { time: _time, ...state } = part.state
+      semantic.state = stableSemanticValue(state)
+      continue
+    }
+    semantic[key] = stableSemanticValue(part[key])
+  }
+  return semantic
+}
+
+function semanticHistorySignature(messages) {
+  return JSON.stringify(messages.map((message) => ({
+    role: message?.info?.role,
+    parts: (message?.parts ?? []).map(semanticMessagePart)
+  })))
+}
+
 
 function mergeReplay(previous, replayed) {
   if (previous.length === 0) return replayed
@@ -304,7 +332,7 @@ export class AcpService {
     )
     if (!resolved) throw new Error(`Harness action is not available: ${actionID}`)
 
-    const before = JSON.stringify(this.#messages.get(sessionID) ?? [])
+    const before = semanticHistorySignature(this.#messages.get(sessionID) ?? [])
     this.#ownedSessions.add(sessionID)
     this.#active.add(sessionID)
     this.#emit("session.updated", sessionID)
@@ -315,7 +343,7 @@ export class AcpService {
         prompt: [{ type: "text", text: `/${resolved.action.command}` }]
       }, 300_000)
       await this.#loadSession(sessionID, true, true)
-      applied = JSON.stringify(this.#messages.get(sessionID) ?? []) !== before
+      applied = semanticHistorySignature(this.#messages.get(sessionID) ?? []) !== before
       if (applied) applyExtensionActionSuccess(this.#actionState(sessionID), resolved.action)
       this.#emit("message.updated", sessionID)
       this.#persistSnapshot(sessionID)
@@ -571,7 +599,7 @@ export class AcpService {
     await this.#restoreSnapshot(sessionID)
     let previousMessages = this.#messages.get(sessionID) ?? []
     const previousTodos = this.#todos.get(sessionID) ?? []
-    const previousMessageSnapshot = JSON.stringify(previousMessages)
+    const previousMessageSnapshot = semanticHistorySignature(previousMessages)
     if (this.#historyLoader) {
       try {
         const persistedMessages = await this.#historyLoader(sessionID)
@@ -601,7 +629,7 @@ export class AcpService {
       this.#messages.set(sessionID, replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
       const replayedTodos = this.#todos.get(sessionID) ?? []
       this.#todos.set(sessionID, replaceHistory ? replayedTodos : mergeTodos(previousTodos, replayedTodos))
-      if (JSON.stringify(this.#messages.get(sessionID) ?? []) !== previousMessageSnapshot) {
+      if (semanticHistorySignature(this.#messages.get(sessionID) ?? []) !== previousMessageSnapshot) {
         this.#resetActionsForSessionChange(sessionID)
       }
       this.#loaded.add(sessionID)

@@ -434,5 +434,8 @@ assert.ok(app.includes('capabilities.actions ? api.listActions'), 'the selected 
 assert.ok(app.includes('api.invokeAction(config, selectedSession.id, command, selectedSession.directory)'), 'OMP Undo/Redo should execute through the action API')
 assert.ok(app.includes('replaceMessages ? msg : mergeFetchedMessages(prev, msg)'), 'a successful Undo must be allowed to shrink the rendered conversation')
 assert.ok(app.includes('setExtensionActions(result.actions)'), 'action execution should apply the returned session-specific enabled state immediately')
+assert.ok(app.includes("if (!result.applied)"), 'a semantic no-op action must have an explicit frontend path')
+assert.ok(app.includes("command === \"undo\" ? 'detail.nothingToUndo' : 'detail.nothingToRedo'"), 'the no-op message should describe the attempted action')
+assert.ok(app.includes('{actionNotice && <div className=\"notice info fade-in\">'), 'no-op action feedback should render as visible information rather than an error')
 
 console.log('ui regression tests passed')
