@@ -1518,17 +1518,20 @@ function MessageContextMenu({
   t: Translator
   children: ReactNode
 }) {
-  const [position, setPosition] = useState<{ x: number, y: number } | null>(null)
+  const [position, setPosition] = useState<{ x: number, y: number, touch: boolean } | null>(null)
   const longPressTimer = useRef<number | undefined>(undefined)
+  const touchStart = useRef<{ x: number, y: number } | null>(null)
   const cancelLongPress = () => {
     if (longPressTimer.current !== undefined) window.clearTimeout(longPressTimer.current)
     longPressTimer.current = undefined
+    touchStart.current = null
   }
-  const open = (x: number, y: number) => {
+  const open = (x: number, y: number, touch = false) => {
     cancelLongPress()
     setPosition({
       x: Math.max(8, Math.min(x, window.innerWidth - 220)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 104))
+      y: Math.max(8, Math.min(y, window.innerHeight - 104)),
+      touch
     })
   }
   const copy = (markdown: boolean) => {
@@ -1567,12 +1570,19 @@ function MessageContextMenu({
       className={className}
       onContextMenu={(event) => {
         event.preventDefault()
-        open(event.clientX, event.clientY)
+        open(event.clientX, event.clientY, window.matchMedia("(pointer: coarse)").matches)
       }}
       onPointerDown={(event) => {
         if (event.pointerType !== "touch") return
         const { clientX, clientY } = event
-        longPressTimer.current = window.setTimeout(() => open(clientX, clientY), 500)
+        touchStart.current = { x: clientX, y: clientY }
+        longPressTimer.current = window.setTimeout(() => open(clientX, clientY, true), 500)
+      }}
+      onPointerMove={(event) => {
+        if (event.pointerType !== "touch" || !touchStart.current) return
+        const movedX = event.clientX - touchStart.current.x
+        const movedY = event.clientY - touchStart.current.y
+        if (Math.hypot(movedX, movedY) > 10) cancelLongPress()
       }}
       onPointerUp={cancelLongPress}
       onPointerCancel={cancelLongPress}
@@ -1582,9 +1592,9 @@ function MessageContextMenu({
         // Pressing an item must not read as pressing "anywhere else": the dismissal above would
         // unmount the menu on pointerdown and the click would never reach the button.
         <div
-          className="message-context-menu"
+          className={`message-context-menu${position.touch ? " message-context-menu--touch" : ""}`}
           role="menu"
-          style={{ left: position.x, top: position.y }}
+          style={position.touch ? undefined : { left: position.x, top: position.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <button type="button" role="menuitem" onClick={() => copy(false)}>{t('detail.copyText')}</button>
