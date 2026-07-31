@@ -2099,8 +2099,10 @@ function App() {
     const revertMessageID = selectedSession?.revertMessageID
     const hasUndo = config.backend !== "opencode" || messages.some((message) => message.info.role === "user" && (!revertMessageID || message.info.id < revertMessageID))
     const hasRedo = config.backend !== "opencode" || !!revertMessageID
-    if (supported.has("undo") && hasUndo) actions.push({ id: "undo", label: t('detail.undo'), onSelect: () => void runNativeHistoryCommand("undo") })
-    if (supported.has("redo") && hasRedo) actions.push({ id: "redo", label: t('detail.redo'), onSelect: () => void runNativeHistoryCommand("redo") })
+    const supportsUndo = config.backend === "opencode" || supported.has("undo")
+    const supportsRedo = config.backend === "opencode" || supported.has("redo")
+    if (supportsUndo && hasUndo) actions.push({ id: "undo", label: t('detail.undo'), onSelect: () => void runNativeHistoryCommand("undo") })
+    if (supportsRedo && hasRedo) actions.push({ id: "redo", label: t('detail.redo'), onSelect: () => void runNativeHistoryCommand("redo") })
     return actions
   }, [commands, config.backend, messages, selectedSession?.revertMessageID, t])
   const selectedNewSessionDirectory = normalizeDirectory(newSessionDirectory)

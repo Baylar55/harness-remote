@@ -388,6 +388,7 @@ assert.match(app, /supported\.has\("redo"\)/, 'Redo must appear only when the co
 assert.match(app, /api\.revertMessage\(config, selectedSession\.id, messageID/, 'OpenCode message actions must use its targeted revert endpoint')
 assert.match(app, /message\.info\.id < revertMessageID/, 'a staged OpenCode revert must hide messages from its boundary onward')
 assert.match(app, /const hasRedo = config\.backend !== "opencode" \|\| !!revertMessageID/, 'OpenCode Redo must only appear while a revert is staged')
+assert.match(app, /const supportsRedo = config\.backend === "opencode" \|\| supported\.has\("redo"\)/, 'OpenCode native history actions must not depend on the server command list')
 assert.match(app, /message-context-menu__separator/, 'harness actions must be visually separated from copy actions')
 assert.match(styles, /\.message-context-menu button\s*\{[\s\S]*?justify-content:\s*flex-start[\s\S]*?text-align:\s*left/, 'message action labels must align to the menu edge')
 // The rule was written for a field that no longer exists, but the class outlived it: dropping the
