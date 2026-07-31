@@ -41,9 +41,19 @@ First-party command, no third party in the path. The bridge uses `session/new`, 
 The bridge recognizes [`@baylarsadigov/omp-undo-redo`](https://www.npmjs.com/package/@baylarsadigov/omp-undo-redo)
 only when the active `omp acp` session advertises both `undo` and `redo`. The package remains a
 host-side OMP plugin; it is not an app or bridge dependency. Its command catalog proves that the
-handlers were registered in that runtime, while the bridge keeps the initial session-specific Redo
-state locally. A bridge restart or Undo/Redo performed elsewhere can therefore leave that enabled
-state stale until a new action or prompt updates it.
+handlers were registered in that runtime.
+
+Action availability and the active tree revision come from the extension-owned sidecar under the
+repository's Git common directory at `omp-undo-redo/history/<sha256-session-id>.json`. The bridge
+adapts the extension's durable schema 1 (`checkpoints` plus `currentIndex`) into `undo`/`redo`
+availability and an active leaf revision. A future sidecar may publish the normalized optional
+contract directly: `actions`, `sessionRevision`, `activeSessionLeaf`, and an invocation
+`actionResult` with a unique `token`. That token prevents a stale result from being attributed to a
+later invocation. The selected leaf also constrains JSONL reconstruction to the active parent chain,
+so abandoned append-only branches are not rendered after reload.
+
+If no authoritative sidecar is available, command execution returns `applied: null`; the bridge does
+not treat a transcript difference as proof of success or failure and keeps fallback Redo disabled.
 
 ### PI — ACP over stdio, via a third-party adapter
 

@@ -239,6 +239,7 @@ export type HarnessAction = {
 
 export type HarnessActionResult = {
   action: string
-  applied: boolean
+  applied: boolean | null
   actions: HarnessAction[]
+  sessionRevision?: string
 }

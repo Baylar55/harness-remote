@@ -2518,10 +2518,10 @@ function App() {
       } else if (capabilities.actions && extensionActions.some((action) => action.id === command)) {
         const result = await api.invokeAction(config, selectedSession.id, command, selectedSession.directory)
         setExtensionActions(result.actions)
-        if (!result.applied) {
+        if (result.applied === false) {
           setActionNotice(t(command === "undo" ? 'detail.nothingToUndo' : 'detail.nothingToRedo'))
         }
-        await loadSelected(selectedSession.id, selectedSession.directory, true, result.applied)
+        await loadSelected(selectedSession.id, selectedSession.directory, true, result.applied !== false)
       } else {
         await api.sendCommand(config, selectedSession.id, command, "", selectedSession.directory, activeModel, activeAgentID)
         await loadSelected(selectedSession.id, selectedSession.directory, true)
