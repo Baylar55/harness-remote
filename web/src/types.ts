@@ -80,6 +80,10 @@ export type Session = {
     name?: string
     worktree: string
   } | null
+  revert?: {
+    messageID: string
+    partID?: string
+  }
   external?: boolean
 }
 
@@ -216,6 +220,7 @@ export type SessionView = {
   additions: number
   deletions: number
   model?: ModelSelection
+  revertMessageID?: string
   external?: boolean
 }
 

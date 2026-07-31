@@ -1279,6 +1279,7 @@ function toSessionView(session: Session, status?: SessionStatus, activityTime = 
     additions: session.summary?.additions ?? 0,
     deletions: session.summary?.deletions ?? 0,
     model: session.model ? { providerID: session.model.providerID, modelID: session.model.id, variant: session.model.variant } : undefined,
+    revertMessageID: session.revert?.messageID,
     external: session.external
   }
 }
@@ -1608,6 +1609,7 @@ function MessageContextMenu({
         >
           {text && <button type="button" role="menuitem" onClick={() => copy(false)}>{t('detail.copyText')}</button>}
           {text && <button type="button" role="menuitem" onClick={() => copy(true)}>{t('detail.copyMarkdown')}</button>}
+          {text && actions.length > 0 && <div className="message-context-menu__separator" role="separator" />}
           {actions.map((action) => (
             <button key={action.id} type="button" role="menuitem" onClick={() => {
               setPosition(null)
@@ -2094,17 +2096,22 @@ function App() {
   const messageMenuActions = useMemo(() => {
     const supported = new Set(commands.map((command) => command.name.toLowerCase()))
     const actions: MessageMenuAction[] = []
-    if (supported.has("undo")) actions.push({ id: "undo", label: t('detail.undo'), onSelect: () => void runNativeHistoryCommand("undo") })
-    if (supported.has("redo")) actions.push({ id: "redo", label: t('detail.redo'), onSelect: () => void runNativeHistoryCommand("redo") })
+    const revertMessageID = selectedSession?.revertMessageID
+    const hasUndo = config.backend !== "opencode" || messages.some((message) => message.info.role === "user" && (!revertMessageID || message.info.id < revertMessageID))
+    const hasRedo = config.backend !== "opencode" || !!revertMessageID
+    if (supported.has("undo") && hasUndo) actions.push({ id: "undo", label: t('detail.undo'), onSelect: () => void runNativeHistoryCommand("undo") })
+    if (supported.has("redo") && hasRedo) actions.push({ id: "redo", label: t('detail.redo'), onSelect: () => void runNativeHistoryCommand("redo") })
     return actions
-  }, [commands, t])
+  }, [commands, config.backend, messages, selectedSession?.revertMessageID, t])
   const selectedNewSessionDirectory = normalizeDirectory(newSessionDirectory)
 
   const renderedMessages = useMemo(() => {
+    const revertMessageID = config.backend === "opencode" ? selectedSession?.revertMessageID : undefined
     return [...messages, ...optimisticUserMessages]
+      .filter((message) => !revertMessageID || message.info.id < revertMessageID)
       .map(toRenderedMessage)
       .filter((message) => message.text || message.parts.some((part) => part.type !== "step-start" && part.type !== "step-finish"))
-  }, [messages, optimisticUserMessages])
+  }, [config.backend, messages, optimisticUserMessages, selectedSession?.revertMessageID])
 
   const timelineGroups = useMemo(() => groupRenderedMessages(renderedMessages), [renderedMessages])
 
@@ -2479,9 +2486,28 @@ function App() {
     setBusySending(true)
     setRuntimeError(null)
     try {
-      await api.sendCommand(config, selectedSession.id, command, "", selectedSession.directory, activeModel, activeAgentID)
+      let revertedSession: Session | undefined
+      if (config.backend === "opencode") {
+        const revertMessageID = selectedSession.revertMessageID
+        const userMessages = messages.filter((message) => message.info.role === "user")
+        if (command === "undo") {
+          const target = [...userMessages].reverse().find((message) => !revertMessageID || message.info.id < revertMessageID)
+          if (!target) return
+          revertedSession = await api.revertMessage(config, selectedSession.id, target.info.id, selectedSession.directory)
+        } else {
+          const next = userMessages.find((message) => !!revertMessageID && message.info.id > revertMessageID)
+          revertedSession = next
+            ? await api.revertMessage(config, selectedSession.id, next.info.id, selectedSession.directory)
+            : await api.unrevertSession(config, selectedSession.id, selectedSession.directory)
+        }
+      } else {
+        await api.sendCommand(config, selectedSession.id, command, "", selectedSession.directory, activeModel, activeAgentID)
+      }
       await loadSelected(selectedSession.id, selectedSession.directory, true)
       await refreshSessions(true)
+      if (revertedSession) {
+        setSessions((current) => current.map((item) => item.id === revertedSession.id ? { ...item, revertMessageID: revertedSession.revert?.messageID } : item))
+      }
     } catch (err) {
       setRuntimeError((err as Error).message)
     } finally {
@@ -2496,9 +2522,10 @@ function App() {
     setBusySending(true)
     setRuntimeError(null)
     try {
-      await api.revertMessage(config, selectedSession.id, messageID, selectedSession.directory)
+      const session = await api.revertMessage(config, selectedSession.id, messageID, selectedSession.directory)
       await loadSelected(selectedSession.id, selectedSession.directory, true)
       await refreshSessions(true)
+      setSessions((current) => current.map((item) => item.id === session.id ? { ...item, revertMessageID: session.revert?.messageID } : item))
     } catch (err) {
       setRuntimeError((err as Error).message)
     } finally {

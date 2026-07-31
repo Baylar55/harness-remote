@@ -992,7 +992,8 @@ p {
   position: fixed;
   z-index: 20;
   display: grid;
-  min-width: 212px;
+  min-width: 232px;
+  gap: 2px;
   padding: var(--space-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1008,12 +1009,26 @@ p {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
-  text-align: start;
+  justify-content: flex-start;
+  text-align: left;
 }
 
-.message-context-menu button:hover,
+.message-context-menu__separator {
+  height: 1px;
+  margin: var(--space-1) var(--space-2);
+  background: var(--border);
+}
+
+@media (hover: hover) {
+  .message-context-menu button:hover {
+    background: var(--surface-strong);
+  }
+}
+
 .message-context-menu button:focus-visible {
   background: var(--surface-strong);
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .message-context-menu--touch {
