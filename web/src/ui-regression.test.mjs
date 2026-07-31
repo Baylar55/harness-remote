@@ -375,14 +375,17 @@ assert.match(
   /const runText = \[\.\.\.messagesByID\.values\(\)\]\.map\(\(message\) => message\.text\)\.filter\(Boolean\)\.join\("\\n\\n"\)/,
   'a run bubble must copy every message it shows, not just the last one'
 )
-assert.match(app, /<MessageContextMenu text=\{runText\}/, 'the run bubble must hand the menu the whole run text')
+assert.match(app, /<MessageContextMenu\s+text=\{runText\}/, 'the run bubble must hand the menu the whole run text')
 assert.ok(
   !/<MessageContextMenu message=/.test(app),
   'the menu takes the text to copy: passing a message let a bubble that shows several, or none, claim one'
 )
-assert.match(app, /if \(!text\) return <article className=\{className\}>\{children\}<\/article>/, 'a bubble with nothing to copy must not offer the menu, nor take over the browser one')
+assert.match(app, /if \(!text && actions\.length === 0\) return <article className=\{className\}>\{children\}<\/article>/, 'a bubble with neither copy nor harness actions must not offer the menu')
 assert.match(app, /if \(!text\) return\s*\n\s*try \{/, 'an empty copy must not replace what the user already had in the clipboard')
 assert.match(app, /selection\.addRange\(previousRange\)/, 'the fallback carrier must give the selection back after stealing it')
+assert.match(app, /supported\.has\("undo"\)/, 'Undo must appear only when the connected harness exposes the command')
+assert.match(app, /supported\.has\("redo"\)/, 'Redo must appear only when the connected harness exposes the command')
+assert.match(app, /api\.revertMessage\(config, selectedSession\.id, messageID/, 'OpenCode message actions must use its targeted revert endpoint')
 // The rule was written for a field that no longer exists, but the class outlived it: dropping the
 // declaration with its original caller left the server name silently back in half a row.
 if (app.includes('className="field-row-span"')) {

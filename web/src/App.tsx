@@ -1505,17 +1505,25 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
+type MessageMenuAction = {
+  id: string
+  label: string
+  onSelect: () => void
+}
+
 /** Wraps a bubble in the copy menu. Takes the text to copy rather than a message, because what a
  *  bubble shows is not always one message's text: a run merges several, and some carry none at all. */
 function MessageContextMenu({
   text,
   className,
   t,
+  actions = [],
   children
 }: {
   text: string
   className: string
   t: Translator
+  actions?: MessageMenuAction[]
   children: ReactNode
 }) {
   const [position, setPosition] = useState<{ x: number, y: number, touch: boolean } | null>(null)
@@ -1528,9 +1536,10 @@ function MessageContextMenu({
   }
   const open = (x: number, y: number, touch = false) => {
     cancelLongPress()
+    const itemCount = actions.length + (text ? 2 : 0)
     setPosition({
       x: Math.max(8, Math.min(x, window.innerWidth - 220)),
-      y: Math.max(8, Math.min(y, window.innerHeight - 104)),
+      y: Math.max(8, Math.min(y, window.innerHeight - (40 * itemCount + 8))),
       touch
     })
   }
@@ -1564,7 +1573,7 @@ function MessageContextMenu({
   // anyway gave two items that could do nothing, and taking over the context menu to show them also
   // took away the browser's own — with its Copy, the one thing that would have worked on a selection
   // the user made by hand. With nothing to copy, the bubble stays out of the way.
-  if (!text) return <article className={className}>{children}</article>
+  if (!text && actions.length === 0) return <article className={className}>{children}</article>
   return (
     <article
       className={className}
@@ -1597,8 +1606,14 @@ function MessageContextMenu({
           style={position.touch ? undefined : { left: position.x, top: position.y }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <button type="button" role="menuitem" onClick={() => copy(false)}>{t('detail.copyText')}</button>
-          <button type="button" role="menuitem" onClick={() => copy(true)}>{t('detail.copyMarkdown')}</button>
+          {text && <button type="button" role="menuitem" onClick={() => copy(false)}>{t('detail.copyText')}</button>}
+          {text && <button type="button" role="menuitem" onClick={() => copy(true)}>{t('detail.copyMarkdown')}</button>}
+          {actions.map((action) => (
+            <button key={action.id} type="button" role="menuitem" onClick={() => {
+              setPosition(null)
+              action.onSelect()
+            }}>{action.label}</button>
+          ))}
         </div>
       )}
     </article>
@@ -1613,6 +1628,8 @@ function ConversationRunView({
   sessionID,
   config,
   directory,
+  actions,
+  onRevertMessage,
   t
 }: {
   items: TimelineItem[]
@@ -1620,6 +1637,8 @@ function ConversationRunView({
   sessionID: string
   config: ServerConfig
   directory: string | undefined
+  actions: MessageMenuAction[]
+  onRevertMessage: (messageID: string) => void
   t: Translator
 }) {
   const fallback = [...messagesByID.values()].pop()
@@ -1632,7 +1651,12 @@ function ConversationRunView({
   // end on a tool call — which is most of the time.
   const runText = [...messagesByID.values()].map((message) => message.text).filter(Boolean).join("\n\n")
   return (
-    <MessageContextMenu text={runText} className="message assistant fade-in" t={t}>
+    <MessageContextMenu
+      text={runText}
+      className="message assistant fade-in"
+      t={t}
+      actions={fallback ? [...actions, ...(config.backend === "opencode" ? [{ id: "revert", label: t('detail.revertToMessage'), onSelect: () => onRevertMessage(fallback.info.id) }] : [])] : actions}
+    >
       {items.map((item) =>
         item.kind === "action-group" ? (
           <ActionGroupView
@@ -1667,15 +1691,24 @@ const MessageArticle = memo(function MessageArticle({
   message,
   config,
   directory,
+  actions,
+  onRevertMessage,
   t
 }: {
   message: MessageEnvelope & { text: string }
   config: ServerConfig
   directory: string | undefined
+  actions: MessageMenuAction[]
+  onRevertMessage: (messageID: string) => void
   t: Translator
 }) {
   return (
-    <MessageContextMenu text={message.text} className={`message ${message.info.role} fade-in`} t={t}>
+    <MessageContextMenu
+      text={message.text}
+      className={`message ${message.info.role} fade-in`}
+      t={t}
+      actions={[...actions, ...(config.backend === "opencode" ? [{ id: "revert", label: t('detail.revertToMessage'), onSelect: () => onRevertMessage(message.info.id) }] : [])]}
+    >
       {buildMessageTimeline(message.parts).map((item) =>
         item.kind === "action-group" ? (
           <ActionGroupView
@@ -1716,6 +1749,8 @@ const MessagesPane = memo(function MessagesPane({
   pendingQuestions,
   config,
   directory,
+  actions,
+  onRevertMessage,
   t,
   messagesRef,
   messagesEndRef,
@@ -1734,6 +1769,8 @@ const MessagesPane = memo(function MessagesPane({
   pendingQuestions: QuestionRequest[]
   config: ServerConfig
   directory: string | undefined
+  actions: MessageMenuAction[]
+  onRevertMessage: (messageID: string) => void
   t: Translator
   messagesRef: RefObject<HTMLDivElement>
   messagesEndRef: RefObject<HTMLDivElement>
@@ -1769,7 +1806,7 @@ const MessagesPane = memo(function MessagesPane({
           <>
             {timelineGroups.map((group) =>
               group.kind === "message" ? (
-                <MessageArticle key={group.message.info.id} message={group.message} config={config} directory={directory} t={t} />
+                <MessageArticle key={group.message.info.id} message={group.message} config={config} directory={directory} actions={actions} onRevertMessage={onRevertMessage} t={t} />
               ) : (
                 <ConversationRunView
                   key={group.key}
@@ -1778,6 +1815,8 @@ const MessagesPane = memo(function MessagesPane({
                   sessionID={group.sessionID}
                   config={config}
                   directory={directory}
+                  actions={actions}
+                  onRevertMessage={onRevertMessage}
                   t={t}
                 />
               )
@@ -2052,6 +2091,13 @@ function App() {
     if (commandFilter === "skill") return commands.filter((command) => command.source === "skill")
     return commands
   }, [commands, commandFilter])
+  const messageMenuActions = useMemo(() => {
+    const supported = new Set(commands.map((command) => command.name.toLowerCase()))
+    const actions: MessageMenuAction[] = []
+    if (supported.has("undo")) actions.push({ id: "undo", label: t('detail.undo'), onSelect: () => void runNativeHistoryCommand("undo") })
+    if (supported.has("redo")) actions.push({ id: "redo", label: t('detail.redo'), onSelect: () => void runNativeHistoryCommand("redo") })
+    return actions
+  }, [commands, t])
   const selectedNewSessionDirectory = normalizeDirectory(newSessionDirectory)
 
   const renderedMessages = useMemo(() => {
@@ -2424,6 +2470,40 @@ function App() {
     setDiffFiles(diff)
     setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
     await loadProjectDashboard(directory)
+  }
+
+  async function runNativeHistoryCommand(command: "undo" | "redo") {
+    if (!selectedSession || busySending) return
+    if (command === "undo" && !window.confirm(t('detail.undoConfirm'))) return
+
+    setBusySending(true)
+    setRuntimeError(null)
+    try {
+      await api.sendCommand(config, selectedSession.id, command, "", selectedSession.directory, activeModel, activeAgentID)
+      await loadSelected(selectedSession.id, selectedSession.directory, true)
+      await refreshSessions(true)
+    } catch (err) {
+      setRuntimeError((err as Error).message)
+    } finally {
+      setBusySending(false)
+    }
+  }
+
+  async function revertToMessage(messageID: string) {
+    if (!selectedSession || busySending || config.backend !== "opencode") return
+    if (!window.confirm(t('detail.revertConfirm'))) return
+
+    setBusySending(true)
+    setRuntimeError(null)
+    try {
+      await api.revertMessage(config, selectedSession.id, messageID, selectedSession.directory)
+      await loadSelected(selectedSession.id, selectedSession.directory, true)
+      await refreshSessions(true)
+    } catch (err) {
+      setRuntimeError((err as Error).message)
+    } finally {
+      setBusySending(false)
+    }
   }
 
   async function loadProjectDashboard(directory: string) {
@@ -3924,6 +4004,8 @@ function App() {
             pendingQuestions={pendingQuestions}
             config={config}
             directory={selectedSession?.directory}
+            actions={messageMenuActions}
+            onRevertMessage={(messageID) => void revertToMessage(messageID)}
             t={t}
             jumpAffordances={jumpAffordances}
             onJumpToTop={handleJumpToTop}

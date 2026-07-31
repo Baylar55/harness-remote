@@ -101,6 +101,11 @@ type TranslationKey =
   | 'detail.waiting'
   | 'detail.copyText'
   | 'detail.copyMarkdown'
+  | 'detail.undo'
+  | 'detail.redo'
+  | 'detail.revertToMessage'
+  | 'detail.undoConfirm'
+  | 'detail.revertConfirm'
   | 'detail.send'
   | 'detail.jumpToLatest'
   | 'detail.you'
@@ -329,6 +334,11 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.waiting': 'Waiting...',
     'detail.copyText': 'Copy text',
     'detail.copyMarkdown': 'Copy as markdown',
+    'detail.undo': 'Undo last turn',
+    'detail.redo': 'Redo last undone turn',
+    'detail.revertToMessage': 'Revert to this message',
+    'detail.undoConfirm': 'Undo the last turn and restore its file changes?',
+    'detail.revertConfirm': 'Revert the conversation and file changes to this message?',
     'detail.send': 'Send',
     'detail.jumpToLatest': 'Go to latest',
     'detail.you': '👤 You',
@@ -556,6 +566,11 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.waiting': 'Attesa...',
     'detail.copyText': 'Copia testo',
     'detail.copyMarkdown': 'Copia come Markdown',
+    'detail.undo': 'Annulla ultimo turno',
+    'detail.redo': 'Ripristina ultimo turno annullato',
+    'detail.revertToMessage': 'Ripristina fino a questo messaggio',
+    'detail.undoConfirm': 'Annullare l’ultimo turno e ripristinare le sue modifiche ai file?',
+    'detail.revertConfirm': 'Ripristinare conversazione e modifiche ai file fino a questo messaggio?',
     'detail.send': 'Invia',
     'detail.jumpToLatest': 'Vai alla fine',
     'detail.you': '👤 Tu',
@@ -783,6 +798,11 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'detail.waiting': '等待中...',
     'detail.copyText': '複製文字',
     'detail.copyMarkdown': '複製為 Markdown',
+    'detail.undo': '復原上一個回合',
+    'detail.redo': '重做上一個復原的回合',
+    'detail.revertToMessage': '還原到這則訊息',
+    'detail.undoConfirm': '要復原上一個回合及其檔案變更嗎？',
+    'detail.revertConfirm': '要將對話和檔案變更還原到這則訊息嗎？',
     'detail.send': '傳送',
     'detail.jumpToLatest': '前往最新',
     'detail.you': '👤 你',

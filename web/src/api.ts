@@ -344,6 +344,13 @@ export const api = {
     })
   },
 
+  revertMessage(config: ServerConfig, sessionID: string, messageID: string, directory?: string) {
+    return request<boolean>(config, withDirectory(`/session/${sessionID}/revert`, directory), {
+      method: "POST",
+      body: { messageID }
+    })
+  },
+
   abort(config: ServerConfig, sessionID: string, directory?: string) {
     return request<boolean>(config, withDirectory(`/session/${sessionID}/abort`, directory), {
       method: "POST",
