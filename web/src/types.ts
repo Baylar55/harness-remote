@@ -20,6 +20,7 @@ export type HarnessCapabilities = {
   filesystemBrowser: boolean
   questions: boolean
   commands: boolean
+  actions: boolean
   sessionRename: boolean
   sessionDelete: boolean
 }
@@ -228,4 +229,16 @@ export type CommandInfo = {
   name: string
   description?: string
   source?: "command" | "mcp" | "skill"
+}
+
+export type HarnessAction = {
+  id: string
+  source?: string
+  enabled: boolean
+}
+
+export type HarnessActionResult = {
+  action: string
+  applied: boolean
+  actions: HarnessAction[]
 }

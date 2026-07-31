@@ -9,6 +9,8 @@ import type {
   FileEntry,
   HealthResponse,
   HarnessCapabilities,
+  HarnessAction,
+  HarnessActionResult,
   MessageEnvelope,
   ModelOption,
   ModelSelection,
@@ -327,6 +329,18 @@ export const api = {
 
   loadFileStatus(config: ServerConfig, directory?: string) {
     return request<FileStatusEntry[] | Record<string, FileStatusEntry>>(config, withDirectory("/file/status", directory))
+  },
+
+  listActions(config: ServerConfig, sessionID: string, directory?: string) {
+    return request<HarnessAction[]>(config, withDirectory(`/session/${sessionID}/action`, directory))
+  },
+
+  invokeAction(config: ServerConfig, sessionID: string, actionID: string, directory?: string) {
+    return request<HarnessActionResult>(config, withDirectory(`/session/${sessionID}/action/${encodeURIComponent(actionID)}`, directory), {
+      method: "POST",
+      body: {},
+      readTimeout: 300_000
+    })
   },
 
   sendPrompt(config: ServerConfig, sessionID: string, text: string, directory?: string, model?: ModelSelection, agentID?: string) {

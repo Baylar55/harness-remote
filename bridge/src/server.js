@@ -110,7 +110,7 @@ function providersResponse(models, fallbackProviderID) {
 export function createBridgeServer({ config, acp, serviceOptions }) {
   const backend = config.backend ?? "omp"
   const profile = harnessProfile(backend)
-  const service = new AcpService(acp, serviceOptions)
+  const service = new AcpService(acp, { ...serviceOptions, actionProviders: profile.actionProviders })
   return http.createServer(async (request, response) => {
     applyCorsHeaders(request, response, config)
     // Browsers omit credentials on the preflight, so it must be answered before auth.
@@ -193,9 +193,9 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
         return
       }
 
-      const sessionMatch = /^\/session\/([^/]+)(?:\/(message|prompt_async|abort|todo|diff))?$/.exec(url.pathname)
+      const sessionMatch = /^\/session\/([^/]+)(?:\/(message|prompt_async|abort|todo|diff|action)(?:\/([^/]+))?)?$/.exec(url.pathname)
       if (sessionMatch) {
-        const [, sessionID, operation] = sessionMatch
+        const [, sessionID, operation, actionID] = sessionMatch
         if (request.method === "PATCH" && !operation) {
           const body = await readBody(request)
           writeJSON(response, 200, await service.renameSession(sessionID, typeof body.title === "string" ? body.title : ""))
@@ -216,6 +216,14 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
         }
         if (request.method === "GET" && operation === "diff") {
           writeJSON(response, 200, [])
+          return
+        }
+        if (request.method === "GET" && operation === "action" && !actionID) {
+          writeJSON(response, 200, await service.actions(sessionID))
+          return
+        }
+        if (request.method === "POST" && operation === "action" && actionID) {
+          writeJSON(response, 200, await service.invokeAction(sessionID, actionID))
           return
         }
         if (request.method === "POST" && operation === "prompt_async") {

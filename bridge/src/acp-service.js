@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
+import {
+  applyExtensionActionSuccess,
+  listExtensionActions,
+  resetExtensionActionState,
+  resolveExtensionAction
+} from "./extension-actions.js"
 
 function toEpoch(value) {
   const epoch = Date.parse(value ?? "")
@@ -32,6 +38,34 @@ function sessionView(session, status = "idle", title = session.title, external =
 function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
 }
+function stableSemanticValue(value) {
+  if (Array.isArray(value)) return value.map(stableSemanticValue)
+  if (!value || typeof value !== "object") return value
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableSemanticValue(value[key])]))
+}
+
+function semanticMessagePart(part) {
+  if (!part || typeof part !== "object") return part
+  const semantic = {}
+  for (const key of Object.keys(part).sort()) {
+    if (["id", "messageID", "sessionID", "callID", "time"].includes(key)) continue
+    if (key === "state" && part.state && typeof part.state === "object") {
+      const { time: _time, ...state } = part.state
+      semantic.state = stableSemanticValue(state)
+      continue
+    }
+    semantic[key] = stableSemanticValue(part[key])
+  }
+  return semantic
+}
+
+function semanticHistorySignature(messages) {
+  return JSON.stringify(messages.map((message) => ({
+    role: message?.info?.role,
+    parts: (message?.parts ?? []).map(semanticMessagePart)
+  })))
+}
+
 
 function mergeReplay(previous, replayed) {
   if (previous.length === 0) return replayed
@@ -116,6 +150,10 @@ export class AcpService {
   #messages = new Map()
   #todos = new Map()
   #configOptions = new Map()
+  #commandCatalogs = new Map()
+  #commandCatalogWaiters = new Map()
+  #actionStates = new Map()
+  #actionProviders
   #loaded = new Set()
   #loads = new Map()
   #sessionListing
@@ -138,12 +176,19 @@ export class AcpService {
   #snapshotWrites = new Map()
   #preserveListedTimestamps
   #reloadOnHistoryRefresh
-  constructor(acp, { snapshotDirectory, historyLoader, preserveListedTimestamps = false, reloadOnHistoryRefresh = true } = {}) {
+  constructor(acp, {
+    snapshotDirectory,
+    historyLoader,
+    preserveListedTimestamps = false,
+    reloadOnHistoryRefresh = true,
+    actionProviders = []
+  } = {}) {
     this.#acp = acp
     this.#snapshotDirectory = snapshotDirectory
     this.#historyLoader = historyLoader
     this.#preserveListedTimestamps = preserveListedTimestamps
     this.#reloadOnHistoryRefresh = reloadOnHistoryRefresh
+    this.#actionProviders = actionProviders
     acp.on("notification", (notification) => this.#handleNotification(notification))
   }
 
@@ -213,6 +258,10 @@ export class AcpService {
     this.#todos.delete(sessionID)
     this.#titles.delete(sessionID)
     this.#configOptions.delete(sessionID)
+    this.#commandCatalogs.delete(sessionID)
+    for (const resolve of this.#commandCatalogWaiters.get(sessionID) ?? []) resolve()
+    this.#commandCatalogWaiters.delete(sessionID)
+    this.#actionStates.delete(sessionID)
     this.#loaded.delete(sessionID)
     this.#ownedSessions.delete(sessionID)
     this.#promptAcknowledgements.delete(sessionID)
@@ -243,6 +292,92 @@ export class AcpService {
     await this.#loadForConfigOptions(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
     return option?.options?.map((candidate) => ({ ...candidate, currentValue: candidate.value === option.currentValue })) ?? []
+  }
+
+  async actions(sessionID) {
+    if (!this.#commandCatalogs.has(sessionID)) {
+      await this.#load(sessionID, true, true)
+      await this.#waitForCommandCatalog(sessionID)
+    }
+    return this.#availableActions(sessionID)
+  }
+
+  #waitForCommandCatalog(sessionID) {
+    if (this.#commandCatalogs.has(sessionID)) return Promise.resolve()
+    return new Promise((resolve) => {
+      let waiters = this.#commandCatalogWaiters.get(sessionID)
+      if (!waiters) {
+        waiters = new Set()
+        this.#commandCatalogWaiters.set(sessionID, waiters)
+      }
+      const finish = () => {
+        clearTimeout(timer)
+        waiters.delete(finish)
+        if (waiters.size === 0) this.#commandCatalogWaiters.delete(sessionID)
+        resolve()
+      }
+      const timer = setTimeout(finish, 500)
+      waiters.add(finish)
+    })
+  }
+
+  async invokeAction(sessionID, actionID) {
+    const available = await this.actions(sessionID)
+    if (!available.some((action) => action.id === actionID)) throw new Error(`Harness action is not available: ${actionID}`)
+    if (!available.some((action) => action.id === actionID && action.enabled)) throw new Error(`Harness action is disabled: ${actionID}`)
+    const resolved = resolveExtensionAction(
+      this.#actionProviders,
+      this.#commandCatalogs.get(sessionID) ?? [],
+      actionID
+    )
+    if (!resolved) throw new Error(`Harness action is not available: ${actionID}`)
+
+    const before = semanticHistorySignature(this.#messages.get(sessionID) ?? [])
+    this.#ownedSessions.add(sessionID)
+    this.#active.add(sessionID)
+    this.#emit("session.updated", sessionID)
+    let applied = false
+    try {
+      await this.#acp.request("session/prompt", {
+        sessionId: sessionID,
+        prompt: [{ type: "text", text: `/${resolved.action.command}` }]
+      }, 300_000)
+      await this.#loadSession(sessionID, true, true)
+      applied = semanticHistorySignature(this.#messages.get(sessionID) ?? []) !== before
+      if (applied) applyExtensionActionSuccess(this.#actionState(sessionID), resolved.action)
+      this.#emit("message.updated", sessionID)
+      this.#persistSnapshot(sessionID)
+    } finally {
+      this.#active.delete(sessionID)
+      this.#emit("session.updated", sessionID)
+    }
+    return { action: actionID, applied, actions: this.#availableActions(sessionID) }
+  }
+
+  #actionState(sessionID) {
+    let state = this.#actionStates.get(sessionID)
+    if (!state) {
+      state = new Map()
+      this.#actionStates.set(sessionID, state)
+    }
+    return state
+  }
+
+  #availableActions(sessionID) {
+    return listExtensionActions(
+      this.#actionProviders,
+      this.#commandCatalogs.get(sessionID) ?? [],
+      this.#actionState(sessionID),
+      this.#isBusy(sessionID)
+    )
+  }
+
+  #resetActionsForSessionChange(sessionID) {
+    resetExtensionActionState(
+      this.#actionProviders,
+      this.#commandCatalogs.get(sessionID) ?? [],
+      this.#actionState(sessionID)
+    )
   }
 
   async setModel(sessionID, model) {
@@ -278,6 +413,7 @@ export class AcpService {
     } else {
       await this.#load(sessionID)
     }
+    this.#resetActionsForSessionChange(sessionID)
     if (this.#active.has(sessionID)) {
       const messageID = this.#recordPrompt(sessionID, text)
       const queue = this.#queues.get(sessionID) ?? []
@@ -457,12 +593,13 @@ export class AcpService {
     }
   }
 
-  async #loadSession(sessionID, requireConfigOptions = false) {
+  async #loadSession(sessionID, requireConfigOptions = false, replaceHistory = false) {
     const session = this.#sessions.get(sessionID)
     if (!session) throw new Error("Harness session not found")
     await this.#restoreSnapshot(sessionID)
     let previousMessages = this.#messages.get(sessionID) ?? []
     const previousTodos = this.#todos.get(sessionID) ?? []
+    const previousMessageSnapshot = semanticHistorySignature(previousMessages)
     if (this.#historyLoader) {
       try {
         const persistedMessages = await this.#historyLoader(sessionID)
@@ -489,9 +626,12 @@ export class AcpService {
       const result = await this.#acp.request("session/load", { sessionId: sessionID, cwd: session.cwd, mcpServers: [] }, 300_000)
       this.#rememberConfigOptions(sessionID, result.configOptions)
       const replayedMessages = this.#messages.get(sessionID) ?? []
-      this.#messages.set(sessionID, mergeReplay(previousMessages, replayedMessages))
+      this.#messages.set(sessionID, replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
       const replayedTodos = this.#todos.get(sessionID) ?? []
-      this.#todos.set(sessionID, mergeTodos(previousTodos, replayedTodos))
+      this.#todos.set(sessionID, replaceHistory ? replayedTodos : mergeTodos(previousTodos, replayedTodos))
+      if (semanticHistorySignature(this.#messages.get(sessionID) ?? []) !== previousMessageSnapshot) {
+        this.#resetActionsForSessionChange(sessionID)
+      }
       this.#loaded.add(sessionID)
       this.#persistSnapshot(sessionID)
     } catch (error) {
@@ -573,6 +713,16 @@ export class AcpService {
     const { sessionId, update } = params
     const replaying = this.#replaying.has(sessionId)
     const session = this.#sessions.get(sessionId)
+    if (update.sessionUpdate === "available_commands_update") {
+      const commands = Array.isArray(update.availableCommands)
+        ? update.availableCommands.filter((command) => typeof command?.name === "string")
+        : []
+      this.#commandCatalogs.set(sessionId, commands)
+      for (const resolve of this.#commandCatalogWaiters.get(sessionId) ?? []) resolve()
+      this.#commandCatalogWaiters.delete(sessionId)
+      if (!replaying) this.#emit("session.updated", sessionId)
+      return
+    }
     if (update.sessionUpdate === "plan") {
       const todos = update.entries.map((entry, index) => ({
         id: `${sessionId}:${index}`,

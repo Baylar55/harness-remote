@@ -295,6 +295,72 @@ class HeldTurnOmpAcp extends EventEmitter {
   }
 }
 
+class ExtensionActionAcp extends EventEmitter {
+  agentInfo = { version: "17.1.3" }
+  prompts = []
+  commands
+  loads = 0
+  fullHistory = [
+    { role: "user", id: "user-1", text: "Change the file" },
+    { role: "assistant", id: "assistant-1", text: "Changed the file" }
+  ]
+  history = [...this.fullHistory]
+
+  constructor({ commands = true } = {}) {
+    super()
+    this.commands = commands
+  }
+
+  async start() {}
+
+  async listSessions() {
+    return [{ sessionId: "session-1", title: "Actions", cwd: process.cwd(), updatedAt: "2026-07-31T00:00:00.000Z" }]
+  }
+
+  async request(method, params) {
+    if (method === "session/prompt") {
+      const command = params.prompt[0].text
+      this.prompts.push(command)
+      if (command === "/undo" && this.history.length === this.fullHistory.length) this.history = [this.fullHistory[0]]
+      if (command === "/redo" && this.history.length < this.fullHistory.length) this.history = [...this.fullHistory]
+      return { stopReason: "end_turn" }
+    }
+    if (method !== "session/load") return {}
+    this.loads += 1
+    this.emit("notification", {
+      method: "session/update",
+      params: {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: this.commands
+            ? [
+                { name: "undo", description: "Revert file changes and session context for the last turn" },
+                { name: "redo", description: "Restore the most recently undone turn" }
+              ]
+            : [{ name: "help", description: "Show help" }]
+        }
+      }
+    })
+    for (const message of this.history) {
+      this.emit("notification", {
+        method: "session/update",
+        params: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: message.role === "user" ? "user_message_chunk" : "agent_message_chunk",
+            messageId: `${message.id}-replay-${this.loads}`,
+            content: { type: "text", text: message.text }
+          }
+        }
+      })
+    }
+    return { configOptions: [] }
+  }
+
+  notify() {}
+}
+
 async function startServer({ acp = new FakeAcp(), ...options } = {}) {
   const server = createBridgeServer({
     acp,
@@ -597,11 +663,107 @@ test("reports capabilities from the selected harness profile", async () => {
     assert.equal(ompCapabilities.models, true)
     assert.equal(ompCapabilities.todos, true)
     assert.equal(ompCapabilities.commands, false)
+    assert.equal(ompCapabilities.actions, true)
     assert.equal(piCapabilities.models, true)
     assert.equal(piCapabilities.todos, false)
     assert.equal(piCapabilities.commands, true)
+    assert.equal(piCapabilities.actions, false)
   } finally {
     await Promise.all([omp.close(), pi.close()])
+  }
+})
+
+test("does not advertise extension actions when OMP did not load their commands", async () => {
+  const bridge = await startServer({ acp: new ExtensionActionAcp({ commands: false }) })
+  try {
+    assert.deepEqual(await readJSON(bridge.baseURL, "/session/session-1/action"), [])
+    const response = await fetch(`${bridge.baseURL}/session/session-1/action/undo`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+    assert.equal(response.status, 400)
+    assert.match((await response.json()).error, /not available/)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("reports a repeated Undo at the history boundary as a semantic no-op", async () => {
+  const acp = new ExtensionActionAcp()
+  const bridge = await startServer({ acp })
+  try {
+    await readJSON(bridge.baseURL, "/session/session-1/action")
+    const first = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+    const second = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+
+    assert.equal(first.applied, true)
+    assert.equal(second.applied, false, "replayed timestamps and message ids must not make unchanged history look applied")
+    assert.equal(second.actions.find((action) => action.id === "redo").enabled, true)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("invokes loaded OMP extension actions and keeps Redo state session-specific", async () => {
+  const acp = new ExtensionActionAcp()
+  const bridge = await startServer({ acp })
+  try {
+    assert.deepEqual(await readJSON(bridge.baseURL, "/session/session-1/action"), [
+      { id: "undo", source: "omp-undo-redo", enabled: true },
+      { id: "redo", source: "omp-undo-redo", enabled: false }
+    ])
+
+    const undo = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+    assert.equal(undo.applied, true)
+    assert.equal(undo.actions.find((action) => action.id === "redo").enabled, true)
+    assert.deepEqual(acp.prompts, ["/undo"])
+    assert.deepEqual(conversation(await readJSON(bridge.baseURL, "/session/session-1/message")), [
+      "user: Change the file"
+    ], "the structured action must not appear as a user prompt")
+
+    const redo = await readJSON(bridge.baseURL, "/session/session-1/action/redo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+    assert.equal(redo.applied, true)
+    assert.equal(redo.actions.find((action) => action.id === "redo").enabled, false)
+    assert.deepEqual(acp.prompts, ["/undo", "/redo"])
+    assert.deepEqual(conversation(await readJSON(bridge.baseURL, "/session/session-1/message")), [
+      "user: Change the file",
+      "assistant: Changed the file"
+    ])
+
+    await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}"
+    })
+    assert.equal((await readJSON(bridge.baseURL, "/session/session-1/action"))
+      .find((action) => action.id === "redo").enabled, true)
+    await readJSON(bridge.baseURL, "/session/session-1/prompt_async", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ parts: [{ type: "text", text: "Start a new branch" }] })
+    })
+    await waitForIdle(bridge.baseURL, "session-1")
+    assert.equal((await readJSON(bridge.baseURL, "/session/session-1/action"))
+      .find((action) => action.id === "redo").enabled, false, "a new prompt must invalidate bridge-local Redo")
+  } finally {
+    await bridge.close()
   }
 })
 

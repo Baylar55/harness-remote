@@ -13,6 +13,7 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: true,
     commands: true,
+    actions: false,
     sessionRename: true,
     sessionDelete: true
   },
@@ -28,6 +29,7 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: false,
     commands: false,
+    actions: true,
     sessionRename: true,
     sessionDelete: true
   },
@@ -43,6 +45,7 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: false,
     commands: true,
+    actions: false,
     sessionRename: true,
     sessionDelete: true
   },
@@ -58,6 +61,7 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: false,
     commands: false,
+    actions: false,
     sessionRename: true,
     sessionDelete: true
   }

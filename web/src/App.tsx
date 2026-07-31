@@ -16,7 +16,7 @@ import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode
 import { DEFAULT_HARNESS_CAPABILITIES } from "./backendCapabilities"
 import { BACKEND_CLIENTS } from "./backendClient"
 import { createServerProfile, loadActiveServerProfile, loadServerProfiles, persistServerProfiles, type SavedServerProfile } from "./serverProfiles"
-import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
+import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessAction, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
   FolderIcon,
@@ -1875,6 +1875,7 @@ function App() {
   const [capabilities, setCapabilities] = useState<HarnessCapabilities>(() => DEFAULT_HARNESS_CAPABILITIES[config.backend])
   const [connectedVersion, setConnectedVersion] = useState<string>("")
   const [commands, setCommands] = useState<CommandInfo[]>([])
+  const [extensionActions, setExtensionActions] = useState<HarnessAction[]>([])
   const [commandFilter, setCommandFilter] = useState<"all" | "skill">("all")
   const [agentOptions, setAgentOptions] = useState<AgentOption[]>([])
   const [agentLoadError, setAgentLoadError] = useState<string | null>(null)
@@ -1979,6 +1980,7 @@ function App() {
   const [awaitingAssistantReply, setAwaitingAssistantReply] = useState(false)
   const [settingsNotice, setSettingsNotice] = useState<{ type: NoticeType; text: string } | null>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<string | null>(null)
   const [connectionState, setConnectionState] = useState<"idle" | "connecting" | "connected" | "reconnecting" | "offline">(
     config.host && config.port > 0 ? "connecting" : "idle"
   )
@@ -2097,14 +2099,18 @@ function App() {
     const supported = new Set(commands.map((command) => command.name.toLowerCase()))
     const actions: MessageMenuAction[] = []
     const revertMessageID = selectedSession?.revertMessageID
-    const hasUndo = config.backend !== "opencode" || messages.some((message) => message.info.role === "user" && (!revertMessageID || message.info.id < revertMessageID))
-    const hasRedo = config.backend !== "opencode" || !!revertMessageID
-    const supportsUndo = config.backend === "opencode" || supported.has("undo")
-    const supportsRedo = config.backend === "opencode" || supported.has("redo")
+    const undoAction = extensionActions.find((action) => action.id === "undo")
+    const redoAction = extensionActions.find((action) => action.id === "redo")
+    const hasUndo = config.backend === "opencode"
+      ? messages.some((message) => message.info.role === "user" && (!revertMessageID || message.info.id < revertMessageID))
+      : undoAction ? undoAction.enabled && messages.some((message) => message.info.role === "user") : true
+    const hasRedo = config.backend === "opencode" ? !!revertMessageID : redoAction ? redoAction.enabled : true
+    const supportsUndo = config.backend === "opencode" || !!undoAction || supported.has("undo")
+    const supportsRedo = config.backend === "opencode" || !!redoAction || supported.has("redo")
     if (supportsUndo && hasUndo) actions.push({ id: "undo", label: t('detail.undo'), onSelect: () => void runNativeHistoryCommand("undo") })
     if (supportsRedo && hasRedo) actions.push({ id: "redo", label: t('detail.redo'), onSelect: () => void runNativeHistoryCommand("redo") })
     return actions
-  }, [commands, config.backend, messages, selectedSession?.revertMessageID, t])
+  }, [commands, config.backend, extensionActions, messages, selectedSession?.revertMessageID, t])
   const selectedNewSessionDirectory = normalizeDirectory(newSessionDirectory)
 
   const renderedMessages = useMemo(() => {
@@ -2184,6 +2190,7 @@ function App() {
     setSelectedModelKey(readStoredModel(config.backend, sessionID))
     loadModelsRequestRef.current += 1
     setModelOptions([])
+    setExtensionActions([])
     setMessages([])
     loadedMessagesRef.current = []
     setLoadedSessionID(null)
@@ -2195,6 +2202,7 @@ function App() {
     setDashboardError(null)
     setAwaitingAssistantReply(false)
     setRuntimeError(null)
+    setActionNotice(null)
     setView("detail")
     setLoadingSessionID(sessionID)
     try {
@@ -2225,6 +2233,8 @@ function App() {
       setAwaitingAssistantReply(false)
       setConnectedVersion("")
       setCommands([])
+      setExtensionActions([])
+      setActionNotice(null)
       setAgentOptions([])
       setModelOptions([])
       setSelectedModelKey(readStoredModel(nextConfig.backend))
@@ -2452,13 +2462,14 @@ function App() {
     localStorage.setItem(AGENT_STORAGE_KEY, nextAgentID)
   }
 
-  async function loadSelected(sessionID: string, directory: string, refreshHistory = false) {
+  async function loadSelected(sessionID: string, directory: string, refreshHistory = false, replaceMessages = false) {
     const requestID = ++loadSelectedRequestRef.current
-    const [msg, todo, diff, questions] = await Promise.all([
+    const [msg, todo, diff, questions, actions] = await Promise.all([
       api.loadMessages(config, sessionID, directory, backendClient.messageRefreshSupported && refreshHistory),
       capabilities.todos ? api.loadTodo(config, sessionID, directory) : Promise.resolve([]),
       capabilities.diff ? api.loadDiff(config, sessionID, directory).catch(() => []) : Promise.resolve([]),
-      capabilities.questions ? api.loadQuestions(config, directory).catch(() => []) : Promise.resolve([])
+      capabilities.questions ? api.loadQuestions(config, directory).catch(() => []) : Promise.resolve([]),
+      capabilities.actions ? api.listActions(config, sessionID, directory).catch(() => []) : Promise.resolve([])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
     setLoadedSessionID(sessionID)
@@ -2472,12 +2483,13 @@ function App() {
     if (!messagesHaveSameContent(current, msg)) {
       shouldAutoScrollRef.current = messagesExtendContent(current, msg) && isNearMessagesBottom()
       loadedMessagesRef.current = msg
-      setMessages((prev) => mergeFetchedMessages(prev, msg))
+      setMessages((prev) => replaceMessages ? msg : mergeFetchedMessages(prev, msg))
     }
     setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
     setTodos(todo)
     setDiffFiles(diff)
     setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
+    setExtensionActions(actions)
     await loadProjectDashboard(directory)
   }
 
@@ -2487,6 +2499,7 @@ function App() {
 
     setBusySending(true)
     setRuntimeError(null)
+    setActionNotice(null)
     try {
       let revertedSession: Session | undefined
       if (config.backend === "opencode") {
@@ -2502,10 +2515,18 @@ function App() {
             ? await api.revertMessage(config, selectedSession.id, next.info.id, selectedSession.directory)
             : await api.unrevertSession(config, selectedSession.id, selectedSession.directory)
         }
+      } else if (capabilities.actions && extensionActions.some((action) => action.id === command)) {
+        const result = await api.invokeAction(config, selectedSession.id, command, selectedSession.directory)
+        setExtensionActions(result.actions)
+        if (!result.applied) {
+          setActionNotice(t(command === "undo" ? 'detail.nothingToUndo' : 'detail.nothingToRedo'))
+        }
+        await loadSelected(selectedSession.id, selectedSession.directory, true, result.applied)
       } else {
         await api.sendCommand(config, selectedSession.id, command, "", selectedSession.directory, activeModel, activeAgentID)
+        await loadSelected(selectedSession.id, selectedSession.directory, true)
       }
-      await loadSelected(selectedSession.id, selectedSession.directory, true)
+      if (config.backend === "opencode") await loadSelected(selectedSession.id, selectedSession.directory, true)
       await refreshSessions(true)
       if (revertedSession) {
         setSessions((current) => current.map((item) => item.id === revertedSession.id ? { ...item, revertMessageID: revertedSession.revert?.messageID } : item))
@@ -2742,6 +2763,7 @@ function App() {
     if (!selectedSession) return
     const text = composer.trim()
     if (!text) return
+    setActionNotice(null)
 
     if (text.startsWith("/")) {
       const normalized = text.slice(1)
@@ -4088,6 +4110,7 @@ function App() {
           </div>
 
           {runtimeError && <div className="error fade-in">✗ {runtimeError}</div>}
+          {actionNotice && <div className="notice info fade-in">ℹ {actionNotice}</div>}
         </main>
       )}
 

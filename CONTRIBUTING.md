@@ -88,10 +88,12 @@ The bridge implements a deliberate subset of the app's API:
 **Implemented:** `/v1/health`, `/global/health`, `/v1/capabilities`, `/v1/events`, `/global/event`,
 `/session` (list and create), `/v1/sessions`, `/experimental/session`, `/session/status`, `/path`,
 `/file`, `/command` (empty), `/agent` (empty), `/config/providers`, and on a session:
-`message`, `todo`, `diff` (empty), `prompt_async`, `abort`.
+`message`, `todo`, `diff` (empty), `prompt_async`, `abort`, rename, delete, plus generic action
+discovery and invocation at `action` and `action/{name}`. OMP currently maps the optional
+`omp-undo-redo` extension onto the generic action API only after ACP advertises both commands.
 
 **Not implemented — anything else 404s**, including `/question` and its replies, `/project/current`,
-`/vcs`, `/file/status`, `/session/{id}/command`, and renaming or deleting a session.
+`/vcs`, `/file/status`, and `/session/{id}/command`.
 
 When you add a call, pick one of two patterns already used in the codebase:
 
