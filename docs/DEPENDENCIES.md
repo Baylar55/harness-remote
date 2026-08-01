@@ -43,17 +43,22 @@ only when the active `omp acp` session advertises both `undo` and `redo`. The pa
 host-side OMP plugin; it is not an app or bridge dependency. Its command catalog proves that the
 handlers were registered in that runtime.
 
-Action availability and the active tree revision come from the extension-owned sidecar under the
-repository's Git common directory at `omp-undo-redo/history/<sha256-session-id>.json`. The bridge
-adapts the extension's durable schema 1 (`checkpoints` plus `currentIndex`) into `undo`/`redo`
-availability and an active leaf revision. A future sidecar may publish the normalized optional
-contract directly: `actions`, `sessionRevision`, `activeSessionLeaf`, and an invocation
-`actionResult` with a unique `token`. That token prevents a stale result from being attributed to a
-later invocation. The selected leaf also constrains JSONL reconstruction to the active parent chain,
-so abandoned append-only branches are not rendered after reload.
+Live action availability comes from extension version 1.1.0 or newer under
+`~/.omp/omp-undo-redo/runtime/<acp-pid>/`. The bridge validates the runtime marker against the exact
+ACP child PID, then reads schema-2 session state containing `actions`, `sessionRevision`,
+`activeSessionLeaf`, and an invocation `actionResult` with a unique `token`. Process and runtime IDs
+prevent stale or concurrent OMP state from controlling the session. This contract works for both Git
+and session-only workspaces.
 
-If no authoritative sidecar is available, command execution returns `applied: null`; the bridge does
-not treat a transcript difference as proof of success or failure and keeps fallback Redo disabled.
+The repository Git common-directory sidecar at
+`omp-undo-redo/history/<sha256-session-id>.json` remains the durable fallback. The bridge adapts its
+schema 1 (`checkpoints` plus `currentIndex`) into action availability and an active leaf revision.
+The selected leaf constrains JSONL reconstruction to the active parent chain, so abandoned
+append-only branches are not rendered after reload.
+
+If neither authoritative source is available, the bridge hides Undo/Redo instead of synthesizing
+availability from defaults. It also declines to select an active branch from JSONL append order and
+lets ACP replay the live branch.
 
 ### PI — ACP over stdio, via a third-party adapter
 

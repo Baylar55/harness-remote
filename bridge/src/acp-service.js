@@ -379,7 +379,7 @@ export class AcpService {
     const state = await loadExtensionActionState(
       this.#actionProviders,
       requireCommands ? this.#commandCatalogs.get(sessionID) ?? [] : undefined,
-      { sessionID, directory: session.cwd }
+      { sessionID, directory: session.cwd, processID: this.#acp.processID }
     )
     if (state) this.#authoritativeActionStates.set(sessionID, state)
     else this.#authoritativeActionStates.delete(sessionID)

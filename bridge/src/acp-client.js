@@ -33,6 +33,10 @@ export class AcpClient extends EventEmitter {
     return this.#agentInfo
   }
 
+  /** PID identifies extension runtime state published by this exact ACP process. */
+  get processID() {
+    return Number.isInteger(this.#child?.pid) ? this.#child.pid : undefined
+  }
 
   async start() {
     if (this.#child) return
