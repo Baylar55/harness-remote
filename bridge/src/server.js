@@ -193,7 +193,7 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
         return
       }
 
-      const sessionMatch = /^\/session\/([^/]+)(?:\/(message|prompt_async|abort|todo|diff|action)(?:\/([^/]+))?)?$/.exec(url.pathname)
+      const sessionMatch = /^\/session\/([^/]+)(?:\/(message|prompt_async|abort|todo|diff|action|command)(?:\/([^/]+))?)?$/.exec(url.pathname)
       if (sessionMatch) {
         const [, sessionID, operation, actionID] = sessionMatch
         if (request.method === "PATCH" && !operation) {
@@ -234,6 +234,18 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
           writeJSON(response, 200, true)
           return
         }
+        // ACP has no command channel: a harness command is prompt text beginning
+        // with a slash, which is exactly what the app's composer would have sent
+        // had the picker never existed.
+        if (request.method === "POST" && operation === "command") {
+          const body = await readBody(request)
+          if (typeof body.command !== "string" || !body.command) throw new Error("A command name is required")
+          const argumentsText = typeof body.arguments === "string" ? body.arguments.trim() : ""
+          const text = argumentsText ? `/${body.command} ${argumentsText}` : `/${body.command}`
+          await service.prompt(sessionID, text, modelWireName(body.model))
+          writeJSON(response, 200, true)
+          return
+        }
         if (request.method === "POST" && operation === "abort") {
           service.abort(sessionID)
           writeJSON(response, 200, true)
@@ -241,7 +253,7 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
         }
       }
       if (request.method === "GET" && url.pathname === "/command") {
-        writeJSON(response, 200, [])
+        writeJSON(response, 200, await service.commands(url.searchParams.get("sessionID") ?? undefined))
         return
       }
       if (request.method === "GET" && url.pathname === "/agent") {

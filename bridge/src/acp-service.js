@@ -144,6 +144,17 @@ export function isHarnessInjectedText(text) {
   return HARNESS_INJECTED_BLOCK.test(text)
 }
 
+// The app groups the picker by source and offers a skill-only filter, so the
+// `skill:` prefix OMP puts on skill commands has to survive as structured data
+// rather than staying buried in the name.
+function commandInfoList(commands) {
+  return commands.map((command) => ({
+    name: command.name,
+    description: command.description ?? undefined,
+    source: command.name.startsWith("skill:") ? "skill" : "command"
+  }))
+}
+
 export class AcpService {
   #acp
   #sessions = new Map()
@@ -303,6 +314,21 @@ export class AcpService {
     }
     await this.#refreshActionState(sessionID)
     return this.#availableActions(sessionID)
+  }
+
+  // The catalog is per ACP session, but a harness advertises the same commands for
+  // every session on the machine, so the newest one answers the app's session-less
+  // GET /command. Without that fallback the picker is empty until a session loads.
+  async commands(sessionID) {
+    if (sessionID) {
+      if (!this.#commandCatalogs.has(sessionID)) {
+        await this.#load(sessionID, true, true)
+        await this.#waitForCommandCatalog(sessionID)
+      }
+      return commandInfoList(this.#commandCatalogs.get(sessionID) ?? [])
+    }
+    const catalogs = [...this.#commandCatalogs.values()]
+    return commandInfoList(catalogs.at(-1) ?? [])
   }
 
   #waitForCommandCatalog(sessionID) {
