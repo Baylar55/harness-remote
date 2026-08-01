@@ -17,6 +17,7 @@ import type {
   ProjectCurrent,
   PathInfo,
   QuestionRequest,
+  PermissionRequest,
   ServerConfig,
   Session,
   SessionStatus,
@@ -395,5 +396,16 @@ export const api = {
       method: "POST",
       body: {}
     })
-  }
+  },
+
+  loadPermissions(config: ServerConfig, directory?: string) {
+    return request<PermissionRequest[]>(config, withDirectory("/permission", directory))
+  },
+
+  replyPermission(config: ServerConfig, requestID: string, reply: "once" | "always" | "reject", directory?: string) {
+    return request<boolean>(config, withDirectory(`/permission/${requestID}/reply`, directory), {
+      method: "POST",
+      body: { reply }
+    })
+  },
 }

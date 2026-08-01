@@ -16,7 +16,7 @@ import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode
 import { DEFAULT_HARNESS_CAPABILITIES } from "./backendCapabilities"
 import { BACKEND_CLIENTS } from "./backendClient"
 import { createServerProfile, loadActiveServerProfile, loadServerProfiles, persistServerProfiles, type SavedServerProfile } from "./serverProfiles"
-import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessAction, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
+import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessAction, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, PermissionRequest, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
   FolderIcon,
@@ -860,6 +860,60 @@ function QuestionCard({
         <button type="button" className="btn-primary" onClick={submit} disabled={submitting || !canSubmit}>
           {t('question.sendAnswer')}
         </button>
+      </div>
+    </article>
+  )
+}
+
+function PermissionCard({
+  config,
+  directory,
+  request,
+  onResolved,
+  t
+}: {
+  config: ServerConfig
+  directory: string
+  request: PermissionRequest
+  onResolved: (id: string) => void
+  t: Translator
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function reply(response: "once" | "always" | "reject") {
+    setSubmitting(true)
+    setError(null)
+    try {
+      await api.replyPermission(config, request.id, response, directory)
+      onResolved(request.id)
+    } catch (err) {
+      setError((err as Error).message)
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <article className="message assistant question-card fade-in" aria-label={t('permission.ariaLabel')}>
+      <div className="question-block">
+        <div className="question-header">{t('permission.requested', { permission: request.permission })}</div>
+        <div className="question-options">
+          {request.patterns.map((pattern) => <code key={pattern}>{pattern}</code>)}
+        </div>
+      </div>
+      {error && <p className="question-error">{error}</p>}
+      <div className="question-actions">
+        <button type="button" className="btn-danger" onClick={() => void reply("reject")} disabled={submitting}>
+          {t('permission.deny')}
+        </button>
+        <button type="button" className="btn-secondary" onClick={() => void reply("once")} disabled={submitting}>
+          {t('permission.allowOnce')}
+        </button>
+        {request.always.length > 0 && (
+          <button type="button" className="btn-primary" onClick={() => void reply("always")} disabled={submitting}>
+            {t('permission.allowAlways')}
+          </button>
+        )}
       </div>
     </article>
   )
@@ -1749,6 +1803,7 @@ const MessagesPane = memo(function MessagesPane({
   timelineGroups,
   showTypingBubble,
   pendingQuestions,
+  pendingPermissions,
   config,
   directory,
   actions,
@@ -1758,6 +1813,7 @@ const MessagesPane = memo(function MessagesPane({
   messagesEndRef,
   onMessagesScroll,
   onQuestionResolved,
+  onPermissionResolved,
   jumpAffordances,
   onJumpToTop,
   onJumpToBottom
@@ -1769,6 +1825,7 @@ const MessagesPane = memo(function MessagesPane({
   timelineGroups: RenderGroup[]
   showTypingBubble: boolean
   pendingQuestions: QuestionRequest[]
+  pendingPermissions: PermissionRequest[]
   config: ServerConfig
   directory: string | undefined
   actions: MessageMenuAction[]
@@ -1778,6 +1835,7 @@ const MessagesPane = memo(function MessagesPane({
   messagesEndRef: RefObject<HTMLDivElement>
   onMessagesScroll: () => void
   onQuestionResolved: (id: string) => void
+  onPermissionResolved: (id: string) => void
   jumpAffordances: { top: boolean; bottom: boolean }
   onJumpToTop: () => void
   onJumpToBottom: () => void
@@ -1798,7 +1856,7 @@ const MessagesPane = memo(function MessagesPane({
             <LoadingIcon size={32} />
             <p>{t('detail.loading')}</p>
           </div>
-        ) : renderedMessages.length === 0 && !showTypingBubble && pendingQuestions.length === 0 ? (
+        ) : renderedMessages.length === 0 && !showTypingBubble && pendingQuestions.length === 0 && pendingPermissions.length === 0 ? (
           <div className="empty-state compact">
             <ChatIcon size={40} className="icon-empty-state" />
             <p>{t('detail.emptyTitle')}</p>
@@ -1831,6 +1889,17 @@ const MessagesPane = memo(function MessagesPane({
                   directory={directory}
                   request={request}
                   onResolved={onQuestionResolved}
+                  t={t}
+                />
+              ))}
+            {directory !== undefined &&
+              pendingPermissions.map((request) => (
+                <PermissionCard
+                  key={request.id}
+                  config={config}
+                  directory={directory}
+                  request={request}
+                  onResolved={onPermissionResolved}
                   t={t}
                 />
               ))}
@@ -1963,6 +2032,7 @@ function App() {
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [diffFiles, setDiffFiles] = useState<DiffFile[]>([])
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([])
+  const [pendingPermissions, setPendingPermissions] = useState<PermissionRequest[]>([])
 
   const [projectDashboard, setProjectDashboard] = useState<ProjectDashboard | null>(null)
 
@@ -2464,11 +2534,12 @@ function App() {
 
   async function loadSelected(sessionID: string, directory: string, refreshHistory = false, replaceMessages = false) {
     const requestID = ++loadSelectedRequestRef.current
-    const [msg, todo, diff, questions, actions] = await Promise.all([
+    const [msg, todo, diff, questions, permissions, actions] = await Promise.all([
       api.loadMessages(config, sessionID, directory, backendClient.messageRefreshSupported && refreshHistory),
       capabilities.todos ? api.loadTodo(config, sessionID, directory) : Promise.resolve([]),
       capabilities.diff ? api.loadDiff(config, sessionID, directory).catch(() => []) : Promise.resolve([]),
       capabilities.questions ? api.loadQuestions(config, directory).catch(() => []) : Promise.resolve([]),
+      capabilities.permissions ? api.loadPermissions(config, directory).catch(() => []) : Promise.resolve([]),
       capabilities.actions ? api.listActions(config, sessionID, directory).catch(() => []) : Promise.resolve([])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
@@ -2489,6 +2560,7 @@ function App() {
     setTodos(todo)
     setDiffFiles(diff)
     setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
+    setPendingPermissions(permissions.filter((permission) => permission.sessionID === sessionID))
     setExtensionActions(actions)
     await loadProjectDashboard(directory)
   }
@@ -2611,6 +2683,10 @@ function App() {
 
   const handleQuestionResolved = useCallback((id: string) => {
     setPendingQuestions((current) => current.filter((item) => item.id !== id))
+  }, [])
+
+  const handlePermissionResolved = useCallback((id: string) => {
+    setPendingPermissions((current) => current.filter((item) => item.id !== id))
   }, [])
 
   function scrollMessagesToBottom(behavior: ScrollBehavior = "smooth") {
@@ -3136,7 +3212,7 @@ function App() {
           applyStreamedPartDelta(current, body.sessionID!, body.messageID!, body.partID!, body.field!, body.delta!)
         )
       }
-      if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.") || type.startsWith("question.")) {
+      if (type.startsWith("session.") || type.startsWith("message.") || type.startsWith("todo.") || type.startsWith("question.") || type.startsWith("permission.")) {
         // `session.*` events carry the id on the session itself; `message.*`/`todo.*` use sessionID.
         const sessionID = body?.sessionID ?? body?.sessionId ?? body?.info?.sessionID ?? body?.info?.id
         if (sessionID) lastEventBySessionRef.current.set(sessionID, Date.now())
@@ -3190,7 +3266,7 @@ function App() {
     if (view !== "detail") return
     if (!stickToBottomRef.current) return
     scrollMessagesToBottom("auto")
-  }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions])
+  }, [view, messageScrollSignature, isWorking, showTypingBubble, pendingQuestions, pendingPermissions])
 
   // Growing or swapping the transcript changes the distance to each end without any scroll event
   // firing, so the jump buttons have to be re-evaluated off the content too.
@@ -4053,6 +4129,7 @@ function App() {
             timelineGroups={timelineGroups}
             showTypingBubble={showTypingBubble}
             pendingQuestions={pendingQuestions}
+            pendingPermissions={pendingPermissions}
             config={config}
             directory={selectedSession?.directory}
             actions={messageMenuActions}
@@ -4065,6 +4142,7 @@ function App() {
             messagesEndRef={messagesEndRef}
             onMessagesScroll={handleMessagesScroll}
             onQuestionResolved={handleQuestionResolved}
+            onPermissionResolved={handlePermissionResolved}
           />
 
 

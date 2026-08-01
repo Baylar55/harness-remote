@@ -10,6 +10,7 @@ const COMMON_CAPABILITIES = {
   diff: false,
   filesystemBrowser: true,
   questions: false,
+  permissions: false,
   sessionRename: false,
   sessionDelete: false
 }

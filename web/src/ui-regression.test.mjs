@@ -166,7 +166,7 @@ assert.ok(
 )
 
 assert.ok(app.includes('api.capabilities(config).then(setCapabilities)'), 'bridge capabilities must be loaded from the selected harness')
-for (const capability of ['agents', 'models', 'todos', 'diff', 'questions', 'sessionRename', 'sessionDelete']) {
+for (const capability of ['agents', 'models', 'todos', 'diff', 'questions', 'permissions', 'sessionRename', 'sessionDelete']) {
   assert.ok(app.includes(`capabilities.${capability}`), `${capability} UI must be capability-driven`)
 }
 
@@ -439,4 +439,11 @@ assert.ok(app.includes('result.applied !== false'), 'unknown results should stil
 assert.ok(app.includes("command === \"undo\" ? 'detail.nothingToUndo' : 'detail.nothingToRedo'"), 'the no-op message should describe the attempted action')
 assert.ok(app.includes('{actionNotice && <div className=\"notice info fade-in\">'), 'no-op action feedback should render as visible information rather than an error')
 
+
+assert.ok(api.includes('withDirectory("/permission", directory)'), 'pending OpenCode permissions must be loaded through the server API')
+assert.ok(api.includes('`/permission/${requestID}/reply`'), 'permission replies must target the request that blocked the session')
+assert.ok(app.includes('capabilities.permissions ? api.loadPermissions'), 'permission polling must follow the negotiated capability')
+assert.ok(app.includes('pendingPermissions.map'), 'each pending permission must render an actionable card')
+assert.ok(app.includes('void reply("once")') && app.includes('void reply("reject")'), 'the permission card must let the user resolve the blocked request')
+assert.ok(app.includes('type.startsWith("permission.")'), 'permission events must refresh the selected session promptly')
 console.log('ui regression tests passed')

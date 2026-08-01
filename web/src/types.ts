@@ -19,6 +19,7 @@ export type HarnessCapabilities = {
   diff: boolean
   filesystemBrowser: boolean
   questions: boolean
+  permissions: boolean
   commands: boolean
   actions: boolean
   sessionRename: boolean
@@ -155,6 +156,19 @@ export type QuestionRequest = {
   id: string
   sessionID: string
   questions: QuestionInfo[]
+  tool?: {
+    messageID: string
+    callID: string
+  }
+}
+
+export type PermissionRequest = {
+  id: string
+  sessionID: string
+  permission: string
+  patterns: string[]
+  metadata: Record<string, unknown>
+  always: string[]
   tool?: {
     messageID: string
     callID: string
