@@ -5,6 +5,7 @@ import { AcpClient } from "../src/acp-client.js"
 
 class FakeChild extends EventEmitter {
   killed = false
+  pid = 4242
   stdout = new EventEmitter()
   stderr = new EventEmitter()
   writes = []
@@ -74,7 +75,9 @@ test("initializes, authenticates, and lists ACP sessions", async () => {
 
   assert.deepEqual(await client.listSessions(), [{ sessionId: "session-1" }])
   assert.deepEqual(client.agentInfo, { name: "oh-my-pi", version: "17.0.7" })
+  assert.equal(client.processID, 4242)
   client.close()
+  assert.equal(client.processID, undefined)
 })
 
 test("launches an ACP adapter with the configured command and arguments", async () => {

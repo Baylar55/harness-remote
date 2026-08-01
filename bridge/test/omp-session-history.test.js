@@ -5,7 +5,7 @@ import path from "node:path"
 import test from "node:test"
 import { createOmpHistoryLoader } from "../src/omp-session-history.js"
 
-test("reads persisted user and assistant text from an OMP session transcript", async () => {
+test("reads only the authoritative branch from an OMP session transcript", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "harness-remote-omp-history-"))
   const nested = path.join(root, "workspace")
   await mkdir(nested)
@@ -20,7 +20,9 @@ test("reads persisted user and assistant text from an OMP session transcript", a
 
   try {
     const loadHistory = createOmpHistoryLoader(root)
-    const messages = await loadHistory(sessionID)
+    assert.deepEqual(await loadHistory(sessionID), [], "append order must not be treated as the active branch")
+
+    const messages = await loadHistory(sessionID, { activeSessionLeaf: "assistant-1" })
     assert.deepEqual(messages.map((message) => [message.info.role, message.parts.map((part) => [part.type, part.text])]), [
       ["user", [["text", "Question"]]],
       ["assistant", [["reasoning", "hidden"], ["text", "Answer"]]]
@@ -28,6 +30,10 @@ test("reads persisted user and assistant text from an OMP session transcript", a
 
     const undone = await loadHistory(sessionID, { activeSessionLeaf: "user-1" })
     assert.deepEqual(undone.map((message) => message.parts[0].text), ["Question"])
+    await assert.rejects(
+      loadHistory(sessionID, { activeSessionLeaf: "missing-leaf" }),
+      /active session leaf is missing/
+    )
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -297,6 +297,7 @@ class HeldTurnOmpAcp extends EventEmitter {
 
 class ExtensionActionAcp extends EventEmitter {
   agentInfo = { version: "17.1.3" }
+  processID = 4242
   prompts = []
   commands
   loads = 0
@@ -689,25 +690,19 @@ test("does not advertise extension actions when OMP did not load their commands"
   }
 })
 
-test("does not infer extension action success from transcript changes", async () => {
+test("does not advertise extension actions without authoritative state", async () => {
   const acp = new ExtensionActionAcp()
   const bridge = await startServer({ acp })
   try {
-    await readJSON(bridge.baseURL, "/session/session-1/action")
-    const first = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
+    assert.deepEqual(await readJSON(bridge.baseURL, "/session/session-1/action"), [])
+    const response = await fetch(`${bridge.baseURL}/session/session-1/action/undo`, {
       method: "POST",
       headers: jsonHeaders(),
       body: "{}"
     })
-    const second = await readJSON(bridge.baseURL, "/session/session-1/action/undo", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: "{}"
-    })
-
-    assert.equal(first.applied, null)
-    assert.equal(second.applied, null)
-    assert.equal(second.actions.find((action) => action.id === "redo").enabled, false)
+    assert.equal(response.status, 400)
+    assert.match((await response.json()).error, /not available/)
+    assert.deepEqual(acp.prompts, [])
   } finally {
     await bridge.close()
   }
@@ -805,6 +800,35 @@ test("loads an external session from the extension-selected tree leaf", async ()
   assert.deepEqual((await service.messages("session-1")).map((message) => message.parts[0].text), ["Change the file"])
   assert.equal(selectedLeaf, "user-1")
   assert.equal(acp.loads, 0, "external history should not activate or replay the ACP session")
+})
+
+test("replays ACP history when extension state is unavailable", async () => {
+  const acp = new ExtensionActionAcp()
+  let selectedLeaf = "not-called"
+  let stateProcessID
+  const provider = {
+    id: "omp-undo-redo",
+    requiredCommands: ["undo", "redo"],
+    actions: [{ id: "undo", command: "undo", enabledByDefault: true }],
+    loadState: async ({ processID }) => {
+      stateProcessID = processID
+      return undefined
+    }
+  }
+  const historyLoader = async (_sessionID, options) => {
+    selectedLeaf = options.activeSessionLeaf
+    return []
+  }
+  const service = new AcpService(acp, { actionProviders: [provider], historyLoader })
+
+  assert.deepEqual((await service.messages("session-1")).map((message) => message.parts[0].text), [
+    "Change the file",
+    "Changed the file"
+  ])
+  assert.equal(selectedLeaf, undefined)
+  assert.equal(stateProcessID, 4242)
+  assert.equal(acp.loads, 1, "ACP must supply active branch when no authoritative leaf exists")
+  assert.deepEqual(await service.actions("session-1"), [])
 })
 
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {

@@ -40,6 +40,9 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
   }
 
   return async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
+    // JSONL is append-only: its final record may belong to an abandoned branch.
+    // Without an authoritative selected leaf, ACP replay is safer than guessing.
+    if (activeSessionLeaf === undefined) return []
     const file = await locateSession(sessionID)
     if (!file) return []
     const records = []
@@ -59,13 +62,12 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     }
 
     const selected = []
-    const leafID = activeSessionLeaf !== undefined ? activeSessionLeaf : records.at(-1)?.id
-    if (leafID === null) {
+    if (activeSessionLeaf === null) {
       // The extension selected the session root.
-    } else if (leafID && entries.has(leafID)) {
+    } else if (entries.has(activeSessionLeaf)) {
       const branch = []
       const visited = new Set()
-      let entry = entries.get(leafID)
+      let entry = entries.get(activeSessionLeaf)
       while (entry && !visited.has(entry.id)) {
         visited.add(entry.id)
         branch.push(entry)
@@ -73,7 +75,7 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
       }
       selected.push(...branch.reverse())
     } else {
-      selected.push(...records)
+      throw new Error("OMP active session leaf is missing from transcript")
     }
 
     const messages = []

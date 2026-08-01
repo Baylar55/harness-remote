@@ -21,13 +21,22 @@ function availableProviders(providers, commands) {
 }
 
 export function listExtensionActions(providers, commands, state, busy = false, authoritativeState) {
-  return availableProviders(providers, commands).flatMap((provider) => provider.actions.map((action) => ({
-    id: action.id,
-    source: provider.id,
-    enabled: !busy && (authoritativeState?.source === provider.id
-      ? authoritativeState.actions.find((candidate) => candidate.id === action.id)?.enabled ?? false
-      : state.get(action.id) ?? action.enabledByDefault)
-  })))
+  return availableProviders(providers, commands).flatMap((provider) => {
+    if (authoritativeState?.source === provider.id) {
+      return provider.actions.map((action) => ({
+        id: action.id,
+        source: provider.id,
+        enabled: !busy && (authoritativeState.actions.find((candidate) => candidate.id === action.id)?.enabled ?? false)
+      }))
+    }
+    // Stateful providers stay hidden until their availability is authoritative.
+    if (provider.loadState) return []
+    return provider.actions.map((action) => ({
+      id: action.id,
+      source: provider.id,
+      enabled: !busy && (state.get(action.id) ?? action.enabledByDefault)
+    }))
+  })
 }
 
 export async function loadExtensionActionState(providers, commands, context) {
