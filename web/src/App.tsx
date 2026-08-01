@@ -2490,6 +2490,10 @@ function App() {
     setDiffFiles(diff)
     setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
     setExtensionActions(actions)
+    // A bridge-backed harness only advertises its commands once a session is loaded, so the
+    // mount-time fetch of an idle bridge legitimately returns []. Retry here rather than in each
+    // of loadSelected's callers, otherwise Help -> Commands stays empty for the whole visit.
+    if (capabilities.commands && commands.length === 0) await loadCommands()
     await loadProjectDashboard(directory)
   }
 

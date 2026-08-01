@@ -1607,3 +1607,19 @@ test("sends a picked command to the harness as slash-prefixed prompt text", asyn
     await bridge.close()
   }
 })
+
+test("fills the command catalog once a session is loaded, so a cold bridge recovers", async () => {
+  const bridge = await startServer({ acp: new SkillCommandAcp() })
+  try {
+    // The app fetches the picker at mount, before any session exists. An idle bridge has
+    // nothing to advertise yet, and answering with a stale or invented list would be worse.
+    assert.deepEqual(await readJSON(bridge.baseURL, "/command"), [])
+
+    await readJSON(bridge.baseURL, "/session/session-1/message")
+
+    const afterLoad = await readJSON(bridge.baseURL, "/command")
+    assert.deepEqual(afterLoad.map((command) => command.name), ["model", "skill:memory"])
+  } finally {
+    await bridge.close()
+  }
+})

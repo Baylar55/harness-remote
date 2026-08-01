@@ -439,4 +439,19 @@ assert.ok(app.includes('result.applied !== false'), 'unknown results should stil
 assert.ok(app.includes("command === \"undo\" ? 'detail.nothingToUndo' : 'detail.nothingToRedo'"), 'the no-op message should describe the attempted action')
 assert.ok(app.includes('{actionNotice && <div className=\"notice info fade-in\">'), 'no-op action feedback should render as visible information rather than an error')
 
+// A bridge-backed harness advertises its commands only once a session is loaded, so the
+// mount-time fetch returns [] against an idle bridge and Help -> Commands stayed empty for the
+// rest of the visit. loadSelected has to retry, and it is the shared seam every caller reaches.
+assert.match(
+  app,
+  /if \(capabilities\.commands && commands\.length === 0\) await loadCommands\(\)/,
+  'loadSelected must refetch an empty command catalog once a session is loaded'
+)
+const loadSelectedBody = app.match(/async function loadSelected\([\s\S]*?\n  \}\n/)
+assert.ok(loadSelectedBody, 'loadSelected should be findable for the catalog-refetch check')
+assert.ok(
+  loadSelectedBody[0].includes('await loadCommands()'),
+  'the command refetch belongs inside loadSelected, not in its individual callers'
+)
+
 console.log('ui regression tests passed')
