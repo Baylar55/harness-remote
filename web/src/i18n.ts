@@ -235,6 +235,11 @@ type TranslationKey =
   | 'question.otherPlaceholder'
   | 'question.skip'
   | 'question.sendAnswer'
+  | 'permission.ariaLabel'
+  | 'permission.requested'
+  | 'permission.allowOnce'
+  | 'permission.allowAlways'
+  | 'permission.deny'
 
 const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   en: {
@@ -470,7 +475,12 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'question.ariaLabel': 'Question from OpenCode',
     'question.otherPlaceholder': 'Other…',
     'question.skip': 'Skip',
-    'question.sendAnswer': 'Send answer'
+    'question.sendAnswer': 'Send answer',
+    'permission.ariaLabel': 'Permission request from OpenCode',
+    'permission.requested': 'Permission requested: {permission}',
+    'permission.allowOnce': 'Allow once',
+    'permission.allowAlways': 'Always allow',
+    'permission.deny': 'Deny'
   },
   it: {
     'app.title': 'Harness Remote',
@@ -705,7 +715,12 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'question.ariaLabel': 'Domanda da OpenCode',
     'question.otherPlaceholder': 'Altro…',
     'question.skip': 'Salta',
-    'question.sendAnswer': 'Invia risposta'
+    'question.sendAnswer': 'Invia risposta',
+    'permission.ariaLabel': 'Richiesta permesso da OpenCode',
+    'permission.requested': 'Permesso richiesto: {permission}',
+    'permission.allowOnce': 'Consenti una volta',
+    'permission.allowAlways': 'Consenti sempre',
+    'permission.deny': 'Nega'
   },
   'zh-TW': {
     'app.title': 'Harness Remote',
@@ -940,7 +955,12 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'question.ariaLabel': '來自 OpenCode 的問題',
     'question.otherPlaceholder': '其他…',
     'question.skip': '略過',
-    'question.sendAnswer': '傳送回答'
+    'question.sendAnswer': '傳送回答',
+    'permission.ariaLabel': '來自 OpenCode 的權限請求',
+    'permission.requested': '請求權限：{permission}',
+    'permission.allowOnce': '允許一次',
+    'permission.allowAlways': '永遠允許',
+    'permission.deny': '拒絕'
   }
 }
 
