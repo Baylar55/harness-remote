@@ -3985,10 +3985,15 @@ function App() {
         <main className="panel detail fade-in">
           <div className="detail-topbar">
             {!isDesktop && (
-              <button className="btn-secondary" onClick={() => {
-                setView("sessions");
-                requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
-              }}>{t('detail.backToSessions')}</button>
+              <>
+                <button className="btn-secondary detail-back-button" onClick={() => {
+                  setView("sessions");
+                  requestAnimationFrame(() => document.querySelector<HTMLElement>(".session-card.active")?.scrollIntoView({ block: "center" }));
+                }}>{t('detail.backToSessions')}</button>
+                {selectedSession && sessionHeaderActions.length > 0 && (
+                  <SessionActionsMenu actions={sessionHeaderActions} t={t} />
+                )}
+              </>
             )}
           </div>
           <div className="header-row detail-header">
@@ -4078,7 +4083,7 @@ function App() {
                 </p>
                 )}
               </div>
-              {selectedSession && sessionHeaderActions.length > 0 && (
+              {isDesktop && selectedSession && sessionHeaderActions.length > 0 && (
                 <SessionActionsMenu actions={sessionHeaderActions} t={t} />
               )}
             </div>

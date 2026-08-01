@@ -2410,18 +2410,24 @@ button.compact {
   }
 
   .detail-topbar {
-    align-items: stretch;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: center;
   }
 
   .detail-topbar .pill {
     align-self: flex-start;
   }
 
-  /* The header row stacks on mobile; keep the ⋯ control out of the title's wrapping flow and
-     aligned to the same right edge the desktop layout gives it. */
-  .header-row .session-actions {
+  /* The header actions share the back row on mobile, pinned to the right edge, so they do not
+     claim a whole line below the title. The back button gives up some padding so the pair fits. */
+  .detail-topbar .session-actions {
     margin-left: auto;
+  }
+
+  .detail-back-button {
+    min-height: 36px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
   }
 
   /* On mobile the whole page scrolls (the composer is pinned with fixed positioning), so the list
