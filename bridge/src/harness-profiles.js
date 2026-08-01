@@ -27,7 +27,7 @@ export const HARNESS_PROFILES = {
       ...COMMON_CAPABILITIES,
       models: true,
       todos: true,
-      commands: false,
+      commands: true,
       actions: true,
       sessionRename: true,
       sessionDelete: true

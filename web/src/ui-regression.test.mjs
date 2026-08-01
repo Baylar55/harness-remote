@@ -468,4 +468,20 @@ assert.ok(app.includes('capabilities.permissions ? api.loadPermissions'), 'permi
 assert.ok(app.includes('pendingPermissions.map'), 'each pending permission must render an actionable card')
 assert.ok(app.includes('void reply("once")') && app.includes('void reply("reject")'), 'the permission card must let the user resolve the blocked request')
 assert.ok(app.includes('type.startsWith("permission.")'), 'permission events must refresh the selected session promptly')
+
+// A bridge-backed harness advertises its commands only once a session is loaded, so the
+// mount-time fetch returns [] against an idle bridge and Help -> Commands stayed empty for the
+// rest of the visit. loadSelected has to retry, and it is the shared seam every caller reaches.
+assert.match(
+  app,
+  /if \(capabilities\.commands && commands\.length === 0\) await loadCommands\(\)/,
+  'loadSelected must refetch an empty command catalog once a session is loaded'
+)
+const loadSelectedBody = app.match(/async function loadSelected\([\s\S]*?\r?\n  \}\r?\n/)
+assert.ok(loadSelectedBody, 'loadSelected should be findable for the catalog-refetch check')
+assert.ok(
+  loadSelectedBody[0].includes('await loadCommands()'),
+  'the command refetch belongs inside loadSelected, not in its individual callers'
+)
+
 console.log('ui regression tests passed')

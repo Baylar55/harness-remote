@@ -30,7 +30,7 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     filesystemBrowser: true,
     questions: false,
     permissions: false,
-    commands: false,
+    commands: true,
     actions: true,
     sessionRename: true,
     sessionDelete: true

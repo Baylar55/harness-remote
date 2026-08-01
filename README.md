@@ -71,7 +71,7 @@ Depending on the harness:
 
 - answer the questions the agent asks, options or free text, without leaving the app — OpenCode
 - follow todo/plan updates as the agent works — OpenCode, OMP, Claude Code
-- send server `/commands` — OpenCode
+- send server `/commands` — OpenCode, OMP
 - choose the agent a session runs as — OpenCode
 - review changed files and their diffs — OpenCode
 - rename and delete sessions — OpenCode changes them in the harness; on OMP, PI and Claude Code the
@@ -258,7 +258,7 @@ Expected response:
 {"healthy":true,"backend":"omp","version":"…"}
 ```
 
-OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Agent selection, server slash commands, and VCS/diff are intentionally unavailable.
+OMP sessions expose their configured model when ACP provides it, and model changes apply to subsequent prompts. Server slash commands are available: OMP advertises them over ACP, the bridge serves them at `/command`, and the app lists them under **Help → Commands**, with a separate tab for the `skill:` ones. Agent selection and VCS/diff remain unavailable.
 
 A prompt sent while the agent is still working is queued rather than refused: it appears in the conversation
 straight away and runs when the current turn ends. Stopping the session discards anything still queued.

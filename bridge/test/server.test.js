@@ -663,7 +663,7 @@ test("reports capabilities from the selected harness profile", async () => {
     const piCapabilities = await readJSON(pi.baseURL, "/v1/capabilities")
     assert.equal(ompCapabilities.models, true)
     assert.equal(ompCapabilities.todos, true)
-    assert.equal(ompCapabilities.commands, false)
+    assert.equal(ompCapabilities.commands, true)
     assert.equal(ompCapabilities.actions, true)
     assert.equal(piCapabilities.models, true)
     assert.equal(piCapabilities.todos, false)
@@ -1560,6 +1560,89 @@ test("keeps provider/model values untouched for the harnesses that use them", as
     assert.equal(body.providers[0].name, "omp")
     assert.deepEqual(Object.keys(body.providers[0].models).sort(), ["first", "second"])
     assert.equal(body.providers[0].models.first.description, undefined, "a harness that describes nothing must not gain an empty line")
+  } finally {
+    await bridge.close()
+  }
+})
+
+/** Advertises a skill command alongside the extension ones, as OMP does. */
+class SkillCommandAcp extends ExtensionActionAcp {
+  async request(method, params) {
+    const result = await super.request(method, params)
+    if (method === "session/load") {
+      this.emit("notification", {
+        method: "session/update",
+        params: {
+          sessionId: "session-1",
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [
+              { name: "model", description: "Show current model selection" },
+              { name: "skill:memory", description: "Runtime-boundary guidance for memory" }
+            ]
+          }
+        }
+      })
+    }
+    return result
+  }
+}
+
+test("serves the harness command catalog and marks skills by source", async () => {
+  const bridge = await startServer({ acp: new SkillCommandAcp() })
+  try {
+    const scoped = await readJSON(bridge.baseURL, "/command?sessionID=session-1")
+    assert.deepEqual(scoped, [
+      { name: "model", description: "Show current model selection", source: "command" },
+      { name: "skill:memory", description: "Runtime-boundary guidance for memory", source: "skill" }
+    ])
+    // The app asks for the picker without a session, so the newest catalog has to answer.
+    assert.deepEqual(await readJSON(bridge.baseURL, "/command"), scoped)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("sends a picked command to the harness as slash-prefixed prompt text", async () => {
+  const acp = new SkillCommandAcp()
+  const bridge = await startServer({ acp })
+  try {
+    await readJSON(bridge.baseURL, "/session/session-1/command", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ command: "skill:memory", arguments: "status" })
+    })
+    assert.ok(acp.prompts.includes("/skill:memory status"), `prompts were ${JSON.stringify(acp.prompts)}`)
+
+    await readJSON(bridge.baseURL, "/session/session-1/command", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ command: "model" })
+    })
+    assert.ok(acp.prompts.includes("/model"), "a command with no arguments must not gain a trailing space")
+
+    const rejected = await fetch(`${bridge.baseURL}/session/session-1/command`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ arguments: "status" })
+    })
+    assert.equal(rejected.status, 400)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("fills the command catalog once a session is loaded, so a cold bridge recovers", async () => {
+  const bridge = await startServer({ acp: new SkillCommandAcp() })
+  try {
+    // The app fetches the picker at mount, before any session exists. An idle bridge has
+    // nothing to advertise yet, and answering with a stale or invented list would be worse.
+    assert.deepEqual(await readJSON(bridge.baseURL, "/command"), [])
+
+    await readJSON(bridge.baseURL, "/session/session-1/message")
+
+    const afterLoad = await readJSON(bridge.baseURL, "/command")
+    assert.deepEqual(afterLoad.map((command) => command.name), ["model", "skill:memory"])
   } finally {
     await bridge.close()
   }
