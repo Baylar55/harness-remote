@@ -457,5 +457,9 @@ assert.match(
 assert.match(app, /session-actions-menu/, 'the header actions menu should have its own styles')
 assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?position:\s*absolute/, 'the header actions menu must overlay the conversation rather than push its layout')
 assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?z-index:\s*20/, 'the header actions menu must stack above the message list')
+assert.match(app, /!isDesktop && \([\s\S]*?detail-back-button[\s\S]*?SessionActionsMenu/, 'on mobile the header actions menu should share the back-to-sessions row')
+assert.match(app, /isDesktop && selectedSession && sessionHeaderActions\.length > 0/, 'on desktop the header actions menu should remain beside the session heading')
+assert.match(styles, /\.detail-topbar \{[\s\S]*?flex-direction:\s*row/, 'the mobile detail topbar should keep its controls on one row')
+assert.doesNotMatch(styles, /\.session-title-button\s*\{[\s\S]*?min-height:\s*44px/, 'the editable title should not create an empty row before the session directory')
 
 console.log('ui regression tests passed')
