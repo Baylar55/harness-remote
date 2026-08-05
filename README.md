@@ -76,10 +76,11 @@ Depending on the harness:
 - review changed files and their diffs — OpenCode
 - rename and delete sessions — OpenCode changes them in the harness; on OMP, PI and Claude Code the
   same controls keep a bridge-local nickname and hide the session from that bridge only
-- extend bridge-backed harnesses through optional host extensions: bridge discovers compatible
-  commands, then enables actions only for sessions where available. OMP Undo/Redo integration uses
-  [`@baylarsadigov/omp-undo-redo`](https://github.com/Baylar55/omp-undo-redo). Version 1.2.0 or newer
-  restores both conversation and supported file changes in Git and non-Git workspaces.
+- extend bridge-backed harnesses through optional host extensions: the bridge discovers compatible
+  commands and the app enables their actions only for sessions where they are available; the first
+  integration is Undo and Redo for OMP through
+  [`@baylarsadigov/omp-undo-redo`](https://github.com/Baylar55/omp-undo-redo), which from version
+  1.2.0 restores supported file changes as well as the conversation, in Git and non-Git workspaces
 
 ## Desktop Mode
 

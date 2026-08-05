@@ -48,8 +48,8 @@ Live action availability comes from extension version 1.1.0 or newer under
 changing this runtime contract. The bridge validates the runtime marker against the exact ACP child
 PID, then reads schema-2 session state containing `actions`, `sessionRevision`, `activeSessionLeaf`,
 and an invocation `actionResult` with a unique `token`. Process and runtime IDs prevent stale or
-concurrent OMP state from controlling the session. This contract works for Git, non-Git, and
-session-only workspaces.
+concurrent OMP state from controlling the session. This contract works for both Git and non-Git
+workspaces.
 
 File restoration remains extension-owned. Harness Remote invokes the same action and reloads the
 authoritative active branch; with extension 1.2.0 or newer, successful non-Git actions restore
