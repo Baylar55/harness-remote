@@ -79,7 +79,8 @@ Depending on the harness:
 - extend bridge-backed harnesses through optional host extensions: the bridge discovers compatible
   commands and the app enables their actions only for sessions where they are available; the first
   integration is Undo and Redo for OMP through
-  [`@baylarsadigov/omp-undo-redo`](https://github.com/Baylar55/omp-undo-redo)
+  [`@baylarsadigov/omp-undo-redo`](https://github.com/Baylar55/omp-undo-redo), which from version
+  1.2.0 restores supported file changes as well as the conversation, in Git and non-Git workspaces
 
 ## Desktop Mode
 
