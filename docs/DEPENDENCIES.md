@@ -44,11 +44,17 @@ host-side OMP plugin; it is not an app or bridge dependency. Its command catalog
 handlers were registered in that runtime.
 
 Live action availability comes from extension version 1.1.0 or newer under
-`~/.omp/omp-undo-redo/runtime/<acp-pid>/`. The bridge validates the runtime marker against the exact
-ACP child PID, then reads schema-2 session state containing `actions`, `sessionRevision`,
-`activeSessionLeaf`, and an invocation `actionResult` with a unique `token`. Process and runtime IDs
-prevent stale or concurrent OMP state from controlling the session. This contract works for both Git
-and session-only workspaces.
+`~/.omp/omp-undo-redo/runtime/<acp-pid>/`. Version 1.2.0 adds non-Git file restoration without
+changing this runtime contract. The bridge validates the runtime marker against the exact ACP child
+PID, then reads schema-2 session state containing `actions`, `sessionRevision`, `activeSessionLeaf`,
+and an invocation `actionResult` with a unique `token`. Process and runtime IDs prevent stale or
+concurrent OMP state from controlling the session. This contract works for Git, non-Git, and
+session-only workspaces.
+
+File restoration remains extension-owned. Harness Remote invokes the same action and reloads the
+authoritative active branch; with extension 1.2.0 or newer, successful non-Git actions restore
+supported workspace file changes as well as conversation state. No bridge package dependency or
+alternate action path is required.
 
 The repository Git common-directory sidecar at
 `omp-undo-redo/history/<sha256-session-id>.json` remains the durable fallback. The bridge adapts its
