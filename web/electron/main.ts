@@ -10,6 +10,10 @@ import type { DesktopCompletionNotification, DesktopEventSubscriptionOptions, De
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, restoredBounds as calculateRestoredBounds } from "./window-state.js"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDevelopment = !app.isPackaged
+// The main process is the one place the three desktops genuinely differ: the taskbar overlay is
+// Windows-only, and the menu and quit-on-last-window conventions are macOS's own.
+const isWindows = process.platform === "win32"
+const isMac = process.platform === "darwin"
 const rendererEntry = join(__dirname, "../../dist/index.html")
 const profileFile = () => join(app.getPath("userData"), "desktop-profiles.json")
 type SavedWindowState = {
@@ -70,7 +74,10 @@ function notifyCompletion(notification: DesktopCompletionNotification): void {
   if (!mainWindow || mainWindow.isDestroyed() || (mainWindow.isFocused() && !mainWindow.isMinimized())) return
   if (!Notification.isSupported()) return
   new Notification({ title: notification.title, body: notification.body }).show()
-  const icon = nativeImage.createFromPath(join(app.getAppPath(), "dist/electron-icon.svg"))
+  if (!isWindows) return
+  // A PNG, because nativeImage cannot decode SVG: the icon came back empty and the taskbar badge
+  // silently never appeared. Resized down because an overlay is drawn at 16x16.
+  const icon = nativeImage.createFromPath(join(app.getAppPath(), "dist/app-icon.png")).resize({ width: 16, height: 16 })
   if (!icon.isEmpty()) mainWindow.setOverlayIcon(icon, notification.overlayDescription)
 }
 
@@ -91,8 +98,16 @@ function createWindow(): BrowserWindow {
       spellcheck: false
     }
   })
+  // Held separately because `closed` fires after the native window is gone, and reading
+  // window.webContents at that point throws "Object has been destroyed".
+  const contents = window.webContents
   let stateTimer: NodeJS.Timeout | undefined
+  const cancelWindowStateSave = () => {
+    clearTimeout(stateTimer)
+    stateTimer = undefined
+  }
   const saveWindowState = () => {
+    if (window.isDestroyed()) return
     const bounds = window.getNormalBounds()
     const state: SavedWindowState = { ...bounds, maximized: window.isMaximized() }
     try {
@@ -102,7 +117,7 @@ function createWindow(): BrowserWindow {
     }
   }
   const scheduleWindowStateSave = () => {
-    clearTimeout(stateTimer)
+    cancelWindowStateSave()
     stateTimer = setTimeout(() => {
       stateTimer = undefined
       saveWindowState()
@@ -112,31 +127,39 @@ function createWindow(): BrowserWindow {
   window.on("move", scheduleWindowStateSave)
   window.on("maximize", scheduleWindowStateSave)
   window.on("unmaximize", scheduleWindowStateSave)
-  window.on("close", saveWindowState)
-  window.on("focus", () => window.setOverlayIcon(null, ""))
+  window.on("close", () => {
+    saveWindowState()
+    cancelWindowStateSave()
+  })
+  window.on("focus", () => {
+    // Guarded rather than left to fail quietly: setOverlayIcon is absent on macOS and Linux, not
+    // inert, so calling it there throws out of the focus handler.
+    if (isWindows) window.setOverlayIcon(null, "")
+  })
 
   window.once("ready-to-show", () => {
     if (savedState.maximized === true) window.maximize()
     window.show()
   })
-  window.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) eventTransport.closeForOwner(window.webContents)
+  contents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) eventTransport.closeForOwner(contents)
   })
-  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+  contents.on("did-fail-load", (_event, errorCode, errorDescription) => {
     log(`local renderer load failed (${errorCode}): ${errorDescription}`)
   })
-  window.webContents.on("render-process-gone", (_event, details) => {
+  contents.on("render-process-gone", (_event, details) => {
     log(`renderer exited (${details.reason})`)
-    eventTransport.closeForOwner(window.webContents)
+    eventTransport.closeForOwner(contents)
   })
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
-  window.webContents.on("will-navigate", (event, url) => {
+  contents.setWindowOpenHandler(() => ({ action: "deny" }))
+  contents.on("will-navigate", (event, url) => {
     if (url !== pathToFileURL(rendererEntry).toString()) event.preventDefault()
   })
-  window.webContents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
-  window.webContents.session.on("will-download", (event) => event.preventDefault())
+  contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
+  contents.session.on("will-download", (event) => event.preventDefault())
   window.on("closed", () => {
-    eventTransport.closeForOwner(window.webContents)
+    cancelWindowStateSave()
+    eventTransport.closeForOwner(contents)
     if (mainWindow === window) mainWindow = undefined
   })
   void window.loadFile(rendererEntry).catch((error: unknown) => log(`renderer load rejected: ${error instanceof Error ? error.message : "unknown error"}`))
@@ -197,7 +220,10 @@ async function start(): Promise<void> {
   await registry.load()
   eventTransport = new DesktopEventTransport(registry, IPC_CHANNELS)
   installIPC()
-  if (!isDevelopment) Menu.setApplicationMenu(null)
+  // macOS keeps its menu: the app menu is where Cmd+Q lives and the Edit menu is what binds
+  // Cmd+C/V/X, so stripping it there costs the user the shortcuts they expect rather than just
+  // hiding chrome. Windows and Linux draw an in-window menu bar that the app has no use for.
+  if (!isDevelopment && !isMac) Menu.setApplicationMenu(null)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   mainWindow = createWindow()
 }
@@ -208,7 +234,11 @@ app.whenReady().then(() => start()).catch((error: unknown) => {
 })
 
 app.on("before-quit", () => eventTransport?.closeAll())
-app.on("window-all-closed", () => app.quit())
+// Closing the last window ends the app everywhere except macOS, where an app with no windows is
+// still running and is expected to reopen one from the dock — which is what "activate" below does.
+app.on("window-all-closed", () => {
+  if (!isMac) app.quit()
+})
 app.on("activate", () => {
   if (!mainWindow) mainWindow = createWindow()
 })
