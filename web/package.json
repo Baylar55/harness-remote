@@ -2,6 +2,12 @@
   "name": "harness-remote-web",
   "private": true,
   "version": "2.9.0",
+  "description": "Companion app for controlling coding-agent harnesses from phone or desktop",
+  "homepage": "https://github.com/giuliastro/harness-remote",
+  "author": {
+    "name": "Giulio Ardoino",
+    "email": "giuliaccio@gmail.com"
+  },
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
@@ -84,6 +90,7 @@
       ],
       "icon": "public/app-icon.png",
       "category": "Development",
+      "maintainer": "Giulio Ardoino <giuliaccio@gmail.com>",
       "artifactName": "Harness-Remote-${version}-linux-${arch}.${ext}"
     },
     "forceCodeSigning": false,

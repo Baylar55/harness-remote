@@ -20,6 +20,14 @@ name: Build desktop apps
 permissions:
   contents: read
 
+# Cutting a release pushes the same commit to main and then tags it: without a group, the two push
+# events each start the full 3-OS matrix and the duplicate run doubles the simultaneous runner
+# demand. Same commit, same build — keep the newer run (the tag one, which is what attaches the
+# artifacts to the release) and cancel the redundant main-push build.
+concurrency:
+  group: desktop-apps-${{ github.sha }}
+  cancel-in-progress: true
+
 jobs:
   package:
     name: Package ${{ matrix.platform }}
