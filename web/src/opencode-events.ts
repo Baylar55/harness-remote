@@ -1,10 +1,15 @@
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core"
-
-export type ParsedOpenCodeEvent =
-  | { ok: true; name: string; raw: string; data: unknown }
-  | { ok: false; name: string; raw: string; error: string }
+import { parseOpenCodeEvent, parseSSEFrame } from "./sse-parser.ts"
+import type { ParsedOpenCodeEvent } from "./sse-parser.ts"
+export { parseOpenCodeEvent, parseSSEFrame }
+export type { ParsedOpenCodeEvent }
 
 export type EventStreamScope = "project" | "global"
+export function streamURL(serverURL: string, scope: EventStreamScope, directory?: string): string {
+  const url = new URL(scope === "global" ? "/global/event" : "/event", serverURL)
+  if (scope === "project" && directory) url.searchParams.set("directory", directory)
+  return url.toString()
+}
 
 export type EventStreamStatus =
   | { type: "connected" }
@@ -46,37 +51,6 @@ function validDelay(value: number | undefined, fallback: number): number {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "EventSource creation failed"
-}
-
-export function streamURL(serverURL: string, scope: EventStreamScope, directory?: string): string {
-  const url = new URL(scope === "global" ? "/global/event" : "/event", serverURL)
-  if (scope === "project" && directory) url.searchParams.set("directory", directory)
-  return url.toString()
-}
-
-/** Preserves raw payloads until OpenCode event shapes are validated in the app. */
-export function parseOpenCodeEvent(data: string, name = "message"): ParsedOpenCodeEvent {
-  try {
-    return { ok: true, name, raw: data, data: JSON.parse(data) as unknown }
-  } catch (error) {
-    return { ok: false, name, raw: data, error: errorMessage(error) }
-  }
-}
-
-/** Parses one SSE frame received through an authenticated fetch stream. */
-export function parseSSEFrame(frame: string): ParsedOpenCodeEvent | null {
-  let name = "message"
-  const data: string[] = []
-  for (const line of frame.replace(/\r/g, "").split("\n")) {
-    if (!line || line.startsWith(":")) continue
-    const separator = line.indexOf(":")
-    const field = separator === -1 ? line : line.slice(0, separator)
-    const value = separator === -1 ? "" : line.slice(separator + 1).replace(/^ /, "")
-    if (field === "event") name = value || name
-    if (field === "data") data.push(value)
-  }
-  if (data.length === 0) return null
-  return parseOpenCodeEvent(data.join("\n"), name)
 }
 
 /** OpenCode global SSE wraps the event payload in { directory, payload }. */

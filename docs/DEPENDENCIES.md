@@ -120,6 +120,24 @@ party entirely.
 - The **bridge has no dependencies at all** and runs on the Node standard library. Keep it that
   way: it is the piece that has to start reliably on someone else's machine.
 
+### Electron and desktop packaging
+
+- **Electron 43** owns main-process HTTP and SSE connections. Renderer receives only frozen preload
+  methods; `contextIsolation`, sandbox, and disabled Node integration are load-bearing.
+- **electron-builder 26** creates unsigned artifacts for all three desktops: Windows x64 NSIS, macOS
+  arm64/x64 dmg and zip, Linux x64 AppImage and deb. No signing secret is configured, so SmartScreen
+  and Gatekeeper warnings are expected. `web/release/` is generated and must not be committed.
+- Renderer `web/dist` is built with Vite `--base=./` for `file://` loading. Standard `npm run build`
+  keeps PWA/Pages absolute-base behavior.
+- All three desktop targets take their icon from `public/app-icon.png`, the same 1024px source the
+  PWA uses — electron-builder rasterises it per platform. `nativeImage` cannot decode SVG, which is
+  why the taskbar overlay badge reads the PNG too. Android icon assets stay separate.
+- Windows-only main-process APIs (`setOverlayIcon`) are absent, not inert, on macOS and Linux: guard
+  them by platform. macOS also keeps its application menu, since that is where its shortcuts live,
+  and does not quit when the last window closes.
+- Saved profiles are validated and persisted by main process under Electron `userData`; request and
+  stream calls carry profile IDs plus relative operations, never complete target URLs.
+
 ## When a harness changes
 
 Unit tests will not catch this. Every quirk in the tables above was found by running a real agent,

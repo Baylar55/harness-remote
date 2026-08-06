@@ -1,0 +1,144 @@
+name: Build desktop apps
+
+"on":
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths:
+      - 'web/src/**'
+      - 'web/electron/**'
+      - 'web/public/**'
+      - 'web/index.html'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'web/tsconfig*.json'
+      - 'web/vite.config.ts'
+      - '.github/workflows/desktop-apps.yml'
+      - 'bridge/**'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One desktop failing should still leave the other two attachable to the release.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            os: windows-latest
+            script: package:win
+            artifacts: |
+              web/release/Harness-Remote-*-win-x64-unsigned.exe
+          # Matched by extension rather than by artifactName: electron-builder normalises the
+          # filename for some targets (deb in particular), and if-no-files-found: error would then
+          # fail a build that actually succeeded. release/ holds nothing but build output.
+          - platform: macos
+            os: macos-latest
+            script: package:mac
+            artifacts: |
+              web/release/*.dmg
+              web/release/*.zip
+          - platform: linux
+            os: ubuntu-latest
+            script: package:linux
+            artifacts: |
+              web/release/*.AppImage
+              web/release/*.deb
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build PWA renderer
+        run: npm run build
+        working-directory: web
+
+      - name: Run web regression tests
+        run: |
+          npm run test:i18n
+          npm run test:config
+          npm run test:ui
+          npm run test:settings
+          npm run test:platform
+          npm run test:model
+          npm run test:events
+          npm run test:profiles
+          npm run test:desktop
+        working-directory: web
+
+      - name: Run bridge tests
+        run: npm test
+        working-directory: bridge
+
+      - name: Build unsigned ${{ matrix.platform }} artifacts
+        run: npm run ${{ matrix.script }}
+        working-directory: web
+        env:
+          # Nothing here is signed. Left on, electron-builder goes looking for a macOS identity in
+          # the runner's keychain and fails the build when it does not find one.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload ${{ matrix.platform }} artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: harness-remote-desktop-${{ matrix.platform }}-${{ github.sha }}
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: harness-remote-desktop-*-${{ github.sha }}
+          merge-multiple: true
+          path: release
+
+      - name: Wait for Android-owned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          deadline=$(( $(date +%s) + 600 ))
+          until gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "GitHub release $TAG did not appear within 10 minutes; the Android workflow publishes it first." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Attach desktop artifacts to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          shopt -s nullglob
+          files=(release/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No desktop artifacts were downloaded." >&2
+            exit 1
+          fi
+          printf 'attaching %s\n' "${files[@]}"
+          gh release upload "$TAG" "${files[@]}" --clobber
