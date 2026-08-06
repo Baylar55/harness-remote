@@ -53,7 +53,6 @@ const MODEL_STORAGE_KEY = "opencode.remote.model"
 const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
 const SIDEBAR_WIDTH_STORAGE_KEY = "opencode.remote.desktopSidebarWidth"
-const MAIN_WIDTH_STORAGE_KEY = "opencode.remote.desktopMainWidth"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
 type Translator = ReturnType<typeof createTranslator>
@@ -66,21 +65,21 @@ const DESKTOP_MEDIA_QUERY = `(min-width: ${DESKTOP_MIN_WIDTH}px)`
 const SIDEBAR_WIDTH_MIN = 220
 const SIDEBAR_WIDTH_MAX = 480
 const SIDEBAR_WIDTH_DEFAULT = 280
+/** The narrowest the main pane may be squeezed to before the sidebar has to stop growing. */
 const MAIN_WIDTH_MIN = 420
-const MAIN_WIDTH_MAX = 1400
-const MAIN_WIDTH_DEFAULT = 820
 // The app-shell's own horizontal padding plus the gap between the sidebar and main pane
-// (2 * --space-4 + --space-4, all 1rem) — how much of the viewport the two resizable panels
-// never get to claim, even before a scrollbar takes its own slice.
+// (2 * --space-4 + --space-4, all 1rem) — how much of the viewport the panels never get to
+// claim, even before a scrollbar takes its own slice.
 const DESKTOP_LAYOUT_CHROME_WIDTH = 64
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-/** The most the sidebar and main pane may occupy together without overflowing the viewport. */
-function maxCombinedPanelWidth(): number {
-  return Math.max(SIDEBAR_WIDTH_MIN + MAIN_WIDTH_MIN, window.innerWidth - DESKTOP_LAYOUT_CHROME_WIDTH)
+/** The widest the sidebar may be dragged: its own maximum, or less on a window too narrow to give
+ *  the main pane its floor as well. */
+function maxSidebarWidth(): number {
+  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, window.innerWidth - MAIN_WIDTH_MIN - DESKTOP_LAYOUT_CHROME_WIDTH))
 }
 
 function readStoredWidth(key: string, fallback: number, min: number, max: number): number {
@@ -2064,52 +2063,29 @@ function App() {
   // instead of duplicating the session list there.
   const mainView = isDesktop && view === "sessions" ? "detail" : view
 
-  // Desktop panel widths: the sidebar (sessions) and main pane (chat) each get an explicit pixel
-  // width instead of the main pane simply filling whatever space is left, so both edges and the
-  // divider between them are independently draggable.
+  // Only the sidebar (sessions) carries an explicit pixel width. The main pane fills the rest of
+  // the window, so the divider between them is the one border worth dragging: the other two edges
+  // are the window's own.
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX)
-  )
-  const [mainWidth, setMainWidth] = useState(() =>
-    readStoredWidth(MAIN_WIDTH_STORAGE_KEY, MAIN_WIDTH_DEFAULT, MAIN_WIDTH_MIN, MAIN_WIDTH_MAX)
   )
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
   }, [sidebarWidth])
-  useEffect(() => {
-    localStorage.setItem(MAIN_WIDTH_STORAGE_KEY, String(mainWidth))
-  }, [mainWidth])
-  const dragSidebarLeft = useHorizontalDrag((deltaX) => {
-    // Dragging the sidebar's left edge left (negative deltaX) grows it. Growing it can't push the
-    // combined width past the viewport, since the main pane doesn't move to make room.
-    setSidebarWidth((width) => clamp(width - deltaX, SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, maxCombinedPanelWidth() - mainWidth)))
-  })
   const dragPanelDivider = useHorizontalDrag((deltaX) => {
-    // The divider trades width between the two panels, so their combined width never changes —
-    // no viewport cap needed here beyond each panel's own min/max.
-    setSidebarWidth((width) => clamp(width + deltaX, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX))
-    setMainWidth((width) => clamp(width - deltaX, MAIN_WIDTH_MIN, MAIN_WIDTH_MAX))
+    // Growing the sidebar takes the space out of the main pane, which is why the cap has to know
+    // the window width rather than just the sidebar's own maximum.
+    setSidebarWidth((width) => clamp(width + deltaX, SIDEBAR_WIDTH_MIN, maxSidebarWidth()))
   })
-  const dragMainRight = useHorizontalDrag((deltaX) => {
-    setMainWidth((width) => clamp(width + deltaX, MAIN_WIDTH_MIN, Math.min(MAIN_WIDTH_MAX, maxCombinedPanelWidth() - sidebarWidth)))
-  })
-  // Restores/keeps the combined panel width within the viewport: on first mount (a stored width
-  // from a wider screen), and again whenever the window is resized narrower than the current
-  // total. Shrinks the main pane first since it has more room to give before hitting its floor.
+  // Keeps the sidebar inside what the window can spare: on first mount (a stored width from a wider
+  // screen) and again on every resize. The main pane needs no such handling — it flexes.
   useEffect(() => {
     if (!isDesktop) return
-    const clampToViewport = () => {
-      const overflow = sidebarWidth + mainWidth - maxCombinedPanelWidth()
-      if (overflow <= 0) return
-      const mainShrink = Math.min(overflow, mainWidth - MAIN_WIDTH_MIN)
-      if (mainShrink > 0) setMainWidth((width) => clamp(width - mainShrink, MAIN_WIDTH_MIN, MAIN_WIDTH_MAX))
-      const sidebarShrink = overflow - mainShrink
-      if (sidebarShrink > 0) setSidebarWidth((width) => clamp(width - sidebarShrink, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX))
-    }
+    const clampToViewport = () => setSidebarWidth((width) => clamp(width, SIDEBAR_WIDTH_MIN, maxSidebarWidth()))
     clampToViewport()
     window.addEventListener("resize", clampToViewport)
     return () => window.removeEventListener("resize", clampToViewport)
-  }, [isDesktop, sidebarWidth, mainWidth])
+  }, [isDesktop])
 
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [selectedID, setSelectedID] = useState<string | null>(null)
@@ -3686,7 +3662,6 @@ function App() {
 
       {isDesktop && (
         <aside className="desktop-sidebar fade-in" style={{ width: sidebarWidth, flex: `0 0 ${sidebarWidth}px` }}>
-          <div className="resize-handle resize-handle--start" onPointerDown={dragSidebarLeft} role="separator" aria-orientation="vertical" aria-label="Resize sessions panel" />
           <div className="resize-handle resize-handle--end" onPointerDown={dragPanelDivider} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
           <div className="sidebar-brand">
             <img src={`${import.meta.env.BASE_URL}app-icon.png`} alt="" className="app-icon" />
@@ -3764,11 +3739,8 @@ function App() {
 
       <div
         className="main-content"
-        style={isDesktop ? { width: mainWidth, flex: `0 0 ${mainWidth}px`, position: "relative" } : undefined}
+        style={isDesktop ? { minWidth: MAIN_WIDTH_MIN, position: "relative" } : undefined}
       >
-      {isDesktop && (
-        <div className="resize-handle resize-handle--end" onPointerDown={dragMainRight} role="separator" aria-orientation="vertical" aria-label="Resize detail panel" />
-      )}
       {mainView === "settings" && (
         <ConditionalWrapper
           condition={isDesktop}

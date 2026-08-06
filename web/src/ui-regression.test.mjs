@@ -27,6 +27,18 @@ assert.ok(
 )
 assert.match(styles, /^\.sidebar-sessions \.session-card h3\s*\{[^}]*white-space:\s*nowrap;/m, 'the desktop sidebar row keeps its single-line ellipsised title')
 
+// The desktop shell used to hug the combined width of two fixed panels, which centred the whole app
+// in a narrow column and left dead space either side of it on any wide display. The pane fills the
+// window now, and only the transcript keeps a readable cap.
+assert.match(styles, /^\.app-shell-desktop\s*\{[^}]*width:\s*100%;/m, 'the desktop shell must fill the window rather than hug its panels')
+assert.ok(
+  !/^\.app-shell-desktop\s*\{[^}]*width:\s*fit-content/m.test(styles),
+  'a fit-content desktop shell is what left the app stranded in the middle of a wide window'
+)
+assert.match(styles, /^\.app-shell-desktop \.messages > \*,\s*\n\.app-shell-desktop \.composer\s*\{[^}]*max-width:\s*var\(--chat-measure\);/m, 'the transcript and composer must share one capped, centred reading column')
+assert.equal(app.includes('MAIN_WIDTH_MAX'), false, 'the main pane flexes now, so it has no width of its own to cap')
+assert.ok(app.includes('maxSidebarWidth()'), 'the divider must clamp the sidebar against the window, since growing it now takes space from the main pane')
+
 assert.ok(app.includes('messageScrollSignature'), 'conversation auto-scroll should react to message content changes, not only message count')
 assert.ok(
   /if \(!stickToBottomRef\.current\) return[\s\S]*?scrollMessagesToBottom\("auto"\)/.test(app),

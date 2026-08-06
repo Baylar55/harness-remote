@@ -2205,11 +2205,16 @@ button.compact {
 .app-shell-desktop {
   flex-direction: row;
   align-items: flex-start;
-  /* The sidebar and main pane both carry an explicit resizable width, so the shell should hug
-     their combined width (up to the viewport) rather than stretching to a fixed max — otherwise
-     dragging a panel's outer edge would leave dead space instead of visibly resizing anything. */
-  width: fit-content;
+  /* Fill the window. Only the sidebar carries an explicit width; the main pane takes whatever is
+     left, so a wide display shows a wider app instead of the same narrow column with dead space
+     either side of it. */
+  width: 100%;
   max-width: 100%;
+  /* How wide the conversation itself is allowed to get inside that pane. The chrome stretches, the
+     prose does not: a transcript run out to 2000px is a worse read than the window is a win. Set
+     wide enough that a maximised window reads as roomy padding rather than as the old dead space,
+     and that code blocks and diffs still get room. */
+  --chat-measure: 80rem;
 }
 
 /* Bound the chat pane to the viewport the same way .desktop-sidebar bounds itself, so .messages is
@@ -2252,6 +2257,19 @@ button.compact {
 
 .app-shell-desktop .jump-controls--chat {
   bottom: var(--space-3);
+  /* Follow the conversation column's right edge instead of the pane's, so the buttons stay beside
+     the transcript rather than drifting off towards the window frame on a wide display. */
+  right: max(var(--space-3), calc((100% - var(--chat-measure)) / 2 + var(--space-3)));
+}
+
+/* The transcript rows and the composer share one centred column so the text keeps a readable
+   measure however wide the pane gets. The cap goes on the rows rather than on .messages, which is
+   the scroller: capping the scroller would park its scrollbar in the middle of the pane. */
+.app-shell-desktop .messages > *,
+.app-shell-desktop .composer {
+  width: 100%;
+  max-width: var(--chat-measure);
+  margin-inline: auto;
 }
 
 .main-content {
@@ -2262,8 +2280,8 @@ button.compact {
   gap: var(--space-4);
 }
 
-/* Draggable borders for the desktop sidebar/main-pane layout: a thin invisible strip straddling
-   the panel edge, widened on hover/drag so it's easy to grab without adding visible chrome. */
+/* The draggable divider between the desktop sidebar and the main pane: a thin invisible strip
+   straddling the panel edge, coloured on hover/drag so it's easy to grab without adding chrome. */
 .resize-handle {
   position: absolute;
   top: 0;
@@ -2289,11 +2307,6 @@ button.compact {
 .resize-handle:hover::after,
 .resize-handle:active::after {
   background: var(--primary);
-}
-
-.resize-handle--start {
-  left: 0;
-  transform: translateX(-50%);
 }
 
 .resize-handle--end {
