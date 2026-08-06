@@ -12,12 +12,13 @@ if you are having an agent do the work.
 
 | Path | What it is |
 |---|---|
-| `web/` | The app: React + TypeScript + Vite, packaged for Android with Capacitor |
-| `web/src/` | Application source. `App.tsx` holds most of the UI, `api.ts` the HTTP client, `i18n.ts` the translations |
-| `web/native-android/` | Java sources copied into the generated Android project — see [Android packaging](#android-packaging) |
-| `bridge/` | A local HTTP/SSE server translating the app's API to ACP over stdio, for OMP and PI. Per-harness launch commands and capabilities live in `src/harness-profiles.js` |
-| `.github/workflows/` | Cloud APK and AAB builds |
-| `OMP-INTEGRATION-PLAN.md` | Design notes and findings from the OMP integration, in Italian |
+| `web/` | React + TypeScript + Vite app, packaged for Android with Capacitor or Windows with Electron |
+| `web/src/` | Application source. `App.tsx` holds most UI, `api.ts` client, `desktopBridge.ts` renderer adapter |
+| `web/electron/` | Main/preload shell, IPC contract, profile registry, HTTP and SSE transports |
+| `web/native-android/` | Java sources copied into generated Android project — see [Android packaging](#android-packaging) |
+| `bridge/` | Local HTTP/SSE server translating app API to ACP over stdio, for OMP and PI |
+| `.github/workflows/` | Cloud APK/AAB and Windows Electron builds |
+| `OMP-INTEGRATION-PLAN.md` | Design notes and findings from OMP integration, in Italian |
 
 ## Prerequisites
 
@@ -25,7 +26,7 @@ if you are having an agent do the work.
   runs on the standard library, so do not look for a lockfile there.
 - **A harness to talk to.** An OpenCode server, a working `omp` command, or PI. You can develop
   UI-only changes without one, but see [Test against a real agent](#test-against-a-real-agent)
-  before assuming that is enough.
+- **Windows packaging:** Windows 10/11 is required to run and manually smoke-test the unsigned Electron artifact.
 - **No Android SDK required.** CI builds the APK. You only need one for local native debugging.
 
 ## Getting it running
@@ -36,8 +37,20 @@ npm install
 npm run dev
 ```
 
-Open the printed URL. Configure the connection in **Settings**; each backend keeps its own saved
-connection, so switching between them does not lose anything.
+Open printed URL. Configure connection in **Settings**; each backend keeps its own saved connection,
+so switching between them does not lose anything.
+
+### Against Windows Electron
+
+Build and launch packaged desktop app:
+
+```powershell
+cd web
+npm run electron:dev
+```
+
+For request/SSE transport tests without live server, use `npm run test:desktop`. Electron owns
+network targets from saved profile IDs; renderer code must never add arbitrary URL or header inputs.
 
 ### Against OpenCode
 
@@ -53,9 +66,9 @@ cd bridge
 node src/cli.js --port 4097 --root "$HOME/your-project" --cors http://localhost:5173
 ```
 
-`--cors` matters for browser development and is easy to forget: without it the browser blocks every
-request and the app just looks broken. Native builds do not need it. The bridge binds to
-`127.0.0.1` by default and refuses any non-loopback bind without `--username` and `--password`.
+`--cors` matters for browser/PWA development and is easy to forget: without it browser blocks every
+request. Installed Electron and Android builds do not need it. Bridge binds to `127.0.0.1` by
+default and refuses non-loopback bind without `--username` and `--password`.
 
 ## The checks you must run
 
@@ -64,12 +77,15 @@ CI runs all of these before it packages anything, so a PR that skips them will f
 ```bash
 cd web
 npm run build
+npm run build:electron
 npm run test:i18n
 npm run test:config
 npm run test:ui
 npm run test:settings
 npm run test:model
 npm run test:events
+npm run test:profiles
+npm run test:desktop
 
 cd ../bridge
 npm test

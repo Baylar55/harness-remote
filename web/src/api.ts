@@ -1,4 +1,5 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
+import { desktopRequest, isDesktopPlatform } from "./desktopBridge"
 import { streamURL } from "./opencode-events"
 import { baseUrl, isValidServerConfig } from "./serverConfig"
 import type {
@@ -104,8 +105,18 @@ type AgentResponse = Array<{
 }>
 
 async function requestWithHeaders<T>(config: ServerConfig, path: string, options: RequestOptions = {}): Promise<ResponseWithHeaders<T>> {
-  const target = `${baseUrl(config)}${path}`
+  const method = options.method ?? "GET"
+  if (isDesktopPlatform()) {
+    const response = await desktopRequest(config, {
+      path,
+      method,
+      body: options.body,
+      readTimeout: options.readTimeout
+    })
+    return { data: response.data as T, headers: response.headers }
+  }
 
+  const target = `${baseUrl(config)}${path}`
   const headers: Record<string, string> = {
     Accept: "application/json"
   }
@@ -115,8 +126,6 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
   if (options.body !== undefined) {
     headers["Content-Type"] = "application/json"
   }
-
-  const method = options.method ?? "GET"
 
   if (Capacitor.isNativePlatform()) {
     let response

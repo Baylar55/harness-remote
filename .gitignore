@@ -5,3 +5,8 @@ web/dist/
 web/android/
 web/*.tsbuildinfo
 *.tgz
+
+web/dist-electron/
+web/release/
+web/release-*/
+.smoke-state/

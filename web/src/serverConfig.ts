@@ -1,4 +1,4 @@
-import type { ServerConfig } from "./types"
+import type { ServerConfig } from "./types.js"
 
 /**
  * Kept free of Capacitor imports so it can be unit tested directly: the rules here

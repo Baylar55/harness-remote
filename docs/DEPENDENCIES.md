@@ -120,6 +120,19 @@ party entirely.
 - The **bridge has no dependencies at all** and runs on the Node standard library. Keep it that
   way: it is the piece that has to start reliably on someone else's machine.
 
+### Electron and Windows packaging
+
+- **Electron 43** owns main-process HTTP and SSE connections. Renderer receives only frozen preload
+  methods; `contextIsolation`, sandbox, and disabled Node integration are load-bearing.
+- **electron-builder 26** creates unsigned x64 Windows NSIS artifacts. No signing secret is configured;
+  SmartScreen warnings are expected. `web/release/` is generated and must not be committed.
+- Renderer `web/dist` is built with Vite `--base=./` for `file://` loading. Standard `npm run build`
+  keeps PWA/Pages absolute-base behavior.
+- `electron-icon.svg` is separate from Android/PWA icon assets. Do not change native platform icons
+  when adjusting Windows branding.
+- Saved profiles are validated and persisted by main process under Electron `userData`; request and
+  stream calls carry profile IDs plus relative operations, never complete target URLs.
+
 ## When a harness changes
 
 Unit tests will not catch this. Every quirk in the tables above was found by running a real agent,

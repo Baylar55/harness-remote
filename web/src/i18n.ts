@@ -2,6 +2,9 @@ export type LanguageCode = 'en' | 'it' | 'zh-TW'
 
 type TranslationKey =
   | 'app.title'
+  | 'notification.title'
+  | 'notification.body'
+  | 'notification.overlayDescription'
   | 'app.jumpToTop'
   | 'app.jumpToBottom'
   | 'nav.settings'
@@ -244,6 +247,9 @@ type TranslationKey =
 const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   en: {
     'app.title': 'Harness Remote',
+    'notification.title': 'Harness Remote',
+    'notification.body': 'Agent completed a task',
+    'notification.overlayDescription': 'Agent completed a task',
     'app.jumpToTop': 'Jump to top',
     'app.jumpToBottom': 'Jump to bottom',
     'nav.settings': 'Settings',
@@ -484,6 +490,9 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
   },
   it: {
     'app.title': 'Harness Remote',
+    'notification.title': 'Harness Remote',
+    'notification.body': 'Agente ha completato un’attività',
+    'notification.overlayDescription': 'Attività agente completata',
     'app.jumpToTop': 'Vai in alto',
     'app.jumpToBottom': 'Vai in basso',
     'nav.settings': 'Impostazioni',
@@ -727,6 +736,9 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'app.jumpToTop': '跳到頂部',
     'app.jumpToBottom': '跳到底部',
     'nav.settings': '設定',
+    'notification.title': 'Harness Remote',
+    'notification.body': '代理程式已完成工作',
+    'notification.overlayDescription': '代理程式工作已完成',
     'nav.sessions': '工作階段',
     'nav.detail': '詳情',
     'nav.help': '說明',

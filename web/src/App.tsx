@@ -1,9 +1,17 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
-import { type PluginListenerHandle } from "@capacitor/core"
+import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { api, isValidServerConfig } from "./api"
+import {
+  createDesktopOpenCodeEventSubscription,
+  desktopProfileID,
+  isAndroidPlatform,
+  isDesktopPlatform,
+  notifyDesktopCompletion,
+  syncDesktopProfiles
+} from "./desktopBridge"
 import {
   createFetchOpenCodeEventSubscription,
   createNativeOpenCodeEventSubscription,
@@ -2000,6 +2008,21 @@ function App() {
   const [config, setConfig] = useState<ServerConfig>(initialProfile.config)
   const [draftProfileName, setDraftProfileName] = useState(initialProfile.name)
   const [profileToDelete, setProfileToDelete] = useState<SavedServerProfile | null>(null)
+  const [desktopProfileRevision, setDesktopProfileRevision] = useState(0)
+  const [desktopProfileSyncError, setDesktopProfileSyncError] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    syncDesktopProfiles(profiles).then((result) => {
+      if (!active) return
+      setDesktopProfileRevision(result.revision)
+      setDesktopProfileSyncError(null)
+    }).catch((error: unknown) => {
+      if (active) setDesktopProfileSyncError(error instanceof Error ? error.message : "Desktop profile synchronization failed")
+    })
+    return () => {
+      active = false
+    }
+  }, [profiles])
   const [language, setLanguage] = useState<LanguageCode>(() => {
     return normalizeLanguage(localStorage.getItem(LANGUAGE_STORAGE_KEY) || navigator.language)
   })
@@ -3126,6 +3149,7 @@ function App() {
   backStateRef.current = { view, activeDetailSheet, sessionToDelete, renamingSessionID }
 
   useEffect(() => {
+    if (!isAndroidPlatform(Capacitor.getPlatform())) return
     let handle: PluginListenerHandle | undefined
     let removed = false
     void CapacitorApp.addListener("backButton", () => {
@@ -3256,16 +3280,23 @@ function App() {
       setEventStreamState("idle")
       return
     }
-    setEventStreamState("connecting")
-    let stream: { url: string; headers: Record<string, string> }
-    try {
-      stream = api.eventStream(config)
-    } catch (error) {
-      setLiveEventError((error as Error).message)
+    if (isDesktopPlatform() && desktopProfileSyncError) {
+      setLiveEventError(desktopProfileSyncError)
       setEventStreamState("fallback")
       return
     }
-    const { url, headers } = stream
+    setEventStreamState("connecting")
+    const desktop = isDesktopPlatform()
+    let stream: { url: string; headers: Record<string, string> } | undefined
+    if (!desktop) {
+      try {
+        stream = api.eventStream(config)
+      } catch (error) {
+        setLiveEventError((error as Error).message)
+        setEventStreamState("fallback")
+        return
+      }
+    }
     let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const scheduleRefresh = () => {
       if (refreshTimer !== undefined) return
@@ -3331,20 +3362,31 @@ function App() {
         setEventStreamState("fallback")
       }
     }
-    const subscription = isNativeEventTransport()
-      ? createNativeOpenCodeEventSubscription({
-          url,
-          username: config.username,
-          password: config.password,
-          onEvent,
-          onStatus
-        })
-      : createFetchOpenCodeEventSubscription({ url, headers, onEvent, onStatus })
+    let subscription: { close(): void }
+    if (desktop) {
+      const profileID = desktopProfileID(config)
+      if (!profileID) {
+        setLiveEventError("Unknown desktop server profile")
+        setEventStreamState("fallback")
+        return
+      }
+      subscription = createDesktopOpenCodeEventSubscription({ profileId: profileID, scope: "global", onEvent, onStatus })
+    } else if (isNativeEventTransport()) {
+      subscription = createNativeOpenCodeEventSubscription({
+        url: stream!.url,
+        username: config.username,
+        password: config.password,
+        onEvent,
+        onStatus
+      })
+    } else {
+      subscription = createFetchOpenCodeEventSubscription({ url: stream!.url, headers: stream!.headers, onEvent, onStatus })
+    }
     return () => {
-      if (refreshTimer !== undefined) clearTimeout(refreshTimer)
+      clearTimeout(refreshTimer)
       subscription.close()
     }
-  }, [config.backend, config.host, config.port, config.username, config.password])
+  }, [config.backend, config.host, config.port, config.username, config.password, desktopProfileRevision, desktopProfileSyncError])
 
   useEffect(() => {
     if (!hasConfiguredServer) {
@@ -3455,6 +3497,11 @@ function App() {
         audio.currentTime = 0
         audio.play().catch(() => undefined)
       }
+      notifyDesktopCompletion({
+        title: t("notification.title"),
+        body: t("notification.body"),
+        overlayDescription: t("notification.overlayDescription")
+      })
     }
     wasAwaitingAssistantReplyRef.current = awaitingAssistantReply
   }, [awaitingAssistantReply])

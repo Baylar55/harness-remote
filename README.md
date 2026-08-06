@@ -115,6 +115,24 @@ desktop layout. Narrow the window below that and it goes back to the phone layou
 Everything else — prompts, slash commands, stopping a run, model and agent selection, todos,
 diffs — behaves exactly as it does on a phone. The backend setup below is identical either way.
 
+### Windows Electron app
+
+The installable desktop app is Windows-only in this first release. It packages same `web/` UI
+inside secure Electron shell. Build unsigned installer from `web/`:
+
+```powershell
+npm ci
+npm run package:win
+```
+
+Install `release/Harness-Remote-<version>-win-x64-unsigned.exe`. Windows SmartScreen can warn
+because artifact is unsigned. Choose **More info → Run anyway** only when artifact source is trusted.
+
+Electron owns HTTP and SSE traffic, so OpenCode and bridge servers do not need `--cors` for
+installed app. Browser/PWA traffic still needs exact browser origin in server CORS config. Saved
+profiles remain under Electron user data and are never accepted as inline request URLs. Closing app
+also closes active event streams.
+
 ## Progressive Web App (PWA)
 
 The web app is installable and is published straight from this repo via GitHub Pages, at
@@ -130,13 +148,13 @@ deliberately, install that one.
 The deploy runs the web regression suites first, so a merge that breaks them does not reach the URL.
 
 - A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
-  same-origin static assets on a stale-while-revalidate basis, so the UI still loads offline or on
-  a flaky connection after the first visit.
+  same-origin static assets on a stale-while-revalidate basis, so UI still loads offline or on a
+  flaky connection after first visit.
 - Requests to your harness server are never cached — they go to whatever host you configured in
   Settings, cross-origin from wherever the PWA itself is hosted, so session data always comes from
   the live server.
-- The service worker is skipped entirely in the native Android app (Capacitor) and in local dev
-  builds; it only registers in production web builds.
+- The service worker is skipped entirely in the native Android app (Capacitor), packaged Electron,
+  and local dev builds; it only registers in production web builds.
 
 Because the app talks to your server cross-origin, the server needs the PWA's origin listed
 in `--cors`:
@@ -148,14 +166,17 @@ npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://giuliastr
 ## Technology Stack
 
 - frontend: React + TypeScript + Vite
+- desktop packaging: Electron + electron-builder (unsigned Windows x64)
 - mobile packaging: Capacitor (Android APK)
 - networking: per-harness transports behind one app-side API — the OpenCode HTTP API spoken directly, and the local HTTP/SSE bridge in `bridge/` that fronts both OMP and PI over ACP
-- CI/CD: GitHub Actions for cloud APK builds
+- CI/CD: GitHub Actions for cloud APK and unsigned Windows builds
 - i18n: lightweight custom i18n module with English, Italian, and Traditional Chinese
 
 ## Download
 
-Download the latest signed Android APK from the GitHub Releases page:
+Download Android APK or Windows unsigned installer from GitHub Releases:
+
+Windows artifact is unsigned; SmartScreen warning is expected. Windows-only desktop support.
 
 https://github.com/giuliastro/harness-remote/releases/latest
 
