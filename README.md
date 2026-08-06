@@ -115,18 +115,27 @@ desktop layout. Narrow the window below that and it goes back to the phone layou
 Everything else — prompts, slash commands, stopping a run, model and agent selection, todos,
 diffs — behaves exactly as it does on a phone. The backend setup below is identical either way.
 
-### Windows Electron app
+### Desktop app
 
-The installable desktop app is Windows-only in this first release. It packages same `web/` UI
-inside secure Electron shell. Build unsigned installer from `web/`:
+The installable desktop app packages the same `web/` UI inside a secure Electron shell, for Windows,
+macOS and Linux. Every `v*` tag builds all three. To build one yourself, run the script for the
+platform you are on, from `web/` — electron-builder does not cross-compile:
 
-```powershell
+```bash
 npm ci
 npm run package:win
 ```
 
-Install `release/Harness-Remote-<version>-win-x64-unsigned.exe`. Windows SmartScreen can warn
-because artifact is unsigned. Choose **More info → Run anyway** only when artifact source is trusted.
+| Platform | Script | Artifact |
+| --- | --- | --- |
+| Windows | `npm run package:win` | `release/Harness-Remote-<version>-win-x64-unsigned.exe` |
+| macOS | `npm run package:mac` | `release/Harness-Remote-<version>-mac-<arch>-unsigned.dmg` and `.zip`, for arm64 and x64 |
+| Linux | `npm run package:linux` | `release/Harness-Remote-<version>-linux-x64.AppImage` and `.deb` |
+
+Nothing is signed, so the first launch needs a deliberate override: Windows SmartScreen offers
+**More info → Run anyway**, and macOS Gatekeeper needs **right-click → Open** (or
+**System Settings → Privacy & Security → Open Anyway**). Take that step only when you trust where the
+artifact came from.
 
 Electron owns HTTP and SSE traffic, so OpenCode and bridge servers do not need `--cors` for
 installed app. Browser/PWA traffic still needs exact browser origin in server CORS config. Saved
@@ -166,17 +175,17 @@ npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://giuliastr
 ## Technology Stack
 
 - frontend: React + TypeScript + Vite
-- desktop packaging: Electron + electron-builder (unsigned Windows x64)
+- desktop packaging: Electron + electron-builder (unsigned Windows, macOS and Linux builds)
 - mobile packaging: Capacitor (Android APK)
 - networking: per-harness transports behind one app-side API — the OpenCode HTTP API spoken directly, and the local HTTP/SSE bridge in `bridge/` that fronts both OMP and PI over ACP
-- CI/CD: GitHub Actions for cloud APK and unsigned Windows builds
+- CI/CD: GitHub Actions for cloud APK and unsigned desktop builds
 - i18n: lightweight custom i18n module with English, Italian, and Traditional Chinese
 
 ## Download
 
-Download Android APK or Windows unsigned installer from GitHub Releases:
+Download the Android APK, or the Windows, macOS or Linux desktop build, from GitHub Releases:
 
-Windows artifact is unsigned; SmartScreen warning is expected. Windows-only desktop support.
+Every desktop artifact is unsigned, so expect a SmartScreen or Gatekeeper warning on first launch.
 
 https://github.com/giuliastro/harness-remote/releases/latest
 

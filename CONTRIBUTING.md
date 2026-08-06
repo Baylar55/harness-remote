@@ -12,12 +12,12 @@ if you are having an agent do the work.
 
 | Path | What it is |
 |---|---|
-| `web/` | React + TypeScript + Vite app, packaged for Android with Capacitor or Windows with Electron |
+| `web/` | React + TypeScript + Vite app, packaged for Android with Capacitor or for desktop with Electron |
 | `web/src/` | Application source. `App.tsx` holds most UI, `api.ts` client, `desktopBridge.ts` renderer adapter |
 | `web/electron/` | Main/preload shell, IPC contract, profile registry, HTTP and SSE transports |
 | `web/native-android/` | Java sources copied into generated Android project — see [Android packaging](#android-packaging) |
 | `bridge/` | Local HTTP/SSE server translating app API to ACP over stdio, for OMP and PI |
-| `.github/workflows/` | Cloud APK/AAB and Windows Electron builds |
+| `.github/workflows/` | Cloud APK/AAB and Windows/macOS/Linux Electron builds |
 | `OMP-INTEGRATION-PLAN.md` | Design notes and findings from OMP integration, in Italian |
 
 ## Prerequisites
@@ -26,7 +26,8 @@ if you are having an agent do the work.
   runs on the standard library, so do not look for a lockfile there.
 - **A harness to talk to.** An OpenCode server, a working `omp` command, or PI. You can develop
   UI-only changes without one, but see [Test against a real agent](#test-against-a-real-agent)
-- **Windows packaging:** Windows 10/11 is required to run and manually smoke-test the unsigned Electron artifact.
+- **Desktop packaging:** electron-builder does not cross-compile, so each artifact is built and
+  smoke-tested on its own OS. CI covers all three; locally you can only check the one you are on.
 - **No Android SDK required.** CI builds the APK. You only need one for local native debugging.
 
 ## Getting it running
@@ -40,11 +41,11 @@ npm run dev
 Open printed URL. Configure connection in **Settings**; each backend keeps its own saved connection,
 so switching between them does not lose anything.
 
-### Against Windows Electron
+### Against the desktop app
 
 Build and launch packaged desktop app:
 
-```powershell
+```bash
 cd web
 npm run electron:dev
 ```
