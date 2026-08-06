@@ -60,8 +60,11 @@ offering a control that fails.
 - stop running work when necessary
 - pick the model a session uses
 - browse the filesystem to choose the working directory for a new session
-- adapt to the screen: Android-friendly bottom navigation on a phone, a two-pane sidebar layout on a
-  wide screen (see [Desktop Mode](#desktop-mode))
+- adapt to the screen: Android-friendly bottom navigation on a phone, a two-pane sidebar layout that
+  fills a wide screen (see [Desktop Mode](#desktop-mode))
+- run as an installed app rather than a browser tab: an Android APK, or a
+  [desktop build](#desktop-app) for Windows, macOS and Linux that also gets a native notification
+  when a session finishes while you are working elsewhere
 - jump to the top or the bottom of a long transcript or session list without dragging through it
 - play a completion sound when a running session finishes
 - switch UI language between English, Italian, and Traditional Chinese, and the theme between light,
@@ -84,9 +87,10 @@ Depending on the harness:
 
 ## Desktop Mode
 
-The app is one build with two layouts. There is no switch to flip and no separate desktop
-download: open it in a window at least 781px wide and it rearranges itself into a two-pane
-desktop layout. Narrow the window below that and it goes back to the phone layout, live.
+The app is one build with two layouts, and there is no switch to flip: open it in a window at least
+781px wide and it rearranges itself into a two-pane desktop layout. Narrow the window below that and
+it goes back to the phone layout, live. The [installable desktop app](#desktop-app) packages that
+same build, so a browser tab and the installed app show the same thing at the same width.
 
 | | Phone layout | Desktop layout |
 |---|---|---|
@@ -104,10 +108,11 @@ desktop layout. Narrow the window below that and it goes back to the phone layou
    itself, so you land in a conversation rather than on an empty pane.
 3. Pick sessions from the sidebar. Hovering a row reveals its rename and delete icons; the
    session you are reading stays highlighted while you browse the rest.
-4. Drag any of the three vertical borders to resize: the sidebar's outer edge, the divider between
-   the two panes, and the chat's outer edge. The sidebar accepts 220–480px and the chat 420–1400px.
-   Both widths are remembered per browser and are clamped back inside the window if you later open
-   the app on a smaller screen.
+4. Drag the divider between the two panes to resize. The sidebar accepts 220–480px, remembered per
+   browser and clamped back inside the window if you later open the app on a smaller screen; the
+   chat pane takes whatever is left, so the app always fills the window. The conversation itself
+   stays within a readable column at the centre of that pane rather than stretching across a wide
+   display — the panels, headers and composer are what grow.
 5. Use the floating arrow buttons at the bottom right of a long transcript or session list to jump
    to either end. They only appear when there is enough scrolling left to be worth it, and jumping
    to the top also releases the chat's auto-follow so incoming output stops yanking the view down.
@@ -118,29 +123,27 @@ diffs — behaves exactly as it does on a phone. The backend setup below is iden
 ### Desktop app
 
 The installable desktop app packages the same `web/` UI inside a secure Electron shell, for Windows,
-macOS and Linux. Every `v*` tag builds all three. To build one yourself, run the script for the
-platform you are on, from `web/` — electron-builder does not cross-compile:
+macOS and Linux. Every `v*` tag builds all three and attaches them to the
+[release](https://github.com/giuliastro/harness-remote/releases/latest), next to the Android APK.
 
-```bash
-npm ci
-npm run package:win
-```
+To build one yourself, run `npm ci` in `web/` and then the script for the platform you are sitting
+at — electron-builder does not cross-compile, so each artifact is built on its own OS:
 
-| Platform | Script | Artifact |
+| Platform | Script | Artifact in `web/release/` |
 | --- | --- | --- |
-| Windows | `npm run package:win` | `release/Harness-Remote-<version>-win-x64-unsigned.exe` |
-| macOS | `npm run package:mac` | `release/Harness-Remote-<version>-mac-<arch>-unsigned.dmg` and `.zip`, for arm64 and x64 |
-| Linux | `npm run package:linux` | `release/Harness-Remote-<version>-linux-x64.AppImage` and `.deb` |
+| Windows | `npm run package:win` | `Harness-Remote-<version>-win-x64-unsigned.exe` |
+| macOS | `npm run package:mac` | `Harness-Remote-<version>-mac-<arch>-unsigned.dmg` and `.zip`, for arm64 and x64 |
+| Linux | `npm run package:linux` | `Harness-Remote-<version>-linux-x64.AppImage` and `.deb` |
 
 Nothing is signed, so the first launch needs a deliberate override: Windows SmartScreen offers
 **More info → Run anyway**, and macOS Gatekeeper needs **right-click → Open** (or
 **System Settings → Privacy & Security → Open Anyway**). Take that step only when you trust where the
-artifact came from.
+artifact came from. An AppImage also needs its executable bit — `chmod +x` — before it will run.
 
-Electron owns HTTP and SSE traffic, so OpenCode and bridge servers do not need `--cors` for
-installed app. Browser/PWA traffic still needs exact browser origin in server CORS config. Saved
-profiles remain under Electron user data and are never accepted as inline request URLs. Closing app
-also closes active event streams.
+Electron owns the HTTP and SSE traffic, so OpenCode and bridge servers do not need `--cors` for the
+installed app; browser and PWA traffic still needs the exact browser origin in the server's CORS
+configuration. Saved profiles live under Electron's user data and are never accepted as inline
+request URLs. Closing the app also closes its active event streams.
 
 ## Progressive Web App (PWA)
 
@@ -150,9 +153,9 @@ add it to the home screen / app list, opening in its own standalone window.
 
 It is redeployed on every merge to `main` that touches `web/`, so it carries the current tip of the
 branch rather than the last release. That is the point: it is where a change gets tried on a real
-phone against a real server before it ships. The Android APK in [Releases](https://github.com/giuliastro/harness-remote/releases/latest)
-is the stable channel and still comes only from `v*` tags — if you want a version that was cut
-deliberately, install that one.
+phone against a real server before it ships. The packaged builds in [Releases](https://github.com/giuliastro/harness-remote/releases/latest)
+— the Android APK and the three desktop apps — are the stable channel and still come only from `v*`
+tags. If you want a version that was cut deliberately, install one of those.
 
 The deploy runs the web regression suites first, so a merge that breaks them does not reach the URL.
 
@@ -183,11 +186,20 @@ npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://giuliastr
 
 ## Download
 
-Download the Android APK, or the Windows, macOS or Linux desktop build, from GitHub Releases:
+Every release carries the Android APK plus desktop builds for all three platforms:
 
-Every desktop artifact is unsigned, so expect a SmartScreen or Gatekeeper warning on first launch.
+| Platform | File |
+| --- | --- |
+| Android | `.apk` |
+| Windows | `-win-x64-unsigned.exe` installer |
+| macOS | `-mac-arm64-unsigned.dmg` (Apple Silicon) or `-mac-x64-unsigned.dmg` (Intel), `.zip` alternatives |
+| Linux | `-linux-x64.AppImage` or `.deb` |
 
 https://github.com/giuliastro/harness-remote/releases/latest
+
+The desktop artifacts are unsigned, so expect a SmartScreen or Gatekeeper prompt on first launch —
+[Desktop app](#desktop-app) explains how to get past it. The web app needs no download at all: it is
+published as an installable [PWA](#progressive-web-app-pwa).
 
 ## Harness Setup
 
