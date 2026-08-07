@@ -3,6 +3,7 @@ import type {
   DesktopEvent,
   DesktopEventStatus,
   DesktopEventSubscriptionOptions,
+  DesktopMenuCommand,
   DesktopProfile,
   DesktopProfileSyncResult,
   DesktopRequest,
@@ -26,6 +27,7 @@ export type DesktopBridgeAPI = {
   ): Promise<string>
   unsubscribeEvents(subscriptionId: string): Promise<void>
   notifyCompletion(notification: DesktopCompletionNotification): Promise<void>
+  onMenuCommand(callback: (command: DesktopMenuCommand) => void): () => void
 }
 declare global {
   interface Window {
@@ -153,6 +155,10 @@ export function desktopProfileID(config: ServerConfig): string | null {
 
 export function notifyDesktopCompletion(notification: DesktopCompletionNotification): void {
   void bridge()?.notifyCompletion(notification).catch(() => undefined)
+}
+
+export function subscribeDesktopMenuCommands(callback: (command: DesktopMenuCommand) => void): () => void {
+  return bridge()?.onMenuCommand(callback) ?? (() => undefined)
 }
 
 export async function desktopRequest(config: ServerConfig, request: DesktopRequest): Promise<DesktopResponse> {

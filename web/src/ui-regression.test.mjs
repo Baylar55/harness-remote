@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+const clipboard = readFileSync(new URL('./clipboard.ts', import.meta.url), 'utf8')
 const api = readFileSync(new URL('./api.ts', import.meta.url), 'utf8')
 const icons = readFileSync(new URL('./Icons.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+const shell = readFileSync(new URL('./components/shell.tsx', import.meta.url), 'utf8')
+const panels = readFileSync(new URL('./components/panels.tsx', import.meta.url), 'utf8')
 
 assert.ok(api.includes('const body = await response.text()'), 'failed HTTP responses must consume their body only once')
 assert.equal(api.includes('const text = await response.text()'), false, 'error handling must not try to read an already consumed response stream')
@@ -36,6 +39,10 @@ assert.ok(
   'a fit-content desktop shell is what left the app stranded in the middle of a wide window'
 )
 assert.match(styles, /^\.app-shell-desktop \.messages > \*,\s*\n\.app-shell-desktop \.composer\s*\{[^}]*max-width:\s*var\(--chat-measure\);/m, 'the transcript and composer must share one capped, centred reading column')
+assert.match(styles, /--chat-measure:\s*clamp\(52rem,\s*58vw,\s*64rem\)/, 'wide desktop windows should progressively expand the transcript without producing full-width prose')
+assert.match(styles, /\.message-reasoning-summary \+ \.message-content\s*\{[^}]*margin-top:\s*var\(--space-4\)/, 'reasoning summaries should have balanced spacing before and after')
+assert.match(styles, /\.message > \.message-reasoning-summary:first-child\s*\{[^}]*margin-top:\s*0/, 'a leading reasoning row should rely on the message-list gap instead of doubling it')
+assert.ok(app.includes('const SIDEBAR_WIDTH_WIDE_DEFAULT = 384') && app.includes('window.innerWidth >= WIDE_DESKTOP_MIN_WIDTH'), 'wide desktop windows should start with a substantially wider session sidebar')
 assert.equal(app.includes('MAIN_WIDTH_MAX'), false, 'the main pane flexes now, so it has no width of its own to cap')
 assert.ok(app.includes('maxSidebarWidth()'), 'the divider must clamp the sidebar against the window, since growing it now takes space from the main pane')
 
@@ -141,7 +148,7 @@ assert.ok(app.includes('NEW_SESSION_DIRECTORY_STORAGE_KEY'), 'last new-session f
 assert.ok(app.includes('showNewSessionPicker'), 'New Session should open a per-session folder picker instead of applying one global folder')
 assert.ok(app.includes('api.loadPath(config, selectedNewSessionDirectory)'), 'folder picker should start from OpenCode /path')
 assert.ok(api.includes('listFiles(config: ServerConfig, path: string, directory?: string)'), 'API should expose OpenCode /file for directory browsing')
-assert.ok(app.includes("t('sessions.projectDirectoryLabel')"), 'folder picker should be localized')
+assert.ok(panels.includes("t('sessions.projectDirectoryLabel')"), 'folder picker should be localized')
 assert.ok(app.includes("api.createSession(config, t('sessions.remoteSessionTitle'), activeModel, directory)"), 'new sessions should pass the translated remote title and only the picked directory to OpenCode')
 assert.ok(app.includes("t('sessions.projectDirectoryInvalid'"), 'picked folders should be validated before creating unusable global sessions')
 assert.ok(app.includes('if (!isProjectDirectory(pathInfo))'), 'new session creation should reject folders that OpenCode resolves to the global project')
@@ -252,8 +259,8 @@ assert.equal(
 assert.ok(app.includes('chip-warning'), 'the context chip should mark the failure visually')
 
 // The harness in use decides what the app can do, so it is named in the header.
-assert.ok(app.includes('className={`harness-badge harness-${config.backend}`}'), 'the header should badge the active harness')
-assert.ok(app.includes('{backendDisplayName(config.backend)}'), 'the badge should show the harness display name')
+assert.ok(shell.includes('className={`harness-badge harness-${profile.backendClass}`}'), 'the server switcher should badge each harness')
+assert.ok(shell.includes('{profile.backendLabel}'), 'the badge should show the harness display name')
 for (const cls of ['.harness-badge', '.harness-omp', '.harness-pi', '.brand-server']) {
   assert.ok(styles.includes(cls), `${cls} should be styled`)
 }
@@ -382,7 +389,7 @@ assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show th
 
 assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY, window\.matchMedia/, 'right-clicking a message must open its action menu')
 assert.match(app, /event\.pointerType !== "touch"/, 'touch messages must support long-press actions')
-assert.match(app, /navigator\.clipboard\?\.writeText/, 'message actions must copy to the system clipboard')
+assert.match(clipboard, /navigator\.clipboard\?\.writeText/, 'message actions must copy to the system clipboard')
 assert.match(app, /markdown \? normalizeMessageMarkdown\(text\) : text/, 'the menu must distinguish plain-text and markdown copies')
 assert.match(styles, /\.message-context-menu\s*\{[\s\S]*?position:\s*fixed/, 'message actions must render above the scrolling transcript')
 assert.match(app, /window\.matchMedia\("\(pointer: coarse\)"\)\.matches/, 'a touch context-menu event must keep the mobile menu layout')
@@ -397,7 +404,7 @@ assert.match(app, /window\.addEventListener\("scroll", dismiss, true\)/, 'a fixe
 assert.match(app, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/, 'choosing an item must not count as pressing outside, or the menu unmounts before the click lands')
 // The Clipboard API needs a secure context, and the app is reachable over plain http on a LAN,
 // where `navigator.clipboard` is undefined and reaching into it throws past any `.catch()`.
-assert.match(app, /document\.execCommand\("copy"\)/, 'copying must still work where the Clipboard API is unavailable')
+assert.match(clipboard, /document\.execCommand\("copy"\)/, 'copying must still work where the Clipboard API is unavailable')
 // Both copy options did nothing on any bubble whose parts carry no text — a run ending on a tool
 // call, an agent turn that only worked and never spoke. The menu was handed the run's last message,
 // and `extractText` returns "" for those, so the copy wrote an empty string: the paste came back
@@ -413,8 +420,8 @@ assert.ok(
   'the menu takes the text to copy: passing a message let a bubble that shows several, or none, claim one'
 )
 assert.match(app, /if \(!text && actions\.length === 0\) return <article className=\{className\}>\{children\}<\/article>/, 'a bubble with neither copy nor harness actions must not offer the menu')
-assert.match(app, /if \(!text\) return\s*\n\s*try \{/, 'an empty copy must not replace what the user already had in the clipboard')
-assert.match(app, /selection\.addRange\(previousRange\)/, 'the fallback carrier must give the selection back after stealing it')
+assert.match(clipboard, /if \(!text\) return\s*\n\s*try \{/, 'an empty copy must not replace what the user already had in the clipboard')
+assert.match(clipboard, /selection\.addRange\(previousRange\)/, 'the fallback carrier must give the selection back after stealing it')
 assert.match(app, /supported\.has\("undo"\)/, 'Undo must appear only when the connected harness exposes the command')
 assert.match(app, /supported\.has\("redo"\)/, 'Redo must appear only when the connected harness exposes the command')
 assert.match(app, /api\.revertMessage\(config, selectedSession\.id, messageID/, 'OpenCode message actions must use its targeted revert endpoint')
@@ -489,9 +496,10 @@ assert.match(
 assert.match(app, /session-actions-menu/, 'the header actions menu should have its own styles')
 assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?position:\s*absolute/, 'the header actions menu must overlay the conversation rather than push its layout')
 assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?z-index:\s*20/, 'the header actions menu must stack above the message list')
-assert.match(app, /!isDesktop && \([\s\S]*?detail-back-button[\s\S]*?SessionActionsMenu/, 'on mobile the header actions menu should share the back-to-sessions row')
+assert.match(app, /mobile-session-appbar[\s\S]*?mobile-back-button[\s\S]*?SessionActionsMenu/, 'mobile detail should use one contextual row for back, identity, and session actions')
 assert.match(app, /isDesktop && selectedSession && sessionHeaderActions\.length > 0/, 'on desktop the header actions menu should remain beside the session heading')
-assert.match(styles, /\.detail-topbar \{[\s\S]*?flex-direction:\s*row/, 'the mobile detail topbar should keep its controls on one row')
+assert.match(styles, /\.mobile-appbar \{[\s\S]*?display:\s*flex/, 'the mobile contextual app bar should keep its controls on one row')
+assert.match(styles, /\.desktop-detail-header \{[\s\S]*?display:\s*none/, 'mobile should not repeat the desktop session heading below the contextual app bar')
 assert.doesNotMatch(styles, /\.session-title-button\s*\{[\s\S]*?min-height:\s*44px/, 'the editable title should not create an empty row before the session directory')
 
 assert.ok(api.includes('withDirectory("/permission", directory)'), 'pending OpenCode permissions must be loaded through the server API')

@@ -41,9 +41,10 @@ assert.ok(i18n.includes("'detail.contextStripLabel'"), 'context chip strings sho
 assert.ok(i18n.includes("'detail.modelToolsYes'"), 'model capability text should be translated')
 assert.ok(i18n.includes("'detail.modelSearchPlaceholder'"), 'model search strings should be translated')
 assert.ok(/\.context-chip[\s\S]*?overflow/.test(styles), 'context chips should have compact mobile styling')
+assert.ok(/@media \(max-width: 780px\)[\s\S]*?\.session-context-strip\s*\{[\s\S]*?position:\s*sticky[\s\S]*?top:\s*calc\(3\.75rem \+ env\(safe-area-inset-top\)\)/.test(styles), 'mobile model and detail context should remain visible below the session app bar')
 assert.ok(/\.bottom-sheet[\s\S]*?max-height/.test(styles), 'model/details should use a mobile bottom sheet')
 assert.ok(/\.model-option-list[\s\S]*?overflow-y/.test(styles), 'searchable model results should scroll in the sheet')
-assert.ok(/\.model-option[\s\S]*?min-height:\s*64px/.test(styles), 'model options should be tall enough for two-line labels')
-assert.ok(/\.model-option span[\s\S]*?line-height:\s*1\.25/.test(styles), 'model option text should not look vertically squeezed')
+assert.ok(/\.model-option[\s\S]*?min-height:\s*2\.75rem/.test(styles), 'model options should preserve a touch-sized minimum height')
+assert.ok(/\.model-option span[\s\S]*?line-height:\s*1\.3/.test(styles), 'model option text should not look vertically squeezed')
 
 console.log('model picker regression tests passed')
