@@ -488,3 +488,189 @@ export const JumpToBottomIcon = ({ className = "", size = 20 }: { className?: st
     <path d="M6 9l6 6 6-6" />
   </svg>
 )
+
+export const SearchIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Search"
+  >
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-3.2-3.2" />
+  </svg>
+)
+
+export const ChevronDownIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Expand"
+  >
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+)
+
+export const ChevronRightIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Next"
+  >
+    <path d="m9 6 6 6-6 6" />
+  </svg>
+)
+
+export const ArrowLeftIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Back"
+  >
+    <path d="M19 12H5" />
+    <path d="m12 19-7-7 7-7" />
+  </svg>
+)
+
+export const CommandIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Commands"
+  >
+    <path d="M15 6a3 3 0 1 1 3 3h-3zm0 0v12m0 0a3 3 0 1 0 3-3h-3zM9 6a3 3 0 1 0-3 3h3zm0 0v12m0 0a3 3 0 1 1-3-3h3zM9 9h6v6H9z" />
+  </svg>
+)
+
+export const ServerIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Server"
+  >
+    <rect x="3" y="4" width="18" height="7" rx="2" />
+    <rect x="3" y="13" width="18" height="7" rx="2" />
+    <path d="M7 7.5h.01M7 16.5h.01" />
+  </svg>
+)
+
+export const SparkIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Model"
+  >
+    <path d="M12 3l1.9 4.9L19 9.8l-4.4 2.6L13.4 18 12 14.3 10.6 18l-1.2-5.6L5 9.8l5.1-1.9z" />
+  </svg>
+)
+
+export const PanelRightIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Side panel"
+  >
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M15 4v16" />
+  </svg>
+)
+
+export const CopyIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Copy"
+  >
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+)
+
+export const CheckIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Done"
+  >
+    <path d="m5 13 4 4L19 7" />
+  </svg>
+)

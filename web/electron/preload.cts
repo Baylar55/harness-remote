@@ -5,6 +5,7 @@ import type {
   DesktopEventMessage,
   DesktopEventStatus,
   DesktopEventSubscriptionOptions,
+  DesktopMenuCommand,
   DesktopProfile,
   DesktopProfileSyncResult,
   DesktopRequest,
@@ -18,7 +19,8 @@ const IPC_CHANNELS = Object.freeze({
   subscribeEvents: "desktop:events:subscribe",
   unsubscribeEvents: "desktop:events:unsubscribe",
   notifyCompletion: "desktop:completion:notify",
-  event: "desktop:events:event"
+  event: "desktop:events:event",
+  menuCommand: "desktop:menu:command"
 })
 
 type EventCallbacks = {
@@ -27,12 +29,16 @@ type EventCallbacks = {
 }
 
 const callbacks = new Map<string, EventCallbacks>()
+const menuCallbacks = new Set<(command: DesktopMenuCommand) => void>()
 ipcRenderer.on(IPC_CHANNELS.event, (_event: Electron.IpcRendererEvent, message: DesktopEventMessage) => {
   if (!message || typeof message.subscriptionId !== "string") return
   const callback = callbacks.get(message.subscriptionId)
   if (!callback) return
   if (message.kind === "event") callback.onEvent(message.event)
   else callback.onStatus?.(message.status)
+})
+ipcRenderer.on(IPC_CHANNELS.menuCommand, (_event: Electron.IpcRendererEvent, command: DesktopMenuCommand) => {
+  for (const callback of menuCallbacks) callback(command)
 })
 
 const harnessDesktop = Object.freeze({
@@ -59,6 +65,10 @@ const harnessDesktop = Object.freeze({
   },
   notifyCompletion(notification: DesktopCompletionNotification): Promise<void> {
     return ipcRenderer.invoke(IPC_CHANNELS.notifyCompletion, notification)
+  },
+  onMenuCommand(callback: (command: DesktopMenuCommand) => void): () => void {
+    menuCallbacks.add(callback)
+    return () => menuCallbacks.delete(callback)
   }
 })
 

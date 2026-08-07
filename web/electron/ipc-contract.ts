@@ -6,7 +6,8 @@ export const IPC_CHANNELS = Object.freeze({
   subscribeEvents: "desktop:events:subscribe",
   unsubscribeEvents: "desktop:events:unsubscribe",
   notifyCompletion: "desktop:completion:notify",
-  event: "desktop:events:event"
+  event: "desktop:events:event",
+  menuCommand: "desktop:menu:command"
 })
 
 export type DesktopProfileSyncResult = {
@@ -89,3 +90,34 @@ export type DesktopEventMessage =
   | { subscriptionId: string; kind: "status"; status: DesktopEventStatus }
 
 export type DesktopSubscribeResult = { subscriptionId: string }
+
+/**
+ * The platform menu bar drives the renderer by sending one of these. They are the same identifiers
+ * the in-app menu bar and the command palette use, so the packaged app and the browser build cannot
+ * end up with two different notions of what "New session" does.
+ */
+export const DESKTOP_MENU_COMMANDS = [
+  "session.new",
+  "session.refresh",
+  "session.rename",
+  "session.delete",
+  "session.stop",
+  "session.undo",
+  "session.redo",
+  "focus.composer",
+  "focus.search",
+  "server.add",
+  "server.settings",
+  "view.palette",
+  "view.inspector",
+  "view.theme.system",
+  "view.theme.light",
+  "view.theme.dark",
+  "help.open"
+] as const
+
+export type DesktopMenuCommand = (typeof DESKTOP_MENU_COMMANDS)[number]
+
+export function isDesktopMenuCommand(value: unknown): value is DesktopMenuCommand {
+  return typeof value === "string" && (DESKTOP_MENU_COMMANDS as readonly string[]).includes(value)
+}

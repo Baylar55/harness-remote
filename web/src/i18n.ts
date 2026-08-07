@@ -177,6 +177,53 @@ type TranslationKey =
   | 'help.network'
   | 'help.troubleshooting'
   | 'help.commands'
+  | 'menubar.file'
+  | 'menubar.session'
+  | 'menubar.view'
+  | 'menubar.help'
+  | 'command.newSession'
+  | 'command.refreshSessions'
+  | 'command.addServer'
+  | 'command.openSettings'
+  | 'command.focusComposer'
+  | 'command.stopAgent'
+  | 'command.commandPalette'
+  | 'command.searchSessions'
+  | 'command.toggleInspector'
+  | 'command.openHelp'
+  | 'command.groupSession'
+  | 'command.groupServer'
+  | 'command.groupView'
+  | 'command.groupOpenSession'
+  | 'command.switchTo'
+  | 'command.manageServers'
+  | 'command.palettePlaceholder'
+  | 'command.paletteEmpty'
+  | 'command.navigate'
+  | 'command.run'
+  | 'command.close'
+  | 'connect.title'
+  | 'connect.subtitle'
+  | 'connect.step.harness'
+  | 'connect.step.address'
+  | 'connect.step.credentials'
+  | 'connect.harness.opencode'
+  | 'connect.harness.omp'
+  | 'connect.harness.pi'
+  | 'connect.harness.claude'
+  | 'connect.addressHint'
+  | 'connect.runOnHost'
+  | 'connect.copyCommand'
+  | 'connect.copied'
+  | 'connect.credentialsHint'
+  | 'connect.back'
+  | 'connect.save'
+  | 'connect.next'
+  | 'sessions.recentProjects'
+  | 'sessions.browseFolders'
+  | 'sessions.typePathLabel'
+  | 'sessions.typePathPlaceholder'
+  | 'sessions.goToPath'
   | 'action.close'
   | 'action.thinking'
   | 'action.thoughtFor'
@@ -244,7 +291,7 @@ type TranslationKey =
   | 'permission.allowAlways'
   | 'permission.deny'
 
-const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
+const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>> = {
   en: {
     'app.title': 'Harness Remote',
     'notification.title': 'Harness Remote',
@@ -486,7 +533,54 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'permission.requested': 'Permission requested: {permission}',
     'permission.allowOnce': 'Allow once',
     'permission.allowAlways': 'Always allow',
-    'permission.deny': 'Deny'
+    'permission.deny': 'Deny',
+    'menubar.file': 'File',
+    'menubar.session': 'Session',
+    'menubar.view': 'View',
+    'menubar.help': 'Help',
+    'command.newSession': 'New session',
+    'command.refreshSessions': 'Refresh sessions',
+    'command.addServer': 'Connect server',
+    'command.openSettings': 'Open settings',
+    'command.focusComposer': 'Focus prompt',
+    'command.stopAgent': 'Stop agent',
+    'command.commandPalette': 'Commands',
+    'command.searchSessions': 'Search sessions',
+    'command.toggleInspector': 'Toggle inspector',
+    'command.openHelp': 'Open help',
+    'command.groupSession': 'Session',
+    'command.groupServer': 'Servers',
+    'command.groupView': 'View',
+    'command.groupOpenSession': 'Open session',
+    'command.switchTo': 'Switch to {name}',
+    'command.manageServers': 'Manage servers',
+    'command.palettePlaceholder': 'Search commands and sessions…',
+    'command.paletteEmpty': 'No matching commands',
+    'command.navigate': 'navigate',
+    'command.run': 'run',
+    'command.close': 'close',
+    'connect.title': 'Connect a server',
+    'connect.subtitle': 'Choose a harness, enter its address, then verify the connection.',
+    'connect.step.harness': 'Harness',
+    'connect.step.address': 'Address',
+    'connect.step.credentials': 'Credentials',
+    'connect.harness.opencode': 'Connect directly to an OpenCode server.',
+    'connect.harness.omp': 'Connect through the bundled Oh My Pi bridge.',
+    'connect.harness.pi': 'Connect to PI through the ACP bridge.',
+    'connect.harness.claude': 'Connect to Claude Code through the ACP bridge.',
+    'connect.addressHint': 'Use the LAN address of the machine that runs the harness.',
+    'connect.runOnHost': 'Run on the host machine',
+    'connect.copyCommand': 'Copy command',
+    'connect.copied': 'Copied',
+    'connect.credentialsHint': 'These credentials must match the command running on the host.',
+    'connect.back': 'Back',
+    'connect.save': 'Save and connect',
+    'connect.next': 'Continue',
+    'sessions.recentProjects': 'Recent projects',
+    'sessions.browseFolders': 'Browse folders',
+    'sessions.typePathLabel': 'Open a path',
+    'sessions.typePathPlaceholder': '/home/you/project or C:\\Projects\\App',
+    'sessions.goToPath': 'Go'
   },
   it: {
     'app.title': 'Harness Remote',
@@ -729,7 +823,54 @@ const translations: Record<LanguageCode, Record<TranslationKey, string>> = {
     'permission.requested': 'Permesso richiesto: {permission}',
     'permission.allowOnce': 'Consenti una volta',
     'permission.allowAlways': 'Consenti sempre',
-    'permission.deny': 'Nega'
+    'permission.deny': 'Nega',
+    'menubar.file': 'File',
+    'menubar.session': 'Sessione',
+    'menubar.view': 'Vista',
+    'menubar.help': 'Aiuto',
+    'command.newSession': 'Nuova sessione',
+    'command.refreshSessions': 'Aggiorna sessioni',
+    'command.addServer': 'Connetti server',
+    'command.openSettings': 'Apri impostazioni',
+    'command.focusComposer': 'Vai al prompt',
+    'command.stopAgent': 'Interrompi agente',
+    'command.commandPalette': 'Comandi',
+    'command.searchSessions': 'Cerca sessioni',
+    'command.toggleInspector': 'Mostra o nascondi inspector',
+    'command.openHelp': 'Apri aiuto',
+    'command.groupSession': 'Sessione',
+    'command.groupServer': 'Server',
+    'command.groupView': 'Vista',
+    'command.groupOpenSession': 'Apri sessione',
+    'command.switchTo': 'Passa a {name}',
+    'command.manageServers': 'Gestisci server',
+    'command.palettePlaceholder': 'Cerca comandi e sessioni…',
+    'command.paletteEmpty': 'Nessun comando corrispondente',
+    'command.navigate': 'naviga',
+    'command.run': 'esegui',
+    'command.close': 'chiudi',
+    'connect.title': 'Connetti un server',
+    'connect.subtitle': 'Scegli un harness, inserisci l’indirizzo e verifica la connessione.',
+    'connect.step.harness': 'Harness',
+    'connect.step.address': 'Indirizzo',
+    'connect.step.credentials': 'Credenziali',
+    'connect.harness.opencode': 'Connessione diretta a un server OpenCode.',
+    'connect.harness.omp': 'Connessione tramite il bridge incluso per Oh My Pi.',
+    'connect.harness.pi': 'Connessione a PI tramite bridge ACP.',
+    'connect.harness.claude': 'Connessione a Claude Code tramite bridge ACP.',
+    'connect.addressHint': 'Usa l’indirizzo LAN del computer che esegue l’harness.',
+    'connect.runOnHost': 'Esegui sul computer host',
+    'connect.copyCommand': 'Copia comando',
+    'connect.copied': 'Copiato',
+    'connect.credentialsHint': 'Le credenziali devono coincidere con il comando in esecuzione sull’host.',
+    'connect.back': 'Indietro',
+    'connect.save': 'Salva e connetti',
+    'connect.next': 'Continua',
+    'sessions.recentProjects': 'Progetti recenti',
+    'sessions.browseFolders': 'Sfoglia cartelle',
+    'sessions.typePathLabel': 'Apri un percorso',
+    'sessions.typePathPlaceholder': '/home/utente/progetto o C:\\Progetti\\App',
+    'sessions.goToPath': 'Vai'
   },
   'zh-TW': {
     'app.title': 'Harness Remote',
@@ -988,7 +1129,9 @@ export function normalizeLanguage(value: string | null | undefined): LanguageCod
   return 'en'
 }
 
-export function createTranslator(language: LanguageCode) {
+export type Translator = (key: string, params?: Record<string, string | number>) => string
+
+export function createTranslator(language: LanguageCode): Translator {
   return (key: string, params: Record<string, string | number> = {}) => {
     const template = translations[language][key as TranslationKey] ?? translations.en[key as TranslationKey] ?? key
     return Object.entries(params).reduce(

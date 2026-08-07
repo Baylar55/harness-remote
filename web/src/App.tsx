@@ -10,6 +10,7 @@ import {
   isAndroidPlatform,
   isDesktopPlatform,
   notifyDesktopCompletion,
+  subscribeDesktopMenuCommands,
   syncDesktopProfiles
 } from "./desktopBridge"
 import {
@@ -23,16 +24,25 @@ import {
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
 import { DEFAULT_HARNESS_CAPABILITIES } from "./backendCapabilities"
 import { BACKEND_CLIENTS } from "./backendClient"
+import { copyToClipboard } from "./clipboard"
+import { backendDisplayName, isBridgeBackend } from "./backendSetup"
+import { CommandPalette, MenuBar, ServerSwitcher, type MenuDefinition, type MenuEntry, type PaletteCommand } from "./components/shell"
+import { ConnectServerWizard, NewSessionDialog } from "./components/panels"
 import { createServerProfile, loadActiveServerProfile, loadServerProfiles, persistServerProfiles, type SavedServerProfile } from "./serverProfiles"
 import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessAction, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, PermissionRequest, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
+  ArrowLeftIcon,
   FolderIcon,
   ChatIcon,
+  CommandIcon,
   JumpToTopIcon,
   JumpToBottomIcon,
   HelpIcon,
+  PanelRightIcon,
   PlusIcon,
+  SearchIcon,
+  ServerIcon,
   TrashIcon,
   StopCircleIcon,
   SendIcon,
@@ -52,7 +62,11 @@ const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
 const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
-const SIDEBAR_WIDTH_STORAGE_KEY = "opencode.remote.desktopSidebarWidth"
+// The wider restyled sidebar gets its own preference version so installations that persisted the
+// old, cramped default receive the new baseline once, while every subsequent manual resize sticks.
+const SIDEBAR_WIDTH_STORAGE_KEY = "opencode.remote.desktopSidebarWidth.v3"
+const INSPECTOR_WIDTH_STORAGE_KEY = "opencode.remote.desktopInspectorWidth"
+const INSPECTOR_OPEN_STORAGE_KEY = "opencode.remote.desktopInspectorOpen"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
 
 type Translator = ReturnType<typeof createTranslator>
@@ -64,22 +78,46 @@ const DESKTOP_MEDIA_QUERY = `(min-width: ${DESKTOP_MIN_WIDTH}px)`
 
 const SIDEBAR_WIDTH_MIN = 220
 const SIDEBAR_WIDTH_MAX = 480
-const SIDEBAR_WIDTH_DEFAULT = 280
-/** The narrowest the main pane may be squeezed to before the sidebar has to stop growing. */
+const SIDEBAR_WIDTH_DEFAULT = 320
+const SIDEBAR_WIDTH_WIDE_DEFAULT = 384
+const WIDE_DESKTOP_MIN_WIDTH = 1600
+const INSPECTOR_WIDTH_MIN = 260
+const INSPECTOR_WIDTH_MAX = 480
+const INSPECTOR_WIDTH_DEFAULT = 320
+/** The narrowest the main pane may be squeezed to before a side panel has to stop growing. */
 const MAIN_WIDTH_MIN = 420
-// The app-shell's own horizontal padding plus the gap between the sidebar and main pane
-// (2 * --space-4 + --space-4, all 1rem) — how much of the viewport the panels never get to
-// claim, even before a scrollbar takes its own slice.
-const DESKTOP_LAYOUT_CHROME_WIDTH = 64
+/** Below this the inspector is folded away automatically: three panes in less room than this turns
+ *  the conversation into a gutter, and the same content is one click away in the context chips. */
+const INSPECTOR_MIN_WINDOW_WIDTH = 1180
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
 }
 
-/** The widest the sidebar may be dragged: its own maximum, or less on a window too narrow to give
- *  the main pane its floor as well. */
-function maxSidebarWidth(): number {
-  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, window.innerWidth - MAIN_WIDTH_MIN - DESKTOP_LAYOUT_CHROME_WIDTH))
+/** The widest a side panel may be dragged: its own maximum, or less on a window too narrow to give
+ *  the main pane its floor as well. `otherPanel` is whatever the opposite edge is already using. */
+function maxPanelWidth(max: number, min: number, otherPanel: number): number {
+  return Math.max(min, Math.min(max, window.innerWidth - MAIN_WIDTH_MIN - otherPanel))
+}
+
+function maxSidebarWidth(otherPanel = 0): number {
+  return maxPanelWidth(SIDEBAR_WIDTH_MAX, SIDEBAR_WIDTH_MIN, otherPanel)
+}
+
+function maxInspectorWidth(otherPanel = 0): number {
+  return maxPanelWidth(INSPECTOR_WIDTH_MAX, INSPECTOR_WIDTH_MIN, otherPanel)
+}
+
+function defaultSidebarWidth(): number {
+  return window.innerWidth >= WIDE_DESKTOP_MIN_WIDTH ? SIDEBAR_WIDTH_WIDE_DEFAULT : SIDEBAR_WIDTH_DEFAULT
+}
+
+/** "Ctrl" everywhere except macOS, which reads ⌘ — the palette hint and every menu accelerator has
+ *  to say the one the user's keyboard actually has. */
+const IS_APPLE = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+
+function shortcut(key: string): string {
+  return IS_APPLE ? `⌘${key}` : `Ctrl+${key}`
 }
 
 function readStoredWidth(key: string, fallback: number, min: number, max: number): number {
@@ -108,10 +146,6 @@ function useHorizontalDrag(onDeltaX: (deltaX: number) => void): (event: React.Po
   }, [onDeltaX])
 }
 
-function isBridgeBackend(backend: ServerConfig["backend"]): boolean {
-  return backend === "omp" || backend === "pi" || backend === "claude"
-}
-
 function isSessionWorking(status: string): boolean {
   return status === "busy" || status === "retry" || status === "waiting"
 }
@@ -127,13 +161,12 @@ function shortDirectory(directory: string): string {
   return `…/${segments.slice(-2).join("/")}`
 }
 
-function backendDisplayName(backend: ServerConfig["backend"]): string {
-  if (backend === "omp") return "Oh My Pi"
-  if (backend === "pi") return "PI"
-  if (backend === "claude") return "Claude Code"
-  return "OpenCode"
+/** The last path segment, which is what a developer calls the project — the sidebar groups rows by
+ *  it rather than by the full absolute path nobody reads. */
+function projectLabel(directory: string): string {
+  const segments = directory.split(/[\\/]+/).filter(Boolean)
+  return segments[segments.length - 1] || directory
 }
-
 
 function formatTime(epoch: number): string {
   if (!epoch) return "-"
@@ -1522,52 +1555,6 @@ function groupRenderedMessages(messages: (MessageEnvelope & { text: string })[])
   return groups
 }
 
-/**
- * The Clipboard API is secure-context only, and this app is also meant to be served over plain http
- * on a LAN, where `navigator.clipboard` is not rejected but absent: reaching through it throws
- * before there is a promise to catch, so the copy fails with nothing in the clipboard and nothing on
- * screen. The deprecated selection copy is the only thing that still works there.
- */
-async function copyToClipboard(text: string): Promise<void> {
-  // Writing an empty string is not a harmless no-op: it succeeds, and it replaces whatever the user
-  // had in the clipboard with nothing. Refusing it keeps a bubble with no text from quietly wiping a
-  // selection the user copied a moment earlier.
-  if (!text) return
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      return
-    }
-  } catch {
-    // A missing API and a refused write need the same fallback from here.
-  }
-  const carrier = document.createElement("textarea")
-  carrier.value = text
-  carrier.setAttribute("readonly", "")
-  carrier.style.position = "fixed"
-  carrier.style.top = "0"
-  carrier.style.opacity = "0"
-  document.body.appendChild(carrier)
-  // The carrier has to own the selection to be copied, which takes it away from whatever the user
-  // had highlighted. Their range is put back afterwards, so falling back does not also cost them
-  // the selection they made.
-  const selection = window.getSelection()
-  const previousRange = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
-  carrier.select()
-  carrier.setSelectionRange(0, text.length)
-  try {
-    document.execCommand("copy")
-  } catch {
-    // Out of options: both paths are gone.
-  } finally {
-    carrier.remove()
-    if (previousRange && selection) {
-      selection.removeAllRanges()
-      selection.addRange(previousRange)
-    }
-  }
-}
-
 type MessageMenuAction = {
   id: string
   label: string
@@ -2063,25 +2050,52 @@ function App() {
   // instead of duplicating the session list there.
   const mainView = isDesktop && view === "sessions" ? "detail" : view
 
-  // Only the sidebar (sessions) carries an explicit pixel width. The main pane fills the rest of
-  // the window, so the divider between them is the one border worth dragging: the other two edges
-  // are the window's own.
+  // The two side panels carry explicit pixel widths; the conversation between them fills whatever
+  // is left, so the panel edges are the borders worth dragging — the other two are the window's own.
   const [sidebarWidth, setSidebarWidth] = useState(() =>
-    readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, SIDEBAR_WIDTH_DEFAULT, SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX)
+    readStoredWidth(SIDEBAR_WIDTH_STORAGE_KEY, defaultSidebarWidth(), SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX)
   )
+  const [inspectorWidth, setInspectorWidth] = useState(() =>
+    readStoredWidth(INSPECTOR_WIDTH_STORAGE_KEY, INSPECTOR_WIDTH_DEFAULT, INSPECTOR_WIDTH_MIN, INSPECTOR_WIDTH_MAX)
+  )
+  /** The right-hand panel is opt-in and remembered: it is a working surface for whoever is watching
+   *  models and file changes, and dead chrome for whoever is only reading the conversation. */
+  const [inspectorOpen, setInspectorOpen] = useState(() => localStorage.getItem(INSPECTOR_OPEN_STORAGE_KEY) === "true")
+  const [inspectorTab, setInspectorTab] = useState<"ai" | "project">("ai")
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
   }, [sidebarWidth])
+  useEffect(() => {
+    localStorage.setItem(INSPECTOR_WIDTH_STORAGE_KEY, String(inspectorWidth))
+  }, [inspectorWidth])
+  useEffect(() => {
+    localStorage.setItem(INSPECTOR_OPEN_STORAGE_KEY, String(inspectorOpen))
+  }, [inspectorOpen])
+  // Only ever shown when there is both a session to describe and room to describe it in.
+  const [hasRoomForInspector, setHasRoomForInspector] = useState(() => window.innerWidth >= INSPECTOR_MIN_WINDOW_WIDTH)
+  // Read through refs by the drag handlers below, which are created during this render but only
+  // ever run after it — the widths they clamp against are whatever the last render settled on.
+  const inspectorSpaceRef = useRef(0)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  sidebarWidthRef.current = sidebarWidth
   const dragPanelDivider = useHorizontalDrag((deltaX) => {
     // Growing the sidebar takes the space out of the main pane, which is why the cap has to know
-    // the window width rather than just the sidebar's own maximum.
-    setSidebarWidth((width) => clamp(width + deltaX, SIDEBAR_WIDTH_MIN, maxSidebarWidth()))
+    // the window width — and what the opposite panel is already holding — rather than just the
+    // sidebar's own maximum.
+    setSidebarWidth((width) => clamp(width + deltaX, SIDEBAR_WIDTH_MIN, maxSidebarWidth(inspectorSpaceRef.current)))
   })
-  // Keeps the sidebar inside what the window can spare: on first mount (a stored width from a wider
+  const dragInspectorDivider = useHorizontalDrag((deltaX) => {
+    setInspectorWidth((width) => clamp(width - deltaX, INSPECTOR_WIDTH_MIN, maxInspectorWidth(sidebarWidthRef.current)))
+  })
+  // Keeps both panels inside what the window can spare: on first mount (a stored width from a wider
   // screen) and again on every resize. The main pane needs no such handling — it flexes.
   useEffect(() => {
     if (!isDesktop) return
-    const clampToViewport = () => setSidebarWidth((width) => clamp(width, SIDEBAR_WIDTH_MIN, maxSidebarWidth()))
+    const clampToViewport = () => {
+      setHasRoomForInspector(window.innerWidth >= INSPECTOR_MIN_WINDOW_WIDTH)
+      setSidebarWidth((width) => clamp(width, SIDEBAR_WIDTH_MIN, maxSidebarWidth()))
+      setInspectorWidth((width) => clamp(width, INSPECTOR_WIDTH_MIN, maxInspectorWidth()))
+    }
     clampToViewport()
     window.addEventListener("resize", clampToViewport)
     return () => window.removeEventListener("resize", clampToViewport)
@@ -2089,6 +2103,8 @@ function App() {
 
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [selectedID, setSelectedID] = useState<string | null>(null)
+  const showInspector = isDesktop && inspectorOpen && hasRoomForInspector && mainView === "detail" && Boolean(selectedID)
+  inspectorSpaceRef.current = showInspector ? inspectorWidth : 0
   const [newSessionDirectory, setNewSessionDirectory] = useState(() => localStorage.getItem(NEW_SESSION_DIRECTORY_STORAGE_KEY) ?? "")
   const [showNewSessionPicker, setShowNewSessionPicker] = useState(false)
   const [pickerPath, setPickerPath] = useState("")
@@ -2133,10 +2149,15 @@ function App() {
   const [renameValue, setRenameValue] = useState("")
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const [activeDetailSheet, setActiveDetailSheet] = useState<null | "ai" | "details">(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [showConnectWizard, setShowConnectWizard] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<"server" | "appearance">("server")
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLDivElement | null>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   // Both gate on mainView, not view: on desktop, picking a session leaves view === "sessions" while
   // the chat is what's actually rendered, so gating on view left the buttons permanently inactive.
   const [jumpAffordances, refreshChatJumps] = useJumpAffordances(mainView === "detail", () =>
@@ -2417,14 +2438,6 @@ function App() {
     applyConfig(profile.config, profile.id)
   }
 
-  function addProfile() {
-    const profile = createServerProfile(t('settings.newServerName'), "opencode")
-    const nextProfiles = [...profiles, profile]
-    setDraftProfileName(profile.name)
-    applyConfig(profile.config, profile.id, nextProfiles)
-    setView("settings")
-  }
-
   function deleteActiveProfile() {
     setProfileToDelete(null)
     if (profiles.length === 1) return
@@ -2434,7 +2447,7 @@ function App() {
     setDraftConfig(nextProfile.config)
     applyConfig(nextProfile.config, nextProfile.id, nextProfiles)
   }
-  async function testConnection(configToTest: ServerConfig) {
+  async function testConnection(configToTest: ServerConfig): Promise<{ ok: boolean; message: string }> {
     setTestingConnection(true)
     setSettingsNotice({ type: "info", text: t('settings.testingConnection') })
     try {
@@ -2448,8 +2461,11 @@ function App() {
       setConnectedVersion(health.version)
       setLastTestedConfigKey(configKey(configToTest))
       setSettingsNotice({ type: "success", text: t('settings.testedNotSaved', { version: health.version }) })
+      return { ok: true, message: t('settings.connectedTo', { version: health.version }) }
     } catch (err) {
-      setSettingsNotice({ type: "error", text: t('settings.connectionFailed', { message: (err as Error).message }) })
+      const message = t('settings.connectionFailed', { message: (err as Error).message })
+      setSettingsNotice({ type: "error", text: message })
+      return { ok: false, message }
     } finally {
       setTestingConnection(false)
     }
@@ -2868,19 +2884,10 @@ function App() {
     setPickerError(null)
     try {
       const pathInfo = await api.loadPath(config, selectedNewSessionDirectory)
-      await browseNewSessionDirectory(selectedNewSessionDirectory ?? pathInfo.directory)
+      await browseNewSessionDirectory(selectedNewSessionDirectory || pathInfo.directory)
     } catch (err) {
       setPickerError((err as Error).message)
     }
-  }
-
-  function parentDirectory(path: string): string | null {
-    if (!path || path === "/") return null
-    const normalized = path.replace(/[/\\]+$/, "")
-    const separator = normalized.includes("\\") ? "\\" : "/"
-    const index = normalized.lastIndexOf(separator)
-    if (index <= 0) return separator === "/" ? "/" : null
-    return normalized.slice(0, index)
   }
 
   async function createSession(directory = selectedNewSessionDirectory) {
@@ -3622,70 +3629,456 @@ function App() {
     { view: "settings" as const, label: t('nav.settings'), icon: <SettingsIcon size={19} />, disabled: false },
     { view: "help" as const, label: t('nav.help'), icon: <HelpIcon size={19} />, disabled: false }
   ]
-  /* The select carries its own accessible name: a visible caption above it would spend a line of the
-     header on a word the chosen option already implies. */
-  const profilePicker = (
-    <div className="server-profile-picker">
-      <select aria-label={t('settings.serverProfile')} value={activeProfileID} onChange={(event) => activateProfile(event.target.value)}>
-        {profiles.map((profile) => (
-          <option key={profile.id} value={profile.id}>{profile.name}</option>
-        ))}
-      </select>
-    </div>
+
+  const serverProfileSummaries = profiles.map((profile) => ({
+    id: profile.id,
+    name: profile.name,
+    backendLabel: backendDisplayName(profile.config.backend),
+    backendClass: profile.config.backend,
+    address: profile.config.host ? `${profile.config.host}:${profile.config.port}` : t('settings.hostPlaceholder')
+  }))
+
+  const brandBlock = (
+    <>
+      <img src={`${import.meta.env.BASE_URL}app-icon.png`} alt="" className="app-icon" />
+      <div className="brand-text">
+        <h1>{t('app.title')}</h1>
+      </div>
+    </>
   )
+
+  /* One dispatcher behind the in-app menu bar, the packaged app's native menu and the command
+     palette. Three surfaces offering the same verbs is only an improvement while they cannot
+     disagree about what those verbs do or when they are available. */
+  function runAppCommand(id: string) {
+    switch (id) {
+      case "session.new":
+        void openNewSessionPicker()
+        return
+      case "session.refresh":
+        void refreshSessionsWithIndicator().catch(() => undefined)
+        return
+      case "session.rename":
+        if (selectedSession) startRename(selectedSession, "header")
+        return
+      case "session.delete":
+        if (selectedSession) setSessionToDelete(selectedSession)
+        return
+      case "session.stop":
+        void abortSession()
+        return
+      case "session.undo":
+        void runNativeHistoryCommand("undo")
+        return
+      case "session.redo":
+        void runNativeHistoryCommand("redo")
+        return
+      case "focus.composer":
+        setView("detail")
+        // The pane it lives in may only mount on this render, so reach for it on the next frame.
+        requestAnimationFrame(() => composerInputRef.current?.focus())
+        return
+      case "focus.search":
+        if (!isDesktop) setView("sessions")
+        requestAnimationFrame(() => searchInputRef.current?.focus())
+        return
+      case "server.add":
+        setShowConnectWizard(true)
+        return
+      case "server.settings":
+        setSettingsTab("server")
+        setView("settings")
+        return
+      case "view.palette":
+        setPaletteOpen(true)
+        return
+      case "view.inspector":
+        setInspectorOpen((open) => !open)
+        return
+      case "view.sessions":
+        setView("sessions")
+        return
+      case "view.theme.system":
+        setTheme("system")
+        return
+      case "view.theme.light":
+        setTheme("light")
+        return
+      case "view.theme.dark":
+        setTheme("dark")
+        return
+      case "help.open":
+        setView("help")
+        return
+      default:
+        return
+    }
+  }
+  const runAppCommandRef = useRef(runAppCommand)
+  runAppCommandRef.current = runAppCommand
+
+  // Keyboard shortcuts belong to the window, not to any one control, so they keep working while
+  // focus is in the transcript or the sidebar. The composer's own Enter/Shift+Enter handling is
+  // untouched: nothing here fires without a modifier.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const accelerator = IS_APPLE ? event.metaKey : event.ctrlKey
+      if (!accelerator || event.altKey) return
+      const key = event.key.toLowerCase()
+      const command = key === "k" ? "view.palette"
+        : key === "n" && !event.shiftKey ? "session.new"
+        : key === "n" && event.shiftKey ? "server.add"
+        : key === "f" ? "focus.search"
+        : key === "r" ? "session.refresh"
+        : key === "," ? "server.settings"
+        : key === "b" ? "view.inspector"
+        : null
+      if (!command) return
+      event.preventDefault()
+      runAppCommandRef.current(command)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
+
+  // The packaged desktop app draws the platform's own menu bar; its items arrive here as commands
+  // so the native menu and the in-app one stay a single implementation.
+  useEffect(() => {
+    return subscribeDesktopMenuCommands((id) => runAppCommandRef.current(id))
+  }, [])
+
+  const menuItem = (id: string, label: string, options: { shortcut?: string; disabled?: boolean; checked?: boolean } = {}): MenuEntry => ({
+    kind: "item",
+    id,
+    label,
+    shortcut: options.shortcut,
+    disabled: options.disabled,
+    checked: options.checked,
+    onSelect: () => runAppCommand(id)
+  })
+
+  const menuDefinitions: MenuDefinition[] = [
+    {
+      id: "file",
+      label: t('menubar.file'),
+      entries: [
+        menuItem("session.new", t('command.newSession'), { shortcut: shortcut("N"), disabled: !hasConfiguredServer || isOffline }),
+        menuItem("session.refresh", t('command.refreshSessions'), { shortcut: shortcut("R"), disabled: !hasConfiguredServer }),
+        { kind: "separator", id: "file-sep" },
+        menuItem("server.add", t('command.addServer'), { shortcut: `${shortcut("N")}+Shift` }),
+        menuItem("server.settings", t('command.openSettings'), { shortcut: shortcut(",") })
+      ]
+    },
+    {
+      id: "session",
+      label: t('menubar.session'),
+      entries: [
+        menuItem("focus.composer", t('command.focusComposer'), { disabled: !selectedSession }),
+        menuItem("session.stop", t('command.stopAgent'), { disabled: !selectedSession || !isWorking }),
+        { kind: "separator", id: "session-sep-1" },
+        menuItem("session.undo", t('detail.undo'), { disabled: !sessionHeaderActions.some((action) => action.id === "undo") }),
+        menuItem("session.redo", t('detail.redo'), { disabled: !sessionHeaderActions.some((action) => action.id === "redo") }),
+        { kind: "separator", id: "session-sep-2" },
+        menuItem("session.rename", t('session.renameTitle'), { disabled: !selectedSession || !capabilities.sessionRename }),
+        menuItem("session.delete", t('sessions.delete'), { disabled: !selectedSession || !capabilities.sessionDelete })
+      ]
+    },
+    {
+      id: "view",
+      label: t('menubar.view'),
+      entries: [
+        menuItem("view.palette", t('command.commandPalette'), { shortcut: shortcut("K") }),
+        menuItem("focus.search", t('command.searchSessions'), { shortcut: shortcut("F") }),
+        menuItem("view.inspector", t('command.toggleInspector'), { shortcut: shortcut("B"), checked: inspectorOpen }),
+        { kind: "separator", id: "view-sep" },
+        menuItem("view.theme.system", t('settings.themeSystem'), { checked: theme === "system" }),
+        menuItem("view.theme.light", t('settings.themeLight'), { checked: theme === "light" }),
+        menuItem("view.theme.dark", t('settings.themeDark'), { checked: theme === "dark" })
+      ]
+    },
+    {
+      id: "help",
+      label: t('menubar.help'),
+      entries: [menuItem("help.open", t('command.openHelp'))]
+    }
+  ]
+
+  const paletteCommands: PaletteCommand[] = [
+    { id: "session.new", group: t('command.groupSession'), label: t('command.newSession'), hint: shortcut("N"), icon: <PlusIcon size={16} />, disabled: !hasConfiguredServer || isOffline },
+    { id: "session.refresh", group: t('command.groupSession'), label: t('command.refreshSessions'), hint: shortcut("R"), icon: <RefreshIcon size={16} />, disabled: !hasConfiguredServer },
+    { id: "session.rename", group: t('command.groupSession'), label: t('session.renameTitle'), icon: <PencilIcon size={16} />, disabled: !selectedSession || !capabilities.sessionRename },
+    { id: "session.delete", group: t('command.groupSession'), label: t('sessions.delete'), icon: <TrashIcon size={16} />, disabled: !selectedSession || !capabilities.sessionDelete },
+    { id: "session.stop", group: t('command.groupSession'), label: t('command.stopAgent'), icon: <StopCircleIcon size={16} />, disabled: !selectedSession || !isWorking },
+    { id: "session.undo", group: t('command.groupSession'), label: t('detail.undo'), disabled: !sessionHeaderActions.some((action) => action.id === "undo") },
+    { id: "session.redo", group: t('command.groupSession'), label: t('detail.redo'), disabled: !sessionHeaderActions.some((action) => action.id === "redo") },
+    { id: "server.add", group: t('command.groupServer'), label: t('command.addServer'), icon: <ServerIcon size={16} /> },
+    { id: "server.settings", group: t('command.groupServer'), label: t('command.openSettings'), hint: shortcut(","), icon: <SettingsIcon size={16} /> },
+    { id: "view.palette", group: t('command.groupView'), label: t('command.commandPalette'), hint: shortcut("K"), icon: <CommandIcon size={16} /> },
+    { id: "view.inspector", group: t('command.groupView'), label: t('command.toggleInspector'), hint: shortcut("B"), icon: <PanelRightIcon size={16} />, disabled: !selectedSession || !hasRoomForInspector },
+    { id: "view.theme.light", group: t('command.groupView'), label: t('settings.themeLight') },
+    { id: "view.theme.dark", group: t('command.groupView'), label: t('settings.themeDark') },
+    { id: "view.theme.system", group: t('command.groupView'), label: t('settings.themeSystem') },
+    { id: "help.open", group: t('command.groupView'), label: t('command.openHelp'), icon: <HelpIcon size={16} /> }
+  ]
+    .map((command) => ({ ...command, run: () => runAppCommand(command.id) }))
+    .concat(
+      // Sessions are commands too: on a machine running a dozen of them, typing three letters of a
+      // project name beats scrolling a sidebar for it.
+      sessions.map((session) => ({
+        id: `open-session-${session.id}`,
+        group: t('command.groupOpenSession'),
+        label: session.title,
+        hint: shortDirectory(session.directory),
+        keywords: session.directory,
+        icon: <ChatIcon size={16} />,
+        run: () => void openSession(session.id, session.directory).catch(() => undefined)
+      }))
+    )
+    .concat(
+      profiles
+        .filter((profile) => profile.id !== activeProfileID)
+        .map((profile) => ({
+          id: `switch-server-${profile.id}`,
+          group: t('command.groupServer'),
+          label: t('command.switchTo', { name: profile.name }),
+          hint: profile.config.host ? `${profile.config.host}:${profile.config.port}` : "",
+          icon: <ServerIcon size={16} />,
+          run: () => activateProfile(profile.id)
+        }))
+    )
+
+  const serverSwitcher = (
+    <ServerSwitcher
+      profiles={serverProfileSummaries}
+      activeProfileID={activeProfileID}
+      connectionState={connectionState}
+      connectionLabel={connectionStatusText || t('connection.connecting')}
+      onSelect={activateProfile}
+      onAddServer={() => setShowConnectWizard(true)}
+      onManageServers={() => {
+        setSettingsTab("server")
+        setView("settings")
+      }}
+      addLabel={t('command.addServer')}
+      manageLabel={t('command.manageServers')}
+      ariaLabel={t('settings.serverProfile')}
+    />
+  )
+
+  /* The AI controls and the project readout are the same panel wherever they appear: a bottom sheet
+     on a phone, the right-hand inspector on a desktop. Written once, so the two can never drift. */
+  const aiPanelContent = (
+    <>
+      {capabilities.agents && (primaryAgentOptions.length > 0 ? (
+        <div className="agent-controls">
+          <label htmlFor="agent-select">
+            {t('detail.agentSelectLabel')}
+            <select
+              id="agent-select"
+              value={activeAgentID}
+              onChange={(event) => changeAgent(event.target.value)}
+              disabled={isWorking}
+            >
+              {primaryAgentOptions.map((agent) => (
+                <option key={agent.id} value={agent.id}>{agentLabel(agent)}</option>
+              ))}
+            </select>
+          </label>
+          <p className="subtle">
+            {activeAgent?.description || t('detail.agentMode', { mode: activeAgent?.mode ?? 'primary' })}
+          </p>
+        </div>
+      ) : (
+        <p className="subtle">{agentLoadError ? t('detail.agentLoadError', { message: agentLoadError }) : t('detail.agentLoading')}</p>
+      ))}
+      {modelOptions.length > 0 ? (
+        <div className="model-controls">
+          <label htmlFor="model-search">
+            {t('detail.modelSelectLabel')}
+            <input
+              id="model-search"
+              value={modelQuery}
+              onChange={(event) => setModelQuery(event.target.value)}
+              placeholder={t('detail.modelSearchPlaceholder')}
+              inputMode="search"
+              enterKeyHint="search"
+              autoCapitalize="none"
+              spellCheck={false}
+              disabled={isWorking}
+              autoComplete="off"
+            />
+          </label>
+          <div className="model-option-list" role="listbox" aria-label={t('detail.modelSelectLabel')}>
+            {filteredModelOptions.length > 0 ? (
+              filteredModelOptions.map((option) => {
+                const optionKey = modelKey(option)
+                const active = activeModelOption ? sameModel(option, activeModelOption) : optionKey === selectedModelKey
+                return (
+                  <button
+                    type="button"
+                    key={optionKey}
+                    className={active ? "model-option active" : "model-option"}
+                    onClick={() => changeModel(optionKey)}
+                    disabled={isWorking}
+                    role="option"
+                    aria-selected={active}
+                  >
+                    <span>
+                      <strong>{option.modelName}</strong>
+                      {/* The harness's own description carries the version — "Sonnet 5 ·
+                          Efficient for routine tasks" — which is what someone picking a
+                          model wants. The provider only earns the line when there is
+                          nothing better, as with OpenCode. */}
+                      <small>
+                        {[option.description ?? option.providerName, option.variant].filter(Boolean).join(" · ")}
+                      </small>
+                    </span>
+                    {option.isDefault && <em>{t('detail.modelDefault')}</em>}
+                  </button>
+                )
+              })
+            ) : (
+              <p className="subtle model-empty">{t('detail.modelSearchEmpty')}</p>
+            )}
+          </div>
+          {activeModelOption && (
+            <div className="model-meta">
+              <span>{t('detail.modelProvider', { provider: activeModelOption.providerName })}</span>
+              <span>{t('detail.modelContext', { context: formatLimit(activeModelOption.contextLimit), output: formatLimit(activeModelOption.outputLimit) })}</span>
+              <span>{activeModelOption.tools ? t('detail.modelToolsYes') : t('detail.modelToolsNo')}</span>
+              {activeModelOption.variant && <span>{t('detail.modelVariant', { variant: activeModelOption.variant })}</span>}
+            </div>
+          )}
+        </div>
+      ) : (
+        <p className="subtle">
+          {!capabilities.models
+            ? t('detail.modelNotSupported')
+            : modelLoadError ? t('detail.modelLoadError', { message: modelLoadError }) : t('detail.modelLoading')}
+        </p>
+      )}
+    </>
+  )
+
+  const projectPanelContent = selectedSession ? (
+    <>
+      <div className="dashboard-card">
+        <span className="dashboard-label">{t('detail.projectLabel')}</span>
+        <strong>{projectName || selectedSession.directory}</strong>
+        <small>{projectPath || selectedSession.directory}</small>
+      </div>
+      <div className="dashboard-card">
+        <span className="dashboard-label">{t('detail.vcsLabel')}</span>
+        <strong>{vcsBranch || t('detail.unavailable')}</strong>
+        {projectDashboard?.vcs && (
+          <small>{t('detail.aheadBehind', { ahead: projectDashboard.vcs.ahead ?? 0, behind: projectDashboard.vcs.behind ?? 0 })}</small>
+        )}
+      </div>
+      <div className="dashboard-card">
+        <span className="dashboard-label">{t('detail.fileStatusLabel')}</span>
+        <strong>{diffFiles.length > 0 ? t('detail.filesCount', { count: diffFiles.length }) : (projectDashboard?.files.length ?? 0)}</strong>
+        {diffFiles.length > 0 ? (
+          <small><span className="positive">+{totalDiffAdditions}</span> <span className="negative">-{totalDiffDeletions}</span></small>
+        ) : (
+          <small>{dashboardError ? t('detail.dashboardError', { message: dashboardError }) : t('detail.fileStatusSource')}</small>
+        )}
+      </div>
+      <div className="dashboard-card">
+        <span className="dashboard-label">{t('detail.agentTitle')}</span>
+        <strong>{agentLabel(activeAgent ?? { id: activeAgentID, name: activeAgentID, mode: "primary" })}</strong>
+        <small>{t('detail.agentMode', { mode: activeAgent?.mode ?? 'primary' })}</small>
+      </div>
+      <div className="dashboard-card">
+        <span className="dashboard-label">{t('detail.modelTitle')}</span>
+        <strong>{modelStatusLabel}</strong>
+        <small>{activeModelOption?.providerName ?? "-"}</small>
+      </div>
+    </>
+  ) : null
+
+  /* Rows carry the project they belong to rather than repeating an absolute path per row: with a
+     dozen sessions across three checkouts, the folder is the thing being scanned for. */
+  const sidebarGroups = filteredSessions.reduce<Array<{ directory: string; sessions: SessionView[] }>>((groups, session) => {
+    const last = groups[groups.length - 1]
+    if (last && last.directory === session.directory) last.sessions.push(session)
+    else groups.push({ directory: session.directory, sessions: [session] })
+    return groups
+  }, [])
 
   return (
     <div className={`app-shell${isDesktop ? " app-shell-desktop" : ""}`}>
-      {!isDesktop && (
-        <header className="top-nav fade-in">
-          <div className="brand-section">
-            <div className="brand-title">
-              <img src={`${import.meta.env.BASE_URL}app-icon.png`} alt="" className="app-icon" />
-              <div className="brand-text">
-                <h1>{t('app.title')}</h1>
-                {/* The harness matters more than the address: the same host can serve a different
-                    one, and every backend-specific limitation follows from which it is. */}
-                <p className="brand-meta">
-                  <span className={`harness-badge harness-${config.backend}`}>
-                    {backendDisplayName(config.backend)}
-                  </span>
-                  <span className="brand-server">
-                    {hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.title')}
-                  </span>
-                </p>
-              </div>
+      {isDesktop ? (
+        <MenuBar
+          menus={menuDefinitions}
+          brand={brandBlock}
+          right={(
+            <>
+              <button type="button" className="palette-hint" onClick={() => setPaletteOpen(true)}>
+                <SearchIcon size={14} />
+                <span>{t('command.commandPalette')}</span>
+                <kbd className="kbd">{shortcut("K")}</kbd>
+              </button>
+              {serverSwitcher}
+              <button
+                type="button"
+                className={`btn-icon btn-ghost${inspectorOpen ? " active" : ""}`}
+                onClick={() => setInspectorOpen((open) => !open)}
+                aria-label={t('command.toggleInspector')}
+                title={t('command.toggleInspector')}
+                disabled={!selectedSession || !hasRoomForInspector}
+              >
+                <PanelRightIcon size={16} />
+              </button>
+            </>
+          )}
+        />
+      ) : mainView === "detail" && selectedSession ? (
+        <header className="mobile-appbar mobile-session-appbar fade-in">
+          <div className="appbar-lead">
+            <button
+              type="button"
+              className="btn-icon btn-ghost mobile-back-button"
+              onClick={() => setView("sessions")}
+              aria-label={t('detail.backToSessions')}
+              title={t('detail.backToSessions')}
+            >
+              <ArrowLeftIcon size={20} />
+            </button>
+            <div className="appbar-titles">
+              <h1 title={selectedSession.title}>{selectedSession.title}</h1>
+              <p title={selectedSession.directory}>{projectLabel(selectedSession.directory)}</p>
             </div>
           </div>
-          {profilePicker}
+          {sessionHeaderActions.length > 0 && (
+            <div className="appbar-actions">
+              <SessionActionsMenu actions={sessionHeaderActions} t={t} />
+            </div>
+          )}
+        </header>
+      ) : (
+        <header className="mobile-appbar mobile-global-appbar fade-in">
+          <div className="mobile-appbar-brand">{brandBlock}</div>
+          <div className="mobile-appbar-spacer" />
+          {serverSwitcher}
         </header>
       )}
+
+      <div className="app-body">
 
       {isDesktop && (
         <aside className="desktop-sidebar fade-in" style={{ width: sidebarWidth, flex: `0 0 ${sidebarWidth}px` }}>
           <div className="resize-handle resize-handle--end" onPointerDown={dragPanelDivider} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
-          <div className="sidebar-brand">
-            <img src={`${import.meta.env.BASE_URL}app-icon.png`} alt="" className="app-icon" />
-            <div className="brand-text">
-              <h1>{t('app.title')}</h1>
-              <p className="brand-meta">
-                <span className={`harness-badge harness-${config.backend}`}>
-                  {backendDisplayName(config.backend)}
-                </span>
-                <span className="brand-server">
-                  {hasConfiguredServer ? `${config.host}:${config.port}` : t('settings.title')}
-                </span>
-              </p>
-            </div>
-          </div>
-          {profilePicker}
-
           <div className="sidebar-toolbar">
-            <input
-              placeholder={t('sessions.searchPlaceholder')}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="search"
-            />
+            <div className="search-field">
+              <SearchIcon size={14} />
+              <input
+                ref={searchInputRef}
+                placeholder={t('sessions.searchPlaceholder')}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="search"
+              />
+            </div>
             <button
               onClick={refreshSessionsWithIndicator}
               className="btn-secondary"
@@ -3712,7 +4105,16 @@ function App() {
                 {isOffline ? t('sessions.offlineHint') : t('sessions.emptyTitle')}
               </p>
             ) : (
-              filteredSessions.map(renderSessionCard)
+              sidebarGroups.map((group) => (
+                <section key={group.directory} className="sidebar-group">
+                  <div className="sidebar-group-label" title={group.directory}>
+                    <FolderIcon size={12} />
+                    <span>{projectLabel(group.directory)}</span>
+                    <span className="sidebar-group-count">{group.sessions.length}</span>
+                  </div>
+                  {group.sessions.map(renderSessionCard)}
+                </section>
+              ))
             )}
           </div>
 
@@ -3750,7 +4152,7 @@ function App() {
             </DesktopModalOverlay>
           )}
         >
-        <section className="panel settings fade-in">
+        <section className="panel settings fade-in" data-settings-tab={settingsTab}>
           <div className="section-heading">
             <div className="section-heading-text">
               <h2>{t('settings.title')}</h2>
@@ -3760,7 +4162,7 @@ function App() {
             {/* Aligned to the bottom of the heading text: the pair costs no height of its own there,
                 and it stays clear of the corner the modal's close button occupies. */}
             <div className="server-profile-actions">
-              <button type="button" className="btn-secondary" onClick={addProfile}>
+              <button type="button" className="btn-secondary" onClick={() => setShowConnectWizard(true)}>
                 <PlusIcon size={16} />
                 {t('settings.addServer')}
               </button>
@@ -3777,8 +4179,19 @@ function App() {
             </div>
           </div>
 
+          <div className="settings-nav settings-nav-inline" role="tablist" aria-label={t('settings.title')}>
+            <button type="button" role="tab" aria-selected={settingsTab === "server"} className={settingsTab === "server" ? "active" : ""} onClick={() => setSettingsTab("server")}>
+              <ServerIcon size={16} />
+              {t('settings.serverProfile')}
+            </button>
+            <button type="button" role="tab" aria-selected={settingsTab === "appearance"} className={settingsTab === "appearance" ? "active" : ""} onClick={() => setSettingsTab("appearance")}>
+              <SettingsIcon size={16} />
+              {t('settings.theme')}
+            </button>
+          </div>
+
           <div className="form-grid">
-          <label htmlFor="server-name" className="field-row-span">
+          <label htmlFor="server-name" className="field-row-span settings-server-field">
             {t('settings.serverName')}
             <input
               id="server-name"
@@ -3793,7 +4206,7 @@ function App() {
               autoComplete="off"
             />
           </label>
-          <label htmlFor="language">
+          <label htmlFor="language" className="settings-appearance-field">
             {t('settings.language')}
             <select
               id="language"
@@ -3806,7 +4219,7 @@ function App() {
             </select>
           </label>
 
-          <label htmlFor="theme">
+          <label htmlFor="theme" className="settings-appearance-field">
             {t('settings.theme')}
             <select
               id="theme"
@@ -3819,7 +4232,7 @@ function App() {
             </select>
           </label>
           
-          <label htmlFor="backend">
+          <label htmlFor="backend" className="settings-server-field">
             {t('settings.backend')}
             <select
               id="backend"
@@ -3836,7 +4249,7 @@ function App() {
             </select>
           </label>
 
-          <label htmlFor="host">
+          <label htmlFor="host" className="settings-server-field">
             {t('settings.host')}
             <input
               id="host"
@@ -3851,7 +4264,7 @@ function App() {
             />
           </label>
 
-          <label htmlFor="port">
+          <label htmlFor="port" className="settings-server-field">
             {t('settings.port')}
             <input
               id="port"
@@ -3870,7 +4283,7 @@ function App() {
             />
           </label>
           
-          <label htmlFor="username">
+          <label htmlFor="username" className="settings-server-field">
             {t('settings.username')}
             <input
               id="username"
@@ -3884,7 +4297,7 @@ function App() {
             />
           </label>
           
-          <label htmlFor="password">
+          <label htmlFor="password" className="settings-server-field">
             {t('settings.password')}
             <input
               id="password"
@@ -4050,76 +4463,24 @@ function App() {
       )}
 
       {showNewSessionPicker && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setShowNewSessionPicker(false)}>
-          <section
-            className="modal-card folder-picker fade-in"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="new-session-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2 id="new-session-title">{t('sessions.newSessionTitle')}</h2>
-            <p className="subtle">{t('sessions.projectDirectoryDefault')}</p>
-            <div className="folder-picker-current">
-              <span>{t('sessions.projectDirectoryLabel')}</span>
-              <strong>{pickerPath || t('detail.loadingProject')}</strong>
-            </div>
-            <div className="inline-actions">
-              <button type="button" className="btn-secondary" onClick={() => createSession("").catch(() => undefined)} disabled={creatingSession}>
-                {t('sessions.useServerDefault')}
-              </button>
-              <button type="button" className="btn-primary" onClick={() => createSession(pickerPath).catch(() => undefined)} disabled={creatingSession || !pickerPath}>
-                {creatingSession ? <LoadingIcon size={16} /> : <PlusIcon size={16} />}
-                {t('sessions.useThisFolder')}
-              </button>
-            </div>
-            {pickerError && <div className="error fade-in">✗ {pickerError}</div>}
-            <div className="folder-list">
-              {pickerLoading ? (
-                <div className="empty-state compact"><LoadingIcon size={28} /><p>{t('sessions.folderPickerLoading')}</p></div>
-              ) : (
-                <>
-                  {parentDirectory(pickerPath) && (
-                    <button type="button" className="folder-row" onClick={() => browseNewSessionDirectory(parentDirectory(pickerPath) ?? pickerPath).catch(() => undefined)}>
-                      <FolderIcon size={16} />
-                      <span>{t('sessions.parentFolder')}</span>
-                    </button>
-                  )}
-                  {pickerItems.length === 0 ? (
-                    <p className="subtle">{t('sessions.folderPickerEmpty')}</p>
-                  ) : pickerItems.map((item) => (
-                    <button key={item.absolute} type="button" className="folder-row" onClick={() => browseNewSessionDirectory(item.absolute).catch(() => undefined)}>
-                      <FolderIcon size={16} />
-                      <span>{item.name}</span>
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
-            <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setShowNewSessionPicker(false)}>
-                {t('session.cancel')}
-              </button>
-            </div>
-          </section>
-        </div>
+        <NewSessionDialog
+          t={t}
+          path={pickerPath}
+          items={pickerItems}
+          loading={pickerLoading}
+          error={pickerError}
+          creating={creatingSession}
+          recentDirectories={Array.from(new Set([selectedNewSessionDirectory, ...sessions.map((session) => session.directory)].filter((directory): directory is string => Boolean(directory)))).slice(0, 5)}
+          onBrowse={(directory) => void browseNewSessionDirectory(directory).catch(() => undefined)}
+          onCreate={(directory) => void createSession(directory).catch(() => undefined)}
+          onUseServerDefault={() => void createSession("").catch(() => undefined)}
+          onClose={() => setShowNewSessionPicker(false)}
+        />
       )}
 
       {mainView === "detail" && (
         <main className="panel detail fade-in">
-          <div className="detail-topbar">
-            {!isDesktop && (
-              <>
-                <button className="btn-secondary detail-back-button" onClick={() => setView("sessions")}>
-                  {t('detail.backToSessions')}
-                </button>
-                {selectedSession && sessionHeaderActions.length > 0 && (
-                  <SessionActionsMenu actions={sessionHeaderActions} t={t} />
-                )}
-              </>
-            )}
-          </div>
-          <div className="header-row detail-header">
+          <div className="header-row detail-header desktop-detail-header">
               <div>
               <h2>
                 {selectedSession ? (
@@ -4291,6 +4652,7 @@ function App() {
 
           <div className="composer" ref={composerRef}>
             <textarea
+              ref={composerInputRef}
               value={composer}
               onChange={(event) => setComposer(event.target.value)}
               placeholder={t('detail.composerPlaceholder')}
@@ -4826,7 +5188,75 @@ http://YOUR_PC_IP:4096/global/health</pre>
       )}
       </div>
 
-      <nav className="bottom-nav" role="navigation" aria-label="Mobile navigation">
+      {showInspector && (
+        <aside className="inspector fade-in" style={{ width: inspectorWidth, flex: `0 0 ${inspectorWidth}px` }}>
+          <div className="resize-handle resize-handle--start" onPointerDown={dragInspectorDivider} role="separator" aria-orientation="vertical" aria-label="Resize inspector" />
+          <div className="inspector-header">
+            <h3>{t('detail.sessionDetailsTitle')}</h3>
+            <div className="segmented" role="tablist" aria-label={t('detail.sessionDetailsTitle')}>
+              <button type="button" role="tab" aria-selected={inspectorTab === "ai"} className={inspectorTab === "ai" ? "active" : ""} onClick={() => setInspectorTab("ai")}>
+                {t('detail.aiChip')}
+              </button>
+              <button type="button" role="tab" aria-selected={inspectorTab === "project"} className={inspectorTab === "project" ? "active" : ""} onClick={() => setInspectorTab("project")}>
+                {t('detail.detailsChip')}
+              </button>
+            </div>
+            <button type="button" className="btn-icon btn-ghost compact" onClick={() => setInspectorOpen(false)} aria-label={t('detail.closeSheet')}>
+              <CloseIcon size={16} />
+            </button>
+          </div>
+          <div className="inspector-body">
+            {inspectorTab === "ai" ? (
+              <section className="inspector-section">
+                <div className="inspector-section-title">
+                  <span>{t('detail.aiTitle')}</span>
+                  <button type="button" className="btn-icon btn-ghost compact" onClick={() => void Promise.all([loadAgents(), loadModels()]).catch(() => undefined)} aria-label={t('detail.refreshAi')}>
+                    <RefreshIcon size={14} />
+                  </button>
+                </div>
+                {aiPanelContent}
+              </section>
+            ) : (
+              <section className="inspector-section project-dashboard single-column">
+                <div className="inspector-section-title">{t('detail.projectDashboardLabel')}</div>
+                {projectPanelContent}
+              </section>
+            )}
+          </div>
+        </aside>
+      )}
+      </div>
+
+      {paletteOpen && (
+        <CommandPalette
+          commands={paletteCommands}
+          placeholder={t('command.palettePlaceholder')}
+          emptyLabel={t('command.paletteEmpty')}
+          navigateHint={t('command.navigate')}
+          runHint={t('command.run')}
+          closeHint={t('command.close')}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+
+      {showConnectWizard && (
+        <ConnectServerWizard
+          t={t}
+          initialName={t('settings.newServerName')}
+          onCancel={() => setShowConnectWizard(false)}
+          onTest={testConnection}
+          onSave={(name, nextConfig) => {
+            const profile = { ...createServerProfile(name, nextConfig.backend), name, config: nextConfig }
+            const nextProfiles = [...profiles, profile]
+            setDraftProfileName(name)
+            applyConfig(nextConfig, profile.id, nextProfiles)
+            setShowConnectWizard(false)
+            setView("sessions")
+          }}
+        />
+      )}
+
+      {!isDesktop && <nav className="bottom-nav" role="navigation" aria-label="Mobile navigation">
         {navItems.map((item) => (
           <button
             key={item.view}
@@ -4839,7 +5269,7 @@ http://YOUR_PC_IP:4096/global/health</pre>
             <span>{item.label}</span>
           </button>
         ))}
-      </nav>
+      </nav>}
     </div>
   )
 }
