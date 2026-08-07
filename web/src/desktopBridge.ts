@@ -4,6 +4,7 @@ import type {
   DesktopEventStatus,
   DesktopEventSubscriptionOptions,
   DesktopMenuCommand,
+  DesktopMenuTemplate,
   DesktopProfile,
   DesktopProfileSyncResult,
   DesktopRequest,
@@ -14,9 +15,9 @@ import type { SavedServerProfile } from "./serverProfiles"
 import { isValidServerConfig } from "./serverConfig"
 import type { ServerConfig } from "./types"
 
-export type DesktopPlatform = { isDesktop: true; os: string }
+export type DesktopPlatform = { isDesktop: true; os: string; usesNativeMenu?: boolean }
 export type DesktopBridgeAPI = {
-  readonly platform: Readonly<{ readonly isDesktop: true; readonly os: string }>
+  readonly platform: Readonly<{ readonly isDesktop: true; readonly os: string; readonly usesNativeMenu?: boolean }>
   replaceProfiles(profiles: DesktopProfile[], revision: number): Promise<DesktopProfileSyncResult>
   request(profileId: string, request: DesktopRequest): Promise<DesktopRequestResult>
   subscribeEvents(
@@ -28,6 +29,7 @@ export type DesktopBridgeAPI = {
   unsubscribeEvents(subscriptionId: string): Promise<void>
   notifyCompletion(notification: DesktopCompletionNotification): Promise<void>
   onMenuCommand(callback: (command: DesktopMenuCommand) => void): () => void
+  setApplicationMenu(template: DesktopMenuTemplate): Promise<boolean>
 }
 declare global {
   interface Window {
@@ -159,6 +161,16 @@ export function notifyDesktopCompletion(notification: DesktopCompletionNotificat
 
 export function subscribeDesktopMenuCommands(callback: (command: DesktopMenuCommand) => void): () => void {
   return bridge()?.onMenuCommand(callback) ?? (() => undefined)
+}
+
+/** True only where the platform draws the menu itself, which today means macOS. Everywhere else —
+ *  the browser, Windows, Linux — the app draws its own menu bar and binds its own accelerators. */
+export function desktopUsesNativeMenu(): boolean {
+  return desktopPlatform()?.usesNativeMenu === true
+}
+
+export function setDesktopApplicationMenu(template: DesktopMenuTemplate): void {
+  void bridge()?.setApplicationMenu(template).catch(() => undefined)
 }
 
 export async function desktopRequest(config: ServerConfig, request: DesktopRequest): Promise<DesktopResponse> {

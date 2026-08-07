@@ -10,6 +10,8 @@ import {
   isAndroidPlatform,
   isDesktopPlatform,
   notifyDesktopCompletion,
+  desktopUsesNativeMenu,
+  setDesktopApplicationMenu,
   subscribeDesktopMenuCommands,
   syncDesktopProfiles
 } from "./desktopBridge"
@@ -29,6 +31,7 @@ import { backendDisplayName, isBridgeBackend } from "./backendSetup"
 import { CommandPalette, MenuBar, ServerSwitcher, type MenuDefinition, type MenuEntry, type PaletteCommand } from "./components/shell"
 import { ConnectServerWizard, NewSessionDialog } from "./components/panels"
 import { createServerProfile, loadActiveServerProfile, loadServerProfiles, persistServerProfiles, type SavedServerProfile } from "./serverProfiles"
+import type { DesktopMenuCommand, DesktopMenuTemplate } from "../electron/ipc-contract"
 import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessAction, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, PermissionRequest, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
@@ -118,6 +121,51 @@ const IS_APPLE = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navi
 
 function shortcut(key: string): string {
   return IS_APPLE ? `⌘${key}` : `Ctrl+${key}`
+}
+
+/**
+ * One place binding a command to a key. Three consumers read from it and previously each spelled the
+ * binding out for itself: the label shown in menus and the palette, the accelerator the platform
+ * menu registers, and the in-app keydown handler. Keeping them derived is what stops a menu from
+ * advertising a shortcut the handler does not implement — and it is what fixes "Ctrl+N+Shift",
+ * which was written by hand in the wrong order.
+ */
+const KEY_BINDINGS: Record<string, { key: string; shift?: boolean }> = {
+  "view.palette": { key: "k" },
+  "session.new": { key: "n" },
+  "server.add": { key: "n", shift: true },
+  "focus.search": { key: "f" },
+  "session.refresh": { key: "r" },
+  "server.settings": { key: "," },
+  "view.inspector": { key: "b" }
+}
+
+function bindingKeyLabel(binding: { key: string }): string {
+  return binding.key.length === 1 && /[a-z]/.test(binding.key) ? binding.key.toUpperCase() : binding.key
+}
+
+function displayShortcut(command: string): string | undefined {
+  const binding = KEY_BINDINGS[command]
+  if (!binding) return undefined
+  const shift = binding.shift ? (IS_APPLE ? "⇧" : "Shift+") : ""
+  return IS_APPLE ? `⌘${shift}${bindingKeyLabel(binding)}` : `Ctrl+${shift}${bindingKeyLabel(binding)}`
+}
+
+/** Electron's own accelerator grammar, which is neither the label nor the DOM key name. */
+function electronAccelerator(command: string): string | undefined {
+  const binding = KEY_BINDINGS[command]
+  if (!binding) return undefined
+  return `CmdOrCtrl+${binding.shift ? "Shift+" : ""}${bindingKeyLabel(binding)}`
+}
+
+/** The command a keystroke means, or null. Shared by the in-app handler so it can never disagree
+ *  with what the menus say. */
+function commandForKeyEvent(event: KeyboardEvent): string | null {
+  const key = event.key.toLowerCase()
+  for (const [command, binding] of Object.entries(KEY_BINDINGS)) {
+    if (binding.key === key && Boolean(binding.shift) === event.shiftKey) return command
+  }
+  return null
 }
 
 function readStoredWidth(key: string, fallback: number, min: number, max: number): number {
@@ -2040,6 +2088,9 @@ function App() {
   // Desktop gets a persistent left sidebar instead of the mobile top bar/bottom nav; this mirrors
   // the existing 780px CSS breakpoint so JS layout and stylesheet layout never disagree.
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia(DESKTOP_MEDIA_QUERY).matches)
+  /* Whether the platform draws the menu itself. Fixed for the life of the process — it is a
+     property of the build, not of the window — so it is read once. */
+  const [usesNativeMenu] = useState(desktopUsesNativeMenu)
   useEffect(() => {
     const query = window.matchMedia(DESKTOP_MEDIA_QUERY)
     const onChange = (event: MediaQueryListEvent) => setIsDesktop(event.matches)
@@ -3720,26 +3771,22 @@ function App() {
   // Keyboard shortcuts belong to the window, not to any one control, so they keep working while
   // focus is in the transcript or the sidebar. The composer's own Enter/Shift+Enter handling is
   // untouched: nothing here fires without a modifier.
+  //
+  // Skipped entirely where the platform menu owns the same accelerators, or every one of them would
+  // fire twice — harmless for "New session", but a toggle run twice lands back where it started.
   useEffect(() => {
+    if (usesNativeMenu) return
     const onKeyDown = (event: KeyboardEvent) => {
       const accelerator = IS_APPLE ? event.metaKey : event.ctrlKey
       if (!accelerator || event.altKey) return
-      const key = event.key.toLowerCase()
-      const command = key === "k" ? "view.palette"
-        : key === "n" && !event.shiftKey ? "session.new"
-        : key === "n" && event.shiftKey ? "server.add"
-        : key === "f" ? "focus.search"
-        : key === "r" ? "session.refresh"
-        : key === "," ? "server.settings"
-        : key === "b" ? "view.inspector"
-        : null
+      const command = commandForKeyEvent(event)
       if (!command) return
       event.preventDefault()
       runAppCommandRef.current(command)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+  }, [usesNativeMenu])
 
   // The packaged desktop app draws the platform's own menu bar; its items arrive here as commands
   // so the native menu and the in-app one stay a single implementation.
@@ -3747,11 +3794,11 @@ function App() {
     return subscribeDesktopMenuCommands((id) => runAppCommandRef.current(id))
   }, [])
 
-  const menuItem = (id: string, label: string, options: { shortcut?: string; disabled?: boolean; checked?: boolean } = {}): MenuEntry => ({
+  const menuItem = (id: string, label: string, options: { disabled?: boolean; checked?: boolean } = {}): MenuEntry => ({
     kind: "item",
     id,
     label,
-    shortcut: options.shortcut,
+    shortcut: displayShortcut(id),
     disabled: options.disabled,
     checked: options.checked,
     onSelect: () => runAppCommand(id)
@@ -3762,11 +3809,11 @@ function App() {
       id: "file",
       label: t('menubar.file'),
       entries: [
-        menuItem("session.new", t('command.newSession'), { shortcut: shortcut("N"), disabled: !hasConfiguredServer || isOffline }),
-        menuItem("session.refresh", t('command.refreshSessions'), { shortcut: shortcut("R"), disabled: !hasConfiguredServer }),
+        menuItem("session.new", t('command.newSession'), { disabled: !hasConfiguredServer || isOffline }),
+        menuItem("session.refresh", t('command.refreshSessions'), { disabled: !hasConfiguredServer }),
         { kind: "separator", id: "file-sep" },
-        menuItem("server.add", t('command.addServer'), { shortcut: `${shortcut("N")}+Shift` }),
-        menuItem("server.settings", t('command.openSettings'), { shortcut: shortcut(",") })
+        menuItem("server.add", t('command.addServer')),
+        menuItem("server.settings", t('command.openSettings'))
       ]
     },
     {
@@ -3787,9 +3834,9 @@ function App() {
       id: "view",
       label: t('menubar.view'),
       entries: [
-        menuItem("view.palette", t('command.commandPalette'), { shortcut: shortcut("K") }),
-        menuItem("focus.search", t('command.searchSessions'), { shortcut: shortcut("F") }),
-        menuItem("view.inspector", t('command.toggleInspector'), { shortcut: shortcut("B"), checked: inspectorOpen }),
+        menuItem("view.palette", t('command.commandPalette')),
+        menuItem("focus.search", t('command.searchSessions')),
+        menuItem("view.inspector", t('command.toggleInspector'), { checked: inspectorOpen }),
         { kind: "separator", id: "view-sep" },
         menuItem("view.theme.system", t('settings.themeSystem'), { checked: theme === "system" }),
         menuItem("view.theme.light", t('settings.themeLight'), { checked: theme === "light" }),
@@ -3803,18 +3850,44 @@ function App() {
     }
   ]
 
+  /* Where the platform draws the menu, it is handed the same definitions the in-app bar would have
+     rendered — labels, enabled state and all — so the two can only ever say the same thing. Sent on
+     change rather than on every render: the signature is what the menu actually depends on, and the
+     definitions are rebuilt each time the transcript ticks. */
+  const nativeMenuTemplate = usesNativeMenu
+    ? menuDefinitions.map((menu) => ({
+        id: menu.id,
+        label: menu.label,
+        items: menu.entries.map((entry) => entry.kind === "separator"
+          ? { kind: "separator" as const }
+          : {
+              kind: "item" as const,
+              command: entry.id as DesktopMenuCommand,
+              label: entry.label,
+              accelerator: electronAccelerator(entry.id),
+              enabled: !entry.disabled,
+              checked: entry.checked
+            })
+      }))
+    : null
+  const nativeMenuSignature = nativeMenuTemplate ? JSON.stringify(nativeMenuTemplate) : ""
+  useEffect(() => {
+    if (!nativeMenuSignature) return
+    setDesktopApplicationMenu(JSON.parse(nativeMenuSignature) as DesktopMenuTemplate)
+  }, [nativeMenuSignature])
+
   const paletteCommands: PaletteCommand[] = [
-    { id: "session.new", group: t('command.groupSession'), label: t('command.newSession'), hint: shortcut("N"), icon: <PlusIcon size={16} />, disabled: !hasConfiguredServer || isOffline },
-    { id: "session.refresh", group: t('command.groupSession'), label: t('command.refreshSessions'), hint: shortcut("R"), icon: <RefreshIcon size={16} />, disabled: !hasConfiguredServer },
+    { id: "session.new", group: t('command.groupSession'), label: t('command.newSession'), hint: displayShortcut("session.new"), icon: <PlusIcon size={16} />, disabled: !hasConfiguredServer || isOffline },
+    { id: "session.refresh", group: t('command.groupSession'), label: t('command.refreshSessions'), hint: displayShortcut("session.refresh"), icon: <RefreshIcon size={16} />, disabled: !hasConfiguredServer },
     { id: "session.rename", group: t('command.groupSession'), label: t('session.renameTitle'), icon: <PencilIcon size={16} />, disabled: !selectedSession || !capabilities.sessionRename },
     { id: "session.delete", group: t('command.groupSession'), label: t('sessions.delete'), icon: <TrashIcon size={16} />, disabled: !selectedSession || !capabilities.sessionDelete },
     { id: "session.stop", group: t('command.groupSession'), label: t('command.stopAgent'), icon: <StopCircleIcon size={16} />, disabled: !selectedSession || !isWorking },
     { id: "session.undo", group: t('command.groupSession'), label: t('detail.undo'), disabled: !sessionHeaderActions.some((action) => action.id === "undo") },
     { id: "session.redo", group: t('command.groupSession'), label: t('detail.redo'), disabled: !sessionHeaderActions.some((action) => action.id === "redo") },
     { id: "server.add", group: t('command.groupServer'), label: t('command.addServer'), icon: <ServerIcon size={16} /> },
-    { id: "server.settings", group: t('command.groupServer'), label: t('command.openSettings'), hint: shortcut(","), icon: <SettingsIcon size={16} /> },
-    { id: "view.palette", group: t('command.groupView'), label: t('command.commandPalette'), hint: shortcut("K"), icon: <CommandIcon size={16} /> },
-    { id: "view.inspector", group: t('command.groupView'), label: t('command.toggleInspector'), hint: shortcut("B"), icon: <PanelRightIcon size={16} />, disabled: !selectedSession || !hasRoomForInspector },
+    { id: "server.settings", group: t('command.groupServer'), label: t('command.openSettings'), hint: displayShortcut("server.settings"), icon: <SettingsIcon size={16} /> },
+    { id: "view.palette", group: t('command.groupView'), label: t('command.commandPalette'), hint: displayShortcut("view.palette"), icon: <CommandIcon size={16} /> },
+    { id: "view.inspector", group: t('command.groupView'), label: t('command.toggleInspector'), hint: displayShortcut("view.inspector"), icon: <PanelRightIcon size={16} />, disabled: !selectedSession || !hasRoomForInspector },
     { id: "view.theme.light", group: t('command.groupView'), label: t('settings.themeLight') },
     { id: "view.theme.dark", group: t('command.groupView'), label: t('settings.themeDark') },
     { id: "view.theme.system", group: t('command.groupView'), label: t('settings.themeSystem') },
@@ -4009,7 +4082,7 @@ function App() {
     <div className={`app-shell${isDesktop ? " app-shell-desktop" : ""}`}>
       {isDesktop ? (
         <MenuBar
-          menus={menuDefinitions}
+          menus={usesNativeMenu ? [] : menuDefinitions}
           brand={brandBlock}
           right={(
             <>

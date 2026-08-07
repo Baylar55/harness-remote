@@ -2,11 +2,12 @@ import { app, BrowserWindow, Menu, Notification, nativeImage, screen, session, i
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import { buildApplicationMenu } from "./app-menu.js"
 import { DesktopEventTransport } from "./event-transport.js"
-import { IPC_CHANNELS } from "./ipc-contract.js"
+import { IPC_CHANNELS, parseDesktopMenuTemplate } from "./ipc-contract.js"
 import { DesktopProfileError, ProfileRegistry } from "./profile-registry.js"
 import { executeDesktopRequest } from "./request-transport.js"
-import type { DesktopCompletionNotification, DesktopEventSubscriptionOptions, DesktopRequest } from "./ipc-contract.js"
+import type { DesktopCompletionNotification, DesktopEventSubscriptionOptions, DesktopMenuCommand, DesktopRequest } from "./ipc-contract.js"
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, restoredBounds as calculateRestoredBounds } from "./window-state.js"
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDevelopment = !app.isPackaged
@@ -68,6 +69,35 @@ function ensureTrustedSender(event: IpcMainInvokeEvent): void {
 
 function notificationText(value: unknown, maxLength: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+/**
+ * Only macOS gets a platform menu. Its menu bar lives outside the window, so the app has to put
+ * something there — and if it does not, Electron leaves its own untranslated default sitting next to
+ * the app's own menu bar. Windows and Linux would draw a second menu bar inside the window frame,
+ * directly beneath the one the renderer already draws, which is why they keep the in-window one
+ * alone. The renderer is told which of the two it is dealing with through `platform.usesNativeMenu`.
+ */
+function applyApplicationMenu(template: unknown): boolean {
+  if (!isMac) return false
+  const parsed = parseDesktopMenuTemplate(template)
+  if (!parsed) return false
+  const sendCommand = (command: DesktopMenuCommand) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(IPC_CHANNELS.menuCommand, command)
+  }
+  try {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(buildApplicationMenu(parsed, {
+      appName: app.getName(),
+      isMac,
+      onCommand: sendCommand
+    })))
+    return true
+  } catch {
+    // A template Electron refuses is not worth taking the window down for: keep whatever menu is
+    // already installed and carry on.
+    log("application menu could not be built")
+    return false
+  }
 }
 
 function notifyCompletion(notification: DesktopCompletionNotification): void {
@@ -202,6 +232,10 @@ function installIPC(): void {
     if (typeof subscriptionId !== "string") throw new Error("Subscription ID is invalid")
     eventTransport.unsubscribe(event.sender, subscriptionId)
   })
+  ipcMain.handle(IPC_CHANNELS.setMenu, async (event, template: unknown) => {
+    ensureTrustedSender(event)
+    return applyApplicationMenu(template)
+  })
   ipcMain.handle(IPC_CHANNELS.notifyCompletion, async (event, notification: unknown) => {
     ensureTrustedSender(event)
     if (!notification || typeof notification !== "object") throw new Error("Notification payload is invalid")
@@ -222,7 +256,9 @@ async function start(): Promise<void> {
   installIPC()
   // macOS keeps its menu: the app menu is where Cmd+Q lives and the Edit menu is what binds
   // Cmd+C/V/X, so stripping it there costs the user the shortcuts they expect rather than just
-  // hiding chrome. Windows and Linux draw an in-window menu bar that the app has no use for.
+  // hiding chrome. The renderer replaces Electron's untranslated default with the real one as soon
+  // as it mounts. Windows and Linux draw an in-window menu bar underneath the app's own, which is
+  // one menu bar too many.
   if (!isDevelopment && !isMac) Menu.setApplicationMenu(null)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   mainWindow = createWindow()
