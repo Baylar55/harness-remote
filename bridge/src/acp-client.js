@@ -8,11 +8,24 @@ const REQUEST_TIMEOUT_MS = 30_000
 /** Kept so a failed handshake can report why the adapter died instead of just its exit code. */
 const STDERR_KEPT_CHARS = 600
 
+/**
+ * JSON-RPC only promises a human-readable `message`, and Codex spends it on a bare "Internal
+ * error", putting the part worth reading — "thread <id> already has an active writer" — in
+ * `data.details`. Dropping that left the app showing `{"error":"Internal error"}` for a refusal it
+ * could otherwise have explained.
+ */
+function acpErrorMessage(error) {
+  const message = error?.message ?? "ACP adapter request failed"
+  const details = error?.data?.details
+  return typeof details === "string" && details && !message.includes(details) ? `${message}: ${details}` : message
+}
+
 export class AcpClient extends EventEmitter {
   #command
   #args
   #spawn
   #permissionMode
+  #preferredAuthMethod
   #child
   #buffer = ""
   #nextID = 1
@@ -21,11 +34,12 @@ export class AcpClient extends EventEmitter {
   #agentInfo
   #stderr = ""
 
-  constructor({ command = "omp", args = ["acp"], permissionMode = "deny", spawnProcess = spawn } = {}) {
+  constructor({ command = "omp", args = ["acp"], permissionMode = "deny", preferredAuthMethod, spawnProcess = spawn } = {}) {
     super()
     this.#command = command
     this.#args = args
     this.#permissionMode = permissionMode
+    this.#preferredAuthMethod = preferredAuthMethod
     this.#spawn = spawnProcess
   }
 
@@ -87,8 +101,13 @@ export class AcpClient extends EventEmitter {
       // that uses those credentials. PI's adapter offers `anthropic-api-key` first and
       // `pi-stored-credentials` last: picking the first would claim an API key from an
       // environment variable that is usually unset, and fail later at inference rather than here.
+      // Codex's adapter lists `api-key` first too, but its ChatGPT login method is what reads a
+      // `codex login` from disk, so a profile may name the method its harness expects.
       const authMethods = Array.isArray(initialized.authMethods) ? initialized.authMethods : []
-      const authMethod = authMethods.find((method) => method?.id === "agent")
+      let authMethod = this.#preferredAuthMethod
+        ? authMethods.find((method) => method?.id === this.#preferredAuthMethod)
+        : undefined
+      authMethod ??= authMethods.find((method) => method?.id === "agent")
         ?? authMethods.find((method) => method?.id && method.type !== "env_var")
         ?? authMethods.find((method) => method?.id)
       if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, START_TIMEOUT_MS)
@@ -175,7 +194,7 @@ export class AcpClient extends EventEmitter {
       if (!pending) return
       clearTimeout(pending.timer)
       this.#pending.delete(message.id)
-      if (message.error) pending.reject(new Error(message.error.message ?? "ACP adapter request failed"))
+      if (message.error) pending.reject(new Error(acpErrorMessage(message.error)))
       else pending.resolve(message.result)
       return
     }

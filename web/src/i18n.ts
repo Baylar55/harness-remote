@@ -96,6 +96,7 @@ type TranslationKey =
   | 'detail.backToSessions'
   | 'detail.selectSession'
   | 'detail.loading'
+  | 'detail.loadFailed'
   | 'detail.emptyTitle'
   | 'detail.emptyHint'
 
@@ -211,6 +212,7 @@ type TranslationKey =
   | 'connect.harness.omp'
   | 'connect.harness.pi'
   | 'connect.harness.claude'
+  | 'connect.harness.codex'
   | 'connect.addressHint'
   | 'connect.runOnHost'
   | 'connect.copyCommand'
@@ -388,6 +390,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.backToSessions': '← Sessions',
     'detail.selectSession': 'Select a session',
     'detail.loading': 'Loading session...',
+    'detail.loadFailed': 'This session could not be opened',
     'detail.emptyTitle': 'No messages yet',
     'detail.emptyHint': 'Start a conversation below',
     'detail.composerPlaceholder': 'Prompt, or / for commands',
@@ -568,6 +571,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.harness.omp': 'Connect through the bundled Oh My Pi bridge.',
     'connect.harness.pi': 'Connect to PI through the ACP bridge.',
     'connect.harness.claude': 'Connect to Claude Code through the ACP bridge.',
+    'connect.harness.codex': 'Connect to Codex CLI through the ACP bridge.',
     'connect.addressHint': 'Use the LAN address of the machine that runs the harness.',
     'connect.runOnHost': 'Run on the host machine',
     'connect.copyCommand': 'Copy command',
@@ -678,6 +682,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.backToSessions': '← Sessioni',
     'detail.selectSession': 'Seleziona una sessione',
     'detail.loading': 'Caricamento sessione...',
+    'detail.loadFailed': 'Impossibile aprire questa sessione',
     'detail.emptyTitle': 'Ancora nessun messaggio',
     'detail.emptyHint': 'Inizia una conversazione qui sotto',
     'detail.composerPlaceholder': 'Prompt, o / per i comandi',
@@ -858,6 +863,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.harness.omp': 'Connessione tramite il bridge incluso per Oh My Pi.',
     'connect.harness.pi': 'Connessione a PI tramite bridge ACP.',
     'connect.harness.claude': 'Connessione a Claude Code tramite bridge ACP.',
+    'connect.harness.codex': 'Connessione a Codex CLI tramite bridge ACP.',
     'connect.addressHint': 'Usa l’indirizzo LAN del computer che esegue l’harness.',
     'connect.runOnHost': 'Esegui sul computer host',
     'connect.copyCommand': 'Copia comando',
@@ -968,6 +974,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.backToSessions': '← 工作階段',
     'detail.selectSession': '選擇工作階段',
     'detail.loading': '載入工作階段...',
+    'detail.loadFailed': '無法開啟此工作階段',
     'detail.emptyTitle': '尚無訊息',
     'detail.emptyHint': '在下方開始對話',
     'detail.composerPlaceholder': '輸入提示，或以 / 下命令',

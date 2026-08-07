@@ -20,7 +20,7 @@ if (config?.help) {
 
 if (config) {
   const profile = harnessProfile(config.backend)
-  const acp = new AcpClient({ command: config.acpCommand, args: config.acpArgs, permissionMode: profile.permissionMode })
+  const acp = new AcpClient({ command: config.acpCommand, args: config.acpArgs, permissionMode: profile.permissionMode, preferredAuthMethod: profile.authMethod })
   const server = createBridgeServer({
     config,
     acp,

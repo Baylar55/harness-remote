@@ -1,3 +1,4 @@
+import { createCodexHistoryLoader } from "./codex-session-history.js"
 import { createOmpHistoryLoader } from "./omp-session-history.js"
 import { OMP_EXTENSION_ACTION_PROVIDERS } from "./extension-actions.js"
 
@@ -77,6 +78,44 @@ export const HARNESS_PROFILES = {
       models: true,
       todos: true,
       commands: false,
+      actions: false,
+      sessionRename: true,
+      sessionDelete: true
+    }
+  },
+  codex: {
+    id: "codex",
+    label: "Codex CLI",
+    // Uses the official ACP adapter for the OpenAI Codex CLI. The adapter speaks ACP JSON-RPC
+    // over stdio and embeds @openai/codex, so no separate Codex installation is needed. The
+    // user must have run `codex login` (ChatGPT account) or set an OpenAI API key first.
+    // Requires Node 22+ (same as the PI and Claude adapters it mirrors).
+    command: process.platform === "win32" ? "npx.cmd" : "npx",
+    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
+    // release appeared in the registry index before its tarball could be fetched.
+    args: ["-y", "@agentclientprotocol/codex-acp@1.1.14"],
+    permissionMode: "allow",
+    // The adapter offers `api-key` before `chat-gpt`; the former demands CODEX_API_KEY or
+    // OPENAI_API_KEY, while a `codex login` leaves ChatGPT credentials the `chat-gpt` method
+    // reads from disk. Prefer the login, exactly like the generic default already avoids
+    // env-var methods for the other harnesses.
+    authMethod: "chat-gpt",
+    // Codex holds a single-writer lock for as long as a client keeps a thread open, so a session the
+    // desktop app is showing cannot be loaded over ACP at all. Its rollout file can, which is what
+    // lets those sessions be read here. `messages` already forces a reload for every session this
+    // bridge does not own, so a conversation still running in Codex keeps updating without asking
+    // for the replay that the sessions we do own would otherwise repeat on each refresh.
+    historyLoader: createCodexHistoryLoader(),
+    preserveListedTimestamps: true,
+    reloadOnHistoryRefresh: false,
+    capabilities: {
+      ...COMMON_CAPABILITIES,
+      // The adapter advertises model ids as bare ids rather than `provider/model`, which is
+      // handled where the response is built. Slash commands and plan updates arrive through
+      // the same notifications OMP emits, so commands and todos reflect the actual wire data.
+      models: true,
+      todos: true,
+      commands: true,
       actions: false,
       sessionRename: true,
       sessionDelete: true

@@ -68,5 +68,22 @@ export const DEFAULT_HARNESS_CAPABILITIES: Record<BackendKind, HarnessCapabiliti
     actions: false,
     sessionRename: true,
     sessionDelete: true
+  },
+  codex: {
+    sessions: true,
+    prompt: true,
+    abort: true,
+    streaming: true,
+    models: true,
+    agents: false,
+    todos: true,
+    diff: false,
+    filesystemBrowser: true,
+    questions: false,
+    permissions: false,
+    commands: true,
+    actions: false,
+    sessionRename: true,
+    sessionDelete: true
   }
 }

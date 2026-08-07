@@ -59,8 +59,12 @@ function responseDetail(body: unknown): string | null {
     }
   }
   if (typeof body === "object") {
-    const value = body as { data?: { message?: string }, message?: string }
-    return value.data?.message ?? value.message ?? JSON.stringify(body)
+    // `data.message` and `message` are OpenCode's shapes; the bridge answers `{ "error": "..." }`,
+    // which fell through to the stringify below and put raw JSON on screen — so every bridge
+    // failure reached the user as `{"error":"Internal error: ..."}` instead of the sentence in it.
+    const value = body as { data?: { message?: string }, message?: string, error?: string }
+    const detail = value.data?.message ?? value.message ?? (typeof value.error === "string" ? value.error : undefined)
+    return detail ?? JSON.stringify(body)
   }
   return String(body)
 }

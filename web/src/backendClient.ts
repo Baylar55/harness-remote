@@ -21,5 +21,9 @@ export const BACKEND_CLIENTS: Record<BackendKind, BackendClient> = {
   claude: {
     modelSelectionRequiresSession: true,
     messageRefreshSupported: true
+  },
+  codex: {
+    modelSelectionRequiresSession: true,
+    messageRefreshSupported: true
   }
 }

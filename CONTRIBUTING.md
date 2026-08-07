@@ -2,8 +2,8 @@
 
 Thanks for wanting to work on this. Harness Remote is a companion app for driving coding-agent
 harnesses from a phone or a desktop browser. It is deliberately harness-agnostic: OpenCode, Oh My Pi
-(OMP) and PI are supported today. Adding a harness should mean adding a profile entry and its setup
-section, never a special case threaded through the app.
+(OMP), PI, Claude Code and Codex CLI are supported today. Adding a harness should mean adding a
+profile entry and its setup section, never a special case threaded through the app.
 
 This document is long on purpose. Read the section that matches what you are touching, or all of it
 if you are having an agent do the work.
@@ -311,8 +311,9 @@ that needs changing afterwards goes in separate commits on top. Squashing is up 
 
 - [Open issues](https://github.com/giuliastro/harness-remote/issues), especially any labelled
   [`help wanted`](https://github.com/giuliastro/harness-remote/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
-  A fourth harness is the obvious next step: the profile mechanism in `bridge/src/harness-profiles.js`
-  is what PI was added through, so it is a well-worn path rather than new ground.
+  A new harness is the obvious next step: the profile mechanism in `bridge/src/harness-profiles.js`
+  is what PI, Claude Code and Codex CLI were added through, so it is a well-worn path rather than
+  new ground.
 - Bug reports from real use are genuinely valuable here, for the reason in
   [Test against a real agent](#test-against-a-real-agent).
 - Translations, if the UI does not speak your language.

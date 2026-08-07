@@ -48,6 +48,16 @@ test("selects PI defaults for the ACP backend", () => {
   assert.match(parseConfig(["--backend", "pi"], {}).acpArgs[1], /@\d+\.\d+\.\d+$/, "the adapter version must stay pinned")
 })
 
+test("selects Codex defaults for the ACP backend", () => {
+  assert.deepEqual(parseConfig(["--backend", "codex"], {}).backend, "codex")
+  assert.equal(parseConfig(["--backend", "codex"], {}).acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
+  // The adapter embeds @openai/codex, so no separate Codex installation is required; the
+  // version is pinned for the same `notarget` reason PI and Claude document.
+  assert.deepEqual(parseConfig(["--backend", "codex"], {}).acpArgs, ["-y", "@agentclientprotocol/codex-acp@1.1.14"])
+  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "codex" }).acpArgs, ["-y", "@agentclientprotocol/codex-acp@1.1.14"])
+  assert.match(parseConfig(["--backend", "codex"], {}).acpArgs[1], /@\d+\.\d+\.\d+$/, "the adapter version must stay pinned")
+})
+
 test("prefers generic environment names while retaining OMP aliases", () => {
   const generic = parseConfig([], {
     HARNESS_REMOTE_BACKEND: "pi",

@@ -105,10 +105,70 @@ credentials, which it reads from disk. Two consequences:
 - updating `pi` locally does not change what the bridge runs;
 - the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
 
+**Assumed:**
+
+| Assumption | What breaks if it changes |
+|---|---|
+| Launched over stdio as an `npx`-installable `bin` | the `--acp-command` / `--acp-arg` defaults in the profile |
+| Offers a non-`env_var` auth method (`pi-stored-credentials`) | the bridge would fall back to an API key from an unset environment variable and fail at inference |
+| Asks `session/request_permission` before each tool call, offering an `allow_once` option | tool calls stop happening, silently — the failure mode is "reports success, changes nothing" |
+| Streams chunks with **no** `messageId` | replies would split into one message per token, or aggregate wrongly |
+| Emits no `agent_plan` | the todo panel stays empty |
+
+**The adapter embeds its own PI.** It depends on `@earendil-works/pi-coding-agent` pinned to a
+specific version (`0.82.1` in adapter 0.2.5), so the PI that actually runs is the one bundled with
+the adapter, not the `pi` on your PATH. Your local install still matters for configuration and
+credentials, which it reads from disk. Two consequences:
+
+- updating `pi` locally does not change what the bridge runs;
+- the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
+
 **Exit route.** If the adapter becomes unmaintained or unreliable, PI's own RPC mode
 (`packages/coding-agent/docs/rpc.md` in the PI repo) is the first-party alternative. It means
 writing a transport in the bridge rather than reusing the ACP client, but it removes the third
 party entirely.
+
+### Codex CLI — ACP over stdio, via the official adapter
+
+- **Adapter:** [`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp),
+  published by the Agent Client Protocol project, MIT. **Pinned to `1.1.14`** in
+  `bridge/src/harness-profiles.js`.
+- **The adapter embeds `@openai/codex`**, so no separate Codex installation is needed on the host —
+  but credentials still come from `codex login` (ChatGPT account) or an `OPENAI_API_KEY` in the
+  bridge process environment.
+- **Pinned for the same reason as PI and Claude:** an unpinned `npx -y` default fails live with
+  `notarget` when a release outruns its own tarball in the registry.
+
+**Assumed, inferred from the adapter bundle (`@agentclientprotocol/codex-acp@1.1.14`) rather than
+read from a spec:**
+
+| Assumption | What breaks if it changes |
+|---|---|
+| `session/list` enumerates every Codex thread on the machine | the session list empties |
+| Rollouts stay at `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<sessionId>.jsonl` | `createCodexHistoryLoader` finds nothing and every session Codex holds open shows as empty |
+| A rollout records the turns the user saw as `event_msg` records — `user_message.message`, `agent_message.message`, `agent_reasoning.text` | the transcript of an externally-held session goes empty, or starts showing the instruction blocks Codex feeds the model, which `response_item` carries under the `user` role |
+| Model config option ids are bare (`gpt-5.2`), not `provider/model` | covered by the same bare-id handling the Claude Code backend proved; if ids gain a provider prefix they still parse, under that provider name |
+| `reasoning_effort` and `mode` config options are advertised but not exposed | they stay invisible in the app; no crash, just unused surface |
+| `plan` / `plan_update` notifications carry entries addressed as `{content, status, priority}` | todo updates stop rendering |
+| `available_commands_update` exposes slash commands | the app's custom `/commands` picker goes empty |
+| ACP permissions requests are auto-answered with `allow` (`permissionMode: "allow"`) | if the adapter asks and no answer were sent, tool calls would hang; granting is the deliberate policy |
+| `api-key` is advertised before `chat-gpt`. The profile prefers `chat-gpt` so a `codex login` is honoured | the bridge would pick `api-key`, demand `CODEX_API_KEY`/`OPENAI_API_KEY`, and fail at inference; an env-var API key deliberately still works if set |
+
+**One writer per thread.** Codex takes a writer lock for as long as a client keeps a thread open —
+`~/.codex/thread-writer-locks/<sessionId>.lock` — and `session/load` answers
+`thread <id> already has an active writer` for every session the Codex desktop app or a running
+`codex` is sitting on. That is most of the sessions worth looking at, so the profile carries a
+`historyLoader` that reads the rollout instead: reading takes no lock, and those sessions display
+while Codex still owns them. They stay read-only, because prompting has to take the writer and
+`AcpService.prompt` surfaces the refusal.
+
+Reading a rollout means depending on a private on-disk format rather than a protocol, which is the
+same trade OMP's loader makes. If the format moves, `bridge/test/codex-session-history.test.js`
+pins the shape the loader expects, and the fallback is ACP replay — correct whenever Codex is not
+holding the thread.
+
+**Watch:** the embedded `@openai/codex` version (it decides which models and modes exist), the
+rollout record shape, and any new `sessionUpdate` / notification shape.
 
 ## App and packaging
 

@@ -658,9 +658,11 @@ test("reports the configured ACP backend", async () => {
 test("reports capabilities from the selected harness profile", async () => {
   const omp = await startServer({ backend: "omp" })
   const pi = await startServer({ backend: "pi" })
+  const codex = await startServer({ backend: "codex" })
   try {
     const ompCapabilities = await readJSON(omp.baseURL, "/v1/capabilities")
     const piCapabilities = await readJSON(pi.baseURL, "/v1/capabilities")
+    const codexCapabilities = await readJSON(codex.baseURL, "/v1/capabilities")
     assert.equal(ompCapabilities.models, true)
     assert.equal(ompCapabilities.todos, true)
     assert.equal(ompCapabilities.commands, true)
@@ -669,8 +671,14 @@ test("reports capabilities from the selected harness profile", async () => {
     assert.equal(piCapabilities.todos, false)
     assert.equal(piCapabilities.commands, true)
     assert.equal(piCapabilities.actions, false)
+    // Codex mirrors Claude's flat model ids and OMP's slash-command catalog, so the app must
+    // trust the canonical OMP-style values the bridge exposes.
+    assert.equal(codexCapabilities.models, true)
+    assert.equal(codexCapabilities.todos, true)
+    assert.equal(codexCapabilities.commands, true)
+    assert.equal(codexCapabilities.actions, false)
   } finally {
-    await Promise.all([omp.close(), pi.close()])
+    await Promise.all([omp.close(), pi.close(), codex.close()])
   }
 })
 
@@ -1307,6 +1315,48 @@ test("reports models for an external session without losing its history", async 
 
   await driver.models("session-1")
   assert.equal(acp.loads, 1, "options already held must not trigger another load")
+})
+
+test("keeps an external transcript readable when the harness refuses the load that models needs", async () => {
+  // Codex allows one writer per conversation and refuses `session/load` for any thread another
+  // client holds open, so config options are genuinely unavailable there. The app asks for the
+  // transcript and the models together on every open, and a single in-flight load shared between
+  // them handed that refusal to the transcript too — so those sessions would not open at all.
+  class RefusingAcp extends EventEmitter {
+    loads = 0
+    async start() {}
+
+    async listSessions() {
+      return [{ sessionId: "session-1", cwd: process.cwd(), updatedAt: "2026-08-07T00:00:00.000Z" }]
+    }
+
+    async request(method) {
+      if (method !== "session/load") return {}
+      this.loads += 1
+      throw new Error("thread session-1 already has an active writer")
+    }
+
+    notify() {}
+  }
+  const history = [{
+    info: { id: "native-first", role: "user", sessionID: "session-1", time: { created: Date.now() } },
+    parts: [{ id: "native-first:text", type: "text", text: "First" }]
+  }]
+  const acp = new RefusingAcp()
+  const driver = new AcpService(acp, { historyLoader: async () => history })
+
+  const [messages, models] = await Promise.all([
+    driver.messages("session-1"),
+    driver.models("session-1").then(() => "loaded", () => "refused")
+  ])
+  assert.deepEqual(messages.map((item) => item.parts[0].text), ["First"], "the transcript must survive a refused load")
+  assert.equal(models, "refused", "models are genuinely unavailable while another client holds the thread")
+
+  assert.deepEqual(
+    (await driver.messages("session-1")).map((item) => item.parts[0].text),
+    ["First"],
+    "a later read must not inherit the earlier refusal either"
+  )
 })
 
 test("merges bridge-only legacy prompts into native external history by timestamp", async () => {

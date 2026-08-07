@@ -24,6 +24,7 @@ import {
   type EventStreamStatus
 } from "./opencode-events"
 import { createTranslator, languageOptions, normalizeLanguage, type LanguageCode } from "./i18n"
+import { stripMarkdownDirectives } from "./markdownDirectives"
 import { DEFAULT_HARNESS_CAPABILITIES } from "./backendCapabilities"
 import { BACKEND_CLIENTS } from "./backendClient"
 import { copyToClipboard } from "./clipboard"
@@ -65,9 +66,10 @@ const LANGUAGE_STORAGE_KEY = "opencode.remote.language"
 const MODEL_STORAGE_KEY = "opencode.remote.model"
 const AGENT_STORAGE_KEY = "opencode.remote.agent"
 const THEME_STORAGE_KEY = "opencode.remote.theme"
-// The wider restyled sidebar gets its own preference version so installations that persisted the
-// old, cramped default receive the new baseline once, while every subsequent manual resize sticks.
-const SIDEBAR_WIDTH_STORAGE_KEY = "opencode.remote.desktopSidebarWidth.v3"
+// Each wider sidebar baseline gets its own preference version so installations that persisted the
+// previous, cramped default receive the new baseline once, while every subsequent manual resize
+// sticks. Bump the key only when the baseline itself changes, never for a drag-once tweak.
+const SIDEBAR_WIDTH_STORAGE_KEY = "opencode.remote.desktopSidebarWidth.v4"
 const INSPECTOR_WIDTH_STORAGE_KEY = "opencode.remote.desktopInspectorWidth"
 const INSPECTOR_OPEN_STORAGE_KEY = "opencode.remote.desktopInspectorOpen"
 const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
@@ -80,9 +82,11 @@ const DESKTOP_MIN_WIDTH = 781
 const DESKTOP_MEDIA_QUERY = `(min-width: ${DESKTOP_MIN_WIDTH}px)`
 
 const SIDEBAR_WIDTH_MIN = 220
-const SIDEBAR_WIDTH_MAX = 480
+const SIDEBAR_WIDTH_MAX = 960
 const SIDEBAR_WIDTH_DEFAULT = 320
-const SIDEBAR_WIDTH_WIDE_DEFAULT = 384
+/** Full-screen desktop windows get the sidebar doubled from the previous wide baseline: a session
+ *  list is the main workspace there, not a thin rail, and the extra width keeps row actions usable. */
+const SIDEBAR_WIDTH_WIDE_DEFAULT = 768
 const WIDE_DESKTOP_MIN_WIDTH = 1600
 const INSPECTOR_WIDTH_MIN = 260
 const INSPECTOR_WIDTH_MAX = 480
@@ -294,7 +298,8 @@ function messagesExtendContent(current: MessageEnvelope[], next: MessageEnvelope
 }
 
 function normalizeMessageMarkdown(text: string): string {
-  return text.includes("\n") ? text : text.replace(/\s-\s(?=\S)/g, "\n- ")
+  const stripped = stripMarkdownDirectives(text)
+  return stripped.includes("\n") ? stripped : stripped.replace(/\s-\s(?=\S)/g, "\n- ")
 }
 
 function capitalizeFirst(text: string): string {
@@ -1722,7 +1727,7 @@ function MessageContextMenu({
     })
   }
   const copy = (markdown: boolean) => {
-    void copyToClipboard(markdown ? normalizeMessageMarkdown(text) : text)
+    void copyToClipboard(markdown ? normalizeMessageMarkdown(text) : stripMarkdownDirectives(text))
     setPosition(null)
   }
   // Everything that means "not this" has to put the menu away: a press anywhere else, Escape, the
@@ -1921,6 +1926,8 @@ const MessageArticle = memo(function MessageArticle({
 const MessagesPane = memo(function MessagesPane({
   loadingSessionID,
   loadedSessionID,
+  loadFailure,
+  onRetrySession,
   selectedID,
   renderedMessages,
   timelineGroups,
@@ -1943,6 +1950,8 @@ const MessagesPane = memo(function MessagesPane({
 }: {
   loadingSessionID: string | null
   loadedSessionID: string | null
+  loadFailure: { sessionID: string; message: string } | null
+  onRetrySession: () => void
   selectedID: string | null
   renderedMessages: (MessageEnvelope & { text: string })[]
   timelineGroups: RenderGroup[]
@@ -1973,6 +1982,15 @@ const MessagesPane = memo(function MessagesPane({
           <div className="empty-state compact">
             <ChatIcon size={40} className="icon-empty-state" />
             <p>{t('detail.selectSession')}</p>
+          </div>
+        ) : loadFailure?.sessionID === selectedID && loadingSessionID !== selectedID ? (
+          /* A history load that failed leaves loadedSessionID unset, which the spinner test below
+             cannot tell apart from one still in flight — so without this the pane spun forever on
+             a session the harness refused to open, and the reason only ever reached the toast. */
+          <div className="empty-state compact">
+            <p>{t('detail.loadFailed')}</p>
+            <p className="subtle">{loadFailure.message}</p>
+            <button type="button" className="secondary" onClick={onRetrySession}>{t('sessions.retry')}</button>
           </div>
         ) : loadingSessionID === selectedID || loadedSessionID !== selectedID ? (
           <div className="empty-state compact">
@@ -2134,13 +2152,15 @@ function App() {
   useEffect(() => {
     localStorage.setItem(INSPECTOR_OPEN_STORAGE_KEY, String(inspectorOpen))
   }, [inspectorOpen])
-  // Only ever shown when there is both a session to describe and room to describe it in.
-  const [hasRoomForInspector, setHasRoomForInspector] = useState(() => window.innerWidth >= INSPECTOR_MIN_WINDOW_WIDTH)
+  // The window width, becoming state only so a resize re-renders the panels. The render-time clamp
+  // of the side panels reads it (via maxSidebarWidth/maxInspectorWidth) and hasRoomForInspector is
+  // derived from it — nothing on a resize ever touches the stored preferences below.
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
+  const hasRoomForInspector = viewportWidth >= INSPECTOR_MIN_WINDOW_WIDTH
   // Read through refs by the drag handlers below, which are created during this render but only
   // ever run after it — the widths they clamp against are whatever the last render settled on.
   const inspectorSpaceRef = useRef(0)
   const sidebarWidthRef = useRef(sidebarWidth)
-  sidebarWidthRef.current = sidebarWidth
   const dragPanelDivider = useHorizontalDrag((deltaX) => {
     // Growing the sidebar takes the space out of the main pane, which is why the cap has to know
     // the window width — and what the opposite panel is already holding — rather than just the
@@ -2150,24 +2170,28 @@ function App() {
   const dragInspectorDivider = useHorizontalDrag((deltaX) => {
     setInspectorWidth((width) => clamp(width - deltaX, INSPECTOR_WIDTH_MIN, maxInspectorWidth(sidebarWidthRef.current)))
   })
-  // Keeps both panels inside what the window can spare: on first mount (a stored width from a wider
-  // screen) and again on every resize. The main pane needs no such handling — it flexes.
+  // Keeps the window width current so a resize re-renders the panels and re-applies the render-time
+  // clamp (viewportSidebarWidth/inspectorWidth). The clamp writes to the rendered widths only:
+  // the stored preferences are reserved for the drag handle and are never narrowed by the viewport.
   useEffect(() => {
     if (!isDesktop) return
-    const clampToViewport = () => {
-      setHasRoomForInspector(window.innerWidth >= INSPECTOR_MIN_WINDOW_WIDTH)
-      setSidebarWidth((width) => clamp(width, SIDEBAR_WIDTH_MIN, maxSidebarWidth()))
-      setInspectorWidth((width) => clamp(width, INSPECTOR_WIDTH_MIN, maxInspectorWidth()))
-    }
-    clampToViewport()
-    window.addEventListener("resize", clampToViewport)
-    return () => window.removeEventListener("resize", clampToViewport)
+    const reflowPanels = () => setViewportWidth(window.innerWidth)
+    reflowPanels()
+    window.addEventListener("resize", reflowPanels)
+    return () => window.removeEventListener("resize", reflowPanels)
   }, [isDesktop])
 
   const [sessions, setSessions] = useState<SessionView[]>([])
   const [selectedID, setSelectedID] = useState<string | null>(null)
   const showInspector = isDesktop && inspectorOpen && hasRoomForInspector && mainView === "detail" && Boolean(selectedID)
-  inspectorSpaceRef.current = showInspector ? inspectorWidth : 0
+  // The persisted widths are the user's preference, changed only by dragging the divider. What is
+  // actually laid out is that preference clamped to what this window can spare at this moment —
+  // kept separate so a resize (or a stored width from a larger screen) never rewrites the stored
+  // preference down to a viewport-sized value that then stays small forever.
+  const viewportSidebarWidth = isDesktop ? clamp(sidebarWidth, SIDEBAR_WIDTH_MIN, maxSidebarWidth()) : sidebarWidth
+  const viewportInspectorWidth = showInspector ? clamp(inspectorWidth, INSPECTOR_WIDTH_MIN, maxInspectorWidth()) : inspectorWidth
+  inspectorSpaceRef.current = showInspector ? viewportInspectorWidth : 0
+  sidebarWidthRef.current = viewportSidebarWidth
   const [newSessionDirectory, setNewSessionDirectory] = useState(() => localStorage.getItem(NEW_SESSION_DIRECTORY_STORAGE_KEY) ?? "")
   const [showNewSessionPicker, setShowNewSessionPicker] = useState(false)
   const [pickerPath, setPickerPath] = useState("")
@@ -2191,6 +2215,8 @@ function App() {
   const [loadingSessionID, setLoadingSessionID] = useState<string | null>(null)
   /** The empty transcript state is only meaningful after this session's first history snapshot succeeds. */
   const [loadedSessionID, setLoadedSessionID] = useState<string | null>(null)
+  /** Which session failed to open, and why, so the transcript pane can say so instead of spinning. */
+  const [loadFailure, setLoadFailure] = useState<{ sessionID: string; message: string } | null>(null)
   const [testingConnection, setTestingConnection] = useState(false)
   const [creatingSession, setCreatingSession] = useState(false)
   const [refreshingSessions, setRefreshingSessions] = useState(false)
@@ -2413,7 +2439,14 @@ function App() {
   ).length
   const totalDiffAdditions = diffFiles.reduce((sum, file) => sum + file.additions, 0)
   const totalDiffDeletions = diffFiles.reduce((sum, file) => sum + file.deletions, 0)
-  const showModelChip = modelOptions.length > 1 || Boolean(activeModelOption) || primaryAgentOptions.length > 0
+  /* The chip also stands its ground when the model list could not be fetched. Hiding it there left
+     no trace of a control every other session has — Codex reports its models only inside the
+     session load it refuses for a conversation its desktop app holds open, so those sessions lost
+     the chip with no explanation. `modelStatusLabel` already has the wording for it. */
+  const showModelChip = modelOptions.length > 1
+    || Boolean(activeModelOption)
+    || primaryAgentOptions.length > 0
+    || (capabilities.models && Boolean(modelLoadError))
   /**
    * Three distinct states, and conflating any two of them reads as a hang: a fetch in flight, a
    * fetch that failed, and a harness that has no model list to fetch. `loadModels` returns early
@@ -2434,6 +2467,7 @@ function App() {
     setMessages([])
     loadedMessagesRef.current = []
     setLoadedSessionID(null)
+    setLoadFailure(null)
     setOptimisticUserMessages([])
     setTodos([])
     setDiffFiles([])
@@ -2449,7 +2483,9 @@ function App() {
       await loadSelected(sessionID, directory, true)
       await Promise.all([loadAgents(), loadModels(sessionID, directory)])
     } catch (err) {
-      setRuntimeError((err as Error).message)
+      const message = (err as Error).message
+      setRuntimeError(message)
+      setLoadFailure({ sessionID, message })
     }
     setLoadingSessionID((activeID) => (activeID === sessionID ? null : activeID))
   }
@@ -2709,6 +2745,9 @@ function App() {
     ])
     if (requestID !== loadSelectedRequestRef.current) return
     setLoadedSessionID(sessionID)
+    // Background polling keeps running after a failed open, so a session that only failed once must
+    // not stay stuck on the failure state once its history does arrive.
+    setLoadFailure((failure) => (failure?.sessionID === sessionID ? null : failure))
     const current = loadedMessagesRef.current
     // A snapshot carrying less assistant text than is already on screen used to be rejected wholesale, to
     // avoid erasing streamed content. But the optimistic user bubble below is cleared against this same
@@ -3477,7 +3516,7 @@ function App() {
     if (!isDesktop) return
     const frame = requestAnimationFrame(refreshSidebarJumps)
     return () => cancelAnimationFrame(frame)
-  }, [isDesktop, query, filteredSessions.length, sidebarWidth, refreshSidebarJumps])
+  }, [isDesktop, query, filteredSessions.length, viewportSidebarWidth, refreshSidebarJumps])
 
   useEffect(() => {
     if (view !== "detail" || !selectedID) return
@@ -4151,7 +4190,7 @@ function App() {
       <div className="app-body">
 
       {isDesktop && (
-        <aside className="desktop-sidebar fade-in" style={{ width: sidebarWidth, flex: `0 0 ${sidebarWidth}px` }}>
+        <aside className="desktop-sidebar fade-in" style={{ width: viewportSidebarWidth, flex: `0 0 ${viewportSidebarWidth}px` }}>
           <div className="resize-handle resize-handle--end" onPointerDown={dragPanelDivider} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
           <div className="sidebar-toolbar">
             <div className="search-field">
@@ -4331,6 +4370,7 @@ function App() {
               <option value="omp">Oh My Pi (bridge)</option>
               <option value="pi">PI (ACP bridge)</option>
               <option value="claude">Claude Code (ACP bridge)</option>
+              <option value="codex">Codex CLI (ACP bridge)</option>
             </select>
           </label>
 
@@ -4712,6 +4752,10 @@ function App() {
           <MessagesPane
             loadingSessionID={loadingSessionID}
             loadedSessionID={loadedSessionID}
+            loadFailure={loadFailure}
+            onRetrySession={() => {
+              if (selectedSession) void openSession(selectedSession.id, selectedSession.directory)
+            }}
             selectedID={selectedID}
             renderedMessages={renderedMessages}
             timelineGroups={timelineGroups}
@@ -5128,6 +5172,12 @@ function App() {
                     <pre>npx --yes ./bridge --backend claude --host 0.0.0.0 --port 4097 --username claude --password your-password --root "$PWD"</pre>
                     <p className="note">Requires <code>claude login</code> or <code>ANTHROPIC_API_KEY</code> on the host machine.</p>
                   </>
+                ) : config.backend === "codex" ? (
+                  <>
+                    <h4>Codex CLI bridge (macOS / Linux)</h4>
+                    <pre>npx --yes ./bridge --backend codex --host 0.0.0.0 --port 4097 --username codex --password your-password --root "$PWD"</pre>
+                    <p className="note">Requires <code>codex login</code> (ChatGPT account) or an OpenAI API key on the host machine.</p>
+                  </>
                 ) : (
                   <>
                     <h4>OpenCode server (macOS / Linux)</h4>
@@ -5137,7 +5187,7 @@ function App() {
               </div>
               <p>
                 <a
-                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "opencode" ? "opencode-server-setup" : config.backend === "pi" ? "pi-bridge-setup" : config.backend === "claude" ? "claude-code-bridge-setup" : "oh-my-pi-bridge-setup"}`}
+                  href={`https://github.com/giuliastro/harness-remote#${config.backend === "opencode" ? "opencode-server-setup" : config.backend === "pi" ? "pi-bridge-setup" : config.backend === "claude" ? "claude-code-bridge-setup" : config.backend === "codex" ? "codex-bridge-setup" : "oh-my-pi-bridge-setup"}`}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -5274,7 +5324,7 @@ http://YOUR_PC_IP:4096/global/health</pre>
       </div>
 
       {showInspector && (
-        <aside className="inspector fade-in" style={{ width: inspectorWidth, flex: `0 0 ${inspectorWidth}px` }}>
+        <aside className="inspector fade-in" style={{ width: viewportInspectorWidth, flex: `0 0 ${viewportInspectorWidth}px` }}>
           <div className="resize-handle resize-handle--start" onPointerDown={dragInspectorDivider} role="separator" aria-orientation="vertical" aria-label="Resize inspector" />
           <div className="inspector-header">
             <h3>{t('detail.sessionDetailsTitle')}</h3>
