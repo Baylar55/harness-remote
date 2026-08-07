@@ -153,14 +153,26 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose web/android/app/build/outputs/apk/release/app-release-signed.apk
 
+      # A file's basename becomes its release asset name, and Gradle's app-release-signed.apk names
+      # neither the app nor the version — next to the desktop artifacts on a release it reads like it
+      # belongs to a different project. Rename it to the shape they use,
+      # Harness-Remote-<version>-<platform>[-unsigned].<ext>, keeping -unsigned meaningful: the APK
+      # only carries the suffix when the signing secrets were absent.
       - name: Select release APK path
         id: apk
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
         run: |
-          if [ -f web/android/app/build/outputs/apk/release/app-release-signed.apk ]; then
-            echo "path=web/android/app/build/outputs/apk/release/app-release-signed.apk" >> "$GITHUB_OUTPUT"
+          out=web/android/app/build/outputs/apk/release
+          if [ -f "$out/app-release-signed.apk" ]; then
+            source="$out/app-release-signed.apk"
+            name="Harness-Remote-$APP_VERSION-android.apk"
           else
-            echo "path=web/android/app/build/outputs/apk/release/app-release-unsigned.apk" >> "$GITHUB_OUTPUT"
+            source="$out/app-release-unsigned.apk"
+            name="Harness-Remote-$APP_VERSION-android-unsigned.apk"
           fi
+          mv "$source" "$out/$name"
+          echo "path=$out/$name" >> "$GITHUB_OUTPUT"
 
       - name: Upload release APK artifact
         uses: actions/upload-artifact@v7
