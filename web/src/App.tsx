@@ -130,14 +130,23 @@ function shortcut(key: string): string {
  * advertising a shortcut the handler does not implement — and it is what fixes "Ctrl+N+Shift",
  * which was written by hand in the wrong order.
  */
-const KEY_BINDINGS: Record<string, { key: string; shift?: boolean }> = {
+const KEY_BINDINGS: Record<string, { key: string; shift?: boolean; desktopOnly?: boolean }> = {
   "view.palette": { key: "k" },
   "session.new": { key: "n" },
   "server.add": { key: "n", shift: true },
-  "focus.search": { key: "f" },
-  "session.refresh": { key: "r" },
+  // Reload and find-in-page belong to the browser, and a page that takes them is a page that
+  // misbehaves: the user loses the two keys they reach for when something looks stuck. The packaged
+  // app has no such owner for them, so there they are ours.
+  "focus.search": { key: "f", desktopOnly: true },
+  "session.refresh": { key: "r", desktopOnly: true },
   "server.settings": { key: "," },
   "view.inspector": { key: "b" }
+}
+
+/** Whether a binding applies here. Fixed for the life of the process: it is a property of the
+ *  build, not of the window, so nothing has to react to it changing. */
+function bindingApplies(binding: { desktopOnly?: boolean }): boolean {
+  return !binding.desktopOnly || isDesktopPlatform()
 }
 
 function bindingKeyLabel(binding: { key: string }): string {
@@ -146,7 +155,9 @@ function bindingKeyLabel(binding: { key: string }): string {
 
 function displayShortcut(command: string): string | undefined {
   const binding = KEY_BINDINGS[command]
-  if (!binding) return undefined
+  // A shortcut the build does not bind must not be advertised either: a menu promising Ctrl+F while
+  // the browser keeps find-in-page is worse than a menu item with no shortcut at all.
+  if (!binding || !bindingApplies(binding)) return undefined
   const shift = binding.shift ? (IS_APPLE ? "⇧" : "Shift+") : ""
   return IS_APPLE ? `⌘${shift}${bindingKeyLabel(binding)}` : `Ctrl+${shift}${bindingKeyLabel(binding)}`
 }
@@ -163,6 +174,7 @@ function electronAccelerator(command: string): string | undefined {
 function commandForKeyEvent(event: KeyboardEvent): string | null {
   const key = event.key.toLowerCase()
   for (const [command, binding] of Object.entries(KEY_BINDINGS)) {
+    if (!bindingApplies(binding)) continue
     if (binding.key === key && Boolean(binding.shift) === event.shiftKey) return command
   }
   return null

@@ -524,4 +524,34 @@ assert.ok(
   'the command refetch belongs inside loadSelected, not in its individual callers'
 )
 
+// Ctrl+R reloads and Ctrl+F opens find-in-page. Taking either one away from someone using the app
+// in a browser costs them the two keys they reach for when something looks stuck — and it is the
+// browser's to give, not ours. The packaged app has no such owner, so there the app may bind them.
+// Asserted on the binding map rather than on the handler: the map is the one place that decides,
+// and a new browser-reserved key added without the flag is exactly the regression worth catching.
+const keyBindings = app.slice(app.indexOf('const KEY_BINDINGS'), app.indexOf('function bindingApplies'))
+assert.ok(keyBindings, 'the keyboard binding map should be findable')
+for (const [command, key] of [['focus.search', 'f'], ['session.refresh', 'r']]) {
+  assert.match(
+    keyBindings,
+    new RegExp(`"${command}":\\s*\\{ key: "${key}",[^}]*desktopOnly: true`),
+    `${command} binds a key the browser owns, so it must be marked desktopOnly`
+  )
+}
+assert.match(
+  app,
+  /function bindingApplies\([\s\S]*?return !binding\.desktopOnly \|\| isDesktopPlatform\(\)/,
+  'a desktop-only binding must be gated on actually running in the desktop app'
+)
+assert.match(
+  app,
+  /if \(!binding \|\| !bindingApplies\(binding\)\) return undefined/,
+  'a shortcut the build does not bind must not be advertised in menus either'
+)
+assert.match(
+  app,
+  /for \(const \[command, binding\] of Object\.entries\(KEY_BINDINGS\)\) \{\s*if \(!bindingApplies\(binding\)\) continue/,
+  'the keydown handler must skip bindings that do not apply to this build'
+)
+
 console.log('ui regression tests passed')
