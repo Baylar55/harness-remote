@@ -190,7 +190,7 @@ Every release carries the Android APK plus desktop builds for all three platform
 
 | Platform | File |
 | --- | --- |
-| Android | `.apk` |
+| Android | `-android.apk` |
 | Windows | `-win-x64-unsigned.exe` installer |
 | macOS | `-mac-arm64-unsigned.dmg` (Apple Silicon) or `-mac-x64-unsigned.dmg` (Intel), `.zip` alternatives |
 | Linux | `-linux-x86_64.AppImage` or `-linux-amd64.deb` |
