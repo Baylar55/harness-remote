@@ -112,6 +112,34 @@ test("accepts alternate or absent ACP authentication methods", async () => {
   unauthenticated.close()
 })
 
+test("prefers the profile's auth method over the first advertised one", async () => {
+  // Codex's adapter lists `api-key` first, which demands an API key from the environment;
+  // a `codex login` is what `chat-gpt` reads from disk, so the profile names it explicitly.
+  let authenticatedMethod
+  const preferred = new AcpClient({
+    preferredAuthMethod: "chat-gpt",
+    spawnProcess: fakeSpawn((child, request) => {
+      respondToHandshake(child, request, [{ id: "api-key" }, { id: "chat-gpt" }])
+      if (request.method === "authenticate") authenticatedMethod = request.params.methodId
+    })
+  })
+  await preferred.start()
+  assert.equal(authenticatedMethod, "chat-gpt")
+  preferred.close()
+
+  let fellBack
+  const missing = new AcpClient({
+    preferredAuthMethod: "chat-gpt",
+    spawnProcess: fakeSpawn((child, request) => {
+      respondToHandshake(child, request, [{ id: "pi_terminal_login" }])
+      if (request.method === "authenticate") fellBack = request.params.methodId
+    })
+  })
+  await missing.start()
+  assert.equal(fellBack, "pi_terminal_login", "an unadvertised preference must fall back to the generic choice")
+  missing.close()
+})
+
 test("forwards ACP notifications and request errors", async () => {
   const client = new AcpClient({
     spawnProcess: fakeSpawn((child, request) => {
@@ -127,6 +155,33 @@ test("forwards ACP notifications and request errors", async () => {
   await client.start()
   await assert.rejects(client.request("session/test", {}), /denied/)
   assert.deepEqual(notifications, [{ jsonrpc: "2.0", method: "session/update", params: { sessionId: "session-1" } }])
+  client.close()
+})
+
+test("keeps the detail an adapter hides behind a generic error message", async () => {
+  // Codex answers a refused load with a bare "Internal error" and puts the reason in data.details,
+  // so the app showed nothing a user could act on for the commonest failure this backend has.
+  const client = new AcpClient({
+    spawnProcess: fakeSpawn((child, request) => {
+      respondToHandshake(child, request)
+      if (request.method === "session/load") {
+        child.respond({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: { code: -32603, message: "Internal error", data: { details: "thread session-1 already has an active writer" } }
+        })
+      }
+      if (request.method === "session/plain") {
+        child.respond({ jsonrpc: "2.0", id: request.id, error: { code: -32603, message: "Internal error" } })
+      }
+    })
+  })
+  await client.start()
+  await assert.rejects(
+    client.request("session/load", {}),
+    /Internal error: thread session-1 already has an active writer/
+  )
+  await assert.rejects(client.request("session/plain", {}), /^Error: Internal error$/, "no detail must add no noise")
   client.close()
 })
 

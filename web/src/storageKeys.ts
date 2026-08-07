@@ -16,6 +16,7 @@ export const SERVER_STORAGE_KEYS = [
   BACKEND_STORAGE_KEYS.omp,
   BACKEND_STORAGE_KEYS.pi,
   BACKEND_STORAGE_KEYS.claude,
+  BACKEND_STORAGE_KEYS.codex,
   "opencode.remote.model",
   "opencode.remote.agent",
   "opencode.remote.newSessionDirectory",

@@ -13,11 +13,12 @@ The app is backend-agnostic: you pick the harness in **Settings** and each one k
 | [Oh My Pi (OMP)](https://omp.sh/) | supported | through the local bridge included in this repository |
 | [PI](https://pi.dev/) | supported | through the local ACP bridge and the [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp) adapter |
 | [Claude Code](https://code.claude.com/) | supported | through the local ACP bridge and the [`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp) adapter |
+| [Codex CLI](https://github.com/openai/codex) | supported | through the local ACP bridge and the [`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp) adapter |
 
 What each harness actually provides, the assumptions the code makes about it, and what to re-check
 when one of them changes are recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).
 
-Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), [PI](#pi-bridge-setup), and [Claude Code](#claude-code-bridge-setup) sections below document the setup and per-backend limitations.
+Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), [PI](#pi-bridge-setup), [Claude Code](#claude-code-bridge-setup), and [Codex CLI](#codex-bridge-setup) sections below document the setup and per-backend limitations.
 
 > **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
@@ -42,11 +43,11 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 
 ## What It Can Do
 
-Everything in the first group works on all four harnesses. The rest depends on what the harness
+Everything in the first group works on all five harnesses. The rest depends on what the harness
 exposes, so each entry says where it applies; the app hides what a backend cannot do rather than
 offering a control that fails.
 
-- configure and test the connection to any supported harness — OpenCode, OMP, PI, or Claude Code — each with its
+- configure and test the connection to any supported harness — OpenCode, OMP, PI, Claude Code, or Codex CLI — each with its
   own saved credentials
 - keep several servers saved under names of your own and switch between them from the header, rather
   than retyping a host every time you move between machines
@@ -73,12 +74,12 @@ offering a control that fails.
 Depending on the harness:
 
 - answer the questions the agent asks, options or free text, without leaving the app — OpenCode
-- follow todo/plan updates as the agent works — OpenCode, OMP, Claude Code
-- send server `/commands` — OpenCode, OMP
+- follow todo/plan updates as the agent works — OpenCode, OMP, Claude Code, Codex CLI
+- send server `/commands` — OpenCode, OMP, Codex CLI
 - choose the agent a session runs as — OpenCode
 - review changed files and their diffs — OpenCode
-- rename and delete sessions — OpenCode changes them in the harness; on OMP, PI and Claude Code the
-  same controls keep a bridge-local nickname and hide the session from that bridge only
+- rename and delete sessions — OpenCode changes them in the harness; on OMP, PI, Claude Code and
+  Codex CLI the same controls keep a bridge-local nickname and hide the session from that bridge only
 - extend bridge-backed harnesses through optional host extensions: the bridge discovers compatible
   commands and the app enables their actions only for sessions where they are available; the first
   integration is Undo and Redo for OMP through
@@ -462,6 +463,82 @@ The adapter still runs with the full filesystem privileges of the account that
 launched it. Do not expose the bridge directly to the Internet; use a trusted
 LAN, VPN, or TLS-terminating reverse proxy.
 
+### Codex Bridge Setup
+
+Harness Remote connects to Codex CLI through the same ACP bridge, using the official
+[`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp)
+adapter, which embeds the OpenAI Codex engine and speaks ACP over stdio — no separate Codex
+installation is needed.
+
+#### Prerequisites
+
+- Node.js 22 or newer (same requirement as the PI and Claude Code adapters);
+- a Codex login via `codex login` (ChatGPT account) or an OpenAI API key set in the environment
+  of the bridge process;
+- a checkout of this repository on the computer that runs Codex.
+
+Start the bridge from the repository root:
+
+```bash
+npx --yes ./bridge \
+  --backend codex \
+  --host 0.0.0.0 \
+  --port 4097 \
+  --username codex \
+  --password "use-a-long-unique-password" \
+  --root "$HOME/Software"
+```
+
+The `codex` backend defaults to `npx -y @agentclientprotocol/codex-acp@1.1.14` and authenticates
+through the adapter's ChatGPT method, so a `codex login` on the host machine is what the bridge
+uses — an `OPENAI_API_KEY` environment variable works too, but is not required and is not preferred.
+The version is pinned to avoid the same `notarget` issue that motivated pinning the PI adapter. Use
+`--acp-command` and repeated `--acp-arg` options to track a newer adapter. The first start downloads
+the adapter and its embedded Codex engine, which is why the handshake allows 90s.
+
+In the app, select **Codex CLI (ACP bridge)** and enter the same host, port,
+username, and password. A successful health check reports `backend: "codex"`
+and the adapter version.
+
+When the app runs in a browser (the Vite dev server, a PWA tab), the bridge must
+admit that origin explicitly or the browser drops every response at CORS despite a
+healthy backend:
+
+```bash
+npx --yes ./bridge --backend codex --host 0.0.0.0 --port 4097 \
+  --username codex --password "use-a-long-unique-password" --root "$HOME/Software" \
+  --cors http://localhost:5173 --cors http://192.168.1.20:5173
+```
+
+The same applies to the OMP, PI and Claude Code backends; `--cors` is a general
+bridge option, documented in `CONTRIBUTING.md`.
+
+Codex supports session listing, history replay, streaming prompts,
+cancellation, queued follow-up prompts, todo/plan updates as the agent works,
+model selection, and slash commands (`/status`, `/plan`, `/mcp`, ...). The model
+picker offers whatever the adapter reports; like Claude Code, ids are bare rather
+than `provider/model`. Reasoning-effort and mode levels are advertised by the
+adapter but the app does not use them yet. No VCS/diff or agent picker is exposed
+through this bridge.
+
+**Sessions the Codex desktop app is holding open are read-only here.** Codex allows one
+writer per conversation and keeps the lock for as long as a client has it open, so those
+sessions cannot be joined over ACP. The bridge shows them anyway by reading Codex's own
+transcript from `~/.codex/sessions`, and the app marks them *Started by another client*;
+they keep updating as Codex works. Sending a prompt has to take the writer, so it fails
+while the desktop app holds it — close the conversation there, or start a new session from
+the app, and it becomes writable. The model picker is unavailable for those sessions too,
+because Codex only reports the available models as part of the load it is refusing.
+
+**Rename and delete are bridge-local**, exactly as with Claude Code. Session
+visibility is not restricted by `--root`: the bridge enumerates every Codex
+session on the machine.
+
+**The bridge grants tool permissions automatically.** Codex can still ask for
+permission in its CLI mode; through ACP the bridge answers `allow` for every
+request, so an agent reached through this bridge edits files unattended — same
+policy and same caveats as the Claude Code backend.
+
 ## Run Locally (Web)
 
 ```bash
@@ -504,7 +581,7 @@ Use your server values:
 
 - Backend: the harness you are connecting to, which also decides the default port
 - Host: computer LAN IP (for example `192.168.1.20`)
-- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP, PI, or Claude Code
+- Port: `4096` for an OpenCode server, `4097` for the bridge in front of OMP, PI, Claude Code, or Codex CLI
 - Username/password: the Basic Auth credentials you started that server or bridge with
 
 Each backend keeps its own saved connection, so switching between them in Settings does not make you
@@ -519,12 +596,12 @@ Against an OpenCode server, spoken directly: `/global/health`, `/global/event`, 
 `/config/providers`, `/command`, `/agent`, `/project/current`, `/vcs`, `/path`, `/file*`, and
 `/question*`.
 
-For OMP, PI, and Claude Code the bridge implements a deliberate subset of those paths, plus its own
-`/v1/health` and `/v1/capabilities`. OMP also exposes generic session action discovery and invocation
-through `/session/:id/action` and `/session/:id/action/:name` when a known host extension is loaded.
-Capabilities tell the app which APIs are supported so it hides the rest rather than calling
-something that 404s. [CONTRIBUTING.md](CONTRIBUTING.md) lists exactly what the bridge does and does
-not answer.
+For OMP, PI, Claude Code, and Codex CLI the bridge implements a deliberate subset of those paths,
+plus its own `/v1/health` and `/v1/capabilities`. OMP also exposes generic session action discovery
+and invocation through `/session/:id/action` and `/session/:id/action/:name` when a known host
+extension is loaded. Capabilities tell the app which APIs are supported so it hides the rest rather
+than calling something that 404s. [CONTRIBUTING.md](CONTRIBUTING.md) lists exactly what the bridge
+does and does not answer.
 
 What each harness actually provides behind those paths, and what to re-check when one of them
 changes, is in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md).

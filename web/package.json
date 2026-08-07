@@ -31,6 +31,7 @@
     "test:model": "node src/model-regression.test.mjs",
     "test:events": "node --experimental-strip-types src/opencode-events.test.mjs",
     "test:profiles": "node --experimental-strip-types src/server-profiles.test.mjs",
+    "test:markdown": "node --experimental-strip-types src/markdown-directives.test.mjs",
     "test:config": "node --experimental-strip-types src/server-config.test.mjs",
     "test:platform": "node src/platform-regression.test.mjs",
     "test:desktop": "npm run build:electron && node --test electron/*.test.mjs",

@@ -10,6 +10,10 @@ const shell = readFileSync(new URL('./components/shell.tsx', import.meta.url), '
 const panels = readFileSync(new URL('./components/panels.tsx', import.meta.url), 'utf8')
 
 assert.ok(api.includes('const body = await response.text()'), 'failed HTTP responses must consume their body only once')
+// The bridge reports failures as {"error": "..."}; without unwrapping that the app printed the raw
+// JSON, so a readable reason like "thread ... already has an active writer" reached the user as a
+// braces-and-quotes blob.
+assert.match(api, /typeof value\.error === "string" \? value\.error : undefined/, 'a bridge error body must be unwrapped to its message')
 assert.equal(api.includes('const text = await response.text()'), false, 'error handling must not try to read an already consumed response stream')
 
 const refreshButton = app.match(/<button onClick=\{refreshSessionsWithIndicator\}[\s\S]*?\{t\('sessions\.refresh'\)\}[\s\S]*?<\/button>/)
@@ -42,7 +46,7 @@ assert.match(styles, /^\.app-shell-desktop \.messages > \*,\s*\n\.app-shell-desk
 assert.match(styles, /--chat-measure:\s*clamp\(52rem,\s*58vw,\s*64rem\)/, 'wide desktop windows should progressively expand the transcript without producing full-width prose')
 assert.match(styles, /\.message-reasoning-summary \+ \.message-content\s*\{[^}]*margin-top:\s*var\(--space-4\)/, 'reasoning summaries should have balanced spacing before and after')
 assert.match(styles, /\.message > \.message-reasoning-summary:first-child\s*\{[^}]*margin-top:\s*0/, 'a leading reasoning row should rely on the message-list gap instead of doubling it')
-assert.ok(app.includes('const SIDEBAR_WIDTH_WIDE_DEFAULT = 384') && app.includes('window.innerWidth >= WIDE_DESKTOP_MIN_WIDTH'), 'wide desktop windows should start with a substantially wider session sidebar')
+assert.ok(app.includes('const SIDEBAR_WIDTH_WIDE_DEFAULT = 768') && app.includes('window.innerWidth >= WIDE_DESKTOP_MIN_WIDTH'), 'wide desktop windows should start with a substantially wider session sidebar')
 assert.equal(app.includes('MAIN_WIDTH_MAX'), false, 'the main pane flexes now, so it has no width of its own to cap')
 assert.ok(app.includes('maxSidebarWidth()'), 'the divider must clamp the sidebar against the window, since growing it now takes space from the main pane')
 
@@ -104,6 +108,16 @@ assert.ok(
   /selectedID === null \?[\s\S]*?t\('detail\.selectSession'\)[\s\S]*?loadingSessionID === selectedID/.test(app),
   'no selected session must render its own empty state, ahead of and separate from the loading state'
 )
+// A failed history load never sets loadedSessionID, which the spinner test cannot tell apart from a
+// load still in flight — so a session the harness refuses to open (a Codex thread the desktop app
+// holds the writer on, say) spun "loading" forever while the reason went only to the toast.
+assert.ok(app.includes('setLoadFailure({ sessionID, message })'), 'a session that fails to open must be recorded, not just reported to the toast')
+assert.ok(app.includes('setLoadFailure(null)'), 'reopening a session must clear the previous failure')
+assert.ok(
+  /loadFailure\?\.sessionID === selectedID && loadingSessionID !== selectedID \?[\s\S]*?t\('detail\.loadFailed'\)[\s\S]*?loadingSessionID === selectedID \|\| loadedSessionID !== selectedID \?/.test(app),
+  'a failed session load must render its own state ahead of the loading state, so the spinner cannot outlive it'
+)
+assert.ok(/t\('detail\.loadFailed'\)[\s\S]*?onClick=\{onRetrySession\}/.test(app), 'the failed-load state must offer a retry')
 assert.ok(app.includes('reconcileStreamedPart'), 'message refresh should not regress streamed assistant output back to a leaner snapshot')
 assert.ok(
   /function reconcileStreamedPart[\s\S]*?incomingText\.length >= previousText\.length \? incoming/.test(app),
@@ -390,7 +404,7 @@ assert.ok(app.includes('>{displayLabel}</span>'), 'the tool summary must show th
 assert.match(app, /onContextMenu=\{\(event\) => \{\s*event\.preventDefault\(\)\s*open\(event\.clientX, event\.clientY, window\.matchMedia/, 'right-clicking a message must open its action menu')
 assert.match(app, /event\.pointerType !== "touch"/, 'touch messages must support long-press actions')
 assert.match(clipboard, /navigator\.clipboard\?\.writeText/, 'message actions must copy to the system clipboard')
-assert.match(app, /markdown \? normalizeMessageMarkdown\(text\) : text/, 'the menu must distinguish plain-text and markdown copies')
+assert.match(app, /markdown \? normalizeMessageMarkdown\(text\) : stripMarkdownDirectives\(text\)/, 'the menu must distinguish plain-text and markdown copies, stripping directive markup from both')
 assert.match(styles, /\.message-context-menu\s*\{[\s\S]*?position:\s*fixed/, 'message actions must render above the scrolling transcript')
 assert.match(app, /window\.matchMedia\("\(pointer: coarse\)"\)\.matches/, 'a touch context-menu event must keep the mobile menu layout')
 assert.match(app, /Math\.hypot\(movedX, movedY\) > 10/, 'moving to scroll must cancel the pending long-press menu')

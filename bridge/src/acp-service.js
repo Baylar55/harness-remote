@@ -640,15 +640,28 @@ export class AcpService {
     const session = this.#sessions.get(sessionID)
     if (!session) throw new Error("Harness session not found")
     if (!force && this.#loaded.has(sessionID)) return
-    let loading = this.#loads.get(sessionID)
-    if (!loading) {
-      loading = this.#loadSession(sessionID, requireConfigOptions)
-      this.#loads.set(sessionID, loading)
+    // Config options only arrive with a real ACP session/load, which a harness may refuse —
+    // Codex does for any conversation another client holds open. Sharing one in-flight load
+    // between callers that need those options and callers that only want the transcript meant
+    // the refusal failed `messages` too, so opening such a session broke whenever the app asked
+    // for both at once, which it does on every open. Each kind of load is tracked separately,
+    // and a caller that never needed the options retries on its own rather than inheriting a
+    // failure that does not apply to it.
+    const inFlight = this.#loads.get(sessionID)
+    if (inFlight && (inFlight.requireConfigOptions || !requireConfigOptions)) {
+      try {
+        await inFlight.promise
+        return
+      } catch (error) {
+        if (requireConfigOptions || !inFlight.requireConfigOptions) throw error
+      }
     }
+    const promise = this.#loadSession(sessionID, requireConfigOptions)
+    this.#loads.set(sessionID, { promise, requireConfigOptions })
     try {
-      await loading
+      await promise
     } finally {
-      if (this.#loads.get(sessionID) === loading) this.#loads.delete(sessionID)
+      if (this.#loads.get(sessionID)?.promise === promise) this.#loads.delete(sessionID)
     }
   }
 

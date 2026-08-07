@@ -60,6 +60,9 @@
   --harness-claude: #b45309;
   --harness-claude-soft: #fdefdb;
   --harness-claude-border: #f5d9ae;
+  --harness-codex: #047857;
+  --harness-codex-soft: #e2f5ec;
+  --harness-codex-border: #c1e9d5;
 
   --focus-ring: rgba(47, 102, 245, 0.34);
   --selection: rgba(47, 102, 245, 0.18);
@@ -162,6 +165,9 @@
   --harness-claude: #f6ad55;
   --harness-claude-soft: rgba(180, 83, 9, 0.26);
   --harness-claude-border: rgba(246, 173, 85, 0.34);
+  --harness-codex: #34d399;
+  --harness-codex-soft: rgba(4, 120, 87, 0.24);
+  --harness-codex-border: rgba(52, 211, 153, 0.32);
 
   --focus-ring: rgba(126, 166, 255, 0.4);
   --selection: rgba(126, 166, 255, 0.22);
@@ -593,6 +599,12 @@ a:focus-visible,
   border-color: var(--harness-claude-border);
   background: var(--harness-claude-soft);
   color: var(--harness-claude);
+}
+
+.harness-badge.harness-codex {
+  border-color: var(--harness-codex-border);
+  background: var(--harness-codex-soft);
+  color: var(--harness-codex);
 }
 
 .brand-text {
@@ -1320,7 +1332,7 @@ a:focus-visible,
 .form-grid select,
 .settings input,
 .settings select {
-  margin-top: var(--space-2);
+  margin-top: var(--space-4);
 }
 
 /* A field that heads a form and names the whole thing reads as a title over the pairs below,
@@ -2072,6 +2084,13 @@ a:focus-visible,
   margin-top: var(--space-4);
 }
 
+/* A reasoning/tool run is summarized as an action row rather than a reasoning row. It needs the
+   same separation before the following answer, otherwise its text starts flush against the row. */
+.message-action-summary + .message-content,
+.message-tool-summary + .message-content {
+  margin-top: var(--space-4);
+}
+
 /* A reasoning row that opens an assistant message already receives the list's inter-message gap.
    Remove its own top margin so both sides resolve to the same 16px instead of 24px above and 8px
    below. When reasoning follows text inside the same message, keep the same 16px rhythm. */
@@ -2080,6 +2099,11 @@ a:focus-visible,
 }
 
 .message > .message-reasoning-summary:first-child {
+  margin-top: 0;
+}
+
+.message > .message-action-summary:first-child,
+.message > .message-tool-summary:first-child {
   margin-top: 0;
 }
 
@@ -2953,13 +2977,18 @@ a:focus-visible,
   z-index: 1;
 }
 
+/* Sheets rise from the bottom edge on a phone and are centred dialogs everywhere else, the same
+   split .palette-backdrop makes. The bottom-anchored form used to be the base with no wide-screen
+   variant, which left the model and project sheets pinned to the bottom of a desktop window. */
 .sheet-backdrop {
   position: fixed;
   inset: 0;
   z-index: var(--z-modal-backdrop);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
+  --modal-margin: var(--space-4);
+  padding: var(--modal-margin);
   background: var(--sheet-backdrop);
 }
 
@@ -2969,14 +2998,15 @@ a:focus-visible,
   max-height: min(86dvh, 46rem);
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-bottom: 0;
-  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  border-radius: var(--radius-xl);
   background: var(--surface);
-  padding: var(--space-3) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom));
+  padding: var(--space-4);
   box-shadow: var(--shadow-lg);
 }
 
+/* The grab handle reads as "drag me down", which is only true of the bottom-anchored form. */
 .sheet-handle {
+  display: none;
   width: 2.5rem;
   height: 0.25rem;
   border-radius: var(--radius-pill);
@@ -4040,6 +4070,21 @@ a:focus-visible,
 
   .palette {
     max-height: 70dvh;
+  }
+
+  .sheet-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .bottom-sheet {
+    border-bottom: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    padding: var(--space-3) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom));
+  }
+
+  .sheet-handle {
+    display: block;
   }
 }
 
