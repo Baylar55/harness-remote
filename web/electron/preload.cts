@@ -6,6 +6,7 @@ import type {
   DesktopEventStatus,
   DesktopEventSubscriptionOptions,
   DesktopMenuCommand,
+  DesktopMenuTemplate,
   DesktopProfile,
   DesktopProfileSyncResult,
   DesktopRequest,
@@ -20,7 +21,8 @@ const IPC_CHANNELS = Object.freeze({
   unsubscribeEvents: "desktop:events:unsubscribe",
   notifyCompletion: "desktop:completion:notify",
   event: "desktop:events:event",
-  menuCommand: "desktop:menu:command"
+  menuCommand: "desktop:menu:command",
+  setMenu: "desktop:menu:set"
 })
 
 type EventCallbacks = {
@@ -42,7 +44,10 @@ ipcRenderer.on(IPC_CHANNELS.menuCommand, (_event: Electron.IpcRendererEvent, com
 })
 
 const harnessDesktop = Object.freeze({
-  platform: Object.freeze({ isDesktop: true, os: process.platform }),
+  // `usesNativeMenu` is what tells the renderer to stop drawing its own menu bar and stop binding
+  // its own accelerators: on the platform that has a real menu, both would be duplicates, and a
+  // shortcut handled twice toggles a panel back to where it started.
+  platform: Object.freeze({ isDesktop: true, os: process.platform, usesNativeMenu: process.platform === "darwin" }),
   replaceProfiles(profiles: DesktopProfile[], revision: number): Promise<DesktopProfileSyncResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.replaceProfiles, profiles, revision)
   },
@@ -69,6 +74,9 @@ const harnessDesktop = Object.freeze({
   onMenuCommand(callback: (command: DesktopMenuCommand) => void): () => void {
     menuCallbacks.add(callback)
     return () => menuCallbacks.delete(callback)
+  },
+  setApplicationMenu(template: DesktopMenuTemplate): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.setMenu, template)
   }
 })
 

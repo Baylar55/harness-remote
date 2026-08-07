@@ -89,6 +89,15 @@ jobs:
           npm run test:desktop
         working-directory: web
 
+      # macOS is the only platform that installs a native application menu, and the unit tests can
+      # only check the template the app builds — not that Electron accepts it. This boots Electron,
+      # installs the real menu and reads it back. Skipped on Linux, where Electron needs a display
+      # the runner does not have, and where the menu is never installed anyway.
+      - name: Verify the application menu installs
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        run: npm run test:desktop:menu
+        working-directory: web
+
       - name: Run bridge tests
         run: npm test
         working-directory: bridge
