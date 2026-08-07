@@ -107,6 +107,10 @@ jobs:
           name: harness-remote-desktop-${{ matrix.platform }}-${{ github.sha }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+          # These exist to hand the builds to the release job below, which runs minutes later. The
+          # default 90 days would keep a second copy of every desktop build — roughly 800MB a
+          # release — long after the permanent copy is attached to the release itself.
+          retention-days: 7
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
