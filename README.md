@@ -133,7 +133,7 @@ at — electron-builder does not cross-compile, so each artifact is built on its
 | --- | --- | --- |
 | Windows | `npm run package:win` | `Harness-Remote-<version>-win-x64-unsigned.exe` |
 | macOS | `npm run package:mac` | `Harness-Remote-<version>-mac-<arch>-unsigned.dmg` and `.zip`, for arm64 and x64 |
-| Linux | `npm run package:linux` | `Harness-Remote-<version>-linux-x64.AppImage` and `.deb` |
+| Linux | `npm run package:linux` | `Harness-Remote-<version>-linux-x86_64.AppImage` and `-linux-amd64.deb` |
 
 Nothing is signed, so the first launch needs a deliberate override: Windows SmartScreen offers
 **More info → Run anyway**, and macOS Gatekeeper needs **right-click → Open** (or
@@ -193,7 +193,7 @@ Every release carries the Android APK plus desktop builds for all three platform
 | Android | `.apk` |
 | Windows | `-win-x64-unsigned.exe` installer |
 | macOS | `-mac-arm64-unsigned.dmg` (Apple Silicon) or `-mac-x64-unsigned.dmg` (Intel), `.zip` alternatives |
-| Linux | `-linux-x64.AppImage` or `.deb` |
+| Linux | `-linux-x86_64.AppImage` or `-linux-amd64.deb` |
 
 https://github.com/giuliastro/harness-remote/releases/latest
 
