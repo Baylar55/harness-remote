@@ -73,7 +73,7 @@ jobs:
         working-directory: web
 
       - name: Generate Android app icon assets
-        run: npx @capacitor/assets generate --android --assetPath public --iconBackgroundColor '#3E3E3F' --iconBackgroundColorDark '#3E3E3F'
+        run: npx @capacitor/assets generate --android --assetPath public --iconBackgroundColor '#FFFFFF' --iconBackgroundColorDark '#FFFFFF'
         working-directory: web
 
       - name: Sync Capacitor project and native live events
