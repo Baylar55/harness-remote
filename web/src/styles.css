@@ -197,6 +197,10 @@ html {
 body {
   margin: 0;
   min-height: 100dvh;
+  /* This is an application shell sized to the viewport, never a document that scrolls sideways. The
+     guard is deliberate: one overflowing descendant used to widen the whole page on a phone, and
+     the only way back was pinch-zooming to find the composer. */
+  overflow-x: hidden;
   font-family: var(--font-family);
   font-size: var(--font-md);
   color: var(--text);
@@ -1902,6 +1906,10 @@ a:focus-visible,
   flex-direction: column;
   gap: var(--space-4);
   overflow-y: auto;
+  /* Transcript content is not the page's to widen: anything too wide for the column scrolls in its
+     own box (code blocks and tool output already do). Without this a single overlong token turned
+     into a horizontally scrolling page, which on a phone moved the composer out of reach. */
+  overflow-x: hidden;
   padding: var(--space-4);
   padding-bottom: var(--chat-bottom-clearance, 140px);
   scroll-padding-bottom: var(--chat-bottom-clearance, 140px);
@@ -2064,6 +2072,10 @@ a:focus-visible,
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
+  /* A flex item refuses to shrink below its content, so a summary naming a long path used to widen
+     the row rather than wrap inside it. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin-top: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -2107,9 +2119,16 @@ a:focus-visible,
   margin-top: 0;
 }
 
+/* `pre-wrap` breaks at whitespace only, so a single long token — a URL, an absolute path, a hash —
+   ran straight out of the box. Nothing clipped it, so on a phone it widened the page itself and
+   pushed the composer and its send button off-screen. Long tokens now break, and anything that
+   still cannot (a wide table of fixed-width columns) scrolls inside this block instead of the page. */
 .message-reasoning-text {
   margin: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+  max-width: 100%;
   font-family: var(--font-mono);
   font-size: var(--font-sm);
 }
@@ -3079,6 +3098,24 @@ a:focus-visible,
   font-weight: 550;
 }
 
+/* The label is a button now, but it has to keep reading as a step marker rather than a control. */
+.wizard-step-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 0;
+  background: none;
+  padding: var(--space-1) 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wizard-step-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .wizard-step-index {
   display: grid;
   place-items: center;
@@ -3120,6 +3157,31 @@ a:focus-visible,
   display: grid;
   align-content: start;
   gap: var(--space-4);
+}
+
+/* Sits between the scrolling body and the footer, so it survives the keyboard taking most of the
+   screen. Its own border keeps the test action visually apart from the footer's save button.
+   The card clips its overflow, which sacrifices whichever child comes last — the footer — so the
+   order in which space is surrendered is stated rather than left to the default: the body first,
+   then this strip, and the footer never. */
+.wizard-test {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border);
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wizard-header,
+.wizard-steps,
+.wizard-footer {
+  flex: 0 0 auto;
+}
+
+.wizard-test .notice {
+  margin: 0;
 }
 
 .wizard-footer {
@@ -4055,6 +4117,11 @@ a:focus-visible,
     padding-right: var(--space-4);
   }
 
+  .wizard-test {
+    padding-left: var(--space-4);
+    padding-right: var(--space-4);
+  }
+
   .wizard-footer {
     flex-wrap: wrap;
   }
@@ -4085,6 +4152,47 @@ a:focus-visible,
 
   .sheet-handle {
     display: block;
+  }
+}
+
+/* An on-screen keyboard leaves roughly this much of a phone, and `interactive-widget=resizes-content`
+   in index.html means the viewport really does shrink to it. Everything the wizard can spare is
+   given back so the test action and the footer both stay on screen: the subtitle goes, the paddings
+   tighten, the footer stops wrapping onto extra rows, and a long failure message scrolls in place. */
+@media (max-height: 560px) {
+  .wizard-header {
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-2);
+  }
+
+  .wizard-header-text p.subtle {
+    display: none;
+  }
+
+  .wizard-steps {
+    padding-top: var(--space-1);
+    padding-bottom: var(--space-1);
+  }
+
+  .wizard-test {
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+
+  .wizard-test .notice {
+    max-height: 4.5rem;
+    overflow-y: auto;
+  }
+
+  .wizard-footer {
+    flex-wrap: nowrap;
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+  }
+
+  .wizard-footer button {
+    flex: 0 1 auto;
+    white-space: nowrap;
   }
 }
 
@@ -4198,6 +4306,21 @@ button,
 .palette-item,
 .message-diff-row {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Every control opts out of double-tap-to-zoom. Without it a tap is held back until the browser has
+   ruled out a second one, which reads as a control that ignored the first press — the bottom
+   navigation especially, where taps land in quick succession. */
+button,
+a,
+label,
+select,
+summary,
+[role="button"],
+[role="option"],
+[role="menuitem"],
+[role="tab"] {
+  touch-action: manipulation;
 }
 
 /* Deliberately excludes .messages: outside the desktop layout its height is unbounded, so it never
