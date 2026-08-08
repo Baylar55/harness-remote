@@ -27,6 +27,20 @@ assert.match(styles, /\.session-card-main\s*\{[\s\S]*?min-width:\s*0;/, 'session
 // Anchored to line start, and each match kept inside one rule block with [^}]: an unanchored
 // `.session-card h3` also matches the tail of `.sidebar-sessions .session-card h3`, which made the
 // negative assertion below fire on the sidebar's deliberate nowrap.
+// Buttons are `white-space: nowrap` globally, which is right for a label and wrong for these three:
+// they hold a whole sentence. Without the override the summary of a long run could not wrap, so it
+// pushed the row past the screen and took the page with it — the chat jump buttons went off the
+// right edge and the composer was cut off.
+assert.match(
+  styles,
+  /\.message-reasoning-summary,\s*\.message-action-summary,\s*\.message-tool-summary\s*\{[^}]*white-space:\s*normal;/,
+  'action summaries must opt out of the global button nowrap'
+)
+assert.match(
+  styles,
+  /\.message-reasoning-summary > \*,\s*\.message-action-summary > \*,\s*\.message-tool-summary > \*\s*\{[^}]*min-width:\s*0;/,
+  'the text inside a summary row must be allowed to shrink, or the flex item keeps its full width'
+)
 assert.match(styles, /^\.session-card h3\s*\{[^}]*overflow-wrap:\s*(break-word|anywhere);/m, 'a long session title must break rather than widen its card')
 assert.ok(
   !/^\.session-card h3\s*\{[^}]*white-space:\s*nowrap/m.test(styles),

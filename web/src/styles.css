@@ -2072,8 +2072,13 @@ a:focus-visible,
   justify-content: space-between;
   gap: var(--space-2);
   width: 100%;
-  /* A flex item refuses to shrink below its content, so a summary naming a long path used to widen
-     the row rather than wrap inside it. */
+  /* These are buttons holding a sentence, not a label, so they opt out of the `nowrap` every other
+     button wants. Without this the summary of a long run — "Thought for 43s, read 1 file, wrote 1
+     file, edited 1 file, ran 2 commands" — could not wrap, so it pushed the row wider than the
+     screen and took the whole page with it: the jump-to-top/bottom buttons went off the right edge
+     and the composer was cut off. The inner span needs its own `min-width` because a flex item
+     refuses to shrink below its content otherwise. */
+  white-space: normal;
   min-width: 0;
   overflow-wrap: anywhere;
   margin-top: var(--space-2);
@@ -2087,6 +2092,26 @@ a:focus-visible,
   font-weight: 500;
   text-align: left;
   cursor: pointer;
+}
+
+.message-reasoning-summary > *,
+.message-action-summary > *,
+.message-tool-summary > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Full-width rows listing a name or a path: unlike the summaries above, one line each is the point,
+   so they end in an ellipsis rather than wrapping. They inherit `nowrap` from `button` and had no
+   clipping, so a long model id or a deep folder simply ran past the row's edge. */
+.model-option > *,
+.palette-item > *,
+.menu-item > *,
+.folder-row > *,
+.context-chip > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Text parts reset their first paragraph margin because they normally start a message. When one
