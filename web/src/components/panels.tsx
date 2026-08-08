@@ -305,17 +305,30 @@ export function ConnectServerWizard({
           </button>
         </div>
 
+        {/* The steps double as navigation. A failed test is usually the address or the port rather
+            than the password, and stepping back one screen at a time to check made that a chore. */}
         <ol className="wizard-steps">
-          {WIZARD_STEPS.map((candidate, index) => (
-            <li
-              key={candidate}
-              className={`wizard-step${candidate === step ? " active" : index < stepIndex ? " done" : ""}`}
-            >
-              <span className="wizard-step-index" aria-hidden="true">{index < stepIndex ? "✓" : index + 1}</span>
-              {t(`connect.step.${candidate}`)}
-              {index < WIZARD_STEPS.length - 1 && <span className="wizard-step-divider" aria-hidden="true" />}
-            </li>
-          ))}
+          {WIZARD_STEPS.map((candidate, index) => {
+            const reachable = candidate !== "credentials" || canLeaveAddress
+            return (
+              <li
+                key={candidate}
+                className={`wizard-step${candidate === step ? " active" : index < stepIndex ? " done" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="wizard-step-button"
+                  onClick={() => setStep(candidate)}
+                  disabled={!reachable}
+                  aria-current={candidate === step ? "step" : undefined}
+                >
+                  <span className="wizard-step-index" aria-hidden="true">{index < stepIndex ? "✓" : index + 1}</span>
+                  {t(`connect.step.${candidate}`)}
+                </button>
+                {index < WIZARD_STEPS.length - 1 && <span className="wizard-step-divider" aria-hidden="true" />}
+              </li>
+            )
+          })}
         </ol>
 
         <div className="wizard-body">
@@ -414,21 +427,28 @@ export function ConnectServerWizard({
                 </label>
               </div>
               <p className="field-hint">{t('connect.credentialsHint')}</p>
-              <div className="inline-actions">
-                <button type="button" className="btn-secondary" onClick={() => void test()} disabled={testing || !canSave}>
-                  {testing ? <LoadingIcon size={15} /> : <TestIcon size={15} />}
-                  {testing ? t('settings.testing') : t('settings.test')}
-                </button>
-              </div>
-              {testResult && (
-                <div className={`notice ${testResult.ok ? "success" : "error"} fade-in`}>
-                  {testResult.ok ? "✓ " : "✗ "}
-                  {testResult.message}
-                </div>
-              )}
             </>
           )}
         </div>
+
+        {/* Outside the scrolling body on purpose. Testing the connection is the first thing anyone
+            does on this step, and with a keyboard open the body is only a couple of lines tall — a
+            test button living at the end of it scrolled out of sight and came to rest against the
+            save button, which is the one press you do not want to hit by accident. */}
+        {step === "credentials" && (
+          <div className="wizard-test">
+            <button type="button" className="btn-secondary" onClick={() => void test()} disabled={testing || !canSave}>
+              {testing ? <LoadingIcon size={15} /> : <TestIcon size={15} />}
+              {testing ? t('settings.testing') : t('settings.test')}
+            </button>
+            {testResult && (
+              <div className={`notice ${testResult.ok ? "success" : "error"} fade-in`}>
+                {testResult.ok ? "✓ " : "✗ "}
+                {testResult.message}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="wizard-footer">
           {step !== "harness" && (

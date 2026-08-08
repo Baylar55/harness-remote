@@ -289,6 +289,19 @@ function messagesHaveSameContent(left: MessageEnvelope[], right: MessageEnvelope
   })
 }
 
+/**
+ * Polling refetches the whole set of side lists every few seconds, and handing React a fresh array
+ * each time is a state change even when the contents are identical. That re-rendered the transcript
+ * — re-parsing every message's markdown — six times per poll for data nobody had changed, which is
+ * what made a busy chat lock the app up for seconds on a phone. These lists are short, so comparing
+ * them is far cheaper than the render it avoids.
+ */
+function keepIfUnchanged<T>(previous: T[], next: T[]): T[] {
+  if (previous === next) return previous
+  if (previous.length !== next.length) return next
+  return JSON.stringify(previous) === JSON.stringify(next) ? previous : next
+}
+
 function messagesExtendContent(current: MessageEnvelope[], next: MessageEnvelope[]): boolean {
   if (next.length < current.length) return false
   return current.every((message, index) => {
@@ -2107,6 +2120,9 @@ function App() {
   const [selectedAgentID, setSelectedAgentID] = useState<string>(() => localStorage.getItem(AGENT_STORAGE_KEY) || "build")
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
   const [modelLoadError, setModelLoadError] = useState<string | null>(null)
+  /** Read inside loadSelected, which must not re-declare itself every time this changes. */
+  const modelLoadErrorRef = useRef<string | null>(null)
+  modelLoadErrorRef.current = modelLoadError
   const [selectedModelKey, setSelectedModelKey] = useState<string | null>(() => readStoredModel(config.backend))
   const [modelQuery, setModelQuery] = useState("")
   const [helpPage, setHelpPage] = useState<"overview" | "server" | "network" | "troubleshooting" | "commands">(
@@ -2274,6 +2290,12 @@ function App() {
   const initialSessionLoadRef = useRef(true)
   const latestMessageTimesRef = useRef(new Map<string, { sessionUpdated: number; activityTime: number }>())
   const selectedSessionRef = useRef<SessionView | null>(null)
+  /** The session `openSession` is currently working on, so its retry can tell it is still wanted. */
+  const openingSessionRef = useRef<string | null>(null)
+  /** Set once the project/vcs/file endpoints prove absent, so polling stops asking for them. */
+  const dashboardUnsupportedRef = useRef(false)
+  /** When the model list was last re-fetched after a failure, so the retry stays occasional. */
+  const modelRetryRef = useRef<{ sessionID: string; at: number } | null>(null)
   const eventStreamStateRef = useRef<"idle" | "connecting" | "live" | "reconnecting" | "fallback">("idle")
   /** Last time an SSE event arrived for a given session, used to spot sessions the stream isn't covering. */
   const lastEventBySessionRef = useRef(new Map<string, number>())
@@ -2479,8 +2501,20 @@ function App() {
     setActionNotice(null)
     setView("detail")
     setLoadingSessionID(sessionID)
+    openingSessionRef.current = sessionID
     try {
-      await loadSelected(sessionID, directory, true)
+      try {
+        await loadSelected(sessionID, directory, true)
+      } catch (first) {
+        // Opening a session fires several requests at once and one of them losing a flaky mobile
+        // connection is common enough that it was the usual way this screen failed. Announcing it
+        // immediately made the app look broken for the second it took to come good on its own, so
+        // one quiet retry comes first and only a second failure is worth telling anyone about.
+        if (openingSessionRef.current !== sessionID) throw first
+        await new Promise((resolve) => setTimeout(resolve, 600))
+        if (openingSessionRef.current !== sessionID) throw first
+        await loadSelected(sessionID, directory, true)
+      }
       await Promise.all([loadAgents(), loadModels(sessionID, directory)])
     } catch (err) {
       const message = (err as Error).message
@@ -2496,6 +2530,7 @@ function App() {
       loadSelectedRequestRef.current += 1
       loadModelsRequestRef.current += 1
       autoSelectAttemptedRef.current = false
+      dashboardUnsupportedRef.current = false
       setSessions([])
       setSelectedID(null)
       setMessages([])
@@ -2582,11 +2617,23 @@ function App() {
     }
     try {
       const items = await api.listGlobalSessions(config).catch(() => api.listSessions(config))
-      const directories = [...new Set(items.map((session) => session.directory).filter(Boolean))]
-      const [sessionLists, statusMaps] = await Promise.all([
-        Promise.all(directories.map((directory) => api.listSessions(config, directory).catch(() => [] as Session[]))),
-        Promise.all(directories.map((directory) => api.listStatuses(config, directory).catch(() => ({} as Record<string, SessionStatus>))))
-      ])
+      // OpenCode scopes both of these to a project directory, so each one has to be asked
+      // separately. The bridge does not: called without a directory it answers for every session it
+      // knows. Fanning out there turned one refresh into two requests per distinct directory — over
+      // a hundred requests every eight seconds on a real session list, which is what made the app
+      // stall for seconds at a time on a phone.
+      const directories = isBridgeBackend(config.backend)
+        ? []
+        : [...new Set(items.map((session) => session.directory).filter(Boolean))]
+      const [sessionLists, statusMaps] = isBridgeBackend(config.backend)
+        ? await Promise.all([
+            api.listSessions(config).then((list) => [list]).catch(() => [[]] as Session[][]),
+            api.listStatuses(config).then((map) => [map]).catch(() => [{}] as Record<string, SessionStatus>[])
+          ])
+        : await Promise.all([
+            Promise.all(directories.map((directory) => api.listSessions(config, directory).catch(() => [] as Session[]))),
+            Promise.all(directories.map((directory) => api.listStatuses(config, directory).catch(() => ({} as Record<string, SessionStatus>))))
+          ])
       const scopedSessions = new Map(sessionLists.flat().map((session) => [session.id, session]))
       const statuses = Object.assign({}, ...statusMaps)
       const hydratedItems = items.map((session) => ({ ...session, ...scopedSessions.get(session.id), project: session.project }))
@@ -2595,10 +2642,19 @@ function App() {
         .map((session) => toSessionView(session, statuses[session.id], activityTimes.get(session.id)))
         .sort((a, b) => b.updated - a.updated)
       setSessions((current) => {
-        const selected = selectedID ? current.find((session) => session.id === selectedID) : null
+        // `current` is the list this refresh started from, so a session opened moments ago may not
+        // be in it yet; the ref holds what is actually on screen. Falling back to `current` alone
+        // let a refresh that raced an open drop the selected session, and the sessions list then
+        // came back with nothing selected.
+        const selected = selectedID
+          ? current.find((session) => session.id === selectedID)
+            ?? (selectedSessionRef.current?.id === selectedID ? selectedSessionRef.current : null)
+          : null
         const toPreserve = preserveSession ?? selected
-        if (!toPreserve || mapped.some((session) => session.id === toPreserve.id)) return mapped
-        return [toPreserve, ...mapped].sort((a, b) => b.updated - a.updated)
+        const next = !toPreserve || mapped.some((session) => session.id === toPreserve.id)
+          ? mapped
+          : [toPreserve, ...mapped].sort((a, b) => b.updated - a.updated)
+        return keepIfUnchanged(current, next)
       })
       backgroundFailureCountRef.current = 0
       initialSessionLoadRef.current = false
@@ -2760,12 +2816,28 @@ function App() {
       loadedMessagesRef.current = msg
       setMessages((prev) => replaceMessages ? msg : mergeFetchedMessages(prev, msg))
     }
-    setOptimisticUserMessages((current) => current.filter((message) => !hasMatchingUserMessage(msg, message)))
-    setTodos(todo)
-    setDiffFiles(diff)
-    setPendingQuestions(questions.filter((question) => question.sessionID === sessionID))
-    setPendingPermissions(permissions.filter((permission) => permission.sessionID === sessionID))
-    setExtensionActions(actions)
+    setOptimisticUserMessages((current) => {
+      const remaining = current.filter((message) => !hasMatchingUserMessage(msg, message))
+      return remaining.length === current.length ? current : remaining
+    })
+    setTodos((current) => keepIfUnchanged(current, todo))
+    setDiffFiles((current) => keepIfUnchanged(current, diff))
+    setPendingQuestions((current) => keepIfUnchanged(current, questions.filter((question) => question.sessionID === sessionID)))
+    setPendingPermissions((current) => keepIfUnchanged(current, permissions.filter((permission) => permission.sessionID === sessionID)))
+    setExtensionActions((current) => keepIfUnchanged(current, actions))
+    // A model list that failed to load once is never retried on its own — the fetch is tied to the
+    // session changing — so a transient failure left the picker disabled and marked in warning for
+    // as long as the session stayed open. The transcript arriving is the signal that the server is
+    // answering again. Spaced out because some failures are permanent rather than transient: Codex
+    // will not list models for a conversation another client holds open, and retrying that on every
+    // poll would be a request every few seconds for an answer that is not going to change.
+    if (capabilities.models && modelLoadErrorRef.current) {
+      const lastAttempt = modelRetryRef.current
+      if (lastAttempt?.sessionID !== sessionID || Date.now() - lastAttempt.at > 30_000) {
+        modelRetryRef.current = { sessionID, at: Date.now() }
+        void loadModels(sessionID, directory)
+      }
+    }
     // A bridge-backed harness only advertises its commands once a session is loaded, so the
     // mount-time fetch of an idle bridge legitimately returns []. Retry here rather than in each
     // of loadSelected's callers, otherwise Help -> Commands stays empty for the whole visit.
@@ -2837,6 +2909,10 @@ function App() {
   }
 
   async function loadProjectDashboard(directory: string) {
+    // The bridge implements none of these three, so on a bridge-backed harness this was nine
+    // guaranteed 404s a second during polling. One round of them settles the question for the
+    // rest of the connection.
+    if (dashboardUnsupportedRef.current) return
     setDashboardError(null)
     try {
       const [project, vcs, fileStatus] = await Promise.all([
@@ -2844,7 +2920,16 @@ function App() {
         api.loadVcs(config, directory).catch(() => null),
         api.loadFileStatus(config, directory).catch(() => [])
       ])
-      setProjectDashboard({ project, vcs, files: toFileStatusList(fileStatus) })
+      const files = toFileStatusList(fileStatus)
+      if (project === null && vcs === null && files.length === 0) {
+        dashboardUnsupportedRef.current = true
+        setProjectDashboard(null)
+        return
+      }
+      setProjectDashboard((current) => {
+        const next = { project, vcs, files }
+        return current && JSON.stringify(current) === JSON.stringify(next) ? current : next
+      })
     } catch (err) {
       setDashboardError((err as Error).message)
     }
@@ -2945,6 +3030,26 @@ function App() {
   const handleJumpToBottom = useCallback(() => {
     stickToBottomRef.current = true
     scrollMessagesToBottom("smooth")
+  }, [])
+
+  /**
+   * Both of these reach the memoized transcript, and `onRevertMessage` goes on to every message in
+   * it. Declared inline they were a new function on every render of this component, which defeated
+   * the memo on all of them and re-parsed every message's markdown each time — the other half of
+   * why opening a long chat froze the app. The bodies are read through refs so the callbacks can
+   * stay identity-stable while still calling the current version.
+   */
+  const revertToMessageRef = useRef(revertToMessage)
+  revertToMessageRef.current = revertToMessage
+  const handleRevertMessage = useCallback((messageID: string) => {
+    void revertToMessageRef.current(messageID)
+  }, [])
+
+  const openSessionRef = useRef(openSession)
+  openSessionRef.current = openSession
+  const handleRetrySession = useCallback(() => {
+    const session = selectedSessionRef.current
+    if (session) void openSessionRef.current(session.id, session.directory)
   }, [])
 
   const handleSessionsJumpToTop = useCallback(() => {
@@ -4753,9 +4858,7 @@ function App() {
             loadingSessionID={loadingSessionID}
             loadedSessionID={loadedSessionID}
             loadFailure={loadFailure}
-            onRetrySession={() => {
-              if (selectedSession) void openSession(selectedSession.id, selectedSession.directory)
-            }}
+            onRetrySession={handleRetrySession}
             selectedID={selectedID}
             renderedMessages={renderedMessages}
             timelineGroups={timelineGroups}
@@ -4765,7 +4868,7 @@ function App() {
             config={config}
             directory={selectedSession?.directory}
             actions={messageMenuActions}
-            onRevertMessage={(messageID) => void revertToMessage(messageID)}
+            onRevertMessage={handleRevertMessage}
             t={t}
             jumpAffordances={jumpAffordances}
             onJumpToTop={handleJumpToTop}
