@@ -101,6 +101,9 @@ type TranslationKey =
   | 'detail.emptyHint'
 
   | 'detail.composerPlaceholder'
+  | 'detail.attachImage'
+  | 'detail.removeAttachment'
+  | 'detail.attachedImage'
   | 'detail.externalSession'
   | 'detail.waiting'
   | 'detail.copyText'
@@ -394,6 +397,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.emptyTitle': 'No messages yet',
     'detail.emptyHint': 'Start a conversation below',
     'detail.composerPlaceholder': 'Prompt, or / for commands',
+    'detail.attachImage': 'Attach image',
+    'detail.removeAttachment': 'Remove attachment',
+    'detail.attachedImage': 'Attached image',
     'detail.externalSession': 'Started by another client',
     'detail.waiting': 'Waiting...',
     'detail.copyText': 'Copy text',
@@ -686,6 +692,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.emptyTitle': 'Ancora nessun messaggio',
     'detail.emptyHint': 'Inizia una conversazione qui sotto',
     'detail.composerPlaceholder': 'Prompt, o / per i comandi',
+    'detail.attachImage': 'Allega immagine',
+    'detail.removeAttachment': 'Rimuovi allegato',
+    'detail.attachedImage': 'Immagine allegata',
     'detail.externalSession': 'Avviata da un altro client',
     'detail.waiting': 'Attesa...',
     'detail.copyText': 'Copia testo',
@@ -978,6 +987,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.emptyTitle': '尚無訊息',
     'detail.emptyHint': '在下方開始對話',
     'detail.composerPlaceholder': '輸入提示，或以 / 下命令',
+    'detail.attachImage': '附加圖片',
+    'detail.removeAttachment': '移除附件',
+    'detail.attachedImage': '附加的圖片',
     'detail.externalSession': '由其他用戶端啟動',
     'detail.waiting': '等待中...',
     'detail.copyText': '複製文字',
