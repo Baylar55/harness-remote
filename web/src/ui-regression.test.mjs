@@ -523,7 +523,7 @@ assert.match(
 )
 assert.match(app, /session-actions-menu/, 'the header actions menu should have its own styles')
 assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?position:\s*absolute/, 'the header actions menu must overlay the conversation rather than push its layout')
-assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?z-index:\s*20/, 'the header actions menu must stack above the message list')
+assert.match(styles, /\.session-actions-menu\s*\{[\s\S]*?z-index:\s*var\(--z-menu\)/, 'the header actions menu must stack above the message list')
 assert.match(app, /mobile-session-appbar[\s\S]*?mobile-back-button[\s\S]*?SessionActionsMenu/, 'mobile detail should use one contextual row for back, identity, and session actions')
 assert.match(app, /isDesktop && selectedSession && sessionHeaderActions\.length > 0/, 'on desktop the header actions menu should remain beside the session heading')
 assert.match(styles, /\.mobile-appbar \{[\s\S]*?display:\s*flex/, 'the mobile contextual app bar should keep its controls on one row')
