@@ -1,22 +1,6 @@
 # Harness Remote quick start
 
-The shortest setup path uses the existing bridge through the new `harness-remote` launcher.
-
-## Testing this PR before merge
-
-While PR #148 is still open, the root `package.json` only exists on the feature branch, so the `npx` command must include that branch explicitly:
-
-```bash
-npx github:giuliastro/harness-remote#agent/one-command-startup
-```
-
-For OpenCode on the PR branch:
-
-```bash
-npx github:giuliastro/harness-remote#agent/one-command-startup --backend opencode
-```
-
-After #148 is merged to `main`, the shorter command becomes valid:
+The shortest setup path uses the `harness-remote` launcher.
 
 ```bash
 npx github:giuliastro/harness-remote
@@ -43,7 +27,7 @@ harness-remote
 
 The root package intentionally remains private for now: this documents a real GitHub/repository launch path without claiming that an npm package has already been published.
 
-The launcher is intentionally thin: it does **not** implement the future Universal Daemon. For ACP-backed agents it starts the existing bridge; for OpenCode it detects the direct-HTTP path and prints the correct startup command.
+The launcher remains intentionally thin while #143 evolves toward the Universal Daemon. ACP-backed agents still use the existing bridge. OpenCode is now started and supervised directly by Harness Remote rather than requiring a second command.
 
 ## What it does
 
@@ -51,9 +35,11 @@ The launcher is intentionally thin: it does **not** implement the future Univers
 - auto-selects the backend when exactly one supported CLI is found;
 - otherwise requires an explicit choice with `--backend`;
 - binds to the LAN by default (`0.0.0.0`) and automatically generates HTTP Basic Auth credentials;
-- generates credentials for loopback quick start too, so local applications/users do not get an unauthenticated bridge by default;
-- keeps generated credentials out of the bridge child-process argv and passes them through environment variables instead;
-- starts ACP-backed agents at port `4097` and OpenCode guidance at port `4096`, choosing the next available port when the default is busy;
+- generates credentials for loopback quick start too;
+- keeps generated credentials out of child-process argv and passes them through environment variables;
+- starts ACP-backed agents from port `4097` and OpenCode from port `4096`, choosing the next available port when the default is busy;
+- for OpenCode, reports readiness only after an authenticated `/global/health` request succeeds with the generated credentials;
+- supervises the OpenCode process and escalates a repeated shutdown signal from graceful `SIGTERM` to `SIGKILL`;
 - prints one or more plausible LAN addresses while preferring non-virtual interfaces;
 - forwards advanced bridge options such as `--root`, `--cors`, `--state-dir`, and `--log-requests` for ACP-backed agents.
 
@@ -83,15 +69,17 @@ harness-remote \
 
 ## OpenCode
 
-OpenCode remains different in the current architecture: the client connects directly to the OpenCode HTTP server rather than through the ACP bridge.
+OpenCode remains different at the protocol layer: the Harness Remote client connects directly to the OpenCode HTTP server rather than through the ACP bridge.
 
-If OpenCode is the only supported CLI found on `PATH`, the launcher now recognizes it and prints a ready-to-run authenticated `opencode serve` command plus the address and credentials to use in Harness Remote instead of suggesting an unrelated ACP backend.
-
-You can request the same guidance explicitly with:
+The launcher now owns the process lifecycle, though. Running:
 
 ```bash
 harness-remote --backend opencode
 ```
+
+will start `opencode serve` itself, pass the generated credentials through `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD`, verify the authenticated health endpoint, print the connection details, and keep supervising the child process until shutdown.
+
+This means there is no second OpenCode command to copy and run manually.
 
 ## Advanced/manual setup
 

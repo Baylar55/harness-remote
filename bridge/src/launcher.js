@@ -6,6 +6,7 @@ import { networkInterfaces } from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { ManagedOpenCodeHost } from "./opencode-host.js"
 
 const BACKEND_EXECUTABLES = {
   omp: ["omp"],
@@ -15,7 +16,6 @@ const BACKEND_EXECUTABLES = {
   opencode: ["opencode"]
 }
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"])
 const VIRTUAL_INTERFACE = /^(docker|br-|veth|virbr|tun|tap|utun)/i
 
 function optionValue(args, name) {
@@ -139,11 +139,29 @@ export function lanAddresses(interfaces = networkInterfaces()) {
 }
 
 export function launcherUsage() {
-  return `Usage: harness-remote [options]\n\nQuick start options:\n  --backend <name>       Select omp, pi, claude, codex, or opencode (auto-detected when unambiguous)\n  --host <host>          Bind host (quick-start default: 0.0.0.0)\n  --port <port>          Preferred port (quick-start default: first free port from 4097)\n  --username <username>  Override generated Basic Auth username\n  --password <password>  Override generated Basic Auth password\n  --help                 Show this help\n\nAll other options are forwarded to harness-remote-bridge for ACP-backed agents.`
+  return `Usage: harness-remote [options]\n\nQuick start options:\n  --backend <name>       Select omp, pi, claude, codex, or opencode (auto-detected when unambiguous)\n  --host <host>          Bind host (quick-start default: 0.0.0.0)\n  --port <port>          Preferred port (OpenCode default: 4096; ACP default: 4097)\n  --username <username>  Override generated Basic Auth username\n  --password <password>  Override generated Basic Auth password\n  --help                 Show this help\n\nOpenCode is started and supervised directly. Other options are forwarded to harness-remote-bridge for ACP-backed agents.`
 }
 
-function openCodeGuidance({ host, port, username, password }) {
-  return `OpenCode was found on PATH. OpenCode connects directly to Harness Remote and does not use the ACP bridge.\n\nStart it directly:\n\n  OPENCODE_SERVER_USERNAME=${username} OPENCODE_SERVER_PASSWORD=${password} opencode serve --hostname ${host} --port ${port}\n\nThen select the OpenCode backend in Harness Remote and use the address/credentials above.`
+export async function startManagedOpenCode({ host, port, username, password, command = "opencode", Host = ManagedOpenCodeHost } = {}) {
+  const managed = new Host({ command, host, port, username, password })
+  await managed.start()
+  return managed
+}
+
+export function createManagedShutdown(managed, processObject = process) {
+  let signalCount = 0
+  let exitCode = 0
+  return (signal) => {
+    signalCount += 1
+    if (signalCount === 1) {
+      exitCode = signal === "SIGINT" ? 130 : 143
+      processObject.exitCode = exitCode
+      managed.stop("SIGTERM")
+      return
+    }
+    managed.stop("SIGKILL")
+    processObject.exit(exitCode || 1)
+  }
 }
 
 async function main() {
@@ -192,7 +210,24 @@ async function main() {
   process.stdout.write(`Password: ${password}\n`)
 
   if (backend === "opencode") {
-    process.stdout.write(`\n${openCodeGuidance({ host, port, username, password })}\n`)
+    process.stdout.write("\nStarting managed OpenCode host...\n")
+    const managed = await startManagedOpenCode({ host, port, username, password })
+    process.stdout.write(`OpenCode is ready on ${host}:${port}. Keep this process running while Harness Remote is connected.\n`)
+
+    let shuttingDown = false
+    const shutdown = createManagedShutdown(managed)
+    const handleSignal = (signal) => {
+      shuttingDown = true
+      shutdown(signal)
+    }
+    managed.on("unavailable", (error) => {
+      if (!shuttingDown) {
+        process.stderr.write(`${error.message}\n`)
+        process.exitCode = 1
+      }
+    })
+    process.on("SIGINT", () => handleSignal("SIGINT"))
+    process.on("SIGTERM", () => handleSignal("SIGTERM"))
     return
   }
 
