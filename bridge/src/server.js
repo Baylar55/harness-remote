@@ -154,7 +154,7 @@ function providersResponse(models, fallbackProviderID) {
   return { providers: [...providers.values()], default: defaults }
 }
 
-export function createBridgeServer({ config, acp, serviceOptions }) {
+export function createBridgeServer({ config, acp, serviceOptions, machineRegistry }) {
   const backend = config.backend ?? "omp"
   const profile = harnessProfile(backend)
   const service = new AcpService(acp, { ...serviceOptions, actionProviders: profile.actionProviders })
@@ -178,6 +178,14 @@ export function createBridgeServer({ config, acp, serviceOptions }) {
       process.stderr.write(`[bridge] ${request.method} ${url.pathname}${url.search}\n`)
     }
     try {
+      if (request.method === "GET" && (url.pathname === "/v1/machine" || url.pathname === "/global/machine")) {
+        if (!machineRegistry) {
+          writeJSON(response, 503, { error: "Machine registry is not configured" })
+          return
+        }
+        writeJSON(response, 200, machineRegistry.snapshot())
+        return
+      }
       if (request.method === "GET" && (url.pathname === "/v1/health" || url.pathname === "/global/health")) {
         await acp.start()
         writeJSON(response, 200, { healthy: true, backend, version: acp.agentInfo?.version ?? "unknown" })
