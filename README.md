@@ -48,18 +48,22 @@ Harness Remote already gives you a common remote UI for five coding-agent harnes
 
 From Android, the web/PWA or the desktop app you can monitor sessions, read streamed progress, send prompts, stop work, select models where supported, inspect agent questions/todos and use the capabilities each harness exposes.
 
-The Harness 3 daemon is now able to represent multiple agent hosts under one stable machine identity and route requests through a single machine connection. Legacy per-harness connections remain supported while the client UI moves to machine-first agent discovery and selection.
+The machine daemon can represent multiple agent hosts under one stable machine identity and route requests through a single machine connection. Legacy per-harness connections remain supported while the client UI moves to machine-first agent discovery and selection.
+
+The backend task foundation is also in place: the daemon can discover known projects, persist normalized tasks, prepare isolated Git worktrees, launch supported agents inside those workspaces, reconcile run state after daemon restarts, inspect Git results and explicitly release finished worktrees without silently deleting dirty or unmerged work.
+
+These task/worktree/finish primitives are currently **backend/API foundations**. The complete task-first client experience — selecting a project, creating work and reviewing the result directly from the app — is still being built.
 
 ## Where it is going
 
 The goal is not just remote chat with coding agents. The goal is a local-first operating layer for **coding work across agents and machines**:
 
+- **Task-first client UX** — expose the existing project/task/worktree/launch primitives as the normal way to create work from phone, web and desktop.
+- **Review / PR lifecycle** — extend result inspection into diff, tests/checks, review, PR creation and CI visibility.
+- **Multi-machine fleet** — supervise and explicitly place work across desktops, laptops and servers without moving credentials or repositories into a hosted control plane.
 - **Attention plane** — one place for the questions, permissions, failures and completed work that actually need you.
-- **Multi-agent machine daemon** — one machine connection, multiple heterogeneous agents, independent lifecycle and failure isolation.
-- **Task-oriented execution** — launch work against a repository instead of manually preparing every agent session.
-- **Worktree isolation** — concurrent tasks get isolated Git workspaces rather than colliding in one checkout.
-- **Finish-work loop** — diff → tests → review → PR as a first-class workflow.
-- **Multi-machine fleet** — supervise and eventually route work across desktops, laptops and servers without moving credentials or repositories into a hosted control plane.
+- **Fleet attention / Inbox** — turn normalized attention into a useful mobile queue once enough concurrent work exists.
+- **Automatic coordination later** — choose machine and agent by availability, capability, workload, cost or rate limits only after explicit task/fleet workflows are reliable.
 
 See [docs/HARNESS_3_ROADMAP.md](docs/HARNESS_3_ROADMAP.md) for the architecture and implementation roadmap.
 
@@ -100,6 +104,8 @@ Other useful docs:
 
 ## Project status
 
-Harness Remote is evolving from a multi-harness remote client into a local-first control plane. The repository deliberately keeps backward compatibility while that transition lands in small, reviewable slices.
+Harness Remote is evolving from a multi-harness remote client into a local-first control plane. One-command startup and the universal machine daemon are shipped; the normalized task/worktree/run/finish backend exists; the next product step is exposing that task model in the client and then extending it across multiple machines.
+
+The repository deliberately keeps backward compatibility while that transition lands in small, reviewable slices.
 
 If that is a problem you have too — several coding agents, several machines, and too much terminal babysitting — issues and feedback are especially useful now.
