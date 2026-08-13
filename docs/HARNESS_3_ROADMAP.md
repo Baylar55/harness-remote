@@ -107,7 +107,7 @@ ACP and generic adapters should make additional agents cheaper to support. Backe
 
 Evolve the existing `bridge/`; do not casually replace it with a greenfield system.
 
-The long-term machine primitive is a Universal Daemon:
+The machine primitive is the Universal Daemon:
 
 ```text
 Harness clients
@@ -127,81 +127,66 @@ Fleet control
       └── later machines…
 ```
 
-Each daemon should expose stable machine identity, agent health/capabilities, projects, runs/tasks and an integration point for attention state.
+The daemon now provides stable machine identity, multiple agent-host representation, project/task foundations and fleet-safe ownership boundaries. Machine-scoped identifiers should continue to be designed so a second or third machine can be added without redefining the model.
 
-Machine-scoped identifiers must be designed so a second or third machine can be added without redefining the model.
+## 6. Current implementation status
 
-## 6. Execution sequencing
+As of August 13, 2026:
+
+- ✅ **#147 — One-command startup** is complete.
+- ✅ **#143 — Universal Daemon** is complete.
+- 🟡 **#145 — Create work** has most backend foundations complete: project discovery, normalized tasks, isolated worktrees, agent launch, persisted task/run linkage, restart reconciliation, safe cleanup, result inspection and explicit finish semantics. The major remaining closure gap is the task-first client UX.
+- ✅ **#163 — Finish-work result and safe finalization primitives** is complete through #164.
+- ⏳ Full review/tests/PR lifecycle remains ahead.
+- ⏳ **#146 — Multi-machine Fleet** remains the next major differentiating product milestone after the task workflow is exposed cleanly to users and fleet demand is validated.
+
+The important distinction is that task/worktree/finish support now exists as **backend/API capability**, but the product should not claim a complete task-first workflow until the client exposes it end to end.
+
+## 7. Execution sequencing
 
 The roadmap has two dependency tracks, but **not an assumption of parallel maintainer capacity**. When capacity conflicts, Product/Adoption work wins.
 
 ### Primary track — Product / Adoption
 
-#### P0A — One-command startup (#147)
+#### Completed foundation — #147 + #143
 
-Ship the cheap adoption win **before** the daemon refactor.
+One-command startup and the Universal Daemon established the adoption/runtime base:
 
-Use the bridge that exists today and provide a thin launcher that can:
-
-- detect/select one supported backend;
-- choose a usable port;
-- preserve authentication requirements;
-- print concise connection information;
-- start the existing bridge;
-- keep advanced/manual setup available.
-
-Representative experience:
-
-```text
-harness-remote
-
-Backend: codex
-Connect to: http://192.168.1.20:4097
-Username: harness
-Password: ...
-```
-
-This milestone deliberately does not require the multi-agent daemon.
-
-#### P0B — Universal Daemon (#143)
-
-After first-run friction is reduced, evolve the bridge into one machine-level multi-agent runtime.
-
-Core goals:
-
-- one daemon represents multiple local agent hosts;
+- low-friction startup;
 - stable machine identity;
-- safe agent discovery;
-- isolated per-host health/failure;
-- fleet-safe API shapes;
-- backward-compatible migration from current bridge use;
-- integration boundary for the Attention Plane.
+- multiple heterogeneous local agent hosts;
+- isolated host health/failure;
+- backward-compatible single-backend paths;
+- fleet-safe machine boundaries.
 
-Real heterogeneous multi-host validation requires at least one reachable ACP-backed harness environment. Test doubles may validate architecture/mechanics, but they must not be presented as proof of real harness compatibility.
+#### Current — finish #145 as a product workflow
 
-#### P1 — Create work (#145)
-
-Harness must create work, not only observe sessions started elsewhere.
-
-Minimum category-entry loop:
+The backend loop already supports:
 
 ```text
-project → task → isolated worktree → agent → run
+project → task → isolated worktree → agent → run → result → finish
 ```
 
-Several tasks must be able to run concurrently in separate worktrees. Worktree isolation without concurrency delivers the mechanism but not the reason the category uses it.
+The immediate product gap is exposing that loop cleanly in the client:
 
-Explicit agent and machine selection is enough initially. `Auto` routing comes later.
+- choose a known project;
+- enter a task;
+- choose an agent;
+- prepare/start the isolated task;
+- open the resulting run/session;
+- inspect the result and finish safely.
 
-#### P1B — Finish work
+Several tasks should eventually be usable concurrently in separate worktrees. Explicit agent selection is enough initially. `Auto` routing remains later.
 
-A tightly following milestone should close the competitive loop:
+#### Finish-work expansion — review / tests / PR
+
+The first backend finish primitives are complete, but the competitive loop is not:
 
 ```text
-run → diff → tests/checks → review → PR
+run → diff → tests/checks → review → PR → CI visibility → finish
 ```
 
-Keep this separate from #145 if necessary to ship sooner, but do not describe task launch alone as the complete table-stakes experience.
+Next slices should add these incrementally without coupling the core task model to one forge too early.
 
 #### P2 — Multi-machine Fleet (#146)
 
@@ -276,7 +261,7 @@ The Inbox can ship as a component after #142 for the active connection. It shoul
 
 Once daemon/task/fleet work creates meaningful concurrent activity, the same mobile-friendly ordered list can become a strong fleet-level “Needs You” surface.
 
-## 7. Zero-config principles
+## 8. Zero-config principles
 
 Setup is part of the product.
 
@@ -287,7 +272,7 @@ Setup is part of the product.
 - unusual environments retain explicit advanced overrides;
 - future pairing should simplify authentication without weakening it.
 
-## 8. Security principles
+## 9. Security principles
 
 - credentials remain on execution machines;
 - source code does not need to be centralized;
@@ -298,7 +283,7 @@ Setup is part of the product.
 - future relay design should not require plaintext access to source, prompts or output;
 - LAN/VPN/self-hosted paths remain valid.
 
-## 9. What not to optimize for
+## 10. What not to optimize for
 
 Do not prioritize:
 
@@ -311,44 +296,43 @@ Do not prioritize:
 - a greenfield rewrite without implementation evidence;
 - multi-machine implementation before demand is validated.
 
-## 10. Validation gates
+## 11. Validation gates
 
 The roadmap should remain falsifiable.
 
-Before or during P0B:
-
-- obtain at least one reachable ACP-backed harness environment for real integration validation.
-
-Before P2 becomes the largest build:
+Before #146 becomes the largest build:
 
 - validate real multi-machine demand.
+
+Before backend-specific deferred permission behavior ships:
+
+- validate it against real ACP-backed harness environments rather than only test doubles.
 
 Before hosted relay or automatic routing:
 
 - prove that users value the local task/fleet graph enough for routing/connectivity to compound rather than distract.
 
-## 11. Current priority order
+## 12. Current priority order
 
 ```text
 PRIMARY
-#147  One-command startup
-  ↓
-#143  Universal Daemon
-  ↓
-#145  Concurrent task launch + worktrees
-  ↓
-       Diff / tests / review / PR
-  ↓
-#146  Multi-machine Fleet (after demand validation)
-  ↓
-       Auto machine + agent routing / orchestration
+✅ #147  One-command startup
+✅ #143  Universal Daemon
+   ↓
+🟡 #145  Expose task launch + worktree + result/finish as an end-to-end client workflow
+   ↓
+          Diff / tests / review / PR / CI lifecycle
+   ↓
+   #146  Multi-machine Fleet (after demand validation)
+   ↓
+          Auto machine + agent routing / orchestration
 
 SECONDARY / NON-BLOCKING
 #141 Track A → #142 → #132
 #141 Track B ─────────→ ACP permission policy
 ```
 
-## 12. Success test
+## 13. Success test
 
 Harness is succeeding when users describe it as **the place they run and manage agent work**, not merely the app they use to remote into one coding session.
 
