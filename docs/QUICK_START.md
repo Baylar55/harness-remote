@@ -81,6 +81,53 @@ will start `opencode serve` itself, pass the generated credentials through `OPEN
 
 This means there is no second OpenCode command to copy and run manually.
 
+## Experimental multi-host daemon
+
+#143 now also has a real multi-host runtime entrypoint. It is intentionally separate from the default launcher while the client routing contract is still being migrated.
+
+From a checkout:
+
+```bash
+npm run daemon -- --backend codex --host 127.0.0.1
+```
+
+or, when the repository package is installed:
+
+```bash
+harness-remote-daemon --backend codex --host 127.0.0.1
+```
+
+The daemon owns one primary ACP host plus a managed OpenCode host by default:
+
+```text
+Harness daemon :4097
+  ├── Codex / Claude / OMP / PI via ACP
+  └── OpenCode 127.0.0.1:4096 via managed HTTP
+```
+
+`GET /v1/machine` and `GET /global/machine` expose both hosts through the same machine registry and stable machine identity. Host lifecycle is isolated: OpenCode can become unavailable without making the ACP host disappear, and vice versa. The daemon HTTP API starts listening before eager managed hosts finish their health checks, so clients can observe `configured` and `unavailable` transitions instead of seeing the whole machine endpoint disappear during a slow host startup.
+
+Managed OpenCode binds to `127.0.0.1` by default even if the Harness daemon itself binds to `0.0.0.0`. This avoids silently opening a second LAN service while OpenCode still uses its direct HTTP transport. If you deliberately need the managed OpenCode listener reachable beyond loopback during this migration phase, opt in explicitly:
+
+```bash
+harness-remote-daemon --backend codex --opencode-host 0.0.0.0
+```
+
+The daemon checks the managed OpenCode port before spawning it and fails with an actionable error if another service is already using that port. Multiple eager managed hosts are started concurrently so one slow host does not serialize daemon startup.
+
+The existing session/run endpoints are still routed through the selected primary ACP backend in this slice. Agent-scoped routing over the shared machine connection is the next #143 step.
+
+Useful migration options:
+
+```bash
+harness-remote-daemon --backend claude --opencode-port 4901
+harness-remote-daemon --backend codex --opencode-command /custom/opencode
+harness-remote-daemon --backend codex --opencode-host 127.0.0.2
+harness-remote-daemon --backend omp --no-opencode
+```
+
+For non-loopback daemon binding, the existing bridge security rule still applies: username and password are required. The managed OpenCode listener remains loopback-only unless `--opencode-host` is supplied explicitly.
+
 ## Advanced/manual setup
 
 The existing backend-specific bridge commands remain supported. Use them when you need custom adapter commands, unusual networking, browser CORS configuration, or other advanced settings documented in the main README.
