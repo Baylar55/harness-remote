@@ -4,7 +4,7 @@ import type { ServerConfig } from "./types.js"
  * Kept free of Capacitor imports so it can be unit tested directly: the rules here
  * decide whether the app is allowed to build a URL at all.
  */
-export function baseUrl(config: ServerConfig): string {
+export function machineBaseUrl(config: ServerConfig): string {
   const host = config.host.trim()
   const schemeMatch = host.match(/^(https?):\/\//)
   const scheme = schemeMatch ? schemeMatch[1] : "http"
@@ -13,11 +13,22 @@ export function baseUrl(config: ServerConfig): string {
 }
 
 /**
- * A host typed one character at a time passes through states such as `http:` and
- * `http://` that produce an unparseable base URL. Callers must check this before
- * building any URL, because a throw on the render path blanks the whole app and a
- * persisted invalid host reproduces that crash on every launch.
+ * A daemon-backed profile points at one agent below the machine address. Legacy profiles have no
+ * agent id, so their base URL remains byte-for-byte identical to previous releases.
  */
+export function baseUrl(config: ServerConfig): string {
+  const machine = machineBaseUrl(config)
+  const agentID = config.agentId?.trim()
+  return agentID ? `${machine}/v1/agents/${encodeURIComponent(agentID)}` : machine
+}
+
+/** Useful when a caller already has a path and does not build through baseUrl. */
+export function agentScopedPath(config: ServerConfig, path: string): string {
+  const agentID = config.agentId?.trim()
+  if (!agentID) return path
+  const normalized = path.startsWith("/") ? path : `/${path}`
+  return `/v1/agents/${encodeURIComponent(agentID)}${normalized}`
+}
 
 /**
  * Credentials are typed on a phone keyboard into fields that show nothing back — the password one
@@ -47,10 +58,16 @@ export function authHeader(config: ServerConfig): string {
   return `Basic ${btoa(binary)}`
 }
 
+/**
+ * A host typed one character at a time passes through states such as `http:` and `http://` that
+ * produce an unparseable base URL. Callers must check this before building any URL, because a throw
+ * on the render path blanks the whole app and a persisted invalid host reproduces that crash on
+ * every launch.
+ */
 export function isValidServerConfig(config: ServerConfig): boolean {
   if (!config.host.trim() || !Number.isInteger(config.port) || config.port <= 0 || config.port > 65535) return false
   try {
-    const url = new URL(baseUrl(config))
+    const url = new URL(machineBaseUrl(config))
     return Boolean(url.hostname)
   } catch {
     return false

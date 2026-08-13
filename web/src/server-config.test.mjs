@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { streamURL } from './opencode-events.ts'
-import { authHeader, baseUrl, hasCredentials, isValidServerConfig } from './serverConfig.ts'
+import { agentScopedPath, authHeader, baseUrl, hasCredentials, isValidServerConfig, machineBaseUrl } from './serverConfig.ts'
 
 const config = (host, port = 4096) => ({ backend: 'opencode', host, port, username: 'opencode', password: 'secret' })
 
@@ -24,6 +24,24 @@ assert.equal(isValidServerConfig(config('localhost', Number.NaN)), false, 'a cle
 
 assert.equal(baseUrl(config('192.168.1.64')), 'http://192.168.1.64:4096', 'a bare host defaults to http')
 assert.equal(baseUrl(config('https://example.com')), 'https://example.com:4096', 'an explicit scheme is preserved')
+
+// Daemon-backed profiles keep one machine address and select an agent below it. Legacy profiles have
+// no agentId, so every existing URL remains unchanged.
+const daemon = { ...config('192.168.1.64', 4097), backend: 'codex', agentId: 'opencode' }
+assert.equal(machineBaseUrl(daemon), 'http://192.168.1.64:4097', 'machine discovery must stay above agent routing')
+assert.equal(baseUrl(daemon), 'http://192.168.1.64:4097/v1/agents/opencode', 'selected agents live below one machine address')
+assert.equal(agentScopedPath(daemon, '/session'), '/v1/agents/opencode/session', 'direct path routing must use the selected agent')
+assert.equal(agentScopedPath({ ...daemon, agentId: undefined }, '/session'), '/session', 'legacy profiles keep their old paths')
+assert.equal(
+  streamURL(baseUrl(daemon), 'global'),
+  'http://192.168.1.64:4097/v1/agents/opencode/global/event',
+  'event streams must keep the selected agent prefix'
+)
+assert.equal(
+  baseUrl({ ...daemon, agentId: 'claude/code' }),
+  'http://192.168.1.64:4097/v1/agents/claude%2Fcode',
+  'agent ids must be URL encoded rather than interpolated as paths'
+)
 
 // Every accepted configuration must survive the URL building that previously crashed.
 for (const host of ['Giulio-S7', 'http://192.168.1.64', 'https://example.com']) {
@@ -104,5 +122,10 @@ assert.equal(
   false,
   'credential checks must go through the shared helper, so an untrimmed field cannot pass one check and fail another'
 )
+
+const machineClient = readFileSync(new URL('./machineClient.ts', import.meta.url), 'utf8')
+assert.match(machineClient, /status === 404 \|\| status === 503/, '404 and registry-less 503 must both fall back to legacy mode')
+assert.match(machineClient, /result\.error\.code === "http" && noMachineStatus\(result\.error\.status\)/, 'desktop discovery must use structured HTTP status')
+assert.equal(/404\|not found/i.test(machineClient), false, 'desktop discovery must not classify transport errors by matching prose')
 
 console.log('server config regression tests passed')
