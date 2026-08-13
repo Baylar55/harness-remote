@@ -3,7 +3,10 @@ import { MachineRegistry, trackAgentHostLifecycle } from "./machine-registry.js"
 import { trackManagedHostLifecycle } from "./opencode-host.js"
 import { discoverProjects } from "./project-catalog.js"
 import { createBridgeServer } from "./server.js"
-import { TaskStore } from "./task-store.js"
+import { createTaskLaunchServer } from "./task-launch-server.js"
+import { TaskLauncher } from "./task-launcher.js"
+import { TaskRunController } from "./task-run-controller.js"
+import { TaskRunStore } from "./task-run-store.js"
 import { WorktreeManager } from "./worktree-manager.js"
 
 export class MachineDaemon {
@@ -74,9 +77,12 @@ export function createMachineDaemonServer({
   serviceOptions,
   createServer = createBridgeServer,
   createRouter = createAgentRoutingServer,
+  createLaunchServer = createTaskLaunchServer,
   taskStore,
   projectCatalog,
-  worktreeManager
+  worktreeManager,
+  taskLauncher,
+  taskRunController
 }) {
   const bridgeServer = createServer({
     config,
@@ -87,10 +93,12 @@ export function createMachineDaemonServer({
   const machineID = daemon.snapshot().machine.id
   const roots = config.roots?.length ? config.roots : [process.cwd()]
   const stateDirectory = config.stateDirectory ?? process.cwd()
-  const tasks = taskStore ?? new TaskStore({ machineID, stateDirectory })
+  const tasks = taskStore ?? new TaskRunStore({ machineID, stateDirectory })
   const projects = projectCatalog ?? (() => discoverProjects({ machineID, roots }))
   const worktrees = worktreeManager ?? new WorktreeManager({ stateDirectory })
-  return createRouter({
+  const launcher = taskLauncher ?? new TaskLauncher({ daemon })
+  const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher })
+  const innerServer = createRouter({
     daemon,
     config,
     primaryAgentID,
@@ -99,4 +107,5 @@ export function createMachineDaemonServer({
     projectCatalog: projects,
     worktreeManager: worktrees
   })
+  return createLaunchServer({ innerServer, config, taskRunController: runs })
 }
