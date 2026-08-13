@@ -134,7 +134,7 @@ The daemon now provides stable machine identity, multiple agent-host representat
 As of August 13, 2026:
 
 - ✅ **#147 — One-command startup** is complete.
-- ✅ **#143 — Universal Daemon** is complete.
+- ✅ **#143 — Universal Daemon** is complete as an implementation milestone. Its architecture and mechanics are well covered by tests, but a real ACP-backed harness still needs to be run end to end before heterogeneous daemon compatibility is described as validated.
 - 🟡 **#145 — Create work** has most backend foundations complete: project discovery, normalized tasks, isolated worktrees, agent launch, persisted task/run linkage, restart reconciliation, safe cleanup, result inspection and explicit finish semantics. The major remaining closure gap is the task-first client UX.
 - ✅ **#163 — Finish-work result and safe finalization primitives** is complete through #164.
 - ⏳ Full review/tests/PR lifecycle remains ahead.
@@ -158,6 +158,8 @@ One-command startup and the Universal Daemon established the adoption/runtime ba
 - isolated host health/failure;
 - backward-compatible single-backend paths;
 - fleet-safe machine boundaries.
+
+The architecture/mechanics are implemented, but real heterogeneous multi-host validation still requires at least one reachable ACP-backed harness environment. Test doubles are evidence for the architecture, not proof of real harness compatibility.
 
 #### Current — finish #145 as a product workflow
 
@@ -188,7 +190,7 @@ run → diff → tests/checks → review → PR → CI visibility → finish
 
 Next slices should add these incrementally without coupling the core task model to one forge too early.
 
-#### P2 — Multi-machine Fleet (#146)
+#### Later — Multi-machine Fleet (#146)
 
 Before implementation becomes the largest roadmap investment, validate demand cheaply with existing users/contributors:
 
@@ -209,7 +211,7 @@ Workspace  New worktree
 
 Automatic machine selection comes later.
 
-#### P3 — Coordinate
+#### Later — Coordinate
 
 Only after task/fleet fundamentals are reliable:
 
@@ -300,13 +302,17 @@ Do not prioritize:
 
 The roadmap should remain falsifiable.
 
+Before the multi-agent daemon is described as validated:
+
+- run at least one real ACP-backed harness end to end against it. Test doubles validate architecture and mechanics; they are not evidence of real harness compatibility.
+
 Before #146 becomes the largest build:
 
 - validate real multi-machine demand.
 
 Before backend-specific deferred permission behavior ships:
 
-- validate it against real ACP-backed harness environments rather than only test doubles.
+- validate deferred approval behavior against real ACP-backed harness environments rather than only test doubles.
 
 Before hosted relay or automatic routing:
 
@@ -314,18 +320,21 @@ Before hosted relay or automatic routing:
 
 ## 12. Current priority order
 
+Status lives in §6; this section expresses ordering only.
+
 ```text
 PRIMARY
-✅ #147  One-command startup
-✅ #143  Universal Daemon
-   ↓
-🟡 #145  Expose task launch + worktree + result/finish as an end-to-end client workflow
-   ↓
-          Diff / tests / review / PR / CI lifecycle
-   ↓
-   #146  Multi-machine Fleet (after demand validation)
-   ↓
-          Auto machine + agent routing / orchestration
+#147  One-command startup
+  ↓
+#143  Universal Daemon
+  ↓
+#145  Expose task launch + worktree + result/finish as an end-to-end client workflow
+  ↓
+       Diff / tests / review / PR / CI lifecycle
+  ↓
+#146  Multi-machine Fleet (after demand validation)
+  ↓
+       Auto machine + agent routing / orchestration
 
 SECONDARY / NON-BLOCKING
 #141 Track A → #142 → #132
