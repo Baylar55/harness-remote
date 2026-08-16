@@ -64,7 +64,7 @@ export class TaskStore {
     return task ? structuredClone(task) : undefined
   }
 
-  async create({ project, agentId, prompt }) {
+  async create({ project, agentId, prompt, model = null }) {
     await this.load()
     const text = typeof prompt === "string" ? prompt.trim() : ""
     if (!text) throw new Error("A task prompt is required")
@@ -76,6 +76,7 @@ export class TaskStore {
       project: { name: project.name, path: project.path, kind: project.kind },
       agentId,
       prompt: text,
+      model,
       status: "draft",
       workspace: { mode: "project", path: project.path },
       run: null,
