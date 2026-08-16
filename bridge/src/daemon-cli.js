@@ -33,7 +33,10 @@ export function parseDaemonOptions(args, environment = process.env, detect = res
 
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index]
-    if (option === "--no-opencode") { options.openCode = false; continue }
+    if (option === "--no-opencode") {
+      options.openCode = false
+      continue
+    }
     if (option === "--opencode-timeout") {
       const value = Number(requireValue(args, index, option))
       if (!Number.isInteger(value) || value < 1000) throw new Error("--opencode-timeout must be at least 1000 (milliseconds)")
@@ -41,9 +44,21 @@ export function parseDaemonOptions(args, environment = process.env, detect = res
       index += 1
       continue
     }
-    if (option === "--opencode-command") { options.openCodeCommand = requireValue(args, index, option); index += 1; continue }
-    if (option === "--opencode-host") { options.openCodeHost = requireValue(args, index, option); index += 1; continue }
-    if (option === "--opencode-port") { options.openCodePort = parsePort(requireValue(args, index, option), option); index += 1; continue }
+    if (option === "--opencode-command") {
+      options.openCodeCommand = requireValue(args, index, option)
+      index += 1
+      continue
+    }
+    if (option === "--opencode-host") {
+      options.openCodeHost = requireValue(args, index, option)
+      index += 1
+      continue
+    }
+    if (option === "--opencode-port") {
+      options.openCodePort = parsePort(requireValue(args, index, option), option)
+      index += 1
+      continue
+    }
     bridgeArgs.push(option)
     if (["--backend", "--host", "--port", "--username", "--password", "--acp-command", "--acp-arg", "--root", "--cors", "--state-dir"].includes(option)) {
       bridgeArgs.push(requireValue(args, index, option))
@@ -51,8 +66,15 @@ export function parseDaemonOptions(args, environment = process.env, detect = res
     }
   }
 
+  // `parseConfig` defaults the backend to `omp` for the standalone bridge, where one server is one
+  // harness and the user names it. A daemon is started once per machine and is expected to work out
+  // what that machine has: without this, a phone with PI and OpenCode installed announced `omp` as
+  // its primary agent and then failed with `spawn omp ENOENT`. Resolve from PATH the way the
+  // launcher already does — it owns the ACP preference order — and let its message explain a
+  // machine with nothing installed rather than starting up and failing later.
   const named = bridgeArgs.includes("--backend") || environment.HARNESS_REMOTE_BACKEND || environment.OMP_BRIDGE_BACKEND
   if (!named) bridgeArgs.push("--backend", detect(args).backend)
+
   return { config: parseConfig(bridgeArgs, environment), ...options }
 }
 
@@ -65,37 +87,44 @@ export async function ensureOpenCodePortAvailable({ port, host, canListenImpl = 
   throw new Error(`OpenCode port ${port} is already in use on ${host}. Is OpenCode already running? Use --opencode-port to choose another.`)
 }
 
-function acpClientFor(config, profile) {
-  return new AcpClient({
-    command: config.acpCommand,
-    args: config.acpArgs,
-    permissionMode: profile.permissionMode,
-    preferredAuthMethod: profile.authMethod
-  })
-}
-
 async function main() {
   let parsed
-  try { parsed = parseDaemonOptions(process.argv.slice(2)) }
-  catch (error) {
+  try {
+    parsed = parseDaemonOptions(process.argv.slice(2))
+  } catch (error) {
     process.stderr.write(`${error.message}\n\n${daemonUsage()}\n`)
     process.exitCode = 1
     return
   }
 
   const { config, openCode, openCodeCommand, openCodeHost, openCodePort, openCodeTimeout } = parsed
-  if (config.help) { process.stdout.write(`${daemonUsage()}\n`); return }
-  if (openCode && openCodePort === config.port) throw new Error(`OpenCode port ${openCodePort} conflicts with the Harness daemon port`)
+  if (config.help) {
+    process.stdout.write(`${daemonUsage()}\n`)
+    return
+  }
+
+  if (openCode && openCodePort === config.port) {
+    throw new Error(`OpenCode port ${openCodePort} conflicts with the Harness daemon port`)
+  }
   if (openCode) await ensureOpenCodePortAvailable({ port: openCodePort, host: openCodeHost })
 
   const identity = await loadMachineIdentity(config.stateDirectory)
   const daemon = new MachineDaemon(identity)
   const profile = harnessProfile(config.backend)
-  const acp = acpClientFor(config, profile)
-
-  // Catalog discovery owns a separate ACP connection and one durable prompt-less session. That
-  // prevents New Task model refresh from interfering with the user-facing bridge/session history.
-  const modelAcp = acpClientFor(config, profile)
+  const acp = new AcpClient({
+    command: config.acpCommand,
+    args: config.acpArgs,
+    permissionMode: profile.permissionMode,
+    preferredAuthMethod: profile.authMethod
+  })
+  // Model discovery owns a separate ACP connection and one durable prompt-less session. That keeps
+  // New Task catalog refreshes from interfering with user-facing ACP session history.
+  const modelAcp = new AcpClient({
+    command: config.acpCommand,
+    args: config.acpArgs,
+    permissionMode: profile.permissionMode,
+    preferredAuthMethod: profile.authMethod
+  })
   const primaryModelCatalog = new AcpAgentModelCatalog({
     agent: modelAcp,
     agentID: profile.id,
@@ -152,8 +181,12 @@ async function main() {
     process.stdout.write(`Harness daemon listening on http://${config.host}:${config.port}\n`)
     process.stdout.write(`Machine: ${identity.name} (${identity.id})\n`)
     if (openCode) process.stdout.write(`Managed OpenCode: http://${openCodeHost}:${openCodePort} (internal — reach it through the daemon port)\n`)
+    // Which adapter an ACP agent is about to run is the single most useful line when it fails to
+    // start: it separates "the adapter you installed is broken" from "we tried to fetch one".
     process.stdout.write(`Primary agent: ${config.backend} (adapter: ${[config.acpCommand, ...config.acpArgs].join(" ")})\n`)
-    for (const host of daemon.snapshot().agents) process.stdout.write(`${host.state === "available" ? "✓" : "•"} ${host.label} [${host.transport}] ${host.state}\n`)
+    for (const host of daemon.snapshot().agents) {
+      process.stdout.write(`${host.state === "available" ? "✓" : "•"} ${host.label} [${host.transport}] ${host.state}\n`)
+    }
   })
 
   const managedResults = await daemon.startManagedHosts()
