@@ -50,9 +50,13 @@ assert.deepEqual(
 )
 assert.deepEqual(selectableMachineAgents({ machine: { id: 'm', name: 'm' }, agents: undefined }), [])
 
-const client = readFileSync(new URL('./machineClient.ts', import.meta.url), 'utf8')
-assert.equal(/fallback\w*Snapshot|synthetic/i.test(client), false)
-assert.ok(client.includes('if (failure !== undefined) throw failure'))
-assert.ok(client.includes('response.status === 401'))
+const taskClient = readFileSync(new URL('./taskMachineClient.ts', import.meta.url), 'utf8')
+assert.equal(/fallback\w*Snapshot|synthetic/i.test(taskClient), false)
+assert.ok(taskClient.includes('if (failure !== undefined) throw failure'))
+assert.ok(taskClient.includes('response.status === 401'))
+
+const legacyClient = readFileSync(new URL('./machineClient.ts', import.meta.url), 'utf8')
+assert.equal(legacyClient.includes('machineCandidates('), false, 'legacy discovery must not probe TaskDesk candidates')
+assert.equal(legacyClient.includes('parseMachineSnapshot('), false, 'legacy discovery keeps archive payload semantics')
 
 console.log('machine payload tests passed')
