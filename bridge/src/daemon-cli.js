@@ -131,6 +131,9 @@ async function main() {
     directory: config.roots?.[0] ?? process.cwd(),
     stateDirectory: config.stateDirectory
   })
+  // Load the persisted catalog session id before the HTTP server starts so a daemon restart never
+  // briefly exposes the prompt-less technical session in the public session list.
+  await primaryModelCatalog.preloadState()
 
   daemon.registerAcpHost({
     id: profile.id,
