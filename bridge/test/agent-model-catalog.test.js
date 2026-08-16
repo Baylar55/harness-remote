@@ -67,6 +67,25 @@ test("ACP model discovery reuses persisted catalog session after daemon restart"
   }
 })
 
+test("persisted ACP catalog session is hidden immediately after daemon restart", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-catalog-preload-"))
+  try {
+    const first = new AcpAgentModelCatalog({ agent: new FakeAcp(), agentID: "codex", directory: "/repo", stateDirectory })
+    await first.list({ allowStale: false })
+
+    const restartedAgent = new FakeAcp()
+    const restarted = new AcpAgentModelCatalog({ agent: restartedAgent, agentID: "codex", directory: "/repo", stateDirectory })
+    await restarted.preloadState()
+
+    assert.equal(restarted.hiddenSessionIDs.has("catalog-session"), true)
+    assert.equal(restartedAgent.starts, 0, "preload must not start the ACP adapter")
+    assert.equal(restartedAgent.loadCalls, 0, "preload must not load or probe the session")
+    assert.equal(restartedAgent.newCalls, 0, "preload must not create a new session")
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
 test("HTTP model discovery refreshes managed harness each time", async () => {
   let calls = 0
   let models = { one: { id: "one", name: "One" } }
