@@ -4,12 +4,15 @@ import { Capacitor } from "@capacitor/core"
 import App from "./App"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { SERVER_STORAGE_KEYS } from "./storageKeys"
+import { TaskDeskTestPage } from "./TaskDeskTestPage"
 import "./styles.css"
+
+const taskDeskTestMode = new URLSearchParams(window.location.search).get("taskdesk-test") === "1"
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary resetKeys={SERVER_STORAGE_KEYS}>
-      <App />
+      {taskDeskTestMode ? <TaskDeskTestPage /> : <App />}
     </ErrorBoundary>
   </React.StrictMode>
 )
