@@ -2,17 +2,27 @@
 
 > Target branch: `integration/nitsuga-taskdesk`
 >
-> Purpose: validate TaskDesk/Harness 3 behavior locally on a PC that has the real harness CLIs installed, before Android/network variables are introduced.
+> Purpose: validate TaskDesk/Harness 3 locally against real harness CLIs before Android/network variables are introduced.
 
-## Why test in the browser first
+## Important: New Task is still hidden in the normal app
 
-The first gate should isolate the product logic:
+The archived TaskDesk experiment never merged the final task-first UI, and upstream PR #172 ended with the feature intentionally disabled after the problematic test period.
+
+This integration branch therefore **does not re-enable New Task in the normal Harness Remote UI**. Real TaskDesk testing uses an explicit browser-only integration surface:
 
 ```text
-local browser → TaskDesk web client → local Harness runtime → real harness CLI
+http://localhost:5173/?taskdesk-test=1
 ```
 
-Only after that works should the same runtime be tested from Android over the LAN. This separates client/backend bugs from Capacitor, Wi-Fi, firewall and packaging problems.
+Without that query parameter, the normal application opens.
+
+## Why browser first
+
+```text
+local browser → TaskDesk test page → local machine daemon → real harness CLI
+```
+
+Only after this works should the same runtime be tested from Android. This isolates TaskDesk/daemon/harness failures from Capacitor, Wi-Fi, firewall and packaging problems.
 
 ## Checkout
 
@@ -20,11 +30,6 @@ Only after that works should the same runtime be tested from Android over the LA
 git clone https://github.com/giuliastro/harness-remote.git
 cd harness-remote
 git checkout integration/nitsuga-taskdesk
-```
-
-Install dependencies:
-
-```bash
 npm install
 cd web
 npm install
@@ -33,36 +38,42 @@ cd ..
 
 Use Node.js 20 or newer.
 
-## Terminal A — start Harness runtime
+## Terminal A — start the machine daemon
 
-### Preferred first pass: one harness at a time
+TaskDesk project/task/model endpoints live on the **machine daemon**, not on the legacy single-backend server. Do not use `--single` for the TaskDesk test page.
 
-Start with OpenCode:
+On a machine with several supported harnesses installed, the simplest start is:
+
+```bash
+npm start
+```
+
+The launcher detects the installed CLIs, chooses an ACP primary, and includes managed OpenCode when available. Record the daemon address, username and password printed in the terminal. The daemon normally uses port 4097; managed OpenCode normally stays internal on loopback port 4096.
+
+To deliberately choose the ACP primary while testing:
+
+```bash
+npm start -- --backend codex
+npm start -- --backend claude
+npm start -- --backend omp
+npm start -- --backend pi
+```
+
+Run one daemon process at a time.
+
+### Separate legacy/single-backend sanity checks
+
+The old single-backend paths can still be checked independently, but they are **not** the TaskDesk test surface:
 
 ```bash
 npm start -- --backend opencode --single
-```
-
-Then repeat independently for ACP-backed harnesses available on the machine:
-
-```bash
 npm start -- --backend codex --single
 npm start -- --backend claude --single
 npm start -- --backend omp --single
 npm start -- --backend pi --single
 ```
 
-Use only one command/process at a time. Record the address, port, username and password printed by the launcher.
-
-### Multi-harness pass
-
-After the single-backend flows are understood:
-
-```bash
-npm start
-```
-
-When multiple supported CLIs are installed, the launcher can use the machine-daemon path and expose the detected harnesses through one connection.
+Use these only to distinguish a general harness/bridge regression from a machine-daemon/TaskDesk regression.
 
 ## Terminal B — start the web client
 
@@ -71,116 +82,140 @@ cd web
 npm run dev
 ```
 
-Open the Vite URL printed in the terminal, normally `http://localhost:5173`.
+Open the normal Vite URL first, normally:
 
-Configure the server using the local runtime address printed by Terminal A. When both browser and runtime are on the same PC, prefer `localhost`/`127.0.0.1` for the diagnostic pass.
+```text
+http://localhost:5173/
+```
+
+Configure/save the server profile pointing to the machine daemon from Terminal A. For a same-PC diagnostic pass, prefer `localhost`/`127.0.0.1`.
+
+Then open:
+
+```text
+http://localhost:5173/?taskdesk-test=1
+```
+
+The TaskDesk test page uses the already-saved active profile and opens the isolated Task launch dialog directly.
 
 ## Browser diagnostics
 
-Keep DevTools open during all TaskDesk tests:
+Keep DevTools open:
 
 - **Console**: JavaScript/runtime errors.
-- **Network**: request URL, duration, status, duplicate requests, pending requests and timeouts.
-- Preserve the Network log when reproducing a first-attempt/second-attempt difference.
+- **Network**: URL, duration, status, duplicate requests, pending requests and timeouts.
+- Enable Preserve log when comparing first and second attempts.
 
 For every failure record:
 
-1. harness/backend;
-2. exact action performed;
+1. ACP primary and target agent;
+2. exact action;
 3. visible UI result;
-4. relevant request path/status/duration;
-5. Console error, if any;
+4. request path/status/duration;
+5. Console error;
 6. whether retrying without restarting changes the result.
 
 ## Mandatory rollback-regression matrix
 
-Run these against each backend where the feature is supported.
+### A. Machine discovery / endpoint correctness
 
-### A. New Task model discovery
+From the normal app save/connect the daemon profile, then open `?taskdesk-test=1`.
 
-1. Start from a fresh page load.
-2. Open New Task.
-3. Select project/directory/worktree input as appropriate.
-4. Observe time until model list becomes usable.
-5. Record every model request in Network.
+**Pass:** TaskDesk reaches the machine daemon and does not confuse a direct OpenCode endpoint (typically 4096) with the daemon endpoint (typically 4097).
 
-**Pass:** list arrives promptly, once for the intended context, with no stale/error state.
+### B. New Task model discovery
 
-### B. First attempt vs second attempt
+1. Fresh page load of `?taskdesk-test=1`.
+2. Observe project and model discovery.
+3. In Network inspect `/v1/projects` and `/v1/agents/<agent>/models`.
+4. Record time until the model selector is usable.
 
-1. From a fresh runtime + page load, open New Task once.
-2. Close/cancel without restarting anything.
-3. Open New Task again with the same target.
+**Pass:** catalog arrives promptly for the intended machine/agent, with no unrelated session requirement and no stale/error state.
 
-**Pass:** first and second attempt have equivalent behavior. A first failure followed by an unexplained second success is a failure.
+### C. First attempt vs second attempt
 
-### C. Context isolation
+1. Start from fresh daemon + page load.
+2. Open the test page once and record model behavior.
+3. Close the dialog/reopen New Task from the test page without restarting anything.
 
-Rapidly switch between two sessions/directories and return.
+**Pass:** first and second attempts behave equivalently. “Fails first, works second” is a failure.
 
-**Pass:** model/agent lists always belong to the visible session/directory. A late response from the previous destination must never replace the current picker.
+### D. Model refresh semantics
 
-### D. Create/start visibility
+Open New Task repeatedly and inspect the model requests.
 
-Create/start a TaskDesk task/run.
+**ACP pass:** discovery reuses its durable prompt-less catalog session rather than creating an ever-growing pile of user-visible probe sessions.
 
-**Pass:** the resulting task/session appears quickly enough to feel synchronous; no long unexplained gap before it appears in the list.
+**OpenCode pass:** managed HTTP catalog is refreshed and belongs to the OpenCode agent.
 
-Record create request completion time and first list-refresh where the new id appears.
+### E. Create + worktree + launch
 
-### E. Open newly created task
+Choose a project, model and prompt and start the task.
 
-Immediately open the created task/session.
+Record timing for:
 
-**Pass:** transcript loads and model/agent picker is populated for that exact session and directory. No persistent yellow/error picker after the rest of the session is healthy.
+```text
+POST /v1/tasks
+POST /v1/tasks/<id>/worktree     (Git + isolation enabled)
+POST /v1/tasks/<id>/launch
+```
 
-### F. Second task state leakage
+**Pass:** selected model is stored on the task, freshly validated before launch, and the task enters its run lifecycle without a long unexplained pause.
 
-Without restarting the app, create a second task in a different directory/model when possible.
+### F. Model removed between picker and launch
 
-**Pass:** no model, agent, directory, selected session or loading state leaks from task 1 into task 2.
+Where practical, change/disable the selected model after the picker loaded but before launch, or reproduce with a controlled harness configuration.
 
-### G. Restart behavior
+**Pass:** launch fails clearly rather than silently falling back to a different model.
 
-Restart only the browser page, then restart the runtime separately.
+### G. Second task state leakage
 
-**Pass:** startup performs only necessary discovery and reaches a consistent state; no repeated expensive model/backend discovery loop.
+Create a second task with a different project/model when possible.
 
-## Single-backend order
+**Pass:** no project, model, worktree or loading state from task 1 contaminates task 2.
 
-Recommended order:
+### H. Restart behavior
 
-1. OpenCode — exercises the direct OpenCode path and model catalog heavily.
-2. Codex — ACP path.
-3. Claude — ACP path.
-4. OMP — existing compatibility baseline.
-5. PI — existing compatibility baseline.
+Reload only the browser, then separately restart the daemon.
 
-Do not interpret one backend passing as proof that the others are safe.
+**Pass:** ACP catalog state can recover/reuse its durable catalog session; startup does not generate repeated user-facing model-probe sessions or an uncontrolled discovery loop.
 
-## Multi-harness / machine-daemon gate
+## Agent coverage
 
-Only after single-backend testing:
+The machine daemon has one ACP primary plus managed OpenCode. Repeat the daemon run with different ACP primaries where installed:
 
-1. start `npm start` without `--single`;
-2. confirm detected harnesses;
-3. connect one local browser profile to the daemon;
-4. create/open work across at least two harnesses;
-5. alternate quickly between them;
-6. repeat the model/session context-isolation tests.
+1. Codex
+2. Claude
+3. OMP
+4. PI
 
-**Pass:** routing never sends model/session state to the wrong harness or stale machine context.
+For each run also test the managed OpenCode agent if available.
+
+One backend passing is not evidence that the others are safe.
+
+## Normal app compatibility sanity check
+
+After TaskDesk testing, remove the query string and use normal Harness Remote against the same daemon:
+
+```text
+http://localhost:5173/
+```
+
+Open existing sessions, create a normal session and send a prompt on the relevant harnesses.
+
+**Pass:** restoring TaskDesk machine/model infrastructure has not broken legacy session behavior.
 
 ## Android gate
 
-After the browser-local flow is stable, keep the same PC runtime running and connect the debug APK over LAN. Repeat the mandatory regression matrix. Any failure that exists only on Android should then be investigated as a mobile/network/Capacitor-specific problem rather than a TaskDesk core failure.
+Only after browser-local TaskDesk and normal-app sanity checks pass, keep the same PC daemon running and connect the debug APK over LAN. The normal mobile app should remain backward-compatible; TaskDesk should not be promoted into its ordinary UI until the browser workflow is proven.
 
 ## Result recording
 
-Record outcomes in issue #197 using:
+Record outcomes in issue #197:
 
 ```text
-Backend:
+ACP primary:
+Target agent:
 Build/commit:
 Test case:
 PASS / FAIL:
@@ -190,4 +225,4 @@ Console evidence:
 Notes:
 ```
 
-No promotion toward `main` is justified by automated CI alone. The real-harness browser pass and the Android pass are explicit gates.
+No promotion toward `main` is justified by automated CI alone. Real-harness browser testing and later Android testing are explicit gates.
