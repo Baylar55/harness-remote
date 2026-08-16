@@ -62,6 +62,7 @@ jobs:
           npm run test:attachments
           npm run test:agent-runs
           npm run test:mutation-coordinator
+          npm run test:catalog-guard
           npm run test:platform
         working-directory: web
 
