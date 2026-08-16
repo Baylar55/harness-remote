@@ -23,6 +23,7 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
       project: { name: "repo", path: "/work/repo", kind: "git" },
       agentId: "codex",
       prompt: "Fix issue #145",
+      model: null,
       status: "draft",
       workspace: { mode: "project", path: "/work/repo" },
       run: null,
