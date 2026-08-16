@@ -7,7 +7,6 @@ function withTimeout(promise, timeoutMs, label) {
   let timer
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
-    timer.unref?.()
   })
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
