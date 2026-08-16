@@ -1,6 +1,17 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
+export const MODEL_CATALOG_TIMEOUT_MS = 8_000
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+    timer.unref?.()
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 function splitModelValue(value, fallbackProviderID) {
   const separator = value.indexOf("/")
   return separator > 0
@@ -98,11 +109,12 @@ class CachedCatalog {
 }
 
 export class AcpAgentModelCatalog extends CachedCatalog {
-  constructor({ agent, agentID, directory, stateDirectory }) {
+  constructor({ agent, agentID, directory, stateDirectory, timeoutMs = MODEL_CATALOG_TIMEOUT_MS }) {
     super()
     this.agent = agent
     this.agentID = agentID
     this.directory = directory
+    this.timeoutMs = timeoutMs
     this.stateFile = path.join(stateDirectory, `model-catalog-${agentID}.json`)
     this.sessionID = undefined
     this.stateLoaded = false
@@ -129,7 +141,7 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   }
 
   async #newCatalogSession() {
-    const created = await this.agent.request("session/new", { cwd: this.directory, mcpServers: [] })
+    const created = await this.agent.request("session/new", { cwd: this.directory, mcpServers: [] }, this.timeoutMs)
     if (!created?.sessionId) throw new Error(`Agent ${this.agentID} did not return a catalog session id`)
     this.sessionID = created.sessionId
     this.hiddenSessionIDs.add(created.sessionId)
@@ -142,7 +154,7 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     await this.#loadState()
     if (this.sessionID) {
       try {
-        const loaded = await this.agent.request("session/load", { sessionId: this.sessionID, cwd: this.directory, mcpServers: [] }, 90_000)
+        const loaded = await this.agent.request("session/load", { sessionId: this.sessionID, cwd: this.directory, mcpServers: [] }, this.timeoutMs)
         return loaded?.configOptions
       } catch {
         this.hiddenSessionIDs.delete(this.sessionID)
@@ -154,7 +166,8 @@ export class AcpAgentModelCatalog extends CachedCatalog {
 
   async list({ allowStale = true } = {}) {
     try {
-      const models = modelsFromConfigOptions(await this.#refreshOptions(), this.agentID)
+      const options = await withTimeout(this.#refreshOptions(), this.timeoutMs, `${this.agentID} model catalog`)
+      const models = modelsFromConfigOptions(options, this.agentID)
       if (!models.length) throw new Error(`Agent ${this.agentID} did not advertise any models`)
       return this.remember(models)
     } catch (error) {
@@ -168,11 +181,12 @@ export class AcpAgentModelCatalog extends CachedCatalog {
 }
 
 export class HttpAgentModelCatalog extends CachedCatalog {
-  constructor({ host, agentID, fetchImpl = fetch }) {
+  constructor({ host, agentID, fetchImpl = fetch, timeoutMs = MODEL_CATALOG_TIMEOUT_MS }) {
     super()
     this.host = host
     this.agentID = agentID
     this.fetchImpl = fetchImpl
+    this.timeoutMs = timeoutMs
     this.hiddenSessionIDs = new Set()
   }
 
@@ -191,8 +205,9 @@ export class HttpAgentModelCatalog extends CachedCatalog {
   }
 
   async list({ allowStale = true } = {}) {
-    try { return this.remember(await this.#refresh()) }
-    catch (error) {
+    try {
+      return this.remember(await withTimeout(this.#refresh(), this.timeoutMs, `${this.agentID} model catalog`))
+    } catch (error) {
       if (allowStale) return this.stale(error)
       throw error
     }
