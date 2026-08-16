@@ -37,6 +37,7 @@
     "test:agent-runs": "node --experimental-strip-types src/agent-runs.test.mjs",
     "test:mutation-coordinator": "node --experimental-strip-types src/session-mutation-coordinator.test.mjs",
     "test:catalog-guard": "node --experimental-strip-types src/catalog-request-guard.test.mjs",
+    "test:machine-payload": "node --experimental-strip-types src/machine-payload.test.mjs",
     "test:platform": "node src/platform-regression.test.mjs",
     "test:desktop": "npm run build:electron && node --test electron/*.test.mjs",
     "test:desktop:menu": "npm run build:electron && electron scripts/menu-smoke.mjs"
@@ -75,7 +76,7 @@
         },
         {
           "target": "zip",
-          "arch": ["arm64", "x64"]
+          "arch": ["x64"]
         }
       ],
       "icon": "public/app-icon.png",
