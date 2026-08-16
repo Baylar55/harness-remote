@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { CloseIcon, FolderIcon, LoadingIcon, PlayIcon, ServerIcon } from "../Icons"
+import { createCatalogRequestGuard } from "../catalog-request-guard"
 import { discoverMachineConnection, selectableMachineAgents } from "../machineClient"
 import { loadActiveServerProfile, loadServerProfiles } from "../serverProfiles"
 import { taskClient, type MachineProject } from "../taskClient"
@@ -18,13 +19,13 @@ const TASK_FALLBACKS: Record<string, string> = {
   "task.agent": "Agent",
   "task.machine": "Machine",
   "task.loading": "Loading machine projects and agents…",
+  "task.modelLoading": "Loading models…",
   "task.promptPlaceholder": "Describe the work the agent should complete…",
   "task.isolatedWorktree": "Use a new isolated Git worktree",
   "task.nonGit": "This project is not a Git repository, so the task will run in the project directory.",
-  "task.activeAgent": "This test stays on the active agent profile so the launched session remains in the current workflow.",
   "task.requiresDaemon": "Task launch requires the Harness machine daemon.",
   "task.noProjects": "This machine has no known projects. Configure a project root on the daemon before starting a task.",
-  "task.agentUnavailable": "The active agent {agent} is unavailable on this machine."
+  "task.agentUnavailable": "The selected agent is unavailable on this machine."
 }
 
 function taskText(t: Translator, key: string, params: Record<string, string | number> = {}): string {
@@ -34,11 +35,11 @@ function taskText(t: Translator, key: string, params: Record<string, string | nu
   return Object.entries(params).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), template)
 }
 
-function activeProfileAgent(machine: MachineSnapshot | null, config: ServerConfig) {
-  if (!machine) return undefined
-  return selectableMachineAgents(machine).find((agent) => (
-    config.agentId ? agent.id === config.agentId : agent.backend === config.backend
-  ))
+function preferredAgentID(machine: MachineSnapshot, config: ServerConfig): string {
+  const agents = selectableMachineAgents(machine)
+  return agents.find((agent) => config.agentId ? agent.id === config.agentId : agent.backend === config.backend)?.id
+    ?? agents[0]?.id
+    ?? ""
 }
 
 /**
@@ -46,9 +47,13 @@ function activeProfileAgent(machine: MachineSnapshot | null, config: ServerConfi
  * App.tsx. It resolves the machine daemon independently from the saved session endpoint and fetches
  * models at machine/agent level, so a new task does not depend on an existing session catalog.
  *
- * The archived i18n table predates the unmerged #172 TaskDesk labels. This integration-only surface
- * therefore carries English fallbacks locally instead of rewriting the global translation file; full
- * localized strings can be restored separately if/when New Task is intentionally exposed normally.
+ * This integration-only surface intentionally allows switching among the agents exposed by the
+ * machine daemon. Model refreshes use the dedicated read-side request guard so a slow response from
+ * the previously selected agent can never replace the current agent's catalog.
+ *
+ * The archived i18n table predates the unmerged #172 TaskDesk labels. English fallbacks live here
+ * rather than rewriting the global translation file; localized strings can be restored separately
+ * if/when New Task is intentionally exposed in the normal application.
  */
 export function TaskLaunchDialog({ t, onClose, onLaunched }: {
   t: Translator
@@ -57,24 +62,28 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
 }) {
   const profile = useMemo(() => loadActiveServerProfile(loadServerProfiles()), [])
   const config: ServerConfig = profile.config
+  const modelGuardRef = useRef(createCatalogRequestGuard())
   const [taskConfig, setTaskConfig] = useState<ServerConfig | null>(null)
   const [machine, setMachine] = useState<MachineSnapshot | null>(null)
   const [projects, setProjects] = useState<MachineProject[]>([])
   const [projectId, setProjectId] = useState("")
+  const [selectedAgentId, setSelectedAgentId] = useState("")
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelIndex, setModelIndex] = useState(-1)
+  const [modelLoading, setModelLoading] = useState(false)
   const [modelStale, setModelStale] = useState(false)
   const [modelNotice, setModelNotice] = useState<string | null>(null)
+  const [modelError, setModelError] = useState<string | null>(null)
   const [prompt, setPrompt] = useState("")
   const [isolated, setIsolated] = useState(true)
   const [loading, setLoading] = useState(true)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const agents = useMemo(() => machine ? selectableMachineAgents(machine) : [], [machine])
   const selectedProject = projects.find((project) => project.id === projectId)
-  const agent = activeProfileAgent(machine, config)
-  const otherAgents = machine ? selectableMachineAgents(machine).length > 1 : false
-  const canStart = Boolean(taskConfig && agent && projectId && prompt.trim()) && !starting
+  const agent = agents.find((candidate) => candidate.id === selectedAgentId)
+  const canStart = Boolean(taskConfig && agent && projectId && prompt.trim() && !modelLoading && !modelError) && !starting
 
   useEffect(() => {
     let cancelled = false
@@ -82,36 +91,69 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
       setLoading(true)
       setError(null)
       setTaskConfig(null)
-      setModelStale(false)
-      setModelNotice(null)
+      setMachine(null)
+      setProjects([])
+      setSelectedAgentId("")
       try {
         const connection = await discoverMachineConnection(config)
         if (!connection) throw new Error(taskText(t, "task.requiresDaemon"))
         const knownProjects = await taskClient.listProjects(connection.config)
         if (cancelled) return
-        const active = activeProfileAgent(connection.machine, config)
-        if (!active) throw new Error(taskText(t, "task.agentUnavailable", { agent: config.agentId ?? config.backend }))
-
-        // New Task owns machine/agent-level model discovery. It must work before any user session
-        // exists, and launch performs the second validation boundary on the daemon.
-        const catalog = await taskClient.listAgentModels(connection.config, active.id)
-        if (cancelled) return
-        setModels(catalog.models)
-        setModelIndex(catalog.models.findIndex((option) => option.isDefault))
-        setModelStale(catalog.stale)
-        setModelNotice(catalog.stale ? (catalog.error ?? "Model catalog could not be refreshed.") : null)
+        const availableAgents = selectableMachineAgents(connection.machine)
+        if (!availableAgents.length) throw new Error(taskText(t, "task.agentUnavailable"))
         setTaskConfig(connection.config)
         setMachine(connection.machine)
         setProjects(knownProjects)
         setProjectId(knownProjects[0]?.id ?? "")
+        setSelectedAgentId(preferredAgentID(connection.machine, config))
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      modelGuardRef.current.invalidate()
+    }
   }, [config, t])
+
+  useEffect(() => {
+    if (!taskConfig || !selectedAgentId) {
+      modelGuardRef.current.invalidate()
+      setModels([])
+      setModelIndex(-1)
+      setModelLoading(false)
+      return
+    }
+
+    const guard = modelGuardRef.current
+    const token = guard.begin({
+      profileID: profile.id,
+      configKey: `${taskConfig.backend}|${taskConfig.host}|${taskConfig.port}|${selectedAgentId}`,
+      sessionID: null,
+      directory: null
+    })
+    setModels([])
+    setModelIndex(-1)
+    setModelLoading(true)
+    setModelStale(false)
+    setModelNotice(null)
+    setModelError(null)
+
+    void taskClient.listAgentModels(taskConfig, selectedAgentId).then((catalog) => {
+      if (!guard.isCurrent(token)) return
+      setModels(catalog.models)
+      setModelIndex(catalog.models.findIndex((option) => option.isDefault))
+      setModelStale(catalog.stale)
+      setModelNotice(catalog.stale ? (catalog.error ?? "Model catalog could not be refreshed.") : null)
+    }).catch((cause) => {
+      if (!guard.isCurrent(token)) return
+      setModelError(cause instanceof Error ? cause.message : String(cause))
+    }).finally(() => {
+      if (guard.isCurrent(token)) setModelLoading(false)
+    })
+  }, [profile.id, selectedAgentId, taskConfig])
 
   async function start() {
     if (!canStart || !taskConfig || !agent) return
@@ -163,12 +205,14 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
                   <span className="eyebrow">{taskText(t, "task.machine")}</span>
                   <strong><ServerIcon size={15} /><span className="truncate">{machineName}</span></strong>
                 </div>
-                <div className="task-context-item">
-                  <span className="eyebrow">{taskText(t, "task.agent")}</span>
-                  <strong><span className="truncate">{agent?.label ?? config.backend}</span></strong>
-                </div>
               </div>
-              {otherAgents && <p className="subtle task-launch-note">{taskText(t, "task.activeAgent")}</p>}
+
+              <label className="field">
+                <span>{taskText(t, "task.agent")}</span>
+                <select value={selectedAgentId} onChange={(event) => setSelectedAgentId(event.target.value)}>
+                  {agents.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label ?? candidate.id}</option>)}
+                </select>
+              </label>
 
               <label className="field">
                 <span>{taskText(t, "task.project")}</span>
@@ -177,20 +221,26 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
                 </select>
               </label>
 
-              {models.length > 0 && (
-                <label className="field">
-                  <span>{taskText(t, "task.model")}</span>
-                  <select value={String(modelIndex)} onChange={(event) => setModelIndex(Number(event.target.value))}>
-                    <option value="-1">{taskText(t, "task.modelDefault")}</option>
-                    {models.map((option, index) => (
-                      <option key={`${option.providerID}/${option.modelID}/${option.variant ?? ""}`} value={String(index)}>
-                        {option.providerName} — {option.modelName}{option.variant ? ` (${option.variant})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  {modelStale && modelNotice && <span className="subtle">{modelNotice}</span>}
-                </label>
-              )}
+              <label className="field">
+                <span>{taskText(t, "task.model")}</span>
+                {modelLoading ? (
+                  <span className="subtle"><LoadingIcon size={14} /> {taskText(t, "task.modelLoading")}</span>
+                ) : modelError ? (
+                  <span className="error">✗ {modelError}</span>
+                ) : (
+                  <>
+                    <select value={String(modelIndex)} onChange={(event) => setModelIndex(Number(event.target.value))}>
+                      <option value="-1">{taskText(t, "task.modelDefault")}</option>
+                      {models.map((option, index) => (
+                        <option key={`${option.providerID}/${option.modelID}/${option.variant ?? ""}`} value={String(index)}>
+                          {option.providerName} — {option.modelName}{option.variant ? ` (${option.variant})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                    {modelStale && modelNotice && <span className="subtle">{modelNotice}</span>}
+                  </>
+                )}
+              </label>
 
               <label className="field">
                 <span>{taskText(t, "task.label")}</span>
