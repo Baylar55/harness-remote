@@ -134,6 +134,11 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     }
   }
 
+  async preloadState() {
+    await this.#loadState()
+    return this.hiddenSessionIDs
+  }
+
   async #saveState() {
     await mkdir(path.dirname(this.stateFile), { recursive: true })
     await writeFile(this.stateFile, JSON.stringify({ version: 1, sessionID: this.sessionID, directory: this.directory }), { mode: 0o600 })
