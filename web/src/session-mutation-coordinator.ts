@@ -45,7 +45,7 @@ export interface MutationLease {
   context: CoordinatorContext
   targetSessionID: string | null
   contextGeneration: number
-  /** True when the result belongs to the selected navigation context and must be discarded after navigation. */
+  /** True when the result belongs to the selected session and must be discarded after navigation. */
   contextBound: boolean
 }
 
@@ -74,6 +74,10 @@ function cloneContext(context: CoordinatorContext): CoordinatorContext {
 
 function sameContext(a: CoordinatorContext, b: CoordinatorContext): boolean {
   return a.profileID === b.profileID && a.configKey === b.configKey && a.sessionID === b.sessionID
+}
+
+function sameServerContext(a: CoordinatorContext, b: CoordinatorContext): boolean {
+  return a.profileID === b.profileID && a.configKey === b.configKey
 }
 
 export function mutationLane(kind: MutationKind): MutationLane {
@@ -124,8 +128,7 @@ export function createSessionMutationCoordinator(
 
     acquireLease(kind: MutationKind, targetSessionID?: string | null) {
       if (context === null) return null
-      const explicitTarget = targetSessionID !== undefined
-      const target = explicitTarget ? targetSessionID! : context.sessionID
+      const target = targetSessionID !== undefined ? targetSessionID : context.sessionID
       if (target === null && kind !== "create") return null
 
       const lane = mutationLane(kind)
@@ -139,9 +142,10 @@ export function createSessionMutationCoordinator(
         context: cloneContext(context),
         targetSessionID: target,
         contextGeneration,
-        // Explicitly targeted operations (for example rename/delete from the session list) remain
-        // valid even if the user navigates elsewhere while the request is in flight.
-        contextBound: !explicitTarget
+        // Whether the target was passed explicitly is irrelevant: work targeting the currently
+        // selected session is navigation-bound; work targeting another session may survive only a
+        // session navigation, never a profile/server change.
+        contextBound: target === context.sessionID
       }
       activeByKey.set(key, lease)
       return lease
@@ -158,11 +162,12 @@ export function createSessionMutationCoordinator(
     isLeaseCurrent,
 
     isLeaseResultCurrent(lease: MutationLease) {
-      if (!isLeaseCurrent(lease)) return false
+      if (!isLeaseCurrent(lease) || context === null) return false
+      // Every result belongs to the server/profile it started against. Targeted metadata work may
+      // survive navigation to another session, but never switching profiles/backends/configs.
+      if (!sameServerContext(context, lease.context)) return false
       if (!lease.contextBound) return true
-      return contextGeneration === lease.contextGeneration
-        && context !== null
-        && sameContext(context, lease.context)
+      return contextGeneration === lease.contextGeneration && sameContext(context, lease.context)
     },
 
     getActiveLeases() {
