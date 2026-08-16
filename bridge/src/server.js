@@ -107,6 +107,13 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   const backend = config.backend ?? "omp"
   const profile = harnessProfile(backend)
   const service = new AcpService(acp, { ...serviceOptions, actionProviders: profile.actionProviders })
+  const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
+  const listVisibleSessions = async (directory) => {
+    const sessions = await service.listSessions(directory)
+    if (!hiddenSessionIDs?.size) return sessions
+    return sessions.filter((session) => !hiddenSessionIDs.has(session.id))
+  }
+
   return http.createServer(async (request, response) => {
     applyCorsHeaders(request, response, config)
     if (request.method === "OPTIONS") {
@@ -159,11 +166,11 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
         return
       }
       if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session" || url.pathname === "/experimental/session")) {
-        writeJSON(response, 200, await service.listSessions(directory))
+        writeJSON(response, 200, await listVisibleSessions(directory))
         return
       }
       if (request.method === "GET" && url.pathname === "/session/status") {
-        const statuses = Object.fromEntries((await service.listSessions(directory)).map((session) => [session.id, service.status(session.id)]))
+        const statuses = Object.fromEntries((await listVisibleSessions(directory)).map((session) => [session.id, service.status(session.id)]))
         writeJSON(response, 200, statuses)
         return
       }
