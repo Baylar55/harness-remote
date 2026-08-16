@@ -48,10 +48,6 @@ export class MachineDaemon {
     await entry.modelCatalog.validate(model)
   }
 
-  hiddenSessionIDs(id) {
-    return this.hostEntry(id)?.modelCatalog?.hiddenSessionIDs ?? new Set()
-  }
-
   async startManagedHosts() {
     const eager = [...this.hosts.values()].filter((entry) => entry.eager)
     const settled = await Promise.allSettled(eager.map((entry) => entry.host.start()))
