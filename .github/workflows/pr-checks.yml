@@ -63,6 +63,7 @@ jobs:
           npm run test:agent-runs
           npm run test:mutation-coordinator
           npm run test:catalog-guard
+          npm run test:machine-payload
           npm run test:platform
         working-directory: web
 
@@ -189,7 +190,7 @@ jobs:
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: harness-remote-debug-v${{ steps.version.outputs.app_version }}-${{ steps.build.outputs.sha }}
+          name: harness-remote-debug-v${{ steps.version.outputs.app_version }}-${{ steps.build.sha }}
           path: web/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
