@@ -5,9 +5,9 @@ import {
   mutationLane
 } from './session-mutation-coordinator.ts'
 
-const ctx = (sessionID = 'session-1') => ({
-  profileID: 'profile-1',
-  configKey: 'backend-a',
+const ctx = (sessionID = 'session-1', profileID = 'profile-1', configKey = 'backend-a') => ({
+  profileID,
+  configKey,
   sessionID
 })
 
@@ -59,10 +59,31 @@ assert.equal(mutationLane('create'), 'create')
   coordinator.replaceContext(ctx('session-2'))
   assert.equal(coordinator.isLeaseCurrent(prompt), true, 'navigation does not steal physical ownership')
   assert.equal(coordinator.isLeaseResultCurrent(prompt), false, 'old selected-session result must be stale')
-  assert.equal(coordinator.isLeaseResultCurrent(rename), true, 'targeted rename remains legitimate after navigation')
+  assert.equal(coordinator.isLeaseResultCurrent(rename), true, 'targeted rename remains legitimate after navigation on the same server')
 
   assert.equal(coordinator.releaseLease(prompt), true)
   assert.equal(coordinator.releaseLease(rename), true)
+}
+
+{
+  const coordinator = createSessionMutationCoordinator(ctx('session-1'))
+  const explicitCurrent = coordinator.acquireLease('prompt', 'session-1')
+  assert.ok(explicitCurrent)
+  assert.equal(explicitCurrent.contextBound, true, 'explicitly naming the selected session must still bind the result to navigation context')
+  coordinator.replaceContext(ctx('session-2'))
+  assert.equal(coordinator.isLeaseResultCurrent(explicitCurrent), false, 'explicit current-session work must not publish into a different selected session')
+  assert.equal(coordinator.releaseLease(explicitCurrent), true)
+}
+
+{
+  const coordinator = createSessionMutationCoordinator(ctx('session-1'))
+  const targeted = coordinator.acquireLease('rename', 'session-9')
+  assert.ok(targeted)
+  assert.equal(targeted.contextBound, false)
+
+  coordinator.replaceContext(ctx('session-2', 'profile-2', 'backend-b'))
+  assert.equal(coordinator.isLeaseResultCurrent(targeted), false, 'targeted work must be stale after switching server/profile')
+  assert.equal(coordinator.releaseLease(targeted), true)
 }
 
 {
