@@ -19,10 +19,21 @@ The objective is not to merge the fork wholesale. The objective is to recover va
 - Do not modify or merge into `main` during evaluation.
 - Keep `archive/harness-3-2026-08-15` unchanged as the recovery baseline.
 - Use `integration/nitsuga-taskdesk` for all integration work.
-- Preserve contributor authorship/history wherever practical.
+- Preserve contributor provenance wherever practical.
 - Integrate by functional blocks, not by merging `nitsuga:main` wholesale.
 - Run tests after every block.
 - Treat real end-to-end behavior as the promotion gate, not only unit tests.
+
+## Architecture rule: keep decomposing the client
+
+The archived TaskDesk line already moved substantial UI/runtime code out of `App.tsx` into modules such as `components/panels.tsx`, `components/session-composer.tsx`, `components/session-list.tsx`, `components/shell.tsx`, backend capability/client/setup modules, event handling, desktop bridge, agent-run helpers and storage helpers.
+
+That direction is mandatory for the integration line. `App.tsx` is still large, so new stabilization logic should not be pasted back into it when it can live in a pure module or focused hook/controller. In particular:
+
+- concurrency primitives stay outside React;
+- model/agent catalog loading should move toward a dedicated state/loading helper rather than growing `App.tsx`;
+- task-first workflow state should be implemented in dedicated TaskDesk modules/components;
+- OpenCode 2-specific behavior must not leak into generic client-state primitives.
 
 ## Repository relationship
 
@@ -30,19 +41,7 @@ The fork continued from the Harness 3 line before the upstream rollback.
 
 Compared with `archive/harness-3-2026-08-15`, `nitsuga:main` is currently 94 commits ahead and 2 commits behind. The two upstream-only commits are archive/documentation changes, so the code comparison is effectively a continuation of the same product line.
 
-The fork has advanced:
-
-- OpenCode 2 support;
-- model/agent loading safeguards;
-- session mutation coordination;
-- richer session activity states;
-- background subagent visibility;
-- structured message/tool rendering;
-- cross-session attention inbox;
-- queued prompt controls;
-- skills;
-- compact/fork;
-- todo reconstruction.
+The fork has advanced OpenCode 2 support, model/agent loading safeguards, session mutation coordination, richer session activity states, background subagent visibility, structured message/tool rendering, a cross-session attention inbox, queued prompt controls, skills, compact/fork and todo reconstruction.
 
 However, the fork's own Harness 3 roadmap still marks the task-first client UX as open. The task/worktree backend foundations exist, but the full TaskDesk client workflow is not complete.
 
@@ -50,20 +49,7 @@ However, the fork's own Harness 3 roadmap still marks the task-first client UX a
 
 ### 1.1 Inventory
 
-Classify the fork's 94 commits/PRs into:
-
-- client-state/race fixes;
-- session creation/refresh/reconciliation;
-- model/agent loading;
-- session mutation coordination;
-- OpenCode 2 base support;
-- supervision state;
-- background agents/subagents;
-- attention inbox;
-- queued prompts;
-- task/worktree UX;
-- docs/tests/maintenance;
-- unrelated or undesirable changes.
+Classify the fork's 94 commits/PRs into client-state/race fixes, session creation/refresh/reconciliation, model/agent loading, session mutation coordination, OpenCode 2 base support, supervision state, background agents/subagents, attention inbox, queued prompts, task/worktree UX, docs/tests/maintenance, and unrelated/undesirable changes.
 
 For each block record a decision: **Keep / Adapt / Drop / Defer**.
 
@@ -79,16 +65,25 @@ These are mandatory retest cases:
 6. Task creation and normal session creation must have clearly distinct UX and semantics.
 7. No unnecessary backend/model discovery should run on every app start.
 
-### 1.3 First stabilization candidates
+### 1.3 Coordinator review decisions
 
-Prioritize fork changes that improve:
+The first imported coordinator was useful as a reference but its original global-lock semantics were not suitable for TaskDesk. Before any React wiring, the integration version is adapted as follows:
 
-- stale model/agent response rejection;
-- explicit destination scoping (`sessionID`, `directory`);
-- invalidation of older model/agent loaders after manual changes;
-- session refresh/reconciliation;
-- mutation locking/coordinator behavior;
-- session creation/open race handling.
+- **No global mutation lock.** Locks are scoped by target session and lane.
+- **Run lane:** prompt/command/skill/history/compact/fork serialize for the same session.
+- **Control lane:** abort/question/permission/inbox can remain available while run work is active.
+- **Metadata lane:** rename/delete serialize only for the same target session, so another session can still be managed.
+- **Create lane:** session creation is isolated from existing-session run work.
+- **Model and agent catalogs are reads, not mutations.** They do not acquire leases. They use request-id plus profile/config/session/directory generation validation.
+- **Explicit recovery:** the coordinator exposes `reset()` for lifecycle teardown or recovery from an async owner that will never release.
+- **Persistent instance:** React integration must keep one coordinator instance in `useRef`; it must not be recreated on dependency changes.
+- **Targeted operations survive navigation:** an explicit rename/delete on another session is not invalidated merely because the user changes the selected session.
+- **Context values are copied:** callers cannot mutate coordinator-owned context through object aliasing.
+- The OpenCode 2 fork-specific generation mechanism is deferred until Compact/Fork is integrated and justified by that feature's real requirements.
+
+### 1.4 First stabilization candidates
+
+Prioritize fork changes that improve stale model/agent response rejection, explicit destination scoping (`sessionID`, `directory`), invalidation of older model/agent loaders after manual changes, session refresh/reconciliation, session creation/open race handling, and safe mutation coordination.
 
 Do not require OpenCode 2 integration merely to obtain generic stability fixes unless the dependency is unavoidable.
 
@@ -96,12 +91,24 @@ Do not require OpenCode 2 integration merely to obtain generic stability fixes u
 
 Port only the minimum coherent subset needed for baseline stability.
 
+The first runtime wiring target is **model/agent catalog correctness**, but it should be implemented as a focused helper/module where practical rather than adding another large state machine directly to `App.tsx`.
+
+Required semantics:
+
+- a loader captures profile, config/backend, target session and directory;
+- only the latest request for that logical catalog may publish results;
+- navigation/profile/backend changes invalidate stale results;
+- manual model/agent changes invalidate older loaders where necessary;
+- session creation reloads catalogs against the newly created session/directory explicitly;
+- a concurrent mutation must never cause a catalog read to be silently skipped.
+
 After each block:
 
 - run web regression suites;
 - run TypeScript type-check/build;
 - run bridge tests if affected;
 - inspect the diff for accidental OpenCode 2 coupling;
+- inspect whether `App.tsx` grew unnecessarily;
 - record the result in issue #197.
 
 ### Phase 2 gate
@@ -114,32 +121,17 @@ Before feature work proceeds:
 
 ## Phase 3 — Supervision layer
 
-Evaluate as separate integration blocks:
-
-1. richer session activity and attention states;
-2. structured message/tool rendering;
-3. background subagents and delegated tasks;
-4. cross-session attention inbox;
-5. queued-prompt visibility and controls.
+Evaluate as separate integration blocks: richer session activity/attention states, structured message/tool rendering, background subagents, cross-session attention inbox, and queued-prompt visibility/controls.
 
 For each block decide whether the implementation is backend-neutral enough for TaskDesk or should remain OpenCode 2-specific.
 
 ## Phase 4 — OpenCode 2
 
-Only after baseline stability is acceptable, evaluate:
-
-- OpenCode 2 base client;
-- `/api/health`, `/api/location`, `/api/project/current` bare-response fix;
-- skills;
-- compact/fork;
-- todo reconstruction;
-- other roadmap items that support the product direction.
+Only after baseline stability is acceptable, evaluate the OpenCode 2 base client, bare-response fixes, skills, compact/fork, todo reconstruction, and other roadmap items that support the product direction.
 
 OpenCode 2 should remain a parallel backend until there is evidence that replacing the existing OpenCode path is safe and desirable.
 
 ## Phase 5 — Finish TaskDesk client UX
-
-This remains product work even after adopting useful fork changes.
 
 Target flow:
 
@@ -153,18 +145,7 @@ project
   → finish safely
 ```
 
-Required client behaviors:
-
-- project selection;
-- task entry;
-- explicit agent selection;
-- worktree preparation/start;
-- immediate run/session visibility;
-- correct model/agent context;
-- result inspection;
-- cleanup/failure recovery;
-- finish semantics;
-- clear distinction between tasks and ordinary sessions.
+Required client behaviors include project selection, task entry, explicit agent selection, worktree preparation/start, immediate run/session visibility, correct model/agent context, result inspection, cleanup/failure recovery, finish semantics, and a clear distinction between tasks and ordinary sessions.
 
 ## Validation matrix
 
@@ -203,26 +184,10 @@ Where changes affect ACP-backed behavior, test at least one real harness end to 
 
 ## Promotion criteria
 
-No proposal to replace stable `main` until all are true:
-
-- all required automated tests pass;
-- Android debug APK has passed the manual flow;
-- known rollback regressions are explicitly marked pass/fail with evidence;
-- no unresolved high-severity integration bug remains;
-- backward compatibility has been reviewed;
-- final diff against stable `main` has been reviewed for scope;
-- TaskDesk task-first UX is coherent enough to be intentionally exposed to users.
+No proposal to replace stable `main` until all required automated tests pass, the Android debug APK passes the manual flow, rollback regressions are explicitly marked pass/fail with evidence, no unresolved high-severity integration bug remains, backward compatibility is reviewed, the final diff against stable `main` is reviewed for scope, and the TaskDesk task-first UX is coherent enough to expose intentionally.
 
 ## Decision log
 
-Use issue #197 as the operational checklist and decision log. For each imported block record:
+Use issue #197 as the operational checklist and decision log. For each imported block record source PR/commit(s), Keep/Adapt/Drop/Defer, integration commits, tests run, manual test result, regressions found and next action.
 
-- source PR/commit(s);
-- Keep / Adapt / Drop / Defer;
-- integration commit(s);
-- tests run;
-- manual test result;
-- regressions found;
-- next action.
-
-Update this document only when the overall sequencing or integration policy changes.
+Update this document when overall sequencing, integration policy or architectural guardrails change.
