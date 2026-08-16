@@ -1,4 +1,5 @@
 import { taskLaunchError } from "./task-errors.js"
+import { promptModelBody, sessionModelBody } from "./task-model.js"
 
 function basicAuthorization(username, password) {
   if (!username && !password) return undefined
@@ -28,6 +29,14 @@ function openCodeStatus(value) {
   return "unknown"
 }
 
+function acpModelValue(configOptions, model) {
+  if (!model) return undefined
+  const option = configOptions?.find((item) => item.id === "model")
+  const qualified = `${model.providerID}/${model.modelID}`
+  if (option?.options?.some((candidate) => candidate.value === qualified)) return qualified
+  return option?.options?.find((candidate) => candidate.value === model.modelID)?.value
+}
+
 export class TaskLauncher {
   constructor({ daemon, fetchImpl = fetch }) {
     this.daemon = daemon
@@ -46,6 +55,8 @@ export class TaskLauncher {
       await entry.host.start()
       const result = await entry.host.request("session/new", { cwd: task.workspace.path, mcpServers: [] })
       if (!result?.sessionId) throw new Error(`Agent ${task.agentId} did not return a session id`)
+      const value = acpModelValue(result.configOptions, task.model)
+      if (value) await entry.host.request("session/set_config_option", { sessionId: result.sessionId, configId: "model", value })
       return { sessionId: result.sessionId, transport: "acp", directory: task.workspace.path }
     }
 
@@ -56,16 +67,11 @@ export class TaskLauncher {
       const authorization = basicAuthorization(entry.host.username, entry.host.password)
       const response = await this.fetchImpl(`${base}/session?directory=${encodeURIComponent(task.workspace.path)}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(authorization ? { Authorization: authorization } : {})
-        },
-        body: JSON.stringify({ title: `Task ${task.id.slice(0, 8)}` })
+        headers: { "Content-Type": "application/json", ...(authorization ? { Authorization: authorization } : {}) },
+        body: JSON.stringify({ title: `Task ${task.id.slice(0, 8)}`, model: sessionModelBody(task.model) })
       })
       const session = await responseJSON(response, `Creating ${task.agentId} session`)
       if (!session?.id) throw new Error(`Agent ${task.agentId} did not return a session id`)
-      // Managed host connection details, especially authorization, are intentionally
-      // kept on this in-memory launch object and must never be persisted on task.run.
       return { sessionId: session.id, transport: "http", directory: task.workspace.path, base, authorization }
     }
 
@@ -80,23 +86,19 @@ export class TaskLauncher {
       void entry.host.request("session/prompt", {
         sessionId: run.sessionId,
         prompt: [{ type: "text", text: task.prompt }]
-      }, 300_000).then((result) => {
-        onCompleted?.(result)
-      }).catch((error) => {
-        onFailed?.(error)
-      })
+      }, 300_000).then((result) => onCompleted?.(result)).catch((error) => onFailed?.(error))
       return
     }
 
     if (entry.kind === "http") {
       const response = await this.fetchImpl(`${run.base}/session/${encodeURIComponent(run.sessionId)}/prompt_async?directory=${encodeURIComponent(task.workspace.path)}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // Authorization belongs to the ephemeral createSession() result only.
-          ...(run.authorization ? { Authorization: run.authorization } : {})
-        },
-        body: JSON.stringify({ parts: [{ type: "text", text: task.prompt }] })
+        headers: { "Content-Type": "application/json", ...(run.authorization ? { Authorization: run.authorization } : {}) },
+        body: JSON.stringify({
+          parts: [{ type: "text", text: task.prompt }],
+          model: promptModelBody(task.model),
+          variant: task.model?.variant || undefined
+        })
       })
       if (!response.ok) throw new Error(`Starting ${task.agentId} task failed with HTTP ${response.status}`)
     }
@@ -107,12 +109,8 @@ export class TaskLauncher {
     if (!run?.sessionId) return "unknown"
     const entry = this.daemon.hostEntry(task.agentId)
     if (!entry) return "unknown"
-
-    // ACP gives us an authoritative completion signal while the prompt request is alive,
-    // but there is no backend-neutral post-restart session status primitive to query here.
     if (entry.kind === "acp") return "unknown"
     if (entry.kind !== "http") return "unknown"
-
     try {
       await entry.host.start?.()
       const host = entry.host.readinessHost ?? entry.host.host ?? "127.0.0.1"
