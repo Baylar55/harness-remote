@@ -32,7 +32,7 @@ function taskText(t: Translator, key: string, params: Record<string, string | nu
   const translated = t(key, params)
   if (translated !== key) return translated
   const template = TASK_FALLBACKS[key] ?? key
-  return Object.entries(params).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), template)
+  return Object.entries(params).reduce((text, [name, value]) => text.split(`{${name}}`).join(String(value)), template)
 }
 
 function preferredAgentID(machine: MachineSnapshot, config: ServerConfig): string {
