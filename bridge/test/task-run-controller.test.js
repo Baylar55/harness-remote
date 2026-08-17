@@ -134,3 +134,31 @@ test("reconciliation load failures stay isolated and surface as unavailable", as
     (error) => error.code === "agent_unavailable" && error.message === "Task state is unavailable"
   )
 })
+
+test("reconciliation adopts an ACP task session and keeps an unconfirmable ACP run active", async () => {
+  let current = draft({
+    status: "running",
+    run: { id: "run-1", agentId: "pi", sessionId: "pi-session", transport: "acp", directory: "/state/worktrees/task-1" }
+  })
+  const adopted = []
+  const controller = new TaskRunController({
+    taskStore: {
+      async list() { return [structuredClone(current)] },
+      async setRunState(_id, update) {
+        current = { ...current, status: update.status, error: update.error }
+        return structuredClone(current)
+      }
+    },
+    taskLauncher: { async inspectRun() { return "unknown" } },
+    acpService: () => ({
+      async adoptTaskSession(sessionID, details) { adopted.push({ sessionID, details }) }
+    })
+  })
+
+  await controller.reconciliation
+  assert.equal(current.status, "running")
+  assert.deepEqual(adopted, [{
+    sessionID: "pi-session",
+    details: { title: "Fix it", prompt: "Fix it" }
+  }])
+})

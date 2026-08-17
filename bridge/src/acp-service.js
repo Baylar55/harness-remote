@@ -275,6 +275,22 @@ export class AcpService {
     return sessionView(session, "idle", this.#titleFor(session.sessionId))
   }
 
+  /** Adopt a task session created by an older daemon so PI can open it without session/load. */
+  async adoptTaskSession(sessionID, { title, prompt } = {}) {
+    await this.#refreshSessions()
+    const session = this.#sessions.get(sessionID)
+    if (!session || this.#deletedSessions.has(sessionID)) return false
+    this.#ownedSessions.add(sessionID)
+    this.#loaded.add(sessionID)
+    if (title && !this.#titles.has(sessionID)) this.#titles.set(sessionID, title)
+    const messages = this.#messages.get(sessionID) ?? []
+    if (prompt && !messages.some((message) => message.info?.role === "user" && message.parts?.some((part) => part.text === prompt))) {
+      this.#recordPrompt(sessionID, prompt)
+    }
+    this.#persistSnapshot(sessionID)
+    return true
+  }
+
   async renameSession(sessionID, title) {
     const normalized = title.trim()
     if (!normalized) throw new Error("A session title is required")

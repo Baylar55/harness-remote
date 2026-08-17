@@ -3,10 +3,11 @@ import { taskLaunchError } from "./task-errors.js"
 import { WorktreeManager } from "./worktree-manager.js"
 
 export class TaskRunController {
-  constructor({ taskStore, taskLauncher, worktreeManager, runIDFactory = randomUUID, clock = () => new Date().toISOString() }) {
+  constructor({ taskStore, taskLauncher, worktreeManager, acpService, runIDFactory = randomUUID, clock = () => new Date().toISOString() }) {
     this.taskStore = taskStore
     this.taskLauncher = taskLauncher
     this.worktreeManager = worktreeManager ?? (taskStore?.stateDirectory ? new WorktreeManager({ stateDirectory: taskStore.stateDirectory }) : undefined)
+    this.acpService = acpService
     this.runIDFactory = runIDFactory
     this.clock = clock
     this.reconciliationError = null
@@ -25,8 +26,17 @@ export class TaskRunController {
     try { await this.taskStore.setRunState(taskID, { status, run, error, expectedRunId: run?.id }) } catch {}
   }
 
+  async #adoptAcpTaskSession(task) {
+    if (!task.run?.sessionId || task.run.transport !== "acp") return
+    const service = this.acpService?.(task.agentId)
+    if (!service) return
+    const title = task.prompt?.trim().split("\n")[0].slice(0, 60)
+    try { await service.adoptTaskSession(task.run.sessionId, { title, prompt: task.prompt }) } catch {}
+  }
+
   async reconcileAll() {
     for (const task of await this.taskStore.list()) {
+      await this.#adoptAcpTaskSession(task)
       if (!["starting", "running"].includes(task.status)) continue
       if (!task.run?.id) {
         try { await this.taskStore.setRunState(task.id, { status: "failed", error: new Error("Active task has no persisted run identity") }) } catch {}
@@ -35,7 +45,7 @@ export class TaskRunController {
       let state = "unknown"
       try { state = await this.taskLauncher.inspectRun?.(task) ?? "unknown" } catch {}
       if (state === "completed") await this.#terminal(task.id, task.run, "completed")
-      else if (state !== "running") await this.#terminal(task.id, task.run, "failed", new Error("Task run could not be confirmed after daemon restart"))
+      else if (state === "failed") await this.#terminal(task.id, task.run, "failed", new Error("Task run could not be confirmed after daemon restart"))
     }
   }
 
