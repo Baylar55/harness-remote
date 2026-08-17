@@ -3,9 +3,20 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
-import { AcpAgentModelCatalog, HttpAgentModelCatalog } from "../src/agent-model-catalog.js"
+import { ACP_MODEL_CATALOG_TIMEOUT_MS, AcpAgentModelCatalog, HttpAgentModelCatalog, MODEL_CATALOG_TIMEOUT_MS } from "../src/agent-model-catalog.js"
 
 const never = () => new Promise(() => {})
+
+test("ACP model discovery reserves the cold-adapter startup budget", () => {
+  const catalog = new AcpAgentModelCatalog({
+    agent: { close() {} },
+    agentID: "omp",
+    directory: "/repo",
+    stateDirectory: "/state"
+  })
+  assert.equal(catalog.timeoutMs, ACP_MODEL_CATALOG_TIMEOUT_MS)
+  assert.ok(ACP_MODEL_CATALOG_TIMEOUT_MS > MODEL_CATALOG_TIMEOUT_MS)
+})
 
 test("ACP model discovery obeys the catalog-wide timeout budget", async () => {
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-timeout-"))
