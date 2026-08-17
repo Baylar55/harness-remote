@@ -54,9 +54,9 @@
   --harness-omp: #6d28d9;
   --harness-omp-soft: #f2eaff;
   --harness-omp-border: #ddccff;
-  --harness-pi: #0d7a70;
-  --harness-pi-soft: #e0f4f1;
-  --harness-pi-border: #bde5df;
+  --harness-pi: #2563eb;
+  --harness-pi-soft: #e8efff;
+  --harness-pi-border: #c7d9ff;
   --harness-claude: #b45309;
   --harness-claude-soft: #fdefdb;
   --harness-claude-border: #f5d9ae;
@@ -159,9 +159,9 @@
   --harness-omp: #c4b5fd;
   --harness-omp-soft: rgba(124, 58, 237, 0.22);
   --harness-omp-border: rgba(196, 181, 253, 0.36);
-  --harness-pi: #5eead4;
-  --harness-pi-soft: rgba(13, 122, 112, 0.26);
-  --harness-pi-border: rgba(94, 234, 212, 0.32);
+  --harness-pi: #93c5fd;
+  --harness-pi-soft: rgba(37, 99, 235, 0.26);
+  --harness-pi-border: rgba(147, 197, 253, 0.38);
   --harness-claude: #f6ad55;
   --harness-claude-soft: rgba(180, 83, 9, 0.26);
   --harness-claude-border: rgba(246, 173, 85, 0.34);
@@ -3114,6 +3114,16 @@ a:focus-visible,
   gap: var(--space-1);
 }
 
+.wizard-close,
+.wizard-header > .btn-icon {
+  margin-left: auto;
+  flex: 0 0 auto;
+  width: var(--control-h-lg);
+  height: var(--control-h-lg);
+  min-height: var(--control-h-lg);
+  padding: 0;
+}
+
 .wizard-header h2 {
   margin: 0;
   font-size: var(--font-xl);
@@ -3244,9 +3254,11 @@ a:focus-visible,
 
 .choice-card {
   display: grid;
+  grid-template-rows: 1.5rem minmax(3rem, 1fr);
   align-content: start;
   gap: var(--space-1);
-  min-height: 5rem;
+  min-width: 0;
+  min-height: 6.75rem;
   padding: var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -3270,6 +3282,9 @@ a:focus-visible,
 }
 
 .choice-card small {
+  display: block;
+  margin: 0;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: var(--font-xs);
   font-weight: 400;
