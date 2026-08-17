@@ -3,7 +3,7 @@ import { CloseIcon, FolderIcon, LoadingIcon, PlayIcon, ServerIcon } from "../Ico
 import { createCatalogRequestGuard } from "../catalog-request-guard"
 import { loadActiveServerProfile, loadServerProfiles } from "../serverProfiles"
 import { discoverMachineConnection, selectableMachineAgents } from "../taskMachineClient"
-import { taskClient, type MachineProject } from "../taskClient"
+import { taskClient, type MachineProject, type MachineTask } from "../taskClient"
 import type { Translator } from "../i18n"
 import type { MachineSnapshot, ModelOption, ServerConfig } from "../types"
 
@@ -58,7 +58,7 @@ function preferredAgentID(machine: MachineSnapshot, config: ServerConfig): strin
 export function TaskLaunchDialog({ t, onClose, onLaunched }: {
   t: Translator
   onClose: () => void
-  onLaunched: () => void
+  onLaunched: (task: MachineTask) => void
 }) {
   const profile = useMemo(() => loadActiveServerProfile(loadServerProfiles()), [])
   const config: ServerConfig = profile.config
@@ -168,8 +168,8 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
         model: model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
       })
       if (isolated && selectedProject?.kind === "git") task = await taskClient.prepareWorktree(taskConfig, task.id)
-      await taskClient.launch(taskConfig, task.id)
-      onLaunched()
+      task = await taskClient.launch(taskConfig, task.id)
+      onLaunched(task)
       onClose()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -181,14 +181,14 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
   const machineName = machine?.machine.name ?? profile.name
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="modal-card wizard fade-in" role="dialog" aria-modal="true" aria-labelledby="new-task-title" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-card wizard task-launch-dialog fade-in" role="dialog" aria-modal="true" aria-labelledby="new-task-title" onClick={(event) => event.stopPropagation()}>
         <div className="wizard-header">
           <div className="wizard-header-text">
             <h2 id="new-task-title">{taskText(t, "task.new")}</h2>
             <p className="subtle">{taskText(t, "task.subtitle", { machine: machineName })}</p>
           </div>
-          <button type="button" className="btn-icon btn-ghost" onClick={onClose} aria-label={t("session.cancel")}><CloseIcon size={16} /></button>
+          <button type="button" className="btn-icon btn-ghost task-launch-close" onClick={onClose} aria-label={t("session.cancel")}><CloseIcon size={16} /></button>
         </div>
 
         <div className="wizard-body">
@@ -200,28 +200,28 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
             <div className="empty-state compact"><FolderIcon size={30} /><p>{taskText(t, "task.noProjects")}</p></div>
           ) : (
             <div className="task-launch-form">
-              <div className="task-context">
+              <div className="task-launch-context">
                 <div className="task-context-item">
                   <span className="eyebrow">{taskText(t, "task.machine")}</span>
                   <strong><ServerIcon size={15} /><span className="truncate">{machineName}</span></strong>
                 </div>
               </div>
 
-              <label className="field">
+              <label className="field task-launch-field task-launch-field--agent">
                 <span>{taskText(t, "task.agent")}</span>
                 <select value={selectedAgentId} onChange={(event) => setSelectedAgentId(event.target.value)}>
                   {agents.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.label ?? candidate.id}</option>)}
                 </select>
               </label>
 
-              <label className="field">
+              <label className="field task-launch-field task-launch-field--project">
                 <span>{taskText(t, "task.project")}</span>
                 <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
                   {projects.map((project) => <option key={project.id} value={project.id}>{project.name} — {project.path}</option>)}
                 </select>
               </label>
 
-              <label className="field">
+              <label className="field task-launch-field task-launch-field--model">
                 <span>{taskText(t, "task.model")}</span>
                 {modelLoading ? (
                   <span className="subtle"><LoadingIcon size={14} /> {taskText(t, "task.modelLoading")}</span>
@@ -242,9 +242,9 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
                 )}
               </label>
 
-              <label className="field">
+              <label className="field task-launch-field task-launch-field--prompt">
                 <span>{taskText(t, "task.label")}</span>
-                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={taskText(t, "task.promptPlaceholder")} rows={6} autoFocus />
+                <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={taskText(t, "task.promptPlaceholder")} rows={5} autoFocus />
               </label>
 
               <div className="task-launch-worktree">
@@ -258,7 +258,7 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
           )}
         </div>
 
-        <div className="wizard-footer">
+        <div className="wizard-footer task-launch-footer">
           <span className="spacer" />
           <button type="button" className="btn-secondary" onClick={onClose}>{t("session.cancel")}</button>
           <button type="button" className="btn-primary" disabled={!canStart} onClick={() => void start()}>
