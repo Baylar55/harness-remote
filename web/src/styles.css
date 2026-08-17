@@ -894,6 +894,9 @@ a:focus-visible,
 }
 
 .server-option-text strong {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -907,6 +910,28 @@ a:focus-visible,
   white-space: nowrap;
   color: var(--muted);
   font-size: var(--font-xs);
+}
+
+.server-option-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: fit-content;
+}
+
+.server-option-status .status-dot {
+  flex: 0 0 auto;
+}
+
+.server-option-current {
+  flex: 0 0 auto;
+  padding: 0.08rem var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--font-2xs);
+  font-weight: 650;
+  line-height: 1.25;
 }
 
 /* --- Sidebar --- */
