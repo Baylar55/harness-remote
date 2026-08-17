@@ -44,25 +44,28 @@ function preferredAgentID(machine: MachineSnapshot, config: ServerConfig): strin
     ?? ""
 }
 
-function taskModelScope(profileID: string, agentID: string): string {
-  return `${profileID}:${agentID}`
+function taskModelScope(machineID: string, agentID: string): string {
+  return `${machineID}:${agentID}`
 }
 
-function readLastTaskModel(profileID: string, agentID: string): ModelSelection | null {
+function readLastTaskModel(machineID: string, legacyProfileID: string, agentID: string): ModelSelection | null {
   try {
     const saved = JSON.parse(localStorage.getItem(TASK_MODEL_STORAGE_KEY) ?? "{}") as Record<string, unknown>
-    const value = saved[taskModelScope(profileID, agentID)]
-    if (!value || typeof value !== "object") return null
-    const model = value as Partial<ModelSelection>
-    return typeof model.providerID === "string" && typeof model.modelID === "string"
-      ? { providerID: model.providerID, modelID: model.modelID, variant: typeof model.variant === "string" ? model.variant : undefined }
-      : null
+    for (const scope of [taskModelScope(machineID, agentID), taskModelScope(legacyProfileID, agentID)]) {
+      const value = saved[scope]
+      if (!value || typeof value !== "object") continue
+      const model = value as Partial<ModelSelection>
+      if (typeof model.providerID === "string" && typeof model.modelID === "string") {
+        return { providerID: model.providerID, modelID: model.modelID, variant: typeof model.variant === "string" ? model.variant : undefined }
+      }
+    }
+    return null
   } catch {
     return null
   }
 }
 
-function rememberTaskModel(profileID: string, agentID: string, model: ModelSelection | undefined): void {
+function rememberTaskModel(machineID: string, agentID: string, model: ModelSelection | undefined): void {
   if (!model) return
   let saved: Record<string, ModelSelection> = {}
   try {
@@ -71,7 +74,7 @@ function rememberTaskModel(profileID: string, agentID: string, model: ModelSelec
   } catch {
     // Replace malformed local data only after a task actually starts successfully.
   }
-  saved[taskModelScope(profileID, agentID)] = model
+  saved[taskModelScope(machineID, agentID)] = model
   localStorage.setItem(TASK_MODEL_STORAGE_KEY, JSON.stringify(saved))
 }
 
@@ -181,7 +184,7 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
     void taskClient.listAgentModels(taskConfig, selectedAgentId).then((catalog) => {
       if (!guard.isCurrent(token)) return
       setModels(catalog.models)
-      const lastModel = readLastTaskModel(profile.id, selectedAgentId)
+      const lastModel = readLastTaskModel(machine?.machine.id ?? profile.id, profile.id, selectedAgentId)
       const lastModelIndex = lastModel ? catalog.models.findIndex((option) => sameTaskModel(option, lastModel)) : -1
       setModelIndex(lastModelIndex >= 0 ? lastModelIndex : catalog.models.findIndex((option) => option.isDefault))
       setModelStale(catalog.stale)
@@ -192,7 +195,7 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
     }).finally(() => {
       if (guard.isCurrent(token)) setModelLoading(false)
     })
-  }, [profile.id, selectedAgentId, taskConfig])
+  }, [machine?.machine.id, profile.id, selectedAgentId, taskConfig])
 
   async function start() {
     if (!canStart || !taskConfig || !agent) return
@@ -208,7 +211,7 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
       })
       if (isolated && selectedProject?.kind === "git") task = await taskClient.prepareWorktree(taskConfig, task.id)
       task = await taskClient.launch(taskConfig, task.id)
-      rememberTaskModel(profile.id, agent.id, model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant })
+      rememberTaskModel(machine?.machine.id ?? profile.id, agent.id, model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant })
       onLaunched(task)
       onClose()
     } catch (cause) {
