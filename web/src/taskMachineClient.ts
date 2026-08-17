@@ -27,6 +27,17 @@ function unauthorized(config: ServerConfig): Error {
     : "HTTP 401: this server requires a username and password, and none were sent.")
 }
 
+function unexpectedMachineResponse(config: ServerConfig, value: unknown): Error | null {
+  if (typeof value !== "string") return null
+  // A dev server or reverse proxy often answers its HTML shell with 200 for an unknown API route.
+  // Calling response.json() there leaked the parser exception into the task dialog and made an
+  // endpoint mistake look like an OMP failure.
+  if (/^\s*<!doctype html|^\s*<html[\s>]/i.test(value)) {
+    return new Error(`${config.host}:${config.port} returned a web page instead of the Harness machine daemon.`)
+  }
+  return null
+}
+
 async function nativeGet(config: ServerConfig, path: string) {
   const target = `${machineBaseUrl(config)}${path}`
   try {
@@ -68,7 +79,10 @@ async function discoverMachinePath(config: ServerConfig, path: string): Promise<
   if (noMachineStatus(response.status)) return null
   if (response.status === 401) throw unauthorized(config)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return parseMachineSnapshot(await response.json())
+  const payload = await response.text()
+  const unexpected = unexpectedMachineResponse(config, payload)
+  if (unexpected) throw unexpected
+  return parseMachineSnapshot(payload)
 }
 
 /** Both routes are published; older machine daemons may answer only the second. */

@@ -54,6 +54,8 @@ const taskClient = readFileSync(new URL('./taskMachineClient.ts', import.meta.ur
 assert.equal(/fallback\w*Snapshot|synthetic/i.test(taskClient), false)
 assert.ok(taskClient.includes('if (failure !== undefined) throw failure'))
 assert.ok(taskClient.includes('response.status === 401'))
+assert.ok(taskClient.includes('unexpectedMachineResponse'), 'TaskDesk machine discovery should detect an HTML page instead of parsing it as JSON')
+assert.ok(taskClient.includes('returned a web page instead of the Harness machine daemon'), 'an endpoint that returns HTML should explain the daemon-address problem clearly')
 
 const legacyClient = readFileSync(new URL('./machineClient.ts', import.meta.url), 'utf8')
 assert.equal(legacyClient.includes('machineCandidates('), false, 'legacy discovery must not probe TaskDesk candidates')
