@@ -55,6 +55,9 @@ for (const className of ['server-profile-actions', 'section-heading-text']) {
 assert.ok(shell.includes('className="server-switcher"'), 'the saved-server UI should use the richer server switcher')
 assert.ok(styles.includes('.server-switcher'), 'the server switcher should be styled instead of relying on default rendering')
 assert.equal(/className="sr-only"/.test(app), false, 'a caption the stylesheet cannot hide must not be rendered at all')
+assert.ok(panels.includes('aria-pressed={backend === kind}'), 'harness choices should expose their selected state without relying on color alone')
+assert.match(styles, /\.choice-card\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/, 'harness choice text should share one full-width alignment column')
+assert.match(styles, /--harness-pi:\s*#0e7490/, 'PI should use a distinct cyan hue instead of OpenCode blue')
 
 // Sized to their labels the two actions came out visibly different widths, and a full row of their own
 // pushed a form that already fills the height cap into scrolling for a few pixels.

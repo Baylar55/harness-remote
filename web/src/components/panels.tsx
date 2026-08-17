@@ -387,6 +387,7 @@ export function ConnectServerWizard({
                   key={kind}
                   type="button"
                   className={`choice-card${backend === kind ? " selected" : ""}`}
+                  aria-pressed={backend === kind}
                   onClick={() => chooseBackend(kind)}
                 >
                   <strong>

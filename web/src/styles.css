@@ -54,9 +54,9 @@
   --harness-omp: #6d28d9;
   --harness-omp-soft: #f2eaff;
   --harness-omp-border: #ddccff;
-  --harness-pi: #2563eb;
-  --harness-pi-soft: #e8efff;
-  --harness-pi-border: #c7d9ff;
+  --harness-pi: #0e7490;
+  --harness-pi-soft: #e0f5fa;
+  --harness-pi-border: #b9e3ed;
   --harness-claude: #b45309;
   --harness-claude-soft: #fdefdb;
   --harness-claude-border: #f5d9ae;
@@ -159,9 +159,9 @@
   --harness-omp: #c4b5fd;
   --harness-omp-soft: rgba(124, 58, 237, 0.22);
   --harness-omp-border: rgba(196, 181, 253, 0.36);
-  --harness-pi: #93c5fd;
-  --harness-pi-soft: rgba(37, 99, 235, 0.26);
-  --harness-pi-border: rgba(147, 197, 253, 0.38);
+  --harness-pi: #67e8f9;
+  --harness-pi-soft: rgba(14, 116, 144, 0.28);
+  --harness-pi-border: rgba(103, 232, 249, 0.38);
   --harness-claude: #f6ad55;
   --harness-claude-soft: rgba(180, 83, 9, 0.26);
   --harness-claude-border: rgba(246, 173, 85, 0.34);
@@ -3489,7 +3489,9 @@ a:focus-visible,
 
 .choice-card {
   display: grid;
-  grid-template-rows: 1.5rem minmax(3rem, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: min-content minmax(3rem, 1fr);
+  justify-items: stretch;
   align-content: start;
   gap: var(--space-1);
   min-width: 0;
@@ -3512,12 +3514,16 @@ a:focus-visible,
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
+  min-height: 1.5rem;
   font-size: var(--font-md);
   font-weight: 600;
 }
 
 .choice-card small {
   display: block;
+  align-self: start;
+  min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--muted);
