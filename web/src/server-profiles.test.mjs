@@ -68,14 +68,23 @@ const repaired = loadServerProfiles()[0]
 assert.equal(repaired.config.backend, 'pi', 'an unmistakably named PI profile saved by the old fallback must recover PI')
 assert.equal(repaired.config.agentId, 'pi', 'the repaired PI profile must target the PI daemon route')
 
+storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify([
+  { id: 'known-daemon-profile', name: 'Codex CLI server', config: { backend: 'codex', host: 'localhost', port: 5001, username: 'harness', password: 'secret', agentId: 'codex' } },
+  { id: 'old-omp-internal-port-profile', name: 'Oh My Pi TEST', config: { backend: 'omp', host: 'localhost', port: 4096, username: 'harness', password: 'secret' } }
+]))
+const repairedPort = loadServerProfiles().find((profile) => profile.id === 'old-omp-internal-port-profile')
+assert.ok(repairedPort, 'the OMP profile should be retained')
+assert.equal(repairedPort.config.port, 5001, 'a named local OMP profile must reuse the known daemon port instead of assuming 4097')
+assert.equal(repairedPort.config.agentId, 'omp', 'a repaired OMP daemon profile must use the OMP route')
+
 storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify([{
-  id: 'old-omp-internal-port-profile',
+  id: 'unknown-daemon-port-profile',
   name: 'Oh My Pi TEST',
   config: { backend: 'omp', host: 'localhost', port: 4096, username: 'harness', password: 'secret' }
 }]))
-const repairedPort = loadServerProfiles()[0]
-assert.equal(repairedPort.config.port, 4097, 'a named local OMP daemon profile must not point at OpenCode internal port 4096')
-assert.equal(repairedPort.config.agentId, 'omp', 'a repaired OMP daemon profile must use the OMP route')
+const unknownPort = loadServerProfiles()[0]
+assert.equal(unknownPort.config.port, 4096, 'a profile with no known machine daemon port must not be guessed')
+assert.equal(unknownPort.config.agentId, undefined, 'an unknown daemon port must not fabricate an agent route')
 
 const storageKeys = readFileSync(new URL('./storageKeys.ts', import.meta.url), 'utf8')
 assert.match(storageKeys, /SERVER_PROFILES_STORAGE_KEY/, 'the crash-recovery reset must clear saved servers')

@@ -74,11 +74,14 @@ export class TaskRunController {
       const session = await this.taskLauncher.createSession(current)
       const linkedRun = { ...run, sessionId: session.sessionId, transport: session.transport }
       current = await this.taskStore.setRunState(taskID, { status: "starting", run: linkedRun, expectedRunId: run.id })
+      // A transport may complete or fail synchronously as startPrompt attaches its callbacks.
+      // Persist running first, so those callbacks can make a legal running -> terminal transition.
+      current = await this.taskStore.setRunState(taskID, { status: "running", run: linkedRun, expectedRunId: linkedRun.id })
       const onFailed = (error) => void this.#terminal(taskID, linkedRun, "failed", error)
       onFailed.onFailed = onFailed
       onFailed.onCompleted = () => void this.#terminal(taskID, linkedRun, "completed")
       await this.taskLauncher.startPrompt(current, session, onFailed)
-      return await this.taskStore.setRunState(taskID, { status: "running", run: linkedRun, expectedRunId: linkedRun.id })
+      return current
     } catch (error) {
       await this.#terminal(taskID, current.run ?? run, "failed", error)
       throw error

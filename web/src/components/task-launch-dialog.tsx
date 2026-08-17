@@ -206,9 +206,9 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
         prompt: prompt.trim(),
         model: model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
       })
-      rememberTaskModel(profile.id, agent.id, model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant })
       if (isolated && selectedProject?.kind === "git") task = await taskClient.prepareWorktree(taskConfig, task.id)
       task = await taskClient.launch(taskConfig, task.id)
+      rememberTaskModel(profile.id, agent.id, model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant })
       onLaunched(task)
       onClose()
     } catch (cause) {

@@ -67,23 +67,24 @@ function namedHarness(name: string): BackendKind | undefined {
 
 function repairMisroutedDaemonProfile(profile: SavedServerProfile): SavedServerProfile {
   const intended = namedHarness(profile.name)
-  if (!intended) return profile
-  const savedAsCodex = profile.config.backend === "codex" && profile.config.agentId === "codex"
-  const loopback = ["localhost", "127.0.0.1", "::1"].includes(profile.config.host.trim().toLowerCase())
-  // Earlier setup guidance incorrectly paired a daemon harness with OpenCode's internal port.
-  // A named local Harness profile with daemon credentials is unambiguously meant for port 4097.
-  const pointedAtOpenCode = profile.config.backend === intended && !profile.config.agentId &&
-    loopback && profile.config.port === 4096 && profile.config.username === "harness"
-  if (!savedAsCodex && !pointedAtOpenCode) return profile
-  return {
-    ...profile,
-    config: {
-      ...profile.config,
-      backend: intended,
-      agentId: intended,
-      ...(pointedAtOpenCode ? { port: 4097 } : {})
-    }
-  }
+  if (!intended || profile.config.backend !== "codex" || profile.config.agentId !== "codex") return profile
+  return { ...profile, config: { ...profile.config, backend: intended, agentId: intended } }
+}
+
+function sameMachine(left: ServerConfig, right: ServerConfig): boolean {
+  return left.host.trim().toLowerCase() === right.host.trim().toLowerCase() && left.username === right.username
+}
+
+/** Repair the bad internal OpenCode port only when another saved daemon profile identifies its port. */
+function repairInternalOpenCodePort(profile: SavedServerProfile, profiles: SavedServerProfile[]): SavedServerProfile {
+  const intended = namedHarness(profile.name)
+  if (!intended || profile.config.backend !== intended || profile.config.agentId || profile.config.port !== 4096) return profile
+  const knownDaemonPort = profiles.find((candidate) =>
+    candidate.id !== profile.id && candidate.config.backend !== "opencode" &&
+    candidate.config.port !== 4096 && sameMachine(candidate.config, profile.config)
+  )?.config.port
+  if (!knownDaemonPort) return profile
+  return { ...profile, config: { ...profile.config, port: knownDaemonPort, agentId: intended } }
 }
 
 function parseProfiles(value: string | null): SavedServerProfile[] | null {
@@ -102,7 +103,9 @@ function parseProfiles(value: string | null): SavedServerProfile[] | null {
         config
       }]
     })
-    return profiles.length > 0 ? profiles.map(repairMisroutedDaemonProfile) : null
+    if (!profiles.length) return null
+    const repaired = profiles.map(repairMisroutedDaemonProfile)
+    return repaired.map((profile) => repairInternalOpenCodePort(profile, repaired))
   } catch {
     return null
   }

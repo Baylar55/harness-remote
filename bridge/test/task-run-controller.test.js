@@ -43,9 +43,32 @@ test("launch persists run identity before starting the prompt and ends running",
     ["state", "starting", null],
     ["session", "starting"],
     ["state", "starting", "session-1"],
-    ["prompt", "starting", "session-1"],
-    ["state", "running", "session-1"]
+    ["state", "running", "session-1"],
+    ["prompt", "running", "session-1"]
   ])
+})
+
+test("a synchronous prompt completion cannot race the starting to running transition", async () => {
+  let current = draft()
+  const store = {
+    async get() { return structuredClone(current) },
+    async setRunState(_id, update) {
+      if (update.status === "running" && current.status !== "starting") throw new Error("Task is not starting")
+      if (["completed", "failed"].includes(update.status) && !["starting", "running"].includes(current.status)) throw new Error("Task is not active")
+      current = { ...current, status: update.status, run: structuredClone(update.run), error: update.error }
+      return structuredClone(current)
+    }
+  }
+  const launcher = {
+    async createSession(task) { return { sessionId: "session-1", transport: "acp", directory: task.workspace.path } },
+    async startPrompt(_task, _session, callbacks) { callbacks.onCompleted() }
+  }
+  const controller = new TaskRunController({ taskStore: store, taskLauncher: launcher, runIDFactory: () => "run-1" })
+
+  const launched = await controller.launch("task-1")
+  assert.equal(launched.status, "running")
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(current.status, "completed")
 })
 
 test("Git tasks cannot launch from the primary checkout", async () => {
