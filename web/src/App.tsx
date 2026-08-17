@@ -1962,6 +1962,8 @@ const MessagesPane = memo(function MessagesPane({
   loadFailure,
   onRetrySession,
   selectedID,
+  connectionState,
+  connectionStatusText,
   renderedMessages,
   timelineGroups,
   showTypingBubble,
@@ -1986,6 +1988,8 @@ const MessagesPane = memo(function MessagesPane({
   loadFailure: { sessionID: string; message: string } | null
   onRetrySession: () => void
   selectedID: string | null
+  connectionState: string
+  connectionStatusText: string
   renderedMessages: (MessageEnvelope & { text: string })[]
   timelineGroups: RenderGroup[]
   showTypingBubble: boolean
@@ -2011,7 +2015,13 @@ const MessagesPane = memo(function MessagesPane({
         {/* Nothing selected is its own state, not a load in progress. Both of the tests below compare
             against selectedID, so a null one used to satisfy them and left the desktop layout — which
             renders this pane with no session, unlike mobile — spinning "loading" forever. */}
-        {selectedID === null ? (
+        {selectedID === null && ["connecting", "reconnecting"].includes(connectionState) ? (
+          <div className="empty-state compact connection-pending" role="status" aria-live="polite">
+            <LoadingIcon size={40} className="icon-empty-state" />
+            <p>{t('sessions.loadingTitle')}</p>
+            <p className="subtle">{connectionStatusText || t('sessions.loadingHint')}</p>
+          </div>
+        ) : selectedID === null ? (
           <div className="empty-state compact">
             <ChatIcon size={40} className="icon-empty-state" />
             <p>{t('detail.selectSession')}</p>
@@ -2266,6 +2276,7 @@ function App() {
     config.host && config.port > 0 ? "connecting" : "idle"
   )
   const [connectionMessage, setConnectionMessage] = useState<string>("")
+  const [profileConnectionStates, setProfileConnectionStates] = useState<Record<string, "idle" | "connecting" | "connected" | "offline">>({})
   const [eventStreamState, setEventStreamState] = useState<"idle" | "connecting" | "live" | "reconnecting" | "fallback">("idle")
   const [liveEventCount, setLiveEventCount] = useState(0)
   const [liveEventError, setLiveEventError] = useState<string | null>(null)
@@ -2604,6 +2615,27 @@ function App() {
     setDraftProfileName(profile.name)
     setDraftConfig(profile.config)
     applyConfig(profile.config, profile.id)
+  }
+
+  async function refreshProfileStatuses() {
+    const inactiveProfiles = profiles.filter((profile) => profile.id !== activeProfileID && isValidServerConfig(profile.config))
+    if (inactiveProfiles.length === 0) return
+    setProfileConnectionStates((current) => Object.fromEntries([
+      ...Object.entries(current),
+      ...inactiveProfiles.map((profile) => [profile.id, "connecting" as const])
+    ]))
+    const results = await Promise.all(inactiveProfiles.map(async (profile) => {
+      try {
+        const health = await Promise.race([
+          api.health(profile.config),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Connection timed out")), 5000))
+        ])
+        return [profile.id, health.backend && health.backend !== profile.config.backend ? "offline" : "connected"] as const
+      } catch {
+        return [profile.id, "offline"] as const
+      }
+    }))
+    setProfileConnectionStates((current) => ({ ...current, ...Object.fromEntries(results) }))
   }
 
   function deleteActiveProfile() {
@@ -3881,13 +3913,29 @@ function App() {
     { view: "help" as const, label: t('nav.help'), icon: <HelpIcon size={19} />, disabled: false }
   ]
 
-  const serverProfileSummaries = profiles.map((profile) => ({
-    id: profile.id,
-    name: profile.name,
-    backendLabel: backendDisplayName(profile.config.backend),
-    backendClass: profile.config.backend,
-    address: profile.config.host ? `${profile.config.host}:${profile.config.port}` : t('settings.hostPlaceholder')
-  }))
+  const serverProfileSummaries = profiles.map((profile) => {
+    const profileConnectionState = profile.id === activeProfileID
+      ? connectionState
+      : profileConnectionStates[profile.id] ?? "idle"
+    const profileConnectionLabel = profile.id === activeProfileID
+      ? connectionStatusText || t('connection.connecting')
+      : profileConnectionState === "connected"
+        ? t('connection.connected')
+        : profileConnectionState === "offline"
+          ? t('connection.offline')
+          : profileConnectionState === "connecting"
+            ? t('connection.connecting')
+            : t('settings.readyToTest')
+    return {
+      id: profile.id,
+      name: profile.name,
+      backendLabel: backendDisplayName(profile.config.backend),
+      backendClass: profile.config.backend,
+      address: profile.config.host ? `${profile.config.host}:${profile.config.port}` : t('settings.hostPlaceholder'),
+      connectionState: profileConnectionState,
+      connectionLabel: profileConnectionLabel
+    }
+  })
 
   const brandBlock = (
     <>
@@ -4126,6 +4174,7 @@ function App() {
       activeProfileID={activeProfileID}
       connectionState={connectionState}
       connectionLabel={connectionStatusText || t('connection.connecting')}
+      onOpen={() => void refreshProfileStatuses()}
       onSelect={activateProfile}
       onAddServer={() => setShowConnectWizard(true)}
       onManageServers={() => {
@@ -4904,6 +4953,8 @@ function App() {
             loadFailure={loadFailure}
             onRetrySession={handleRetrySession}
             selectedID={selectedID}
+            connectionState={connectionState}
+            connectionStatusText={connectionStatusText}
             renderedMessages={renderedMessages}
             timelineGroups={timelineGroups}
             showTypingBubble={showTypingBubble}
