@@ -30,6 +30,7 @@ import { BACKEND_CLIENTS } from "./backendClient"
 import { copyToClipboard } from "./clipboard"
 import { backendDisplayName, isBridgeBackend } from "./backendSetup"
 import { taskClient } from "./taskClient"
+import { discoverMachineConnection } from "./taskMachineClient"
 import { type AttachmentPart } from "./attachments"
 import { CommandPalette, MenuBar, ServerSwitcher, type MenuDefinition, type MenuEntry, type PaletteCommand } from "./components/shell"
 import { ConnectServerWizard, NewSessionDialog } from "./components/panels"
@@ -2729,21 +2730,40 @@ function App() {
     const requestID = ++loadModelsRequestRef.current
     try {
       let list: ModelOption[]
-      try {
-        list = await api.listModels(config, directory, backendClient.modelSelectionRequiresSession ? sessionID : undefined)
-      } catch (sessionCatalogError) {
-        // A Codex session held by its desktop client can refuse the legacy session-scoped
-        // /config/providers request. The machine daemon owns an independent agent catalog for
-        // exactly this case; retain the legacy path for ordinary bridge servers.
-        if (!isBridgeBackend(config.backend)) throw sessionCatalogError
-        const catalog = await taskClient.listAgentModels(config, config.agentId ?? config.backend)
-        if (!catalog.models.length) throw sessionCatalogError
+      // OpenCode stores the selected model on the message rather than the session. A task is the
+      // durable link between that session and the model the user chose, including after reload.
+      const taskServerConfig = isBridgeBackend(config.backend)
+        ? config
+        : config.backend === "opencode"
+          ? (await discoverMachineConnection(config).catch(() => null))?.config ?? null
+          : null
+      const launchedTask = taskServerConfig && sessionID
+        ? await taskClient.listTasks(taskServerConfig)
+          .then((tasks) => tasks.find((task) => (task.run?.sessionId ?? task.run?.sessionID) === sessionID) ?? null)
+          .catch(() => null)
+        : null
+
+      if (launchedTask && taskServerConfig) {
+        const catalog = await taskClient.listAgentModels(taskServerConfig, launchedTask.agentId)
+        if (!catalog.models.length) throw new Error(`No models are available for ${launchedTask.agentId}`)
         list = catalog.models
+      } else {
+        try {
+          list = await api.listModels(config, directory, backendClient.modelSelectionRequiresSession ? sessionID : undefined)
+        } catch (sessionCatalogError) {
+          // A Codex session held by its desktop client can refuse the legacy session-scoped
+          // /config/providers request. The machine daemon owns an independent agent catalog for
+          // exactly this case; retain the legacy path for ordinary bridge servers.
+          if (!isBridgeBackend(config.backend)) throw sessionCatalogError
+          const catalog = await taskClient.listAgentModels(config, config.agentId ?? config.backend)
+          if (!catalog.models.length) throw sessionCatalogError
+          list = catalog.models
+        }
       }
       if (requestID !== loadModelsRequestRef.current) return
       setModelOptions(list)
       setModelLoadError(null)
-      const sessionModel = sessions.find((session) => session.id === sessionID)?.model
+      const sessionModel = launchedTask?.model ?? sessions.find((session) => session.id === sessionID)?.model
       const sessionOption = sessionModel ? list.find((option) => sameModel(option, sessionModel)) : null
       if (sessionOption) {
         const nextKey = modelKey(sessionOption)

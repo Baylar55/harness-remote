@@ -27,6 +27,7 @@ export type MachineTask = {
   project: { name: string; path: string; kind: string }
   agentId: string
   prompt: string
+  model?: ModelSelection | null
   status: string
   workspace: TaskWorkspace
   run: null | { id?: string; sessionId?: string; sessionID?: string; status?: string }

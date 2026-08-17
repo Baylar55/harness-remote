@@ -180,22 +180,29 @@ async function main() {
   acp.on("stderr", (line) => process.stderr.write(`[${profile.id}] ${line}\n`))
   acp.on("exit", (error) => process.stderr.write(`[${profile.id}] ${error.message}\n`))
 
-  server.listen(config.port, config.host, () => {
-    process.stdout.write(`Harness daemon listening on http://${config.host}:${config.port}\n`)
-    process.stdout.write(`Machine: ${identity.name} (${identity.id})\n`)
-    if (openCode) process.stdout.write(`Managed OpenCode: http://${openCodeHost}:${openCodePort} (internal — reach it through the daemon port)\n`)
-    // Which adapter an ACP agent is about to run is the single most useful line when it fails to
-    // start: it separates "the adapter you installed is broken" from "we tried to fetch one".
-    process.stdout.write(`Primary agent: ${config.backend} (adapter: ${[config.acpCommand, ...config.acpArgs].join(" ")})\n`)
-    for (const host of daemon.snapshot().agents) {
-      process.stdout.write(`${host.state === "available" ? "✓" : "•"} ${host.label} [${host.transport}] ${host.state}\n`)
-    }
+  await new Promise((resolve, reject) => {
+    const onError = (error) => reject(error)
+    server.once("error", onError)
+    server.listen(config.port, config.host, () => {
+      server.off("error", onError)
+      resolve()
+    })
   })
 
   const managedResults = await daemon.startManagedHosts()
+  process.stdout.write(`Harness daemon ready at http://${config.host}:${config.port}\n`)
+  process.stdout.write(`Machine: ${identity.name} (${identity.id})\n`)
+  process.stdout.write("Active agents:\n")
+  for (const host of daemon.snapshot().agents) {
+    if (host.id === profile.id) {
+      process.stdout.write(`  • ${host.label} — primary (${host.transport.toUpperCase()})\n`)
+      continue
+    }
+    const location = host.id === "opencode" ? ` on 127.0.0.1:${openCodePort}` : ""
+    process.stdout.write(`  • ${host.label} — managed ${host.transport.toUpperCase()}${location}, ${host.state}\n`)
+  }
   for (const result of managedResults) {
-    if (result.status === "available") process.stdout.write(`[${result.id}] available\n`)
-    else process.stderr.write(`[${result.id}] unavailable: ${result.error?.message ?? "startup failed"}\n`)
+    if (result.status !== "available") process.stderr.write(`[${result.id}] unavailable: ${result.error?.message ?? "startup failed"}\n`)
   }
 
   let shuttingDown = false
