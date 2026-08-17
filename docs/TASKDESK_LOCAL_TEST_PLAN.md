@@ -1,6 +1,6 @@
 # TaskDesk local test plan
 
-> Target branch: `integration/nitsuga-taskdesk`
+> Target branch: `v3/taskdesk`
 >
 > Purpose: validate TaskDesk/Harness 3 locally against real harness CLIs before Android/network variables are introduced.
 
@@ -19,7 +19,7 @@ Without that query parameter, the normal application opens.
 ## Why browser first
 
 ```text
-local browser → TaskDesk test page → local machine daemon → real harness CLI
+local browser -> TaskDesk test page -> local machine daemon -> real harness CLI
 ```
 
 Only after this works should the same runtime be tested from Android. This isolates TaskDesk/daemon/harness failures from Capacitor, Wi-Fi, firewall and packaging problems.
@@ -27,9 +27,8 @@ Only after this works should the same runtime be tested from Android. This isola
 ## Checkout
 
 ```bash
-git clone https://github.com/giuliastro/harness-remote.git
+git clone -b v3/taskdesk https://github.com/giuliastro/harness-remote.git
 cd harness-remote
-git checkout integration/nitsuga-taskdesk
 npm install
 cd web
 npm install
@@ -38,25 +37,33 @@ cd ..
 
 Use Node.js 20 or newer.
 
-## Terminal A — start the machine daemon
+## Terminal A: start the machine daemon
 
 TaskDesk project/task/model endpoints live on the **machine daemon**, not on the legacy single-backend server. Do not use `--single` for the TaskDesk test page.
 
-On a machine with several supported harnesses installed, the simplest start is:
+### Browser DEV testing requires CORS
+
+The local Vite client runs on `http://localhost:5173` while the machine daemon normally runs on `http://localhost:4097`. These are different browser origins, so the daemon must allow the Vite origin during browser testing.
+
+For the local TaskDesk browser test, start the daemon with CORS enabled for the dev origin:
 
 ```bash
-npm start
+npm start -- --cors http://localhost:5173
 ```
 
-The launcher detects the installed CLIs, chooses an ACP primary, and includes managed OpenCode when available. Record the daemon address, username and password printed in the terminal. The daemon normally uses port 4097; managed OpenCode normally stays internal on loopback port 4096.
+If testing through `127.0.0.1` or another host/IP, allow that exact browser origin as well.
 
-To deliberately choose the ACP primary while testing:
+This is a **browser/PWA requirement only**. The installed Electron desktop app and Android APK use native networking and should not require users to configure CORS. The final v3 user instructions must preserve that distinction rather than presenting `--cors` as a general Harness Remote requirement.
+
+On a machine with several supported harnesses installed, the launcher detects the installed CLIs, chooses an ACP primary, and includes managed OpenCode when available. Record the daemon address, username and password printed in the terminal. The daemon normally uses port 4097; managed OpenCode normally stays internal on loopback port 4096.
+
+To deliberately choose the ACP primary while testing, keep the browser CORS origin enabled:
 
 ```bash
-npm start -- --backend codex
-npm start -- --backend claude
-npm start -- --backend omp
-npm start -- --backend pi
+npm start -- --backend codex --cors http://localhost:5173
+npm start -- --backend claude --cors http://localhost:5173
+npm start -- --backend omp --cors http://localhost:5173
+npm start -- --backend pi --cors http://localhost:5173
 ```
 
 Run one daemon process at a time.
@@ -75,7 +82,7 @@ npm start -- --backend pi --single
 
 Use these only to distinguish a general harness/bridge regression from a machine-daemon/TaskDesk regression.
 
-## Terminal B — start the web client
+## Terminal B: start the web client
 
 ```bash
 cd web
@@ -138,7 +145,7 @@ From the normal app save/connect the daemon profile, then open `?taskdesk-test=1
 2. Open the test page once and record model behavior.
 3. Close the dialog/reopen New Task from the test page without restarting anything.
 
-**Pass:** first and second attempts behave equivalently. “Fails first, works second” is a failure.
+**Pass:** first and second attempts behave equivalently. "Fails first, works second" is a failure.
 
 ### D. Model refresh semantics
 
