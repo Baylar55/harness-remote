@@ -114,7 +114,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     return sessions.filter((session) => !hiddenSessionIDs.has(session.id))
   }
 
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     applyCorsHeaders(request, response, config)
     if (request.method === "OPTIONS") {
       response.writeHead(allowedOrigin(request, config) ? 204 : 403)
@@ -278,4 +278,8 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
       writeJSON(response, 400, { error: error instanceof Error ? error.message : "Request failed" })
     }
   })
+  // The machine task launcher must use this exact service so task-created ACP sessions retain
+  // their title, prompt, live messages, and ownership when the user switches harnesses.
+  server.acpService = service
+  return server
 }
