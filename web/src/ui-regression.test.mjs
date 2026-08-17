@@ -122,6 +122,11 @@ assert.ok(app.includes('if (requestID !== sessionRefreshRequestRef.current) retu
 assert.match(app, /message\.startsWith\("HTTP 401:"\)[\s\S]*?clearServerData\(\)/, 'an unauthorized session refresh must clear the previously visible server data')
 assert.match(app, /function DesktopModalOverlay\([\s\S]*?closeOnBackdrop = true/, 'desktop panel overlays must support disabling backdrop dismissal')
 assert.match(app, /ariaLabel=\{t\('settings\.title'\)\} closeOnBackdrop=\{false\}/, 'server configuration must stay open when its backdrop is clicked')
+assert.ok(!app.includes('sheet-backdrop" role="presentation" onClick={() => setActiveDetailSheet(null)}'), 'the model configuration sheet must require an explicit close action')
+assert.ok(!panels.includes('modal-backdrop" role="presentation" onClick={onCancel}'), 'the server connection wizard must not discard a draft when its backdrop is clicked')
+assert.ok(panels.includes('wizard-close'), 'the server connection wizard needs an explicit close control')
+assert.ok(app.includes('profileID !== activeProfileID || configKey(nextConfig) !== configKey(config)'), 'switching profiles must clear the previous harness session even for the same host')
+assert.ok(app.includes('agentId: config.agentId?.trim() ?? ""'), 'the server identity must include the selected daemon agent')
 assert.ok(!taskDialog.includes('role="presentation" onClick={onClose}'), 'the new-task dialog must not discard typed work when the backdrop is clicked')
 assert.ok(taskDialog.includes('onLaunched: (task: MachineTask) => void'), 'the task launcher must return the launched task, not a bare callback')
 assert.ok(taskDialog.includes('task = await taskClient.launch(taskConfig, task.id)'), 'the success view must receive the task returned by launch')
@@ -309,6 +314,9 @@ for (const cls of ['.harness-badge', '.harness-omp', '.harness-pi', '.brand-serv
   assert.ok(styles.includes(cls), `${cls} should be styled`)
 }
 assert.match(styles, /\.brand-server[\s\S]*?text-overflow: ellipsis/, 'a long address must truncate rather than push the badge off screen')
+assert.match(styles, /--harness-pi:\s*#2563eb/, 'PI needs a clearly distinct blue harness color')
+assert.match(styles, /\.wizard-header > \.btn-icon[\s\S]*?margin-left:\s*auto/, 'wizard close controls must stay pinned to the top-right corner')
+assert.match(styles, /\.choice-card\s*\{[\s\S]*?grid-template-rows:\s*1\.5rem minmax\(3rem, 1fr\)/, 'server choice card labels must align across harnesses')
 
 // Mobile keyboard: an address is not a sentence, a port is a number, and a soft keyboard has
 // no Shift key — so the composer flips on touch-primary devices: Enter inserts a new line,
