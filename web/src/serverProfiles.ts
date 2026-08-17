@@ -67,8 +67,23 @@ function namedHarness(name: string): BackendKind | undefined {
 
 function repairMisroutedDaemonProfile(profile: SavedServerProfile): SavedServerProfile {
   const intended = namedHarness(profile.name)
-  if (!intended || profile.config.backend !== "codex" || profile.config.agentId !== "codex") return profile
-  return { ...profile, config: { ...profile.config, backend: intended, agentId: intended } }
+  if (!intended) return profile
+  const savedAsCodex = profile.config.backend === "codex" && profile.config.agentId === "codex"
+  const loopback = ["localhost", "127.0.0.1", "::1"].includes(profile.config.host.trim().toLowerCase())
+  // Earlier setup guidance incorrectly paired a daemon harness with OpenCode's internal port.
+  // A named local Harness profile with daemon credentials is unambiguously meant for port 4097.
+  const pointedAtOpenCode = profile.config.backend === intended && !profile.config.agentId &&
+    loopback && profile.config.port === 4096 && profile.config.username === "harness"
+  if (!savedAsCodex && !pointedAtOpenCode) return profile
+  return {
+    ...profile,
+    config: {
+      ...profile.config,
+      backend: intended,
+      agentId: intended,
+      ...(pointedAtOpenCode ? { port: 4097 } : {})
+    }
+  }
 }
 
 function parseProfiles(value: string | null): SavedServerProfile[] | null {
