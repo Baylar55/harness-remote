@@ -3,6 +3,9 @@
 Harness Remote is a companion app for controlling coding-agent harnesses from phone or desktop, even when you are not at your main workstation.
 It is designed to make daily usage simple: connect to a backend, check active sessions, see progress, send new prompts or slash commands, and stop a running action when supported.
 
+**Harness Remote v3 / TaskDesk is under active development.**  
+The current stable version remains on `main`, while the v3 work is being stabilized and tested on [`integration/nitsuga-taskdesk`](https://github.com/giuliastro/harness-remote/tree/integration/nitsuga-taskdesk) before any future promotion.
+
 ## Supported Harnesses
 
 The app is backend-agnostic: you pick the harness in **Settings** and each one keeps its own saved connection, so you can switch between them without re-entering anything.
@@ -475,7 +478,7 @@ every past conversation. The `--root` option only governs directory browsing and
 new-session cwd, not which sessions are visible.
 
 Like PI, the Claude Code adapter asks before each tool call. **The bridge grants
-those requests automatically** — there is no way to prompt on the phone mid-turn
+those requests automatically** — there is no way to prompt you on the phone mid-turn
 and a refusal would silently prevent the agent from working. An agent reached
 through this bridge edits files unattended.
 
