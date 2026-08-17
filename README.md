@@ -4,7 +4,7 @@ Harness Remote is a companion app for controlling coding-agent harnesses from ph
 It is designed to make daily usage simple: connect to a backend, check active sessions, see progress, send new prompts or slash commands, and stop a running action when supported.
 
 **Harness Remote v3 / TaskDesk is under active development.**  
-The current stable version remains on `main`, while the v3 work is being stabilized and tested on [`integration/nitsuga-taskdesk`](https://github.com/giuliastro/harness-remote/tree/integration/nitsuga-taskdesk) before any future promotion.
+The current stable version remains on `main`, while the v3 work is being stabilized and tested on [`v3/taskdesk`](https://github.com/giuliastro/harness-remote/tree/v3/taskdesk) before any future promotion.
 
 ## Supported Harnesses
 
