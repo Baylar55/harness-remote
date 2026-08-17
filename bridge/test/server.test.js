@@ -1064,6 +1064,39 @@ test("keeps PI streamed assistant fragments in one Markdown message", async () =
   }
 })
 
+test("merges PI assistant fragments replayed during session load", async () => {
+  class FragmentedReplayAcp extends EventEmitter {
+    async start() {}
+
+    async listSessions() {
+      return [{ sessionId: "session-1", cwd: process.cwd(), updatedAt: "2026-08-17T20:00:00.000Z" }]
+    }
+
+    async request(method) {
+      if (method !== "session/load") return {}
+      for (const [messageId, text] of [
+        ["2c1b4ee5-0ca2-4656-8c0a-7eece95bb0ae", "## Aggiorn"],
+        ["044ec068-2e43-4ffd-a330-06a7b678d360", "amento\\n\\nIl Markdown resta integro."]
+      ]) {
+        this.emit("notification", {
+          method: "session/update",
+          params: {
+            sessionId: "session-1",
+            update: { sessionUpdate: "agent_message_chunk", messageId, content: { type: "text", text } }
+          }
+        })
+      }
+      return {}
+    }
+
+    notify() {}
+  }
+
+  const service = new AcpService(new FragmentedReplayAcp())
+  const messages = await service.messages("session-1", true)
+  assert.deepEqual(messages.map((message) => message.parts[0].text), ["## Aggiornamento\\n\\nIl Markdown resta integro."])
+})
+
 test("replays persistent user and assistant history when reopening an OMP session", async () => {
   const bridge = await startServer({ acp: new ReplayAcp() })
   try {

@@ -50,7 +50,14 @@ function mergeFragmentedPiSnapshot(messages) {
       && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(message.info.id)
       && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(previous.info.id)
     ) {
-      previous.parts.push(...message.parts)
+      for (const part of message.parts ?? []) {
+        const lastPart = previous.parts.at(-1)
+        if (lastPart?.type === part?.type && typeof lastPart.text === "string" && typeof part.text === "string") {
+          lastPart.text += part.text
+        } else {
+          previous.parts.push(part)
+        }
+      }
       continue
     }
     merged.push(message)
@@ -772,7 +779,7 @@ export class AcpService {
     if (!session) throw new Error("Harness session not found")
     await this.#restoreSnapshot(sessionID)
     const authoritativeState = await this.#refreshActionState(sessionID, false)
-    let previousMessages = this.#messages.get(sessionID) ?? []
+    let previousMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
     const previousTodos = this.#todos.get(sessionID) ?? []
     const previousMessageSnapshot = semanticHistorySignature(previousMessages)
     if (this.#historyLoader) {
@@ -784,6 +791,7 @@ export class AcpService {
           previousMessages = authoritativeState
             ? persistedMessages
             : mergeExternalHistory(persistedMessages, previousMessages)
+          previousMessages = mergeFragmentedPiSnapshot(previousMessages)
           this.#messages.set(sessionID, previousMessages)
           if (!this.#ownedSessions.has(sessionID) && !requireConfigOptions) {
             this.#todos.set(sessionID, [])
@@ -804,7 +812,7 @@ export class AcpService {
     try {
       const result = await this.#acp.request("session/load", { sessionId: sessionID, cwd: session.cwd, mcpServers: [] }, 300_000)
       this.#rememberConfigOptions(sessionID, result.configOptions)
-      const replayedMessages = this.#messages.get(sessionID) ?? []
+      const replayedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
       this.#messages.set(sessionID, replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
       const replayedTodos = this.#todos.get(sessionID) ?? []
       this.#todos.set(sessionID, replaceHistory ? replayedTodos : mergeTodos(previousTodos, replayedTodos))
