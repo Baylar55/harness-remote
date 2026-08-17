@@ -113,6 +113,12 @@ assert.ok(app.includes('completionShouldPlayRef.current = true'), 'completion so
 assert.ok(app.includes('wasAwaitingAssistantReplyRef.current && !awaitingAssistantReply && completionShouldPlayRef.current'), 'completion sound should play only when assistant waiting ends, not when the user bubble renders')
 assert.ok(app.includes('loadSelectedRequestRef'), 'session message refreshes should ignore stale overlapping polling responses')
 assert.ok(app.includes('if (requestID !== loadSelectedRequestRef.current) return'), 'older loadSelected requests must not overwrite newer assistant output')
+assert.ok(app.includes('const sessionRefreshRequestRef = useRef(0)'), 'session list refreshes need their own request generation')
+assert.ok(app.includes('if (requestID !== sessionRefreshRequestRef.current) return'), 'an old authenticated session-list response must not repopulate the UI after credentials change')
+assert.ok(!app.includes('sheet-backdrop" role="presentation" onClick={() => setActiveDetailSheet(null)}'), 'the model configuration sheet must require an explicit close action')
+assert.ok(!panels.includes('modal-backdrop" role="presentation" onClick={onCancel}'), 'the server connection wizard must not discard a draft when its backdrop is clicked')
+assert.ok(panels.includes('wizard-close'), 'the server connection wizard needs an explicit close control')
+assert.ok(app.includes('profileID !== activeProfileID || configKey(nextConfig) !== configKey(config)'), 'switching profiles must clear the previous harness session even for the same host')
 assert.ok(app.includes('loadedSessionID'), 'the message pane should track whether the selected session history has loaded')
 assert.ok(app.includes('loadedSessionID !== selectedID'), 'an unloaded selected session must render the loading state instead of an empty transcript')
 assert.ok(app.includes('setLoadedSessionID(sessionID)'), 'a successful selected-session snapshot should unlock the empty transcript state')
@@ -293,6 +299,9 @@ for (const cls of ['.harness-badge', '.harness-omp', '.harness-pi', '.brand-serv
   assert.ok(styles.includes(cls), `${cls} should be styled`)
 }
 assert.match(styles, /\.brand-server[\s\S]*?text-overflow: ellipsis/, 'a long address must truncate rather than push the badge off screen')
+assert.match(styles, /--harness-pi:\s*#2563eb/, 'PI needs a clearly distinct blue harness color')
+assert.match(styles, /\.wizard-header > \.btn-icon[\s\S]*?margin-left:\s*auto/, 'wizard close controls must stay pinned to the top-right corner')
+assert.match(styles, /\.choice-card\s*\{[\s\S]*?grid-template-rows:\s*1\.5rem minmax\(3rem, 1fr\)/, 'server choice card labels must align across harnesses')
 
 // Mobile keyboard: an address is not a sentence, a port is a number, and a soft keyboard has
 // no Shift key — so the composer flips on touch-primary devices: Enter inserts a new line,

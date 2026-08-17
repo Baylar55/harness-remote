@@ -2308,6 +2308,7 @@ function App() {
   const awaitingAssistantBaselineRef = useRef("")
   const loadSelectedRequestRef = useRef(0)
   const loadModelsRequestRef = useRef(0)
+  const sessionRefreshRequestRef = useRef(0)
   const backgroundFailureCountRef = useRef(0)
   const initialSessionLoadRef = useRef(true)
   const latestMessageTimesRef = useRef(new Map<string, { sessionUpdated: number; activityTime: number }>())
@@ -2546,32 +2547,43 @@ function App() {
     setLoadingSessionID((activeID) => (activeID === sessionID ? null : activeID))
   }
 
+  function clearServerData(nextBackend = config.backend) {
+    // A credentials change is a hard boundary too: never leave a previous server's
+    // sessions visible while the new configuration is unauthenticated or rejected.
+    sessionRefreshRequestRef.current += 1
+    loadSelectedRequestRef.current += 1
+    loadModelsRequestRef.current += 1
+    openingSessionRef.current = null
+    autoSelectAttemptedRef.current = false
+    dashboardUnsupportedRef.current = false
+    setSessions([])
+    setSelectedID(null)
+    setLoadingSessionID(null)
+    setActiveDetailSheet(null)
+    setView((current) => current === "detail" ? "sessions" : current)
+    setMessages([])
+    setLoadedSessionID(null)
+    loadedMessagesRef.current = []
+    setOptimisticUserMessages([])
+    setTodos([])
+    setDiffFiles([])
+    setProjectDashboard(null)
+    setDashboardError(null)
+    setAwaitingAssistantReply(false)
+    setConnectedVersion("")
+    setCommands([])
+    setExtensionActions([])
+    setActionNotice(null)
+    setAgentOptions([])
+    setModelOptions([])
+    setSelectedModelKey(readStoredModel(nextBackend))
+  }
+
   function applyConfig(nextConfig: ServerConfig, profileID = activeProfileID, sourceProfiles = profiles) {
-    const serverChanged = configKey(nextConfig) !== configKey(config)
-    if (serverChanged) {
-      loadSelectedRequestRef.current += 1
-      loadModelsRequestRef.current += 1
-      autoSelectAttemptedRef.current = false
-      dashboardUnsupportedRef.current = false
-      setSessions([])
-      setSelectedID(null)
-      setMessages([])
-      setLoadedSessionID(null)
-      loadedMessagesRef.current = []
-      setOptimisticUserMessages([])
-      setTodos([])
-      setDiffFiles([])
-      setProjectDashboard(null)
-      setDashboardError(null)
-      setAwaitingAssistantReply(false)
-      setConnectedVersion("")
-      setCommands([])
-      setExtensionActions([])
-      setActionNotice(null)
-      setAgentOptions([])
-      setModelOptions([])
-      setSelectedModelKey(readStoredModel(nextConfig.backend))
-    }
+    // A profile is a trust and session boundary, even if two profiles happen to point at the same
+    // host. Switching profile must never leave the previous harness conversation on screen.
+    const serverChanged = profileID !== activeProfileID || configKey(nextConfig) !== configKey(config)
+    if (serverChanged) clearServerData(nextConfig.backend)
     const nextProfiles = sourceProfiles.map((profile) => profile.id === profileID ? { ...profile, config: nextConfig } : profile)
     setProfiles(nextProfiles)
     setActiveProfileID(profileID)
@@ -2629,6 +2641,7 @@ function App() {
 
   async function refreshSessions(silent = false, preserveSession?: SessionView) {
     if (!isValidServerConfig(config)) return
+    const requestID = ++sessionRefreshRequestRef.current
     if (!silent) {
       setRuntimeError(null)
       setConnectionState(sessions.length === 0 ? "connecting" : "reconnecting")
@@ -2663,6 +2676,7 @@ function App() {
       const mapped = hydratedItems
         .map((session) => toSessionView(session, statuses[session.id], activityTimes.get(session.id)))
         .sort((a, b) => b.updated - a.updated)
+      if (requestID !== sessionRefreshRequestRef.current) return
       setSessions((current) => {
         // `current` is the list this refresh started from, so a session opened moments ago may not
         // be in it yet; the ref holds what is actually on screen. Falling back to `current` alone
@@ -2684,6 +2698,7 @@ function App() {
       setConnectionMessage(t('connection.connected'))
       setRuntimeError(null)
     } catch (err) {
+      if (requestID !== sessionRefreshRequestRef.current) return
       const message = (err as Error).message
       if (!silent) {
         setConnectionState("offline")
@@ -5024,7 +5039,7 @@ function App() {
       )}
 
       {activeDetailSheet && selectedSession && (
-        <div className="sheet-backdrop" role="presentation" onClick={() => setActiveDetailSheet(null)}>
+        <div className="sheet-backdrop" role="presentation">
           <section
             className="bottom-sheet fade-in"
             role="dialog"

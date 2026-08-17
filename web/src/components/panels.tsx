@@ -287,7 +287,7 @@ export function ConnectServerWizard({
   }
 
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onCancel}>
+    <div className="modal-backdrop" role="presentation">
       <section
         className="modal-card wizard fade-in"
         role="dialog"
@@ -300,7 +300,7 @@ export function ConnectServerWizard({
             <h2 id="connect-server-title">{t('connect.title')}</h2>
             <p className="subtle">{t('connect.subtitle')}</p>
           </div>
-          <button type="button" className="btn-icon btn-ghost" onClick={onCancel} aria-label={t('session.cancel')}>
+          <button type="button" className="btn-icon btn-ghost wizard-close" onClick={onCancel} aria-label={t('session.cancel')}>
             <CloseIcon size={16} />
           </button>
         </div>
