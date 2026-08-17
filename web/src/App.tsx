@@ -1348,7 +1348,8 @@ function configKey(config: ServerConfig): string {
     host: config.host.trim(),
     port: config.port,
     username: config.username.trim(),
-    password: config.password
+    password: config.password,
+    agentId: config.agentId?.trim() ?? ""
   })
 }
 
@@ -2510,10 +2511,14 @@ function App() {
     sessionRefreshRequestRef.current += 1
     loadSelectedRequestRef.current += 1
     loadModelsRequestRef.current += 1
+    openingSessionRef.current = null
     autoSelectAttemptedRef.current = false
     dashboardUnsupportedRef.current = false
     setSessions([])
     setSelectedID(null)
+    setLoadingSessionID(null)
+    setActiveDetailSheet(null)
+    setView((current) => current === "detail" ? "sessions" : current)
     setMessages([])
     setLoadedSessionID(null)
     loadedMessagesRef.current = []
@@ -2533,7 +2538,9 @@ function App() {
   }
 
   function applyConfig(nextConfig: ServerConfig, profileID = activeProfileID, sourceProfiles = profiles) {
-    const serverChanged = configKey(nextConfig) !== configKey(config)
+    // A profile is a trust and session boundary, even if two profiles happen to point at the same
+    // host. In particular, agentId distinguishes harnesses exposed by one machine daemon.
+    const serverChanged = profileID !== activeProfileID || configKey(nextConfig) !== configKey(config)
     if (serverChanged) clearServerData(nextConfig.backend)
     const nextProfiles = sourceProfiles.map((profile) => profile.id === profileID ? { ...profile, config: nextConfig } : profile)
     setProfiles(nextProfiles)
@@ -4706,7 +4713,7 @@ function App() {
       )}
 
       {activeDetailSheet && selectedSession && (
-        <div className="sheet-backdrop" role="presentation" onClick={() => setActiveDetailSheet(null)}>
+        <div className="sheet-backdrop" role="presentation">
           <section
             className="bottom-sheet fade-in"
             role="dialog"
