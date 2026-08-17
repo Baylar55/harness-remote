@@ -5,7 +5,9 @@ import { loadActiveServerProfile, loadServerProfiles } from "../serverProfiles"
 import { discoverMachineConnection, selectableMachineAgents } from "../taskMachineClient"
 import { taskClient, type MachineProject, type MachineTask } from "../taskClient"
 import type { Translator } from "../i18n"
-import type { MachineSnapshot, ModelOption, ServerConfig } from "../types"
+import type { MachineSnapshot, ModelOption, ModelSelection, ServerConfig } from "../types"
+
+const TASK_MODEL_STORAGE_KEY = "opencode.remote.taskModel"
 
 const TASK_FALLBACKS: Record<string, string> = {
   "task.new": "New Task",
@@ -40,6 +42,41 @@ function preferredAgentID(machine: MachineSnapshot, config: ServerConfig): strin
   return agents.find((agent) => config.agentId ? agent.id === config.agentId : agent.backend === config.backend)?.id
     ?? agents[0]?.id
     ?? ""
+}
+
+function taskModelScope(profileID: string, agentID: string): string {
+  return `${profileID}:${agentID}`
+}
+
+function readLastTaskModel(profileID: string, agentID: string): ModelSelection | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TASK_MODEL_STORAGE_KEY) ?? "{}") as Record<string, unknown>
+    const value = saved[taskModelScope(profileID, agentID)]
+    if (!value || typeof value !== "object") return null
+    const model = value as Partial<ModelSelection>
+    return typeof model.providerID === "string" && typeof model.modelID === "string"
+      ? { providerID: model.providerID, modelID: model.modelID, variant: typeof model.variant === "string" ? model.variant : undefined }
+      : null
+  } catch {
+    return null
+  }
+}
+
+function rememberTaskModel(profileID: string, agentID: string, model: ModelSelection | undefined): void {
+  if (!model) return
+  let saved: Record<string, ModelSelection> = {}
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TASK_MODEL_STORAGE_KEY) ?? "{}")
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) saved = parsed as Record<string, ModelSelection>
+  } catch {
+    // Replace malformed local data only after a task actually starts successfully.
+  }
+  saved[taskModelScope(profileID, agentID)] = model
+  localStorage.setItem(TASK_MODEL_STORAGE_KEY, JSON.stringify(saved))
+}
+
+function sameTaskModel(option: ModelOption, model: ModelSelection): boolean {
+  return option.providerID === model.providerID && option.modelID === model.modelID && (option.variant ?? "") === (model.variant ?? "")
 }
 
 /**
@@ -144,7 +181,9 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
     void taskClient.listAgentModels(taskConfig, selectedAgentId).then((catalog) => {
       if (!guard.isCurrent(token)) return
       setModels(catalog.models)
-      setModelIndex(catalog.models.findIndex((option) => option.isDefault))
+      const lastModel = readLastTaskModel(profile.id, selectedAgentId)
+      const lastModelIndex = lastModel ? catalog.models.findIndex((option) => sameTaskModel(option, lastModel)) : -1
+      setModelIndex(lastModelIndex >= 0 ? lastModelIndex : catalog.models.findIndex((option) => option.isDefault))
       setModelStale(catalog.stale)
       setModelNotice(catalog.stale ? (catalog.error ?? "Model catalog could not be refreshed.") : null)
     }).catch((cause) => {
@@ -167,6 +206,7 @@ export function TaskLaunchDialog({ t, onClose, onLaunched }: {
         prompt: prompt.trim(),
         model: model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant }
       })
+      rememberTaskModel(profile.id, agent.id, model && { providerID: model.providerID, modelID: model.modelID, variant: model.variant })
       if (isolated && selectedProject?.kind === "git") task = await taskClient.prepareWorktree(taskConfig, task.id)
       task = await taskClient.launch(taskConfig, task.id)
       onLaunched(task)
