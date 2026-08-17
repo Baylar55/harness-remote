@@ -132,6 +132,8 @@ export type ServerProfileSummary = {
   backendLabel: string
   backendClass: string
   address: string
+  connectionState: string
+  connectionLabel: string
 }
 
 /**
@@ -145,6 +147,7 @@ export function ServerSwitcher({
   activeProfileID,
   connectionState,
   connectionLabel,
+  onOpen,
   onSelect,
   onAddServer,
   onManageServers,
@@ -156,6 +159,7 @@ export function ServerSwitcher({
   activeProfileID: string
   connectionState: string
   connectionLabel: string
+  onOpen: () => void
   onSelect: (profileID: string) => void
   onAddServer: () => void
   onManageServers: () => void
@@ -177,7 +181,11 @@ export function ServerSwitcher({
         aria-expanded={open}
         aria-label={ariaLabel}
         title={active ? `${active.name} — ${active.address} (${connectionLabel})` : ariaLabel}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => setOpen((value) => {
+          const nextOpen = !value
+          if (nextOpen) onOpen()
+          return nextOpen
+        })}
       >
         <span className={`status-dot ${connectionState}`} aria-hidden="true" />
         <span className="server-switcher-name">{active?.name ?? ariaLabel}</span>
@@ -200,8 +208,15 @@ export function ServerSwitcher({
             >
               <ServerIcon size={16} />
               <span className="server-option-text">
-                <strong>{profile.name}</strong>
+                <strong>
+                  <span>{profile.name}</span>
+                  {profile.id === activeProfileID && <span className="server-option-current" aria-label="Active server">✓</span>}
+                </strong>
                 <small>{profile.address}</small>
+                <small className={`server-option-status ${profile.connectionState}`}>
+                  <span className={`status-dot ${profile.connectionState}`} aria-hidden="true" />
+                  {profile.connectionLabel}
+                </small>
               </span>
               <span className={`harness-badge harness-${profile.backendClass}`}>{profile.backendLabel}</span>
             </button>
