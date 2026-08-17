@@ -1,7 +1,25 @@
-import { spawn } from "node:child_process"
+import { spawn, spawnSync } from "node:child_process"
 import { EventEmitter } from "node:events"
 
 const DEFAULT_START_TIMEOUT_MS = 15_000
+
+// npm installs the OpenCode launcher as `opencode.cmd` on Windows. `spawn("opencode")` does not
+// resolve that command shim, even though it is correctly present on PATH, which made the daemon
+// advertise a managed OpenCode host and then immediately report ENOENT. Go through cmd.exe for
+// command shims (and bare commands resolved through PATHEXT); native executables remain direct.
+function openCodeSpawnInvocation(command, args, platform, environment) {
+  if (platform !== "win32" || /\.(?:exe|com)$/i.test(command)) return { command, args }
+  return {
+    command: environment.ComSpec ?? "cmd.exe",
+    args: ["/d", "/s", "/c", command, ...args]
+  }
+}
+
+function stopWindowsProcessTree(processID) {
+  // `cmd /c opencode` can outlive its cmd.exe parent. taskkill /T targets only the managed
+  // process tree, unlike a port-based kill which could terminate an unrelated OpenCode instance.
+  spawnSync("taskkill", ["/pid", String(processID), "/t", "/f"], { stdio: "ignore", windowsHide: true })
+}
 const READINESS_RETRY_MS = 100
 const READINESS_ATTEMPT_MS = 1_000
 
@@ -68,6 +86,8 @@ export class ManagedOpenCodeHost extends EventEmitter {
     password,
     environment = process.env,
     spawnProcess = spawn,
+    platform = process.platform,
+    stopProcessTree = stopWindowsProcessTree,
     readinessHost,
     startTimeoutMs = DEFAULT_START_TIMEOUT_MS,
     waitUntilReady = waitForOpenCodeHealth
@@ -80,10 +100,13 @@ export class ManagedOpenCodeHost extends EventEmitter {
     this.password = password
     this.environment = environment
     this.spawnProcess = spawnProcess
+    this.platform = platform
+    this.stopProcessTree = stopProcessTree
     this.readinessHost = readinessHost ?? (host === "0.0.0.0" ? "127.0.0.1" : host)
     this.startTimeoutMs = startTimeoutMs
     this.waitUntilReady = waitUntilReady
     this.child = undefined
+    this.windowsShellChild = false
     this.starting = undefined
   }
 
@@ -104,8 +127,17 @@ export class ManagedOpenCodeHost extends EventEmitter {
   }
 
   async #start() {
-    const child = this.spawnProcess(this.command, ["serve", "--hostname", this.host, "--port", String(this.port)], {
-      stdio: "inherit",
+    const invocation = openCodeSpawnInvocation(
+      this.command,
+      ["serve", "--hostname", this.host, "--port", String(this.port)],
+      this.platform,
+      this.environment
+    )
+    const child = this.spawnProcess(invocation.command, invocation.args, {
+      // OpenCode's own "server listening" banner duplicates the daemon's ready summary. Keep its
+      // error stream visible, but let the daemon be the one authoritative startup report.
+      stdio: ["ignore", "ignore", "inherit"],
+      windowsHide: true,
       env: {
         ...this.environment,
         OPENCODE_SERVER_USERNAME: this.username,
@@ -113,6 +145,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
       }
     })
     this.child = child
+    this.windowsShellChild = this.platform === "win32" && this.spawnProcess === spawn && invocation.command !== this.command
 
     const exited = new Promise((_, reject) => {
       child.once("error", (error) => reject(error))
@@ -153,6 +186,10 @@ export class ManagedOpenCodeHost extends EventEmitter {
   stop(signal = "SIGTERM") {
     const child = this.child
     if (!child || child.exitCode != null || child.signalCode != null) return false
+    if (this.windowsShellChild && Number.isInteger(child.pid)) {
+      this.stopProcessTree(child.pid)
+      return true
+    }
     return child.kill(signal)
   }
 

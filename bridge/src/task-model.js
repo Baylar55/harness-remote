@@ -10,13 +10,6 @@ export function normalizeTaskModel(value) {
   return variant ? { providerID, modelID, variant } : { providerID, modelID }
 }
 
-export function sessionModelBody(model) {
-  if (!model) return undefined
-  return model.variant
-    ? { providerID: model.providerID, id: model.modelID, variant: model.variant }
-    : { providerID: model.providerID, id: model.modelID }
-}
-
 export function promptModelBody(model) {
   if (!model) return undefined
   return { providerID: model.providerID, modelID: model.modelID }

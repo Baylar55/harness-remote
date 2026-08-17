@@ -31,6 +31,7 @@ test("starts OpenCode without placing credentials on argv", async () => {
     port: 4096,
     username: "harness",
     password: "secret",
+    platform: "linux",
     environment: { PATH: "/bin" },
     spawnProcess: (command, args, options) => {
       invocation = { command, args, options }
@@ -51,7 +52,59 @@ test("starts OpenCode without placing credentials on argv", async () => {
   assert.equal(invocation.args.includes("secret"), false)
   assert.equal(invocation.options.env.OPENCODE_SERVER_USERNAME, "harness")
   assert.equal(invocation.options.env.OPENCODE_SERVER_PASSWORD, "secret")
+  assert.deepEqual(invocation.options.stdio, ["ignore", "ignore", "inherit"])
   assert.equal(host.processID, 4242)
+})
+
+test("uses cmd.exe for the Windows OpenCode command shim", async () => {
+  const child = new FakeChild()
+  let invocation
+  const host = new ManagedOpenCodeHost({
+    command: "opencode",
+    username: "harness",
+    password: "secret",
+    platform: "win32",
+    environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+    spawnProcess: (command, args, options) => {
+      invocation = { command, args, options }
+      return child
+    },
+    waitUntilReady: async () => {}
+  })
+
+  await host.start()
+
+  assert.equal(invocation.command, "C:\\Windows\\System32\\cmd.exe")
+  assert.deepEqual(invocation.args, ["/d", "/s", "/c", "opencode", "serve", "--hostname", "127.0.0.1", "--port", "4096"])
+  assert.equal(invocation.options.windowsHide, true)
+  assert.equal(invocation.options.env.OPENCODE_SERVER_PASSWORD, "secret")
+})
+
+test("terminates the managed Windows command tree instead of leaving OpenCode running", async () => {
+  const child = new FakeChild()
+  child.pid = 9090
+  const processTrees = []
+  const host = new ManagedOpenCodeHost({
+    command: "opencode",
+    username: "harness",
+    password: "secret",
+    platform: "win32",
+    spawnProcess: (command, args, options) => {
+      // The production default spawn is not used in this test, so explicitly model the shell
+      // child path through the injectable terminator rather than terminating a real PID.
+      void command; void args; void options
+      return child
+    },
+    stopProcessTree: (pid) => processTrees.push(pid),
+    waitUntilReady: async () => {}
+  })
+
+  await host.start()
+  // Mark the injected child as a production shell child for the lifecycle invariant under test.
+  host.windowsShellChild = true
+  assert.equal(host.stop(), true)
+  assert.deepEqual(processTrees, [9090])
+  assert.deepEqual(child.killSignals, [])
 })
 
 test("health readiness verifies the generated credentials", async () => {

@@ -1,5 +1,5 @@
 import { taskLaunchError } from "./task-errors.js"
-import { promptModelBody, sessionModelBody } from "./task-model.js"
+import { promptModelBody } from "./task-model.js"
 
 function basicAuthorization(username, password) {
   if (!username && !password) return undefined
@@ -78,8 +78,10 @@ export class TaskLauncher {
           ...(authorization ? { Authorization: authorization } : {})
         },
         body: JSON.stringify({
-          title: `Task ${task.id.slice(0, 8)}`,
-          model: sessionModelBody(task.model)
+          // OpenCode assigns the model to a message, not to a session. Keep the session title
+          // consistent with sessions created for other agents; the UI resolves task metadata
+          // separately when it displays the session's selected model.
+          title: `Task ${task.id.slice(0, 8)}`
         })
       })
       const session = await responseJSON(response, `Creating ${task.agentId} session`)
@@ -109,7 +111,10 @@ export class TaskLauncher {
     }
 
     if (entry.kind === "http") {
-      const response = await this.fetchImpl(`${run.base}/session/${encodeURIComponent(run.sessionId)}/prompt_async?directory=${encodeURIComponent(task.workspace.path)}`, {
+      // prompt_async only acknowledges queueing (204). Provider/authentication failures then land
+      // in OpenCode events and the task remains "running" forever. The normal message endpoint
+      // keeps the same selected model but lets the background request settle as completed or failed.
+      void this.fetchImpl(`${run.base}/session/${encodeURIComponent(run.sessionId)}/message?directory=${encodeURIComponent(task.workspace.path)}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -121,8 +126,9 @@ export class TaskLauncher {
           model: promptModelBody(task.model),
           variant: task.model?.variant || undefined
         })
-      })
-      if (!response.ok) throw new Error(`Starting ${task.agentId} task failed with HTTP ${response.status}`)
+      }).then((response) => responseJSON(response, `Starting ${task.agentId} task`))
+        .then((result) => onCompleted?.(result))
+        .catch((error) => onFailed?.(error))
     }
   }
 

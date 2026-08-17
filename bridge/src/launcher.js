@@ -285,8 +285,8 @@ async function main() {
 
   const addresses = host === "0.0.0.0" ? lanAddresses() : [host]
 
-  process.stdout.write("Harness Remote quick start\n\n")
-  process.stdout.write("Enter this in the app:\n")
+  process.stdout.write("Harness Remote\n\n")
+  process.stdout.write("Configure this server in Harness Remote:\n")
   if (addresses.length) {
     for (const address of addresses) process.stdout.write(`  Address   http://${address}:${port}\n`)
   } else {
@@ -296,14 +296,13 @@ async function main() {
   process.stdout.write(`  Password  ${password}\n`)
 
   if (plan.mode === "daemon") {
-    process.stdout.write("\nThat one connection serves every agent on this machine:\n")
+    process.stdout.write("\nHarnesses detected on this machine:\n")
     for (const agent of plan.detected) {
-      if (agent === backend) process.stdout.write(`  ${agent} — primary agent\n`)
-      else if (agent === "opencode" && openCodePort) {
-        process.stdout.write(`  ${agent} — managed by the daemon on 127.0.0.1:${openCodePort}, internal only\n`)
-      } else process.stdout.write(`  ${agent} — detected\n`)
+      if (agent === backend) process.stdout.write(`  • ${agent} — selected as primary\n`)
+      else if (agent === "opencode") process.stdout.write("  • opencode — will be started by the daemon\n")
+      else process.stdout.write(`  • ${agent} — detected, not started\n`)
     }
-    process.stdout.write("There is nothing else to configure: no second address, no second password.\n")
+    process.stdout.write("\n")
   } else {
     process.stdout.write(`\nBackend: ${backend}\n`)
   }

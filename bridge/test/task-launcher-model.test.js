@@ -65,7 +65,7 @@ test("managed HTTP task launch sends selected model and variant", async () => {
     if (url.includes("/session?")) {
       return { ok: true, async json() { return { id: "http-session" } } }
     }
-    return { ok: true }
+    return { ok: true, async json() { return { info: { id: "message-1" }, parts: [] } } }
   }
   const host = {
     readinessHost: "127.0.0.1",
@@ -83,11 +83,35 @@ test("managed HTTP task launch sends selected model and variant", async () => {
   const run = await launcher.createSession(selected)
 
   const createBody = JSON.parse(requests[0].options.body)
-  assert.deepEqual(createBody.model, { providerID: "openai", id: "gpt-x", variant: "high" })
+  assert.deepEqual(createBody, { title: "Task task-123" })
   assert.equal(run.sessionId, "http-session")
 
   await launcher.startPrompt(selected, run)
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.match(requests[1].url, /\/message\?directory=/)
   const promptBody = JSON.parse(requests[1].options.body)
   assert.deepEqual(promptBody.model, { providerID: "openai", modelID: "gpt-x" })
   assert.equal(promptBody.variant, "high")
+})
+
+test("managed HTTP task launch reports a provider failure after the prompt is accepted", async () => {
+  const host = { readinessHost: "127.0.0.1", port: 4096, async start() {} }
+  const daemon = {
+    hostEntry: () => ({ kind: "http", host }),
+    registry: { host: () => ({ state: "available" }) }
+  }
+  const launcher = new TaskLauncher({
+    daemon,
+    fetchImpl: async () => ({ ok: false, status: 402, async json() { return { error: "Provider credit exhausted" } } })
+  })
+  const failures = []
+
+  await launcher.startPrompt(task({ agentId: "opencode" }), {
+    sessionId: "http-session",
+    base: "http://127.0.0.1:4096",
+    authorization: undefined
+  }, { onFailed: (error) => failures.push(error.message) })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(failures, ["Starting opencode task failed with HTTP 402: Provider credit exhausted"])
 })
