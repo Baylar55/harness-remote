@@ -107,7 +107,11 @@ export function createMachineDaemonServer({
   const tasks = taskStore ?? new TaskRunStore({ machineID, stateDirectory })
   const projects = projectCatalog ?? (() => discoverProjects({ machineID, roots }))
   const worktrees = worktreeManager ?? new WorktreeManager({ stateDirectory })
-  const launcher = taskLauncher ?? new TaskLauncher({ daemon })
+  const acpService = (agentID) => {
+    const server = agentID === primaryAgentID ? bridgeServer : acpBridgeServer(agentID)
+    return server?.acpService
+  }
+  const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher })
   const innerServer = createRouter({ daemon, config, primaryAgentID, bridgeServer, acpBridgeServer, taskStore: tasks, projectCatalog: projects, worktreeManager: worktrees })
   const launchServer = createLaunchServer({ innerServer, config, taskRunController: runs })

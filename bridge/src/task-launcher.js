@@ -37,10 +37,15 @@ function acpModelValue(configOptions, model) {
   return option?.options?.find((candidate) => candidate.value === model.modelID)?.value
 }
 
+function acpModelWireName(model) {
+  return model ? `${model.providerID}/${model.modelID}` : undefined
+}
+
 export class TaskLauncher {
-  constructor({ daemon, fetchImpl = fetch }) {
+  constructor({ daemon, fetchImpl = fetch, acpService } = {}) {
     this.daemon = daemon
     this.fetchImpl = fetchImpl
+    this.acpService = acpService
   }
 
   async createSession(task) {
@@ -52,6 +57,16 @@ export class TaskLauncher {
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
 
     if (entry.kind === "acp") {
+      const service = this.acpService?.(task.agentId)
+      if (service) {
+        const session = await service.createSession({
+          directory: task.workspace.path,
+          title: `Task ${task.id.slice(0, 8)}`,
+          model: acpModelWireName(task.model)
+        })
+        if (!session?.id) throw new Error(`Agent ${task.agentId} did not return a session id`)
+        return { sessionId: session.id, transport: "acp", directory: task.workspace.path }
+      }
       await entry.host.start()
       const result = await entry.host.request("session/new", { cwd: task.workspace.path, mcpServers: [] })
       if (!result?.sessionId) throw new Error(`Agent ${task.agentId} did not return a session id`)
@@ -99,6 +114,15 @@ export class TaskLauncher {
     if (!entry) throw taskLaunchError("unknown_agent", `Unknown agent: ${task.agentId}`)
 
     if (entry.kind === "acp") {
+      const service = this.acpService?.(task.agentId)
+      if (service) {
+        void service.promptAndWait(run.sessionId, task.prompt).then((result) => {
+          onCompleted?.(result)
+        }).catch((error) => {
+          onFailed?.(error)
+        })
+        return
+      }
       void entry.host.request("session/prompt", {
         sessionId: run.sessionId,
         prompt: [{ type: "text", text: task.prompt }]

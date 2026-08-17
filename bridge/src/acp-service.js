@@ -519,6 +519,32 @@ export class AcpService {
     this.#startTurn(sessionID, text, false, attachments)
   }
 
+  /** Start a prompt through the session service and resolve only when that turn becomes idle. */
+  async promptAndWait(sessionID, text, model, attachments = []) {
+    return new Promise((resolve, reject) => {
+      let started = false
+      let settled = false
+      const finish = (error) => {
+        if (settled) return
+        settled = true
+        unsubscribe()
+        if (error) reject(error)
+        else resolve()
+      }
+      const unsubscribe = this.subscribe((event) => {
+        if (event.sessionId !== sessionID) return
+        if (event.type === "session.error") {
+          finish(new Error(event.message ?? "Harness prompt failed"))
+          return
+        }
+        if (event.type !== "session.updated") return
+        if (this.#isBusy(sessionID)) started = true
+        else if (started) finish()
+      })
+      void this.prompt(sessionID, text, model, attachments).catch(finish)
+    })
+  }
+
   #startTurn(sessionID, text, recorded = false, attachments = []) {
     const generation = (this.#turnGenerations.get(sessionID) ?? 0) + 1
     this.#turnGenerations.set(sessionID, generation)

@@ -58,6 +58,35 @@ test("ACP task launch applies selected model before prompting", async () => {
   assert.equal(calls.at(-1).method, "session/prompt")
 })
 
+test("ACP task launch uses the bridge session service so the task remains visible with its messages", async () => {
+  const calls = []
+  const service = {
+    async createSession(input) {
+      calls.push(["create", input])
+      return { id: "service-session" }
+    },
+    async promptAndWait(sessionID, text) {
+      calls.push(["prompt", sessionID, text])
+    }
+  }
+  const daemon = {
+    hostEntry: () => ({ kind: "acp", host: {} }),
+    registry: { host: () => ({ state: "available" }) }
+  }
+  const launcher = new TaskLauncher({ daemon, acpService: () => service })
+  const selected = task({ agentId: "omp" })
+  const run = await launcher.createSession(selected)
+  let completed = false
+  await launcher.startPrompt(selected, run, { onCompleted: () => { completed = true } })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(calls, [
+    ["create", { directory: "/repo", title: "Task task-123", model: "openai/gpt-x" }],
+    ["prompt", "service-session", "Implement the fix"]
+  ])
+  assert.equal(completed, true)
+})
+
 test("managed HTTP task launch sends selected model and variant", async () => {
   const requests = []
   const fetchImpl = async (url, options = {}) => {
