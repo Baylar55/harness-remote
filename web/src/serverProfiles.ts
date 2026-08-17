@@ -78,7 +78,10 @@ function parseProfiles(value: string | null): SavedServerProfile[] | null {
   }
 }
 
-function legacyProfiles(): SavedServerProfile[] {
+/** Read only real legacy entries. Keeping this separate from the blank fallback lets a newer
+    profile collection absorb a configuration from an older backend-specific key without adding
+    an invented empty server on every launch. */
+function readLegacyProfiles(): SavedServerProfile[] {
   const profiles: SavedServerProfile[] = []
   for (const backend of BACKENDS) {
     const raw = localStorage.getItem(BACKEND_STORAGE_KEYS[backend])
@@ -95,15 +98,31 @@ function legacyProfiles(): SavedServerProfile[] {
     const legacy = parseConfig(JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) ?? "null"), "opencode")
     if (legacy) return [{ id: profileID(), name: profileName(legacy.backend, 0), config: legacy }]
   } catch {
-    // Start with a blank OpenCode profile when legacy storage is malformed.
+    // Ignore malformed legacy storage and continue with the backend-specific entries.
   }
+  return profiles
+}
+
+function legacyProfiles(): SavedServerProfile[] {
+  const profiles = readLegacyProfiles()
+  if (profiles.length > 0) return profiles
   const backend = localStorage.getItem(ACTIVE_BACKEND_STORAGE_KEY)
   const fallback = isBackend(backend) ? backend : "opencode"
   return [{ id: profileID(), name: profileName(fallback, 0), config: defaultConfig(fallback) }]
 }
 
 export function loadServerProfiles(): SavedServerProfile[] {
-  return parseProfiles(localStorage.getItem(SERVER_PROFILES_STORAGE_KEY)) ?? legacyProfiles()
+  const savedProfiles = parseProfiles(localStorage.getItem(SERVER_PROFILES_STORAGE_KEY))
+  if (!savedProfiles) return legacyProfiles()
+
+  // A user may upgrade while they already have one new-format server plus an older OMP/PI/etc.
+  // backend key. Treat the collection as authoritative for profiles it knows, but retain a legacy
+  // configuration for a backend that the collection does not contain. Previously the startup
+  // persistence below overwrote that key's only path back into the UI.
+  const legacyOnly = readLegacyProfiles().filter((legacyProfile) =>
+    !savedProfiles.some((profile) => profile.config.backend === legacyProfile.config.backend)
+  )
+  return [...savedProfiles, ...legacyOnly]
 }
 
 export function loadActiveServerProfile(profiles: SavedServerProfile[]): SavedServerProfile {
