@@ -112,7 +112,7 @@ export function createMachineDaemonServer({
     return server?.acpService
   }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
-  const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher })
+  const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
   const innerServer = createRouter({ daemon, config, primaryAgentID, bridgeServer, acpBridgeServer, taskStore: tasks, projectCatalog: projects, worktreeManager: worktrees })
   const launchServer = createLaunchServer({ innerServer, config, taskRunController: runs })
   const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks })
