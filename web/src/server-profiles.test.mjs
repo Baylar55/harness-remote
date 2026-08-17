@@ -68,6 +68,15 @@ const repaired = loadServerProfiles()[0]
 assert.equal(repaired.config.backend, 'pi', 'an unmistakably named PI profile saved by the old fallback must recover PI')
 assert.equal(repaired.config.agentId, 'pi', 'the repaired PI profile must target the PI daemon route')
 
+storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify([{
+  id: 'old-omp-internal-port-profile',
+  name: 'Oh My Pi TEST',
+  config: { backend: 'omp', host: 'localhost', port: 4096, username: 'harness', password: 'secret' }
+}]))
+const repairedPort = loadServerProfiles()[0]
+assert.equal(repairedPort.config.port, 4097, 'a named local OMP daemon profile must not point at OpenCode internal port 4096')
+assert.equal(repairedPort.config.agentId, 'omp', 'a repaired OMP daemon profile must use the OMP route')
+
 const storageKeys = readFileSync(new URL('./storageKeys.ts', import.meta.url), 'utf8')
 assert.match(storageKeys, /SERVER_PROFILES_STORAGE_KEY/, 'the crash-recovery reset must clear saved servers')
 assert.match(storageKeys, /ACTIVE_PROFILE_STORAGE_KEY/, 'the crash-recovery reset must clear the selected server')
