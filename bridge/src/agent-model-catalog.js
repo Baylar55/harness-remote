@@ -1,7 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
+// HTTP providers are already running and should fail quickly. ACP adapters may need their first
+// `npx` launch, authentication, and a technical session before they can expose config options.
 export const MODEL_CATALOG_TIMEOUT_MS = 8_000
+export const ACP_MODEL_CATALOG_TIMEOUT_MS = 90_000
 
 function withTimeout(promise, timeoutMs, label) {
   let timer
@@ -108,7 +111,7 @@ class CachedCatalog {
 }
 
 export class AcpAgentModelCatalog extends CachedCatalog {
-  constructor({ agent, agentID, directory, stateDirectory, timeoutMs = MODEL_CATALOG_TIMEOUT_MS }) {
+  constructor({ agent, agentID, directory, stateDirectory, timeoutMs = ACP_MODEL_CATALOG_TIMEOUT_MS }) {
     super()
     this.agent = agent
     this.agentID = agentID
