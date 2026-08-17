@@ -35,6 +35,8 @@ assert.ok(app.includes('activeAgent?.id ?? "build"'), 'agent selection should de
 assert.ok(taskDialog.includes('TASK_MODEL_STORAGE_KEY'), 'TaskDesk should remember the last task model locally')
 assert.ok(taskDialog.includes('readLastTaskModel(profile.id, selectedAgentId)'), 'TaskDesk should preselect the last model for the chosen server and agent')
 assert.ok(taskDialog.includes('rememberTaskModel(profile.id, agent.id'), 'TaskDesk should remember the model used to create a task')
+const taskLaunchBody = taskDialog.slice(taskDialog.indexOf('async function start()'))
+assert.ok(taskLaunchBody.indexOf('task = await taskClient.launch') < taskLaunchBody.indexOf('rememberTaskModel(profile.id, agent.id'), 'TaskDesk must remember a model only after the task launches successfully')
 assert.ok(app.includes('id="agent-select"'), 'AI sheet should render an agent selector')
 assert.ok(app.includes('api.sendPrompt(config, selectedSession.id, text, selectedSession.directory, activeModel, activeAgentID, attachments)'), 'chat prompts should use selected agent and carry staged attachments')
 assert.ok(app.includes('api.sendCommand(config, selectedSession.id, command, args, selectedSession.directory, activeModel, activeAgentID)'), 'slash commands should use selected agent')
