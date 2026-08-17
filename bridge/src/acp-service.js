@@ -35,6 +35,29 @@ function sessionView(session, status = "idle", title = session.title, external =
   }
 }
 
+/**
+ * Older PI snapshots contain one UUID-identified assistant envelope per streamed fragment. A user
+ * turn is the natural delimiter, so those adjacent envelopes are one visible reply. Keeping them
+ * separate breaks Markdown whenever a marker or word straddles two updates.
+ */
+function mergeFragmentedPiSnapshot(messages) {
+  const merged = []
+  for (const message of messages) {
+    const previous = merged.at(-1)
+    if (
+      message?.info?.role === "assistant"
+      && previous?.info?.role === "assistant"
+      && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(message.info.id)
+      && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(previous.info.id)
+    ) {
+      previous.parts.push(...message.parts)
+      continue
+    }
+    merged.push(message)
+  }
+  return merged
+}
+
 function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
 }
@@ -652,7 +675,7 @@ export class AcpService {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
-      if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, snapshot.messages)
+      if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, mergeFragmentedPiSnapshot(snapshot.messages))
       if (Array.isArray(snapshot.todos)) this.#todos.set(sessionID, snapshot.todos)
       if (typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
       if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
@@ -975,7 +998,12 @@ export class AcpService {
     const counterpartKey = `${sessionId}:${role === "user" ? "assistant" : "user"}`
     this.#chunkMessageIDs.delete(counterpartKey)
     const chunkKey = `${sessionId}:${role}`
-    const messageID = update.messageId ?? this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
+    // PI sends a new message id for every streaming fragment. During a live turn the bridge's
+    // id is authoritative, so all adjacent fragments remain one Markdown message. Replay keeps
+    // adapter ids because it reconstructs historical conversation boundaries.
+    const messageID = !replaying && role === "assistant"
+      ? this.#chunkMessageIDs.get(chunkKey) ?? update.messageId ?? randomUUID()
+      : update.messageId ?? this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
     this.#chunkMessageIDs.set(chunkKey, messageID)
     const messages = this.#messages.get(sessionId) ?? []
     this.#messages.set(sessionId, messages)
