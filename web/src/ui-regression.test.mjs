@@ -303,9 +303,9 @@ for (const cls of ['.harness-badge', '.harness-omp', '.harness-pi', '.brand-serv
   assert.ok(styles.includes(cls), `${cls} should be styled`)
 }
 assert.match(styles, /\.brand-server[\s\S]*?text-overflow: ellipsis/, 'a long address must truncate rather than push the badge off screen')
-assert.match(styles, /--harness-pi:\s*#2563eb/, 'PI needs a clearly distinct blue harness color')
+assert.match(styles, /--harness-pi:\s*#0e7490/, 'PI needs a clearly distinct cyan harness color')
 assert.match(styles, /\.wizard-header > \.btn-icon[\s\S]*?margin-left:\s*auto/, 'wizard close controls must stay pinned to the top-right corner')
-assert.match(styles, /\.choice-card\s*\{[\s\S]*?grid-template-rows:\s*1\.5rem minmax\(3rem, 1fr\)/, 'server choice card labels must align across harnesses')
+assert.match(styles, /\.choice-card\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\)/, 'server choice card labels must align across harnesses')
 
 // Mobile keyboard: an address is not a sentence, a port is a number, and a soft keyboard has
 // no Shift key — so the composer flips on touch-primary devices: Enter inserts a new line,
