@@ -3461,10 +3461,6 @@ function App() {
   }, [theme])
 
   useEffect(() => {
-    persistServerProfiles(profiles, activeProfileID)
-  }, [])
-
-  useEffect(() => {
     localStorage.setItem(NEW_SESSION_DIRECTORY_STORAGE_KEY, newSessionDirectory)
   }, [newSessionDirectory])
 
