@@ -10,6 +10,8 @@ const shell = readFileSync(new URL('./components/shell.tsx', import.meta.url), '
 const panels = readFileSync(new URL('./components/panels.tsx', import.meta.url), 'utf8')
 const sessionList = readFileSync(new URL('./components/session-list.tsx', import.meta.url), 'utf8')
 const composerView = readFileSync(new URL('./components/session-composer.tsx', import.meta.url), 'utf8')
+const taskDialog = readFileSync(new URL('./components/task-launch-dialog.tsx', import.meta.url), 'utf8')
+const taskDeskTestPage = readFileSync(new URL('./TaskDeskTestPage.tsx', import.meta.url), 'utf8')
 
 assert.ok(api.includes('const body = await response.text()'), 'failed HTTP responses must consume their body only once')
 // The bridge reports failures as {"error": "..."}; without unwrapping that the app printed the raw
@@ -115,6 +117,18 @@ assert.ok(app.includes('completionShouldPlayRef.current = true'), 'completion so
 assert.ok(app.includes('wasAwaitingAssistantReplyRef.current && !awaitingAssistantReply && completionShouldPlayRef.current'), 'completion sound should play only when assistant waiting ends, not when the user bubble renders')
 assert.ok(app.includes('loadSelectedRequestRef'), 'session message refreshes should ignore stale overlapping polling responses')
 assert.ok(app.includes('if (requestID !== loadSelectedRequestRef.current) return'), 'older loadSelected requests must not overwrite newer assistant output')
+assert.ok(app.includes('const sessionRefreshRequestRef = useRef(0)'), 'session list refreshes need their own request generation')
+assert.ok(app.includes('if (requestID !== sessionRefreshRequestRef.current) return'), 'an old authenticated session-list response must not repopulate the UI after credentials change')
+assert.match(app, /message\.startsWith\("HTTP 401:"\)[\s\S]*?clearServerData\(\)/, 'an unauthorized session refresh must clear the previously visible server data')
+assert.match(app, /function DesktopModalOverlay\([\s\S]*?closeOnBackdrop = true/, 'desktop panel overlays must support disabling backdrop dismissal')
+assert.match(app, /ariaLabel=\{t\('settings\.title'\)\} closeOnBackdrop=\{false\}/, 'server configuration must stay open when its backdrop is clicked')
+assert.ok(!taskDialog.includes('role="presentation" onClick={onClose}'), 'the new-task dialog must not discard typed work when the backdrop is clicked')
+assert.ok(taskDialog.includes('onLaunched: (task: MachineTask) => void'), 'the task launcher must return the launched task, not a bare callback')
+assert.ok(taskDialog.includes('task = await taskClient.launch(taskConfig, task.id)'), 'the success view must receive the task returned by launch')
+assert.ok(taskDeskTestPage.includes('Codex is now working on your task'), 'the integration page must confirm a successful launch in user language')
+assert.ok(!taskDeskTestPage.includes('Task launch callback received'), 'technical callback wording must not be shown as task-launch confirmation')
+assert.match(styles, /\.taskdesk-launch-details\s*\{[^}]*grid-template-columns:/, 'the launch confirmation must present task details in a structured layout')
+assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.taskdesk-launch-details\s*\{[^}]*grid-template-columns:\s*1fr;/, 'launch confirmation details must stack on mobile')
 assert.ok(app.includes('loadedSessionID'), 'the message pane should track whether the selected session history has loaded')
 assert.ok(app.includes('loadedSessionID !== selectedID'), 'an unloaded selected session must render the loading state instead of an empty transcript')
 assert.ok(app.includes('setLoadedSessionID(sessionID)'), 'a successful selected-session snapshot should unlock the empty transcript state')
@@ -588,5 +602,11 @@ assert.match(
   /for \(const \[command, binding\] of Object\.entries\(KEY_BINDINGS\)\) \{\s*if \(!bindingApplies\(binding\)\) continue/,
   'the keydown handler must skip bindings that do not apply to this build'
 )
+
+assert.match(styles, /\.task-launch-form\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/, 'TaskDesk launch should use balanced desktop form columns')
+assert.match(styles, /\.task-launch-context,[\s\S]*?\.task-launch-worktree\s*\{[^}]*grid-column:\s*1 \/ -1/, 'TaskDesk context, prompt, model and worktree must span the dialog intentionally')
+assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.task-launch-form\s*\{[^}]*grid-template-columns:\s*1fr/, 'TaskDesk launch must collapse to one mobile form column')
+assert.match(styles, /\.task-launch-check input\[type="checkbox"\]\s*\{[^}]*width:\s*1\.125rem;[^}]*max-width:\s*1\.125rem;[^}]*min-height:\s*1\.125rem/, 'TaskDesk worktree checkbox must never inherit full-width text-input sizing')
+assert.match(styles, /\.task-launch-close\s*\{[^}]*margin-left:\s*auto/, 'TaskDesk close control must stay anchored to the header’s right edge')
 
 console.log('ui regression tests passed')
