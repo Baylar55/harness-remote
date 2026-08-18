@@ -46,6 +46,14 @@ assert.equal(panels.includes('agents discovered'), false, 'machine discovery fee
 assert.equal(panels.includes('{agent.label} · {agent.state}'), false, 'protocol host states must not be rendered verbatim')
 assert.ok(panels.includes('agent.state !== "available" && agent.state !== "configured"'), 'unavailable machine agents must not be selectable')
 
+// Automatic server names are suggestions. Once the user types a name, later discovery or agent
+// selection must not silently replace it with a generated machine/harness label.
+assert.ok(panels.includes('const [nameEdited, setNameEdited] = useState(false)'), 'the wizard should remember when the server name was edited manually')
+assert.ok(panels.includes('if (!nameEdited) setName(`${backendDisplayName(next)} server`)'), 'backend defaults should only replace an untouched automatic name')
+assert.ok(panels.includes('if (preferred && !nameEdited) setName(`${discovered.machine.name} · ${preferred.label}`)'), 'machine discovery should preserve a manually entered server name')
+assert.ok(panels.includes('if (next && !nameEdited) setName(`${machine.machine.name} · ${next.label}`)'), 'agent selection should preserve a manually entered server name')
+assert.match(panels, /setName\(event\.target\.value\)[\s\S]*?setNameEdited\(true\)/, 'typing in the server-name field should lock in the user value')
+
 // Agent-scoped URLs are the primary routing contract. The backend header is a compatibility guard
 // for profiles saved by older builds with no agentId, or with an agentId that points at the old primary.
 // A raw OpenCode server must not receive the custom header because its CORS policy does not know it.
