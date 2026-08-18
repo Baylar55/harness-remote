@@ -622,3 +622,7 @@ assert.match(styles, /\.task-launch-check input\[type="checkbox"\]\s*\{[^}]*widt
 assert.match(styles, /\.task-launch-close\s*\{[^}]*margin-left:\s*auto/, 'TaskDesk close control must stay anchored to the header’s right edge')
 
 console.log('ui regression tests passed')
+
+
+const settingsAutoSelectGuard = 'if (!isDesktop || view === "settings" || view === "help" || autoSelectAttemptedRef.current || selectedID || sessions.length === 0) return'
+assert.ok(app.includes(settingsAutoSelectGuard), 'desktop auto-select must preserve explicit Settings and Help views')
