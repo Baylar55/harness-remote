@@ -84,6 +84,14 @@ export function agentScopedRequest(request) {
   }
 }
 
+function routedAgentForBackend(daemon, route, requestedBackend) {
+  if (!requestedBackend) return route
+  const routedHost = daemon.registry.host(route.agentID)
+  if (routedHost?.backend === requestedBackend) return route
+  const matching = daemon.snapshot().agents.find((agent) => agent.backend === requestedBackend)
+  return matching ? { ...route, agentID: matching.id } : route
+}
+
 export function proxyManagedHttpRequest({
   request,
   response,
@@ -224,11 +232,20 @@ export function createAgentRoutingServer({
       return
     }
 
-    const route = agentScopedRequest(request)
+    const requestedBackend = typeof request.headers["x-harness-backend"] === "string"
+      ? request.headers["x-harness-backend"].trim()
+      : ""
+    let route = agentScopedRequest(request)
     if (!route) {
-      bridgeServer.emit("request", request, response)
-      return
+      const matching = requestedBackend && daemon.snapshot().agents.find((agent) => agent.backend === requestedBackend)
+      if (matching && matching.id !== primaryAgentID) {
+        route = { agentID: matching.id, path: requestURL.pathname, search: requestURL.search }
+      } else {
+        bridgeServer.emit("request", request, response)
+        return
+      }
     }
+    route = routedAgentForBackend(daemon, route, requestedBackend)
 
     if (route.agentID === primaryAgentID) {
       request.url = `${route.path}${route.search}`
