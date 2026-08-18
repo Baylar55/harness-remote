@@ -2,9 +2,12 @@ import React from "react"
 import ReactDOM from "react-dom/client"
 import { Capacitor } from "@capacitor/core"
 import App from "./App"
+import { installCompletionAudioGuard } from "./completion-audio"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { SERVER_STORAGE_KEYS } from "./storageKeys"
 import "./styles.css"
+
+installCompletionAudioGuard()
 
 const taskDeskTestMode = import.meta.env.DEV && new URLSearchParams(window.location.search).get("taskdesk-test") === "1"
 

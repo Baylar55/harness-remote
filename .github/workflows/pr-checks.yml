@@ -65,6 +65,7 @@ jobs:
           npm run test:catalog-guard
           npm run test:machine-payload
           npm run test:platform
+          npm run test:completion-audio
         working-directory: web
 
       - name: Run bridge tests
