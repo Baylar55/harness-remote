@@ -1,7 +1,7 @@
 // Bumped with the app icon artwork: the precached icon-192/icon-512 entries are served cache-first,
 // so an already-installed PWA keeps painting the previous icon until the cache name changes and
 // `activate` drops the old one.
-const CACHE_NAME = "harness-remote-v2"
+const CACHE_NAME = "harness-remote-v3"
 
 self.addEventListener("install", (event) => {
   const scope = self.registration.scope
