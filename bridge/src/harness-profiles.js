@@ -48,7 +48,13 @@ export const HARNESS_PROFILES = {
     adapterCommand: "pi-acp",
     permissionMode: "allow",
     preserveListedTimestamps: true,
-    reloadOnHistoryRefresh: false,
+    // Opening a PI session explicitly asks for fresh history. Honour that request so a stale bridge
+    // snapshot cannot hide assistant output that PI has already persisted.
+    reloadOnHistoryRefresh: true,
+    // PI owns its display names. The bridge must use the title from session/list and propagate an
+    // app rename through PI's own /name command so the app and PI /resume cannot drift apart.
+    preferListedTitles: true,
+    nativeRenameCommand: "name",
     // PI may flush the last replay chunks just after session/load resolves, most visibly on Windows.
     replaySettleMs: 250,
     capabilities: {
