@@ -9,15 +9,15 @@ const REQUEST_TIMEOUT_MS = 30_000
 const STDERR_KEPT_CHARS = 600
 
 /**
- * JSON-RPC only promises a human-readable `message`, and Codex spends it on a bare "Internal
- * error", putting the part worth reading — "thread <id> already has an active writer" — in
- * `data.details`. Dropping that left the app showing `{"error":"Internal error"}` for a refusal it
- * could otherwise have explained.
+ * JSON-RPC only promises a human-readable `message`, and adapters sometimes spend it on a bare
+ * "Internal error", putting the actionable detail in `data.details` or `data.message`.
  */
 function acpErrorMessage(error) {
   const message = error?.message ?? "ACP adapter request failed"
-  const details = error?.data?.details
-  return typeof details === "string" && details && !message.includes(details) ? `${message}: ${details}` : message
+  const details = [error?.data?.details, error?.data?.message].find(
+    (value) => typeof value === "string" && value
+  )
+  return details && !message.includes(details) ? `${message}: ${details}` : message
 }
 
 export class AcpClient extends EventEmitter {
@@ -169,13 +169,11 @@ export class AcpClient extends EventEmitter {
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`)
   }
 
-
   async listSessions() {
     await this.start()
     const result = await this.request("session/list", {})
     return result.sessions ?? []
   }
-
 
   close() {
     const child = this.#child
