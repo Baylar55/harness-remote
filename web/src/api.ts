@@ -29,8 +29,8 @@ import type {
 
 export { baseUrl, isValidServerConfig }
 
-// A 401 says the server wants credentials, not that the ones given are wrong — and the app can tell
-// the two apart, because it knows whether it sent any. The connection test enables itself without a
+// A 401 says the server wants credentials, not that the ones given are wrong, and the app can tell
+// the two apart because it knows whether it sent any. The connection test enables itself without a
 // password, so the common case is a server with Basic Auth and an empty password field, which read
 // as "wrong password" and sent people back to re-check credentials that were correct.
 function unauthorizedDetail(config: ServerConfig): string {
@@ -67,7 +67,7 @@ function responseDetail(body: unknown): string | null {
   }
   if (typeof body === "object") {
     // `data.message` and `message` are OpenCode's shapes; the bridge answers `{ "error": "..." }`,
-    // which fell through to the stringify below and put raw JSON on screen — so every bridge
+    // which fell through to the stringify below and put raw JSON on screen, so every bridge
     // failure reached the user as `{"error":"Internal error: ..."}` instead of the sentence in it.
     const value = body as { data?: { message?: string }, message?: string, error?: string }
     const detail = value.data?.message ?? value.message ?? (typeof value.error === "string" ? value.error : undefined)
@@ -115,6 +115,13 @@ type AgentResponse = Array<{
   hidden?: boolean
 }>
 
+function routingHeaders(config: ServerConfig): Record<string, string> {
+  // A direct OpenCode server does not know this compatibility header and may reject it during CORS
+  // preflight. Daemon-backed profiles have an agentId, while ACP bridge profiles can safely send it.
+  if (config.backend === "opencode" && !config.agentId) return {}
+  return { "X-Harness-Backend": config.backend }
+}
+
 async function requestWithHeaders<T>(config: ServerConfig, path: string, options: RequestOptions = {}): Promise<ResponseWithHeaders<T>> {
   const method = options.method ?? "GET"
   if (isDesktopPlatform()) {
@@ -129,7 +136,8 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
 
   const target = `${baseUrl(config)}${path}`
   const headers: Record<string, string> = {
-    Accept: "application/json"
+    Accept: "application/json",
+    ...routingHeaders(config)
   }
   if (hasCredentials(config)) {
     headers.Authorization = authHeader(config)
@@ -229,7 +237,7 @@ function modelWireName(model?: ModelSelection) {
 
 export const api = {
   eventStream(config: ServerConfig) {
-    const headers: Record<string, string> = {}
+    const headers: Record<string, string> = { ...routingHeaders(config) }
     if (hasCredentials(config)) headers.Authorization = authHeader(config)
     return { url: streamURL(baseUrl(config), "global"), headers }
   },

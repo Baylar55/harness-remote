@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+const api = readFileSync(new URL('./api.ts', import.meta.url), 'utf8')
 const i18n = readFileSync(new URL('./i18n.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 const shell = readFileSync(new URL('./components/shell.tsx', import.meta.url), 'utf8')
@@ -44,6 +45,15 @@ assert.equal(panels.includes('Agent on '), false, 'the machine picker must not i
 assert.equal(panels.includes('agents discovered'), false, 'machine discovery feedback must not introduce hardcoded English copy')
 assert.equal(panels.includes('{agent.label} · {agent.state}'), false, 'protocol host states must not be rendered verbatim')
 assert.ok(panels.includes('agent.state !== "available" && agent.state !== "configured"'), 'unavailable machine agents must not be selectable')
+
+// Agent-scoped URLs are the primary routing contract. The backend header is a compatibility guard
+// for profiles saved by older builds with no agentId, or with an agentId that points at the old primary.
+// A raw OpenCode server must not receive the custom header because its CORS policy does not know it.
+assert.ok(api.includes('function routingHeaders(config: ServerConfig)'), 'API requests should centralize the compatibility routing hint')
+assert.ok(api.includes('return { "X-Harness-Backend": config.backend }'), 'daemon requests should identify the selected harness backend')
+assert.ok(api.includes('if (config.backend === "opencode" && !config.agentId) return {}'), 'direct legacy OpenCode servers must not receive the daemon routing header')
+assert.ok(api.includes('...routingHeaders(config)'), 'ordinary API requests should carry the selected harness routing hint')
+assert.match(api, /eventStream\(config: ServerConfig\)[\s\S]*?routingHeaders\(config\)/, 'browser SSE should preserve the selected harness routing hint too')
 
 // The server picker used to caption itself with a visually-hidden span, but no rule ever hid it: the
 // caption rendered as stray text above the header. Every class the picker and its actions rely on has
