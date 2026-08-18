@@ -45,10 +45,47 @@ storage.set('opencode.remote.server.omp', JSON.stringify({ backend: 'omp', host:
 const mergedMigration = loadServerProfiles()
 assert.deepEqual(mergedMigration.map((profile) => profile.config.backend), ['opencode', 'omp'], 'a legacy OMP profile must survive alongside the saved profile collection')
 
-// A crash caused by a bad saved server has to be recoverable, so the reset must clear the profiles
-// too: leaving them behind would restore the same broken connection on every retry. The reset list is
-// asserted as source text because storageKeys.ts imports this module with an extensionless specifier,
-// which the node test runner cannot resolve.
+const daemonProfile = {
+  id: 'machine-profile',
+  name: 'Workstation',
+  config: { backend: 'opencode', host: 'workstation.local', port: 4097, username: 'harness', password: 'secret', agentId: 'opencode' }
+}
+persistServerProfiles([daemonProfile], daemonProfile.id)
+const restoredDaemon = loadActiveServerProfile(loadServerProfiles())
+assert.equal(restoredDaemon.config.agentId, 'opencode', 'machine agent selection should survive restart')
+
+const malformed = JSON.parse(storage.get(SERVER_PROFILES_STORAGE_KEY))
+malformed[0].config.agentId = { invalid: true }
+storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify(malformed))
+assert.equal(loadServerProfiles()[0].config.agentId, undefined, 'malformed agent ids must not leak from persisted data')
+
+storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify([{
+  id: 'old-pi-wizard-profile',
+  name: 'PI test machine',
+  config: { backend: 'codex', host: 'workstation.local', port: 4097, username: 'harness', password: 'secret', agentId: 'codex' }
+}]))
+const repaired = loadServerProfiles()[0]
+assert.equal(repaired.config.backend, 'pi', 'an unmistakably named PI profile saved by the old fallback must recover PI')
+assert.equal(repaired.config.agentId, 'pi', 'the repaired PI profile must target the PI daemon route')
+
+storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify([
+  { id: 'known-daemon-profile', name: 'Codex CLI server', config: { backend: 'codex', host: 'localhost', port: 5001, username: 'harness', password: 'secret', agentId: 'codex' } },
+  { id: 'old-omp-internal-port-profile', name: 'Oh My Pi TEST', config: { backend: 'omp', host: 'localhost', port: 4096, username: 'harness', password: 'secret' } }
+]))
+const repairedPort = loadServerProfiles().find((profile) => profile.id === 'old-omp-internal-port-profile')
+assert.ok(repairedPort, 'the OMP profile should be retained')
+assert.equal(repairedPort.config.port, 5001, 'a named local OMP profile must reuse the known daemon port instead of assuming 4097')
+assert.equal(repairedPort.config.agentId, 'omp', 'a repaired OMP daemon profile must use the OMP route')
+
+storage.set(SERVER_PROFILES_STORAGE_KEY, JSON.stringify([{
+  id: 'unknown-daemon-port-profile',
+  name: 'Oh My Pi TEST',
+  config: { backend: 'omp', host: 'localhost', port: 4096, username: 'harness', password: 'secret' }
+}]))
+const unknownPort = loadServerProfiles()[0]
+assert.equal(unknownPort.config.port, 4096, 'a profile with no known machine daemon port must not be guessed')
+assert.equal(unknownPort.config.agentId, undefined, 'an unknown daemon port must not fabricate an agent route')
+
 const storageKeys = readFileSync(new URL('./storageKeys.ts', import.meta.url), 'utf8')
 assert.match(storageKeys, /SERVER_PROFILES_STORAGE_KEY/, 'the crash-recovery reset must clear saved servers')
 assert.match(storageKeys, /ACTIVE_PROFILE_STORAGE_KEY/, 'the crash-recovery reset must clear the selected server')

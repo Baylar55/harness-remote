@@ -15,6 +15,10 @@ export const BACKEND_STORAGE_KEYS = {
 
 export const SERVER_PROFILES_STORAGE_KEY = "opencode.remote.serverProfiles"
 export const ACTIVE_PROFILE_STORAGE_KEY = "opencode.remote.activeServerProfile"
+export const ACTIVE_PROFILE_CHANGED_EVENT = "harness-remote:active-profile-changed"
+
+const NEW_SESSION_DIRECTORY_STORAGE_KEY = "opencode.remote.newSessionDirectory"
+const NEW_SESSION_DIRECTORY_BY_PROFILE_STORAGE_KEY = "opencode.remote.newSessionDirectoryByProfile"
 
 export type SavedServerProfile = {
   id: string
@@ -28,8 +32,8 @@ function defaultConfig(backend: BackendKind): ServerConfig {
   return {
     backend,
     host: "",
-    port: backend === "opencode" ? 4096 : 4097,
-    username: backend === "opencode" ? "opencode" : backend,
+    port: 4097,
+    username: "harness",
     password: ""
   }
 }
@@ -43,7 +47,8 @@ function parseConfig(value: unknown, fallbackBackend: BackendKind): ServerConfig
   const candidate = value as Partial<ServerConfig>
   const backend = isBackend(candidate.backend) ? candidate.backend : fallbackBackend
   if (typeof candidate.host !== "string" || typeof candidate.port !== "number" || typeof candidate.username !== "string" || typeof candidate.password !== "string") return null
-  return { ...defaultConfig(backend), ...candidate, backend }
+  const agentId = typeof candidate.agentId === "string" && candidate.agentId.trim() ? candidate.agentId.trim() : undefined
+  return { ...defaultConfig(backend), ...candidate, backend, agentId }
 }
 
 function profileID(): string {
@@ -53,6 +58,37 @@ function profileID(): string {
 function profileName(backend: BackendKind, position: number): string {
   const label = backend === "omp" ? "Oh My Pi" : backend === "pi" ? "PI" : backend === "claude" ? "Claude Code" : backend === "codex" ? "Codex CLI" : "OpenCode"
   return position === 0 ? `${label} server` : `${label} server ${position + 1}`
+}
+
+/** Repair only profiles whose human name makes the earlier wrong-agent fallback unambiguous. */
+function namedHarness(name: string): BackendKind | undefined {
+  const value = name.trim().toLowerCase()
+  if (/\boh my pi\b|\bomp\b/.test(value)) return "omp"
+  if (/(^|[\s·._-])pi([\s·._-]|$)/.test(value)) return "pi"
+  if (/\bclaude\b/.test(value)) return "claude"
+  return undefined
+}
+
+function repairMisroutedDaemonProfile(profile: SavedServerProfile): SavedServerProfile {
+  const intended = namedHarness(profile.name)
+  if (!intended || profile.config.backend !== "codex" || profile.config.agentId !== "codex") return profile
+  return { ...profile, config: { ...profile.config, backend: intended, agentId: intended } }
+}
+
+function sameMachine(left: ServerConfig, right: ServerConfig): boolean {
+  return left.host.trim().toLowerCase() === right.host.trim().toLowerCase() && left.username === right.username
+}
+
+/** Repair the bad internal OpenCode port only when another saved daemon profile identifies its port. */
+function repairInternalOpenCodePort(profile: SavedServerProfile, profiles: SavedServerProfile[]): SavedServerProfile {
+  const intended = namedHarness(profile.name)
+  if (!intended || profile.config.backend !== intended || profile.config.agentId || profile.config.port !== 4096) return profile
+  const knownDaemonPort = profiles.find((candidate) =>
+    candidate.id !== profile.id && candidate.config.backend !== "opencode" &&
+    candidate.config.port !== 4096 && sameMachine(candidate.config, profile.config)
+  )?.config.port
+  if (!knownDaemonPort) return profile
+  return { ...profile, config: { ...profile.config, port: knownDaemonPort, agentId: intended } }
 }
 
 function parseProfiles(value: string | null): SavedServerProfile[] | null {
@@ -71,7 +107,9 @@ function parseProfiles(value: string | null): SavedServerProfile[] | null {
         config
       }]
     })
-    return profiles.length > 0 ? profiles : null
+    if (!profiles.length) return null
+    const repaired = profiles.map(repairMisroutedDaemonProfile)
+    return repaired.map((profile) => repairInternalOpenCodePort(profile, repaired))
   } catch {
     return null
   }
@@ -110,6 +148,46 @@ function legacyProfiles(): SavedServerProfile[] {
   return [{ id: profileID(), name: profileName(fallback, 0), config: defaultConfig(fallback) }]
 }
 
+function readDirectoryScopes(): Record<string, string> {
+  const raw = localStorage.getItem(NEW_SESSION_DIRECTORY_BY_PROFILE_STORAGE_KEY)
+  if (raw === null) {
+    // The previous format had one path for every machine. It is unsafe to guess which profile owns
+    // that value, so discard it once instead of carrying a Windows path into Linux or vice versa.
+    localStorage.removeItem(NEW_SESSION_DIRECTORY_STORAGE_KEY)
+    localStorage.setItem(NEW_SESSION_DIRECTORY_BY_PROFILE_STORAGE_KEY, "{}")
+    return {}
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+  } catch {
+    return {}
+  }
+}
+
+function connectionIdentity(config: ServerConfig): string {
+  return JSON.stringify({
+    backend: config.backend,
+    host: config.host.trim().toLowerCase(),
+    port: config.port,
+    username: config.username,
+    agentId: config.agentId?.trim() ?? ""
+  })
+}
+
+function switchNewSessionDirectory(previousProfileID: string | null, nextProfileID: string, clearNext: boolean): void {
+  const scopes = readDirectoryScopes()
+  if (previousProfileID) {
+    const current = localStorage.getItem(NEW_SESSION_DIRECTORY_STORAGE_KEY) ?? ""
+    if (current) scopes[previousProfileID] = current
+    else delete scopes[previousProfileID]
+  }
+  if (clearNext) delete scopes[nextProfileID]
+  localStorage.setItem(NEW_SESSION_DIRECTORY_BY_PROFILE_STORAGE_KEY, JSON.stringify(scopes))
+  localStorage.setItem(NEW_SESSION_DIRECTORY_STORAGE_KEY, clearNext ? "" : (scopes[nextProfileID] ?? ""))
+}
+
 export function loadServerProfiles(): SavedServerProfile[] {
   const savedProfiles = parseProfiles(localStorage.getItem(SERVER_PROFILES_STORAGE_KEY))
   if (!savedProfiles) return legacyProfiles()
@@ -125,13 +203,35 @@ export function loadServerProfiles(): SavedServerProfile[] {
 }
 
 export function loadActiveServerProfile(profiles: SavedServerProfile[]): SavedServerProfile {
+  readDirectoryScopes()
   const storedID = localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
   return profiles.find((profile) => profile.id === storedID) ?? profiles[0]
 }
 
 export function persistServerProfiles(profiles: SavedServerProfile[], activeProfileID: string): void {
+  const previousProfileID = localStorage.getItem(ACTIVE_PROFILE_STORAGE_KEY)
+  const previousProfiles = parseProfiles(localStorage.getItem(SERVER_PROFILES_STORAGE_KEY)) ?? []
+  const previousProfile = previousProfiles.find((profile) => profile.id === previousProfileID)
+  const nextProfile = profiles.find((profile) => profile.id === activeProfileID)
+  const profileChanged = previousProfileID !== null && previousProfileID !== activeProfileID
+  const connectionChanged = Boolean(
+    previousProfileID === activeProfileID && previousProfile && nextProfile &&
+    connectionIdentity(previousProfile.config) !== connectionIdentity(nextProfile.config)
+  )
+
+  if (profileChanged || connectionChanged) {
+    switchNewSessionDirectory(previousProfileID, activeProfileID, connectionChanged)
+  }
+
   localStorage.setItem(SERVER_PROFILES_STORAGE_KEY, JSON.stringify(profiles))
   localStorage.setItem(ACTIVE_PROFILE_STORAGE_KEY, activeProfileID)
+
+  // Switching profiles must remount the app so profile-scoped state is re-read. Editing the host,
+  // port or credentials of the current profile must not: Settings persists valid drafts while the
+  // user types, and remounting there closes the editor and starts a connection mid-entry.
+  if (profileChanged) {
+    window.dispatchEvent(new CustomEvent(ACTIVE_PROFILE_CHANGED_EVENT, { detail: activeProfileID }))
+  }
 }
 
 export function createServerProfile(name: string, backend: BackendKind): SavedServerProfile {

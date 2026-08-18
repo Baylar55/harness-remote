@@ -29,15 +29,19 @@ import { DEFAULT_HARNESS_CAPABILITIES } from "./backendCapabilities"
 import { BACKEND_CLIENTS } from "./backendClient"
 import { copyToClipboard } from "./clipboard"
 import { backendDisplayName, isBridgeBackend } from "./backendSetup"
-import { ATTACHMENT_MAX_COUNT, fileToAttachment, type AttachmentPart } from "./attachments"
+import { taskClient } from "./taskClient"
+import { discoverMachineConnection } from "./taskMachineClient"
+import { discoverMachine, selectableMachineAgents } from "./machineClient"
+import { type AttachmentPart } from "./attachments"
 import { CommandPalette, MenuBar, ServerSwitcher, type MenuDefinition, type MenuEntry, type PaletteCommand } from "./components/shell"
 import { ConnectServerWizard, NewSessionDialog } from "./components/panels"
+import { SessionComposer } from "./components/session-composer"
+import { SessionSidebar, SessionsPanel, formatTime, projectLabel, shortDirectory, type SessionRenameState } from "./components/session-list"
 import { createServerProfile, loadActiveServerProfile, loadServerProfiles, persistServerProfiles, type SavedServerProfile } from "./serverProfiles"
 import type { DesktopMenuCommand, DesktopMenuTemplate } from "../electron/ipc-contract"
 import type { AgentOption, CommandInfo, DiffFile, FileEntry, FileStatusEntry, HarnessAction, HarnessCapabilities, MessageEnvelope, MessagePart, ModelOption, ModelSelection, PathInfo, PermissionRequest, ProjectDashboard, QuestionInfo, QuestionRequest, ServerConfig, Session, SessionStatus, SessionView, TodoItem } from "./types"
 import {
   SettingsIcon,
-  PaperclipIcon,
   ArrowLeftIcon,
   FolderIcon,
   ChatIcon,
@@ -51,12 +55,10 @@ import {
   ServerIcon,
   TrashIcon,
   StopCircleIcon,
-  SendIcon,
   SaveIcon,
   TestIcon,
   LoadingIcon,
   RefreshIcon,
-  OfflineIcon,
   PencilIcon,
   CloseIcon,
   MoreVerticalIcon
@@ -223,52 +225,6 @@ function useHorizontalDrag(onDeltaX: (deltaX: number) => void): (event: React.Po
 
 function isSessionWorking(status: string): boolean {
   return status === "busy" || status === "retry" || status === "waiting"
-}
-
-/**
- * A session card showed the whole absolute path, which on a phone wrapped to three lines and
- * took a third of the card. The last segments are what identifies a project; the full path stays
- * in the title attribute and in the session detail.
- */
-function shortDirectory(directory: string): string {
-  const segments = directory.split(/[\\/]+/).filter(Boolean)
-  if (segments.length <= 2) return directory
-  return `…/${segments.slice(-2).join("/")}`
-}
-
-/** The last path segment, which is what a developer calls the project — the sidebar groups rows by
- *  it rather than by the full absolute path nobody reads. */
-function projectLabel(directory: string): string {
-  const segments = directory.split(/[\\/]+/).filter(Boolean)
-  return segments[segments.length - 1] || directory
-}
-
-function formatTime(epoch: number): string {
-  if (!epoch) return "-"
-  return new Date(epoch).toLocaleString()
-}
-
-const RELATIVE_TIME_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
-  ["year", 60 * 60 * 24 * 365],
-  ["month", 60 * 60 * 24 * 30],
-  ["week", 60 * 60 * 24 * 7],
-  ["day", 60 * 60 * 24],
-  ["hour", 60 * 60],
-  ["minute", 60]
-]
-
-/** Compact, locale-translated "13 min ago" / "13 minuti fa" style string — falls back to
- *  "just now" (via the 0-second `second` bucket) rather than "-1 minutes ago" for very recent times. */
-function formatRelativeTime(epoch: number, locale: LanguageCode): string {
-  if (!epoch) return "-"
-  const deltaSeconds = Math.round((epoch - Date.now()) / 1000)
-  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "short" })
-  for (const [unit, secondsInUnit] of RELATIVE_TIME_UNITS) {
-    if (Math.abs(deltaSeconds) >= secondsInUnit) {
-      return formatter.format(Math.round(deltaSeconds / secondsInUnit), unit)
-    }
-  }
-  return formatter.format(deltaSeconds, "second")
 }
 
 function extractText(msg: MessageEnvelope): string {
@@ -839,14 +795,16 @@ function ConditionalWrapper({
 function DesktopModalOverlay({
   onClose,
   ariaLabel,
+  closeOnBackdrop = true,
   children
 }: {
   onClose: () => void
   ariaLabel: string
+  closeOnBackdrop?: boolean
   children: ReactNode
 }) {
   return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+    <div className="modal-backdrop" role="presentation" onClick={closeOnBackdrop ? onClose : undefined}>
       <section
         className="modal-card desktop-panel-modal fade-in"
         role="dialog"
@@ -1391,7 +1349,8 @@ function configKey(config: ServerConfig): string {
     host: config.host.trim(),
     port: config.port,
     username: config.username.trim(),
-    password: config.password
+    password: config.password,
+    agentId: config.agentId?.trim() ?? ""
   })
 }
 
@@ -2383,10 +2342,13 @@ function App() {
   // server connection so it doesn't fight a session the user deliberately closed back out of.
   const autoSelectAttemptedRef = useRef(false)
   useEffect(() => {
-    if (!isDesktop || autoSelectAttemptedRef.current || selectedID || sessions.length === 0) return
+    // Loading or reconnecting a server while Settings or Help is open must never navigate away
+    // from that panel. Settings autosaves a valid password after a short pause; the resulting
+    // session refresh is not an instruction to open the first conversation.
+    if (!isDesktop || view === "settings" || view === "help" || autoSelectAttemptedRef.current || selectedID || sessions.length === 0) return
     autoSelectAttemptedRef.current = true
     openSession(sessions[0].id, sessions[0].directory).catch(() => undefined)
-  }, [isDesktop, selectedID, sessions])
+  }, [isDesktop, view, selectedID, sessions])
 
   const filteredSessions = useMemo(() => {
     const text = query.trim().toLowerCase()
@@ -2592,7 +2554,7 @@ function App() {
 
   function applyConfig(nextConfig: ServerConfig, profileID = activeProfileID, sourceProfiles = profiles) {
     // A profile is a trust and session boundary, even if two profiles happen to point at the same
-    // host. Switching profile must never leave the previous harness conversation on screen.
+    // host. In particular, agentId distinguishes harnesses exposed by one machine daemon.
     const serverChanged = profileID !== activeProfileID || configKey(nextConfig) !== configKey(config)
     if (serverChanged) clearServerData(nextConfig.backend)
     const nextProfiles = sourceProfiles.map((profile) => profile.id === profileID ? { ...profile, config: nextConfig } : profile)
@@ -2705,11 +2667,12 @@ function App() {
       const statuses = Object.assign({}, ...statusMaps)
       const hydratedItems = items.map((session) => ({ ...session, ...scopedSessions.get(session.id), project: session.project }))
       const activityTimes = await loadSessionActivityTimes(hydratedItems)
+      if (requestID !== sessionRefreshRequestRef.current) return
       const mapped = hydratedItems
         .map((session) => toSessionView(session, statuses[session.id], activityTimes.get(session.id)))
         .sort((a, b) => b.updated - a.updated)
-      if (requestID !== sessionRefreshRequestRef.current) return
       setSessions((current) => {
+        if (requestID !== sessionRefreshRequestRef.current) return current
         // `current` is the list this refresh started from, so a session opened moments ago may not
         // be in it yet; the ref holds what is actually on screen. Falling back to `current` alone
         // let a refresh that raced an open drop the selected session, and the sessions list then
@@ -2732,6 +2695,14 @@ function App() {
     } catch (err) {
       if (requestID !== sessionRefreshRequestRef.current) return
       const message = (err as Error).message
+      if (message.startsWith("HTTP 401:")) {
+        clearServerData()
+        setConnectionState("offline")
+        setConnectionMessage(t('connection.offline'))
+        setRuntimeError(message)
+        initialSessionLoadRef.current = false
+        return
+      }
       if (!silent) {
         setConnectionState("offline")
         setConnectionMessage(t('connection.offline'))
@@ -2801,11 +2772,41 @@ function App() {
     if (!isValidServerConfig(config) || !capabilities.models) return
     const requestID = ++loadModelsRequestRef.current
     try {
-      const list = await api.listModels(config, directory, backendClient.modelSelectionRequiresSession ? sessionID : undefined)
+      let list: ModelOption[]
+      // OpenCode stores the selected model on the message rather than the session. A task is the
+      // durable link between that session and the model the user chose, including after reload.
+      const taskServerConfig = isBridgeBackend(config.backend)
+        ? config
+        : config.backend === "opencode"
+          ? (await discoverMachineConnection(config).catch(() => null))?.config ?? null
+          : null
+      const launchedTask = taskServerConfig && sessionID
+        ? await taskClient.listTasks(taskServerConfig)
+          .then((tasks) => tasks.find((task) => (task.run?.sessionId ?? task.run?.sessionID) === sessionID) ?? null)
+          .catch(() => null)
+        : null
+
+      if (launchedTask && taskServerConfig) {
+        const catalog = await taskClient.listAgentModels(taskServerConfig, launchedTask.agentId)
+        if (!catalog.models.length) throw new Error(`No models are available for ${launchedTask.agentId}`)
+        list = catalog.models
+      } else {
+        try {
+          list = await api.listModels(config, directory, backendClient.modelSelectionRequiresSession ? sessionID : undefined)
+        } catch (sessionCatalogError) {
+          // A Codex session held by its desktop client can refuse the legacy session-scoped
+          // /config/providers request. The machine daemon owns an independent agent catalog for
+          // exactly this case; retain the legacy path for ordinary bridge servers.
+          if (!isBridgeBackend(config.backend)) throw sessionCatalogError
+          const catalog = await taskClient.listAgentModels(config, config.agentId ?? config.backend)
+          if (!catalog.models.length) throw sessionCatalogError
+          list = catalog.models
+        }
+      }
       if (requestID !== loadModelsRequestRef.current) return
       setModelOptions(list)
       setModelLoadError(null)
-      const sessionModel = sessions.find((session) => session.id === sessionID)?.model
+      const sessionModel = launchedTask?.model ?? sessions.find((session) => session.id === sessionID)?.model
       const sessionOption = sessionModel ? list.find((option) => sameModel(option, sessionModel)) : null
       if (sessionOption) {
         const nextKey = modelKey(sessionOption)
@@ -3496,14 +3497,32 @@ function App() {
       setConnectionMessage("")
       return
     }
-    setConnectionState("connecting")
-    setConnectionMessage(t('connection.connecting'))
-    backgroundFailureCountRef.current = 0
-    initialSessionLoadRef.current = true
-    refreshSessions(true).catch(() => undefined)
-    loadCommands().catch(() => undefined)
-    if (capabilities.agents) loadAgents().catch(() => undefined)
-    if (capabilities.models) loadModels().catch(() => undefined)
+    let cancelled = false
+    const connect = async () => {
+      // Profiles saved before multi-harness routing did not carry agentId. Resolve a matching
+      // daemon host before any session request: otherwise OMP/PI silently read the primary
+      // harness's sessions from the daemon root.
+      if (isBridgeBackend(config.backend)) {
+        const machine = await discoverMachine(config).catch(() => null)
+        const agents = machine ? selectableMachineAgents(machine) : []
+        const agent = agents.find((candidate) => candidate.backend === config.backend)
+        const selected = agents.find((candidate) => candidate.id === config.agentId)
+        if (agent && (!config.agentId || selected?.backend !== config.backend)) {
+          if (!cancelled) applyConfig({ ...config, agentId: agent.id })
+          return
+        }
+      }
+      if (cancelled) return
+      setConnectionState("connecting")
+      setConnectionMessage(t('connection.connecting'))
+      backgroundFailureCountRef.current = 0
+      initialSessionLoadRef.current = true
+      refreshSessions(true).catch(() => undefined)
+      loadCommands().catch(() => undefined)
+      if (capabilities.agents) loadAgents().catch(() => undefined)
+      if (capabilities.models) loadModels().catch(() => undefined)
+    }
+    void connect()
     const timer = setInterval(() => {
       // Live SSE events already keep sessions and the open session's messages/todos/diffs in sync
       // (via applyStreamedPartUpdate/scheduleRefresh), so polling on top of a working stream is a
@@ -3524,8 +3543,11 @@ function App() {
         loadSelected(selectedSession.id, selectedSession.directory).catch(() => undefined)
       }
     }, 3500)
-    return () => clearInterval(timer)
-  }, [capabilities.agents, capabilities.models, config.backend, config.host, config.port, config.username, config.password, selectedSession?.id, selectedNewSessionDirectory])
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [capabilities.agents, capabilities.models, config.agentId, config.backend, config.host, config.port, config.username, config.password, selectedSession?.id, selectedNewSessionDirectory])
 
   useEffect(() => {
     const fallback = DEFAULT_HARNESS_CAPABILITIES[config.backend]
@@ -3774,133 +3796,6 @@ function App() {
     }
     wasRunningRef.current = isSessionWorking(selectedSession.status)
   }, [selectedSession?.id, selectedSession?.status])
-
-  // Shared between the mobile sessions panel and the desktop sidebar so both list sessions
-  // identically instead of maintaining two copies of this markup.
-  const renderSessionCard = (session: SessionView) => (
-    <article
-      key={session.id}
-      className={`session-card ${session.status} ${selectedID === session.id ? "active" : ""} ${renamingSessionID === session.id && renameSource === "list" ? "renaming" : ""} fade-in`}
-      onClick={() => openSession(session.id, session.directory).catch(() => undefined)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault()
-          openSession(session.id, session.directory).catch(() => undefined)
-        }
-      }}
-    >
-      <div className="session-card-main">
-        <div>
-          {renamingSessionID === session.id && renameSource === "list" ? (
-            <div
-              className="rename-inline"
-              onClick={(event) => event.stopPropagation()}
-              onMouseDown={(event) => event.stopPropagation()}
-            >
-              <input
-                ref={renameInputRef}
-                value={renameValue}
-                onChange={(event) => setRenameValue(event.target.value)}
-                onKeyDown={(event) => {
-                  event.stopPropagation()
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    renameSession(session.id, renameValue, session.directory).catch(() => undefined)
-                  } else if (event.key === "Escape") {
-                    cancelRename()
-                  }
-                }}
-                onBlur={() => {
-                  // Only cancel if not clicked on save button
-                  if (renameValue === session.title || !renameValue.trim()) {
-                    cancelRename()
-                  }
-                }}
-                placeholder={t('session.renamePlaceholder')}
-                enterKeyHint="done"
-                autoCorrect="off"
-                spellCheck={false}
-                className="rename-input"
-                autoComplete="off"
-              />
-              <button
-                className="btn-primary compact"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  renameSession(session.id, renameValue, session.directory).catch(() => undefined)
-                }}
-                onMouseDown={(event) => event.preventDefault()}
-                title={t('session.renameConfirm')}
-              >
-                <SaveIcon size={16} />
-              </button>
-              <button
-                className="btn-secondary compact"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  cancelRename()
-                }}
-                title={t('session.cancel')}
-              >
-                <CloseIcon size={16} />
-              </button>
-            </div>
-          ) : (
-            <h3 title={session.title}>{session.title}</h3>
-          )}
-          <p title={session.directory}>{shortDirectory(session.directory)}</p>
-        </div>
-      </div>
-      <div className="session-stats">
-        {/* "No file changes" is said by its absence: one line fewer on a phone. */}
-        {(session.files > 0 || session.additions > 0 || session.deletions > 0) && (
-          <span className="change-summary">
-            <strong>{session.files}</strong> files
-            <strong className="positive">+{session.additions}</strong>
-            <strong className="negative">-{session.deletions}</strong>
-          </span>
-        )}
-        <span className="subtle session-meta-line">
-          <span className="session-directory-compact" title={session.directory}>{shortDirectory(session.directory)}</span>
-          <span title={formatTime(session.updated)}>
-            {t('sessions.updated', { time: formatRelativeTime(session.updated, language) })}
-          </span>
-        </span>
-        <span className={`pill ${session.status}`}>{session.status}</span>
-      </div>
-      <div className="inline-actions">
-        {capabilities.sessionRename && capabilities.sessionDelete && (
-          <>
-            <button
-              className="btn-secondary"
-              onClick={(event) => {
-                event.stopPropagation()
-                startRename(session)
-              }}
-              title={t('session.renameTitle')}
-              aria-label={t('session.renameTitle')}
-            >
-              <PencilIcon size={16} />
-              {t('session.renameConfirm')}
-            </button>
-            <button
-              className="btn-danger"
-              onClick={(event) => {
-                event.stopPropagation()
-                setSessionToDelete(session)
-              }}
-              title={t('sessions.delete')}
-            >
-              <TrashIcon size={16} />
-              {t('sessions.delete')}
-            </button>
-          </>
-        )}
-      </div>
-    </article>
-  )
 
   const navItems = [
     { view: "sessions" as const, label: t('nav.sessions'), icon: <FolderIcon size={19} />, disabled: !hasConfiguredServer },
@@ -4323,6 +4218,26 @@ function App() {
     return groups
   }, [])
 
+  const sessionRenameState: SessionRenameState = {
+    sessionID: renamingSessionID,
+    source: renameSource,
+    value: renameValue
+  }
+  const sessionCardProps = {
+    selectedID,
+    rename: sessionRenameState,
+    renameInputRef,
+    capabilities,
+    language,
+    t,
+    onOpen: (session: SessionView) => void openSession(session.id, session.directory).catch(() => undefined),
+    onRenameValueChange: setRenameValue,
+    onRename: (session: SessionView) => void renameSession(session.id, renameValue, session.directory).catch(() => undefined),
+    onCancelRename: cancelRename,
+    onStartRename: (session: SessionView) => startRename(session),
+    onDelete: setSessionToDelete
+  }
+
   return (
     <div className={`app-shell${isDesktop ? " app-shell-desktop" : ""}`}>
       {isDesktop ? (
@@ -4384,77 +4299,26 @@ function App() {
       <div className="app-body">
 
       {isDesktop && (
-        <aside className="desktop-sidebar fade-in" style={{ width: viewportSidebarWidth, flex: `0 0 ${viewportSidebarWidth}px` }}>
-          <div className="resize-handle resize-handle--end" onPointerDown={dragPanelDivider} role="separator" aria-orientation="vertical" aria-label="Resize panels" />
-          <div className="sidebar-toolbar">
-            <div className="search-field">
-              <SearchIcon size={14} />
-              <input
-                ref={searchInputRef}
-                placeholder={t('sessions.searchPlaceholder')}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="search"
-              />
-            </div>
-            <button
-              onClick={refreshSessionsWithIndicator}
-              className="btn-secondary"
-              disabled={refreshingSessions}
-              aria-label={t('sessions.refresh')}
-              title={t('sessions.refresh')}
-            >
-              {refreshingSessions ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
-            </button>
-            <button
-              onClick={openNewSessionPicker}
-              className="btn-primary"
-              disabled={creatingSession || isOffline}
-              aria-label={t('sessions.new')}
-              title={isOffline ? t('sessions.offlineHint') : t('sessions.new')}
-            >
-              {creatingSession ? <LoadingIcon size={16} /> : <PlusIcon size={16} />}
-            </button>
-          </div>
-
-          <div className="sidebar-sessions" ref={sidebarSessionsRef} onScroll={refreshSidebarJumps}>
-            {filteredSessions.length === 0 ? (
-              <p className="subtle sidebar-empty">
-                {isOffline ? t('sessions.offlineHint') : t('sessions.emptyTitle')}
-              </p>
-            ) : (
-              sidebarGroups.map((group) => (
-                <section key={group.directory} className="sidebar-group">
-                  <div className="sidebar-group-label" title={group.directory}>
-                    <FolderIcon size={12} />
-                    <span>{projectLabel(group.directory)}</span>
-                    <span className="sidebar-group-count">{group.sessions.length}</span>
-                  </div>
-                  {group.sessions.map(renderSessionCard)}
-                </section>
-              ))
-            )}
-          </div>
-
-          <JumpControls
-            affordances={sidebarJumpAffordances}
-            onJumpToTop={handleSidebarJumpToTop}
-            onJumpToBottom={handleSidebarJumpToBottom}
-            variant="sidebar"
-            t={t}
-          />
-
-          <div className="sidebar-footer">
-            <button type="button" className="btn-secondary" onClick={() => setView("help")} title={t('nav.help')}>
-              <HelpIcon size={18} />
-              <span className="sidebar-footer-label">{t('nav.help')}</span>
-            </button>
-            <button type="button" className="btn-secondary" onClick={() => setView("settings")} title={t('nav.settings')}>
-              <SettingsIcon size={18} />
-              <span className="sidebar-footer-label">{t('nav.settings')}</span>
-            </button>
-          </div>
-        </aside>
+        <SessionSidebar
+          groups={sidebarGroups}
+          query={query}
+          searchInputRef={searchInputRef}
+          sidebarSessionsRef={sidebarSessionsRef}
+          refreshing={refreshingSessions}
+          creating={creatingSession}
+          offline={isOffline}
+          width={viewportSidebarWidth}
+          t={t}
+          onQueryChange={setQuery}
+          onRefresh={() => void refreshSessionsWithIndicator().catch(() => undefined)}
+          onNewSession={() => void openNewSessionPicker()}
+          onShowHelp={() => setView("help")}
+          onShowSettings={() => setView("settings")}
+          onResize={dragPanelDivider}
+          onScroll={refreshSidebarJumps}
+          jumpControls={<JumpControls affordances={sidebarJumpAffordances} onJumpToTop={handleSidebarJumpToTop} onJumpToBottom={handleSidebarJumpToBottom} variant="sidebar" t={t} />}
+          sessionCardProps={sessionCardProps}
+        />
       )}
 
       <div
@@ -4465,7 +4329,7 @@ function App() {
         <ConditionalWrapper
           condition={isDesktop}
           wrapper={(children) => (
-            <DesktopModalOverlay onClose={() => setView("detail")} ariaLabel={t('settings.title')}>
+            <DesktopModalOverlay onClose={() => setView("detail")} ariaLabel={t('settings.title')} closeOnBackdrop={false}>
               {children}
             </DesktopModalOverlay>
           )}
@@ -4675,110 +4539,28 @@ function App() {
       )}
 
       {mainView === "sessions" && (
-        <section className="panel sessions fade-in">
-          <div className="section-heading">
-            <div>
-              <h2>{t('sessions.title')}</h2>
-              <p className="subtle">
-                {t('sessions.summary', { total: sessions.length, active: activeSessions, changed: changedSessions })}
-              </p>
-              {(connectionStatusText || eventStreamText) && (
-                <div className="connection-status-row">
-                  {connectionStatusText && (
-                    <p className={`connection-status ${connectionState}`}>
-                      {['connecting', 'reconnecting'].includes(connectionState) && <LoadingIcon size={14} />}
-                      {connectionStatusText}
-                    </p>
-                  )}
-                  {eventStreamText && (
-                    <p className={`connection-status event-stream ${eventStreamState}`}>
-                      {['connecting', 'reconnecting'].includes(eventStreamState) && <LoadingIcon size={14} />}
-                      {eventStreamText}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="inline-actions sessions-header-actions">
-              <button onClick={refreshSessionsWithIndicator} className="btn-secondary" disabled={refreshingSessions}>
-                {refreshingSessions ? <LoadingIcon size={18} /> : <RefreshIcon size={18} />}
-                {t('sessions.refresh')}
-              </button>
-              <button
-                onClick={openNewSessionPicker}
-                className="btn-primary"
-                disabled={creatingSession || isOffline}
-                title={isOffline ? t('sessions.offlineHint') : undefined}
-              >
-                {creatingSession ? <LoadingIcon size={18} /> : <PlusIcon size={18} />}
-                {creatingSession ? t('sessions.creating') : t('sessions.new')}
-              </button>
-            </div>
-          </div>
-          
-          <div className="toolbar">
-            <input
-              placeholder={t('sessions.searchPlaceholder')}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              className="search"
-            />
-          </div>
-          
-          <div className="session-list">
-            {/* An empty list while the server is unreachable is not "still loading". Saying so,
-                and offering the two things worth doing, beats a spinner that never resolves. */}
-            {filteredSessions.length === 0 && isOffline ? (
-              <div className="empty-state">
-                <OfflineIcon size={44} className="icon-empty-state" />
-                <p>{t('sessions.offlineHint')}</p>
-                <div className="empty-state-actions">
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => refreshSessionsWithIndicator().catch(() => undefined)}
-                    disabled={refreshingSessions}
-                  >
-                    {refreshingSessions ? <LoadingIcon size={18} /> : <RefreshIcon size={18} />}
-                    {t('sessions.retry')}
-                  </button>
-                  <button type="button" className="btn-secondary" onClick={() => setView("settings")}>
-                    <SettingsIcon size={18} />
-                    {t('nav.settings')}
-                  </button>
-                </div>
-              </div>
-            ) : filteredSessions.length === 0 && ['connecting', 'reconnecting'].includes(connectionState) ? (
-              <div className="empty-state connection-pending">
-                <LoadingIcon size={40} className="icon-empty-state" />
-                <p>{t('sessions.loadingTitle')}</p>
-                <p className="subtle">{t('sessions.loadingHint')}</p>
-              </div>
-            ) : filteredSessions.length === 0 ? (
-              <div className="empty-state">
-                <FolderIcon size={48} className="icon-empty-state" />
-                <p>{t('sessions.emptyTitle')}</p>
-                <p className="subtle">{t('sessions.emptyHint')}</p>
-              </div>
-            ) : (
-              filteredSessions.map(renderSessionCard)
-            )}
-          </div>
-
-          {/* The offline empty state already explains this and offers the two useful actions;
-              repeating the raw transport error underneath is the second voice again. */}
-          {runtimeError && !(isOffline && filteredSessions.length === 0) && (
-            <div className="error fade-in">✗ {runtimeError}</div>
-          )}
-
-          <JumpControls
-            affordances={sessionJumpAffordances}
-            onJumpToTop={handleSessionsJumpToTop}
-            onJumpToBottom={handleSessionsJumpToBottom}
-            variant="page"
-            t={t}
-          />
-        </section>
+        <SessionsPanel
+          sessions={sessions}
+          filteredSessions={filteredSessions}
+          activeSessions={activeSessions}
+          changedSessions={changedSessions}
+          query={query}
+          refreshing={refreshingSessions}
+          creating={creatingSession}
+          offline={isOffline}
+          connectionState={connectionState}
+          connectionStatusText={connectionStatusText}
+          eventStreamState={eventStreamState}
+          eventStreamText={eventStreamText}
+          runtimeError={runtimeError}
+          t={t}
+          onQueryChange={setQuery}
+          onRefresh={() => void refreshSessionsWithIndicator().catch(() => undefined)}
+          onNewSession={() => void openNewSessionPicker()}
+          onShowSettings={() => setView("settings")}
+          jumpControls={<JumpControls affordances={sessionJumpAffordances} onJumpToTop={handleSessionsJumpToTop} onJumpToBottom={handleSessionsJumpToBottom} variant="page" t={t} />}
+          sessionCardProps={sessionCardProps}
+        />
       )}
 
       {showNewSessionPicker && (
@@ -4970,115 +4752,32 @@ function App() {
             onQuestionResolved={handleQuestionResolved}
             onPermissionResolved={handlePermissionResolved}
           />
-
-
-
-          <div className="composer" ref={composerRef}>
-            {attachments.length > 0 && (
-              <div className="composer-chips">
-                {attachments.map((attachment, index) => (
-                  <span className="composer-chip" key={`${attachment.filename}-${index}`}>
-                    <strong>{attachment.filename}</strong>
-                    <button
-                      className="btn-ghost btn-icon"
-                      aria-label={t('detail.removeAttachment')}
-                      onClick={() => setAttachments((current) => current.filter((_, position) => position !== index))}
-                    >
-                      <CloseIcon size={12} />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-            <textarea
-              ref={composerInputRef}
-              value={composer}
-              onChange={(event) => setComposer(event.target.value)}
-              placeholder={t('detail.composerPlaceholder')}
-              enterKeyHint={SOFT_KEYBOARD_DEVICE ? "enter" : "send"}
-              autoCapitalize="sentences"
-              autoCorrect="on"
-              onFocus={() => {
-                syncChatBottomClearance()
-                setTimeout(() => scrollMessagesToBottom("smooth"), 400)
-                const onResize = () => {
-                  scrollMessagesToBottom("smooth")
-                  window.removeEventListener("resize", onResize)
-                }
-                window.addEventListener("resize", onResize, { once: true })
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter") return
-                if (SOFT_KEYBOARD_DEVICE) {
-                  // The soft keyboard has no Shift key, so Enter inserts a new line by default
-                  // and Ctrl/Cmd+Enter (hardware keyboards) sends.
-                  if (event.ctrlKey || event.metaKey) {
-                    event.preventDefault()
-                    send().catch(() => undefined)
-                  }
-                  return
-                }
-                if (!event.shiftKey) {
-                  event.preventDefault()
-                  send().catch(() => undefined)
-                }
-              }}
-              disabled={!selectedSession}
-            />
-            <div className="composer-bar">
-              {/* Gated on what the harness advertised: PI, Claude Code and Codex CLI expose no image
-                  prompt capability, and offering a picker whose only outcome is a refusal at send
-                  time is worse than not offering one. The OS picker is the camera, the gallery and
-                  the file browser in one, so the app needs no capture UI of its own. */}
-              {capabilities.attachments && (
-                <>
-                  <input
-                    ref={attachmentInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    hidden
-                    onChange={async (event) => {
-                      const chosen = Array.from(event.target.files ?? []).slice(0, ATTACHMENT_MAX_COUNT - attachments.length)
-                      event.target.value = ""
-                      if (!chosen.length) return
-                      try {
-                        const prepared = await Promise.all(chosen.map((file) => fileToAttachment(file)))
-                        setAttachments((current) => [...current, ...prepared])
-                        setRuntimeError(null)
-                      } catch (err) {
-                        setRuntimeError((err as Error).message)
-                      }
-                    }}
-                  />
-                  <button
-                    className="btn-ghost btn-icon"
-                    title={t('detail.attachImage')}
-                    aria-label={t('detail.attachImage')}
-                    onClick={() => attachmentInputRef.current?.click()}
-                    disabled={!selectedSession || attachments.length >= ATTACHMENT_MAX_COUNT}
-                  >
-                    <PaperclipIcon size={18} />
-                  </button>
-                </>
-              )}
-              <div className="composer-actions">
-                {/* While the agent works the same button stops it, but starts sending again as
-                    soon as there is something to send, so a follow-up can be queued. */}
-                <button
-                  onClick={showStopAction ? abortSession : send}
-                  disabled={!selectedSession}
-                  className={showStopAction ? "btn-danger composer-send" : "btn-primary composer-send"}
-                >
-                  {showStopAction ? (
-                    <StopCircleIcon size={18} />
-                  ) : (
-                    <SendIcon size={18} />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
+          <SessionComposer
+            selected={Boolean(selectedSession)}
+            value={composer}
+            attachments={attachments}
+            supportsAttachments={capabilities.attachments}
+            showStopAction={showStopAction}
+            softKeyboard={SOFT_KEYBOARD_DEVICE}
+            t={t}
+            composerRef={composerRef}
+            inputRef={composerInputRef}
+            attachmentInputRef={attachmentInputRef}
+            onValueChange={setComposer}
+            onAttachmentsChange={setAttachments}
+            onAttachmentError={(message) => setRuntimeError(message)}
+            onFocus={() => {
+              syncChatBottomClearance()
+              setTimeout(() => scrollMessagesToBottom("smooth"), 400)
+              const onResize = () => {
+                scrollMessagesToBottom("smooth")
+                window.removeEventListener("resize", onResize)
+              }
+              window.addEventListener("resize", onResize, { once: true })
+            }}
+            onSend={() => void send().catch(() => undefined)}
+            onAbort={() => void abortSession()}
+          />
 
           {runtimeError && <div className="error fade-in">✗ {runtimeError}</div>}
           {actionNotice && <div className="notice info fade-in">ℹ {actionNotice}</div>}

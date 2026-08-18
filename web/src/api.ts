@@ -1,7 +1,7 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequest, isDesktopPlatform } from "./desktopBridge"
 import { streamURL } from "./opencode-events"
-import { baseUrl, isValidServerConfig } from "./serverConfig"
+import { authHeader, baseUrl, hasCredentials, isValidServerConfig } from "./serverConfig"
 import type { AttachmentPart } from "./attachments"
 import type {
   AgentOption,
@@ -27,11 +27,17 @@ import type {
   VcsStatus
 } from "./types"
 
-function authHeader(config: ServerConfig): string {
-  return `Basic ${btoa(`${config.username}:${config.password}`)}`
-}
-
 export { baseUrl, isValidServerConfig }
+
+// A 401 says the server wants credentials, not that the ones given are wrong, and the app can tell
+// the two apart because it knows whether it sent any. The connection test enables itself without a
+// password, so the common case is a server with Basic Auth and an empty password field, which read
+// as "wrong password" and sent people back to re-check credentials that were correct.
+function unauthorizedDetail(config: ServerConfig): string {
+  return hasCredentials(config)
+    ? "HTTP 401: the server rejected these credentials."
+    : "HTTP 401: this server requires a username and password, and none were sent."
+}
 
 function withDirectory(path: string, directory?: string): string {
   if (!directory) return path
@@ -61,7 +67,7 @@ function responseDetail(body: unknown): string | null {
   }
   if (typeof body === "object") {
     // `data.message` and `message` are OpenCode's shapes; the bridge answers `{ "error": "..." }`,
-    // which fell through to the stringify below and put raw JSON on screen — so every bridge
+    // which fell through to the stringify below and put raw JSON on screen, so every bridge
     // failure reached the user as `{"error":"Internal error: ..."}` instead of the sentence in it.
     const value = body as { data?: { message?: string }, message?: string, error?: string }
     const detail = value.data?.message ?? value.message ?? (typeof value.error === "string" ? value.error : undefined)
@@ -75,6 +81,23 @@ function normalizeHeaders(headers: Record<string, unknown> | undefined): Record<
   return Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value.join(", ") : String(value)])
   )
+}
+
+/**
+ * CapacitorHttp normally decodes JSON, but native engines can still hand a JSON response back as a
+ * string depending on the server headers and platform. The browser path always calls response.json(),
+ * so returning the string unchanged makes Android the only client that can turn a session array into
+ * an iterable string. Parse JSON-looking native strings here while preserving ordinary text bodies.
+ */
+function normalizeNativeResponseData(data: unknown): unknown {
+  if (typeof data !== "string") return data
+  const trimmed = data.trim()
+  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) return data
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return data
+  }
 }
 
 type ConfigProvidersResponse = {
@@ -109,6 +132,13 @@ type AgentResponse = Array<{
   hidden?: boolean
 }>
 
+function routingHeaders(config: ServerConfig): Record<string, string> {
+  // A direct OpenCode server does not know this compatibility header and may reject it during CORS
+  // preflight. Daemon-backed profiles have an agentId, while ACP bridge profiles can safely send it.
+  if (config.backend === "opencode" && !config.agentId) return {}
+  return { "X-Harness-Backend": config.backend }
+}
+
 async function requestWithHeaders<T>(config: ServerConfig, path: string, options: RequestOptions = {}): Promise<ResponseWithHeaders<T>> {
   const method = options.method ?? "GET"
   if (isDesktopPlatform()) {
@@ -123,9 +153,10 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
 
   const target = `${baseUrl(config)}${path}`
   const headers: Record<string, string> = {
-    Accept: "application/json"
+    Accept: "application/json",
+    ...routingHeaders(config)
   }
-  if (config.username && config.password) {
+  if (hasCredentials(config)) {
     headers.Authorization = authHeader(config)
   }
   if (options.body !== undefined) {
@@ -148,12 +179,13 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
     }
 
     if (response.status >= 400) {
+      if (response.status === 401) throw new Error(responseDetail(response.data) || unauthorizedDetail(config))
       throw new Error(responseDetail(response.data) || `HTTP ${response.status}`)
     }
 
     const responseHeaders = normalizeHeaders(response.headers)
     if (response.status === 204) return { data: true as T, headers: responseHeaders }
-    return { data: response.data as T, headers: responseHeaders }
+    return { data: normalizeNativeResponseData(response.data) as T, headers: responseHeaders }
   }
 
   let response: Response
@@ -166,14 +198,14 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
   } catch {
     // Kept short: this text reaches a phone screen. The CORS note only means something in a
     // browser, where it is the usual cause, and nothing at all inside the app.
-    const corsHint = config.username && config.password
+    const corsHint = hasCredentials(config)
       ? " In a browser, Basic Auth also needs the bridge started with --cors for this origin."
       : ""
     throw new Error(`Cannot reach ${config.host}:${config.port}.${corsHint}`)
   }
 
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`
+    let detail = response.status === 401 ? unauthorizedDetail(config) : `HTTP ${response.status}`
     try {
       // A Response body is a one-shot stream. Read it once and let responseDetail
       // parse JSON when applicable, so a plain-text server error remains useful.
@@ -222,8 +254,8 @@ function modelWireName(model?: ModelSelection) {
 
 export const api = {
   eventStream(config: ServerConfig) {
-    const headers: Record<string, string> = {}
-    if (config.username && config.password) headers.Authorization = authHeader(config)
+    const headers: Record<string, string> = { ...routingHeaders(config) }
+    if (hasCredentials(config)) headers.Authorization = authHeader(config)
     return { url: streamURL(baseUrl(config), "global"), headers }
   },
 

@@ -35,6 +35,36 @@ function sessionView(session, status = "idle", title = session.title, external =
   }
 }
 
+/**
+ * Older PI snapshots contain one UUID-identified assistant envelope per streamed fragment. A user
+ * turn is the natural delimiter, so those adjacent envelopes are one visible reply. Keeping them
+ * separate breaks Markdown whenever a marker or word straddles two updates.
+ */
+function mergeFragmentedPiSnapshot(messages) {
+  const merged = []
+  for (const message of messages) {
+    const previous = merged.at(-1)
+    if (
+      message?.info?.role === "assistant"
+      && previous?.info?.role === "assistant"
+      && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(message.info.id)
+      && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(previous.info.id)
+    ) {
+      for (const part of message.parts ?? []) {
+        const lastPart = previous.parts.at(-1)
+        if (lastPart?.type === part?.type && typeof lastPart.text === "string" && typeof part.text === "string") {
+          lastPart.text += part.text
+        } else {
+          previous.parts.push(part)
+        }
+      }
+      continue
+    }
+    merged.push(message)
+  }
+  return merged
+}
+
 function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
 }
@@ -201,6 +231,7 @@ export class AcpService {
   #replaying = new Set()
   #historyLoader
   #ownedSessions = new Set()
+  #acpOpenSessions = new Set()
   #promptAcknowledgements = new Map()
   #titles = new Map()
   #deletedSessions = new Set()
@@ -217,11 +248,17 @@ export class AcpService {
   #snapshotWrites = new Map()
   #preserveListedTimestamps
   #reloadOnHistoryRefresh
+  #replaySettleMs
+  #preferListedTitles
+  #nativeRenameCommand
   constructor(acp, {
     snapshotDirectory,
     historyLoader,
     preserveListedTimestamps = false,
     reloadOnHistoryRefresh = true,
+    replaySettleMs = 0,
+    preferListedTitles = false,
+    nativeRenameCommand,
     actionProviders = []
   } = {}) {
     this.#acp = acp
@@ -229,6 +266,9 @@ export class AcpService {
     this.#historyLoader = historyLoader
     this.#preserveListedTimestamps = preserveListedTimestamps
     this.#reloadOnHistoryRefresh = reloadOnHistoryRefresh
+    this.#replaySettleMs = replaySettleMs
+    this.#preferListedTitles = preferListedTitles
+    this.#nativeRenameCommand = nativeRenameCommand
     this.#actionProviders = actionProviders
     acp.on("notification", (notification) => this.#handleNotification(notification))
   }
@@ -255,6 +295,7 @@ export class AcpService {
   async createSession({ directory, title, model }) {
     await this.#acp.start()
     const result = await this.#acp.request("session/new", { cwd: directory, mcpServers: [] })
+    this.#acpOpenSessions.add(result.sessionId)
     this.#rememberConfigOptions(result.sessionId, result.configOptions)
     const session = {
       sessionId: result.sessionId,
@@ -275,10 +316,86 @@ export class AcpService {
     return sessionView(session, "idle", this.#titleFor(session.sessionId))
   }
 
+  /** Adopt a task session created by an older daemon so PI can open it without session/load. */
+  async adoptTaskSession(sessionID, { title, prompt } = {}) {
+    await this.#refreshSessions()
+    const session = this.#sessions.get(sessionID)
+    if (!session || this.#deletedSessions.has(sessionID)) return false
+    this.#ownedSessions.add(sessionID)
+    this.#loaded.add(sessionID)
+    if (title && !this.#titles.has(sessionID)) this.#titles.set(sessionID, title)
+    const messages = this.#messages.get(sessionID) ?? []
+    if (prompt && !messages.some((message) => message.info?.role === "user" && message.parts?.some((part) => part.text === prompt))) {
+      this.#recordPrompt(sessionID, prompt)
+    }
+    this.#persistSnapshot(sessionID)
+    return true
+  }
+
   async renameSession(sessionID, title) {
-    const normalized = title.trim()
+    const normalized = title.trim().replace(/\s+/g, " ")
     if (!normalized) throw new Error("A session title is required")
     await this.#requireSession(sessionID)
+
+    if (typeof this.#historyLoader?.renameSession === "function") {
+      if (this.#isBusy(sessionID)) throw new Error("A busy PI session cannot be renamed")
+      if (this.#acpOpenSessions.has(sessionID)) {
+        await this.#acp.request("session/close", { sessionId: sessionID })
+        this.#acpOpenSessions.delete(sessionID)
+      }
+      await this.#historyLoader.renameSession(sessionID, normalized)
+      this.#loaded.delete(sessionID)
+      this.#ownedSessions.delete(sessionID)
+      this.#configOptions.delete(sessionID)
+      this.#commandCatalogs.delete(sessionID)
+      this.#actionStates.delete(sessionID)
+      this.#authoritativeActionStates.delete(sessionID)
+      this.#titles.delete(sessionID)
+      await this.#refreshSessions()
+      const session = this.#sessions.get(sessionID)
+      if (!session) throw new Error("Harness session not found after rename")
+      this.#persistSnapshot(sessionID)
+      this.#emit("session.updated", sessionID)
+      return sessionView(
+        session,
+        "idle",
+        this.#titleFor(sessionID),
+        Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
+      )
+    }
+
+    if (this.#nativeRenameCommand) {
+      await this.#load(sessionID, true)
+      const messagesBefore = structuredClone(this.#messages.get(sessionID) ?? [])
+      const todosBefore = structuredClone(this.#todos.get(sessionID) ?? [])
+      const wasActive = this.#active.has(sessionID)
+      if (!wasActive) this.#active.add(sessionID)
+      try {
+        await this.#acp.request("session/prompt", {
+          sessionId: sessionID,
+          prompt: [{ type: "text", text: `/${this.#nativeRenameCommand} ${normalized}` }]
+        }, 300_000)
+      } finally {
+        if (!wasActive) this.#active.delete(sessionID)
+        this.#messages.set(sessionID, messagesBefore)
+        this.#todos.set(sessionID, todosBefore)
+        this.#chunkMessageIDs.delete(`${sessionID}:user`)
+        this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+      }
+      this.#titles.delete(sessionID)
+      await this.#refreshSessions()
+      const session = this.#sessions.get(sessionID)
+      if (!session) throw new Error("Harness session not found after rename")
+      this.#persistSnapshot(sessionID)
+      this.#emit("session.updated", sessionID)
+      return sessionView(
+        session,
+        this.#isBusy(sessionID) ? "busy" : "idle",
+        this.#titleFor(sessionID),
+        Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
+      )
+    }
+
     this.#titles.set(sessionID, normalized)
     this.#persistSnapshot(sessionID)
     this.#emit("session.updated", sessionID)
@@ -315,6 +432,24 @@ export class AcpService {
   async messages(sessionID, refresh = false) {
     await this.#refreshSessions()
     await this.#restoreSnapshot(sessionID)
+    if (this.#historyLoader?.authoritativeHistory) {
+      try {
+        const persistedMessages = mergeFragmentedPiSnapshot(await this.#historyLoader(sessionID))
+        const cachedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
+        const messages = this.#isBusy(sessionID)
+          ? mergeFragmentedPiSnapshot(mergeExternalHistory(persistedMessages, cachedMessages))
+          : persistedMessages
+        if (semanticHistorySignature(messages) !== semanticHistorySignature(cachedMessages)) {
+          this.#resetActionsForSessionChange(sessionID)
+        }
+        this.#messages.set(sessionID, messages)
+        this.#loaded.add(sessionID)
+        this.#persistSnapshot(sessionID)
+        return messages
+      } catch {
+        this.#emit("session.error", sessionID, { message: "Harness session history could not be read" })
+      }
+    }
     const externalHistory = Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
     const reloadHistory = refresh && this.#reloadOnHistoryRefresh
     await this.#load(sessionID, reloadHistory || externalHistory)
@@ -519,6 +654,32 @@ export class AcpService {
     this.#startTurn(sessionID, text, false, attachments)
   }
 
+  /** Start a prompt through the session service and resolve only when that turn becomes idle. */
+  async promptAndWait(sessionID, text, model, attachments = []) {
+    return new Promise((resolve, reject) => {
+      let started = false
+      let settled = false
+      const finish = (error) => {
+        if (settled) return
+        settled = true
+        unsubscribe()
+        if (error) reject(error)
+        else resolve()
+      }
+      const unsubscribe = this.subscribe((event) => {
+        if (event.sessionId !== sessionID) return
+        if (event.type === "session.error") {
+          finish(new Error(event.message ?? "Harness prompt failed"))
+          return
+        }
+        if (event.type !== "session.updated") return
+        if (this.#isBusy(sessionID)) started = true
+        else if (started) finish()
+      })
+      void this.prompt(sessionID, text, model, attachments).catch(finish)
+    })
+  }
+
   #startTurn(sessionID, text, recorded = false, attachments = []) {
     const generation = (this.#turnGenerations.get(sessionID) ?? 0) + 1
     this.#turnGenerations.set(sessionID, generation)
@@ -610,9 +771,9 @@ export class AcpService {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
-      if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, snapshot.messages)
+      if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, mergeFragmentedPiSnapshot(snapshot.messages))
       if (Array.isArray(snapshot.todos)) this.#todos.set(sessionID, snapshot.todos)
-      if (typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
+      if (!this.#preferListedTitles && typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
       if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
     } catch (error) {
       if (error?.code !== "ENOENT") this.#emit("session.error", sessionID, { message: "Stored session snapshot is unreadable" })
@@ -707,7 +868,7 @@ export class AcpService {
     if (!session) throw new Error("Harness session not found")
     await this.#restoreSnapshot(sessionID)
     const authoritativeState = await this.#refreshActionState(sessionID, false)
-    let previousMessages = this.#messages.get(sessionID) ?? []
+    let previousMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
     const previousTodos = this.#todos.get(sessionID) ?? []
     const previousMessageSnapshot = semanticHistorySignature(previousMessages)
     if (this.#historyLoader) {
@@ -719,6 +880,7 @@ export class AcpService {
           previousMessages = authoritativeState
             ? persistedMessages
             : mergeExternalHistory(persistedMessages, previousMessages)
+          previousMessages = mergeFragmentedPiSnapshot(previousMessages)
           this.#messages.set(sessionID, previousMessages)
           if (!this.#ownedSessions.has(sessionID) && !requireConfigOptions) {
             this.#todos.set(sessionID, [])
@@ -738,8 +900,17 @@ export class AcpService {
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
     try {
       const result = await this.#acp.request("session/load", { sessionId: sessionID, cwd: session.cwd, mcpServers: [] }, 300_000)
+      this.#acpOpenSessions.add(sessionID)
+      if (this.#historyLoader?.claimOnLoad) this.#ownedSessions.add(sessionID)
+      // PI can resolve session/load just before its final replay notifications drain from stdout,
+      // especially through the Windows cmd/npx pipe. Profiles can opt into a short replay tail so
+      // those assistant chunks remain historical output instead of being rejected as unsolicited
+      // live output. Other ACP harnesses keep the zero-delay default.
+      if (this.#replaySettleMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.#replaySettleMs))
+      }
       this.#rememberConfigOptions(sessionID, result.configOptions)
-      const replayedMessages = this.#messages.get(sessionID) ?? []
+      const replayedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
       this.#messages.set(sessionID, replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
       const replayedTodos = this.#todos.get(sessionID) ?? []
       this.#todos.set(sessionID, replaceHistory ? replayedTodos : mergeTodos(previousTodos, replayedTodos))
@@ -811,6 +982,8 @@ export class AcpService {
 
   /** ACP session listings may carry no title, so keep the creation title or derive one from the first prompt. */
   #titleFor(sessionID) {
+    const listed = this.#sessions.get(sessionID)?.title?.trim()
+    if (this.#preferListedTitles && listed) return listed
     const known = this.#titles.get(sessionID)
     if (known) return known
     const firstPrompt = this.#messages.get(sessionID)?.find((message) => message.info.role === "user")
@@ -933,7 +1106,12 @@ export class AcpService {
     const counterpartKey = `${sessionId}:${role === "user" ? "assistant" : "user"}`
     this.#chunkMessageIDs.delete(counterpartKey)
     const chunkKey = `${sessionId}:${role}`
-    const messageID = update.messageId ?? this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
+    // PI sends a new message id for every streaming fragment. During a live turn the bridge's
+    // id is authoritative, so all adjacent fragments remain one Markdown message. Replay keeps
+    // adapter ids because it reconstructs historical conversation boundaries.
+    const messageID = !replaying && role === "assistant"
+      ? this.#chunkMessageIDs.get(chunkKey) ?? update.messageId ?? randomUUID()
+      : update.messageId ?? this.#chunkMessageIDs.get(chunkKey) ?? randomUUID()
     this.#chunkMessageIDs.set(chunkKey, messageID)
     const messages = this.#messages.get(sessionId) ?? []
     this.#messages.set(sessionId, messages)

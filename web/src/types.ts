@@ -6,6 +6,8 @@ export type ServerConfig = {
   port: number
   username: string
   password: string
+  /** Present when this profile targets one agent exposed by a Harness machine daemon. */
+  agentId?: string
 }
 
 export type HarnessCapabilities = {
@@ -25,6 +27,26 @@ export type HarnessCapabilities = {
   sessionRename: boolean
   sessionDelete: boolean
   attachments: boolean
+}
+
+export type MachineAgentHost = {
+  id: string
+  label: string
+  backend: string
+  transport: string
+  managed: boolean
+  state: "configured" | "available" | "unavailable" | string
+  capabilities: Partial<HarnessCapabilities> & Record<string, unknown>
+  processID?: number
+}
+
+export type MachineSnapshot = {
+  machine: {
+    id: string
+    name: string
+    createdAt?: string
+  }
+  agents: MachineAgentHost[]
 }
 
 export type HealthResponse = {
