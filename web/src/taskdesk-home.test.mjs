@@ -101,14 +101,17 @@ test("Universal workspace resolves and can change the model of the selected sess
   assert.match(source, /api\.sendPrompt\(selected\.config, selected\.session\.id, text, selected\.session\.directory, model\)/)
 })
 
-test("Universal workspace gives supported harness replies their own visual identity", () => {
+test("Universal workspace gives supported harness replies their own local visual identity", () => {
   const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
   const readableFixes = readFileSync(new URL("./universal-workspace-readable-fixes.css", import.meta.url), "utf8")
 
-  assert.match(source, /const HARNESS_ICON_URLS/)
+  assert.match(source, /const HARNESS_ICON_FILES/)
   for (const backend of ["codex", "claude", "opencode", "omp", "pi"]) {
     assert.match(source, new RegExp(`${backend}:`))
+    assert.match(source, new RegExp(`${backend}\\.svg`))
   }
+  assert.match(source, /import\.meta\.env\.BASE_URL.*harness-icons/)
+  assert.doesNotMatch(source, /https:\/\/(?:openai|claude|opencode|omp|pi)\./)
   assert.match(source, /function HarnessAvatar/)
   assert.match(source, /agentBackend=\{selected\.agent\.backend\}/)
   assert.match(readableFixes, /\.uw-avatar-agent img/)
