@@ -89,18 +89,26 @@ function semanticMessagePart(part) {
   return semantic
 }
 
-function semanticMessageSignature(message) {
-  return JSON.stringify({
+/**
+ * A turn that failed carries its reason on the envelope rather than in a part, and two failures are
+ * two different messages even when both have nothing to show. Leaving the reason out of the identity
+ * let one be deduplicated away against the other, and let a newly recorded failure pass for no
+ * change at all.
+ */
+function semanticMessageIdentity(message) {
+  return {
     role: message?.info?.role,
+    ...(message?.info?.error?.message ? { error: message.info.error.message } : {}),
     parts: (message?.parts ?? []).map(semanticMessagePart)
-  })
+  }
+}
+
+function semanticMessageSignature(message) {
+  return JSON.stringify(semanticMessageIdentity(message))
 }
 
 function semanticHistorySignature(messages) {
-  return JSON.stringify(messages.map((message) => ({
-    role: message?.info?.role,
-    parts: (message?.parts ?? []).map(semanticMessagePart)
-  })))
+  return JSON.stringify(messages.map(semanticMessageIdentity))
 }
 
 /** Exported for testing only. */
@@ -722,6 +730,7 @@ export class AcpService {
       ]
     }, 300_000).catch((error) => {
       if (this.#turnGenerations.get(sessionID) === generation) {
+        this.#recordTurnFailure(sessionID, error.message)
         this.#emit("session.error", sessionID, { message: error.message })
       }
     }).finally(() => {
@@ -732,6 +741,30 @@ export class AcpService {
       this.#persistSnapshot(sessionID)
       void this.#runNextQueued(sessionID)
     })
+  }
+
+  /**
+   * A turn that fails leaves the prompt on screen with nothing after it, and the live error banner
+   * that reports why is gone the moment the session is reopened. Attaching the reason to the turn's
+   * own assistant message keeps it in the transcript — and in the snapshot — so a failed reply stays
+   * distinguishable from a reply that never got recorded.
+   */
+  #recordTurnFailure(sessionID, message) {
+    if (typeof message !== "string" || !message.trim()) return
+    const messages = this.#messages.get(sessionID) ?? []
+    this.#messages.set(sessionID, messages)
+    const streamedID = this.#chunkMessageIDs.get(`${sessionID}:assistant`)
+    let target = streamedID ? messages.find((item) => item.info.id === streamedID) : undefined
+    if (!target) {
+      target = {
+        info: { id: randomUUID(), role: "assistant", sessionID, time: { created: Date.now() } },
+        parts: []
+      }
+      messages.push(target)
+    }
+    target.info.error = { name: "HarnessTurnError", message: message.trim() }
+    this.#emit("message.updated", sessionID)
+    this.#persistSnapshot(sessionID)
   }
 
   async #runNextQueued(sessionID) {
