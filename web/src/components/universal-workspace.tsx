@@ -42,6 +42,13 @@ const REFRESH_INTERVAL_MS = 4_000
 const DETAIL_REFRESH_INTERVAL_MS = 2_500
 const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000
 const PINNED_STORAGE_KEY = "harness-remote.universal-workspace.pinned"
+const HARNESS_ICON_URLS: Record<string, string> = {
+  codex: "https://openai.com/favicon.ico",
+  claude: "https://claude.ai/favicon.ico",
+  opencode: "https://opencode.ai/favicon.ico",
+  omp: "https://omp.sh/favicon.ico",
+  pi: "https://pi.dev/favicon.ico"
+}
 
 type WorkspaceFilter = "all" | "working" | "needs-you" | "idle" | "pinned"
 type DetailTab = "conversation" | "changes"
@@ -196,6 +203,10 @@ function modelLabel(model?: Session["model"] | ModelSelection | null): string {
   return `${model.providerID}/${candidate}${variant}`
 }
 
+function modelOptionKey(model: ModelSelection): string {
+  return `${model.providerID}/${model.modelID}/${model.variant || ""}`
+}
+
 function uniqueEndpointProfiles(profiles: SavedServerProfile[]): SavedServerProfile[] {
   const seen = new Set<string>()
   return profiles.filter((profile) => {
@@ -346,14 +357,28 @@ function ToolCard({ message }: { message: MessageEnvelope }) {
   )
 }
 
-function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
+function HarnessAvatar({ backend, label }: { backend: string; label: string }) {
+  const [failed, setFailed] = useState(false)
+  const source = HARNESS_ICON_URLS[backend.toLowerCase()]
+  return (
+    <div className="uw-avatar uw-avatar-agent" title={label}>
+      {source && !failed ? (
+        <img src={source} alt="" aria-hidden="true" onError={() => setFailed(true)} />
+      ) : label.slice(0, 2).toUpperCase()}
+    </div>
+  )
+}
+
+function MessageBubble({ message, agentLabel, agentBackend }: { message: MessageEnvelope; agentLabel: string; agentBackend: string }) {
   const isUser = message.info.role === "user"
   const text = extractText(message)
   return (
     <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
-      <div className={`uw-avatar ${isUser ? "uw-avatar-user" : "uw-avatar-agent"}`}>
-        {isUser ? "You" : agentLabel.slice(0, 2).toUpperCase()}
-      </div>
+      {isUser ? (
+        <div className="uw-avatar uw-avatar-user">You</div>
+      ) : (
+        <HarnessAvatar backend={agentBackend} label={agentLabel} />
+      )}
       <div className="uw-message-body">
         <header>
           <strong>{isUser ? "You" : agentLabel}</strong>
@@ -861,6 +886,9 @@ export function UniversalWorkspace({
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<DetailTab>("conversation")
   const [composer, setComposer] = useState("")
+  const [sessionModels, setSessionModels] = useState<ModelOption[]>([])
+  const [sessionModelKey, setSessionModelKey] = useState("")
+  const [sessionModelsLoading, setSessionModelsLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [newSessionOpen, setNewSessionOpen] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
@@ -874,6 +902,7 @@ export function UniversalWorkspace({
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const selected = sessions.find((item) => item.key === selectedKey) || null
+  const selectedSessionModel = sessionModels.find((model) => modelOptionKey(model) === sessionModelKey)
 
   const refreshAll = useCallback(async (silent = false) => {
     if (refreshInFlight.current) return
@@ -1033,6 +1062,39 @@ export function UniversalWorkspace({
   }, [selected?.key, questionRevision, loadDetail])
 
   useEffect(() => {
+    if (!selected) {
+      setSessionModels([])
+      setSessionModelKey("")
+      setSessionModelsLoading(false)
+      return
+    }
+    let cancelled = false
+    setSessionModelsLoading(true)
+    void withTimeout(
+      api.listModels(selected.config, selected.session.directory, selected.session.id),
+      `${selected.agent.label} model loading`
+    ).then((models) => {
+      if (cancelled) return
+      setSessionModels(models)
+      const nativeModel = selected.session.model
+        ? models.find((model) => model.providerID === selected.session.model?.providerID
+          && model.modelID === selected.session.model?.id
+          && (model.variant || "") === (selected.session.model?.variant || ""))
+        : undefined
+      const currentModel = nativeModel || models.find((model) => model.isDefault) || models[0]
+      setSessionModelKey(currentModel ? modelOptionKey(currentModel) : "")
+    }).catch(() => {
+      if (!cancelled) {
+        setSessionModels([])
+        setSessionModelKey("")
+      }
+    }).finally(() => {
+      if (!cancelled) setSessionModelsLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [selected?.key])
+
+  useEffect(() => {
     if (!transcriptRef.current || detailTab !== "conversation") return
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
   }, [selected?.key, detail.messages.length, detailTab])
@@ -1092,9 +1154,11 @@ export function UniversalWorkspace({
     setSending(true)
     setGlobalError(null)
     try {
-      const model = selected.session.model
-        ? { providerID: selected.session.model.providerID, modelID: selected.session.model.id, variant: selected.session.model.variant }
-        : undefined
+      const model = selectedSessionModel
+        ? { providerID: selectedSessionModel.providerID, modelID: selectedSessionModel.modelID, variant: selectedSessionModel.variant }
+        : selected.session.model
+          ? { providerID: selected.session.model.providerID, modelID: selected.session.model.id, variant: selected.session.model.variant }
+          : undefined
       await api.sendPrompt(selected.config, selected.session.id, text, selected.session.directory, model)
       await loadDetail(selected, true)
       await refreshAll(true)
@@ -1154,6 +1218,7 @@ export function UniversalWorkspace({
   const connectionProfile = profiles.find((profile) => profile.id === connectionProfileID) || null
   const selectedQuestions = detail.questions
   const selectedPermissions = detail.permissions
+  const selectedModelLabel = selectedSessionModel ? modelLabel(selectedSessionModel) : modelLabel(selected?.session.model)
 
   if (classicOpen) {
     return (
@@ -1368,7 +1433,24 @@ export function UniversalWorkspace({
                   <div className="uw-context-strip">
                     <span><small>Project</small><b>{selected.projectName}</b></span>
                     <span><small>Harness</small><b>{selected.agent.label}</b></span>
-                    <span><small>Model</small><b>{modelLabel(selected.session.model)}</b></span>
+                    <span className="uw-context-model">
+                      <small>Model</small>
+                      {sessionModels.length > 0 ? (
+                        <select
+                          className="uw-context-model-select"
+                          value={sessionModelKey}
+                          onChange={(event) => setSessionModelKey(event.target.value)}
+                          disabled={sessionModelsLoading || sending}
+                          title="Model used for the next turn"
+                        >
+                          {sessionModels.map((model) => (
+                            <option key={modelOptionKey(model)} value={modelOptionKey(model)}>
+                              {model.modelName}{model.variant ? ` (${model.variant})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      ) : <b>{sessionModelsLoading ? "Loading…" : selectedModelLabel}</b>}
+                    </span>
                     <span><small>Machine</small><b>{selected.machineName}</b></span>
                     <span className={statusClass(selected.status, selected.attention)}><small>Status</small><b>{statusLabel(selected.status, selected.attention)}</b></span>
                   </div>
@@ -1400,7 +1482,12 @@ export function UniversalWorkspace({
                     ) : detail.messages.length === 0 ? (
                       <div className="uw-empty-panel"><ChatIcon size={24} /><strong>This session has no messages yet.</strong></div>
                     ) : detail.messages.map((message) => (
-                      <MessageBubble key={message.info.id} message={message} agentLabel={selected.agent.label} />
+                      <MessageBubble
+                        key={message.info.id}
+                        message={message}
+                        agentLabel={selected.agent.label}
+                        agentBackend={selected.agent.backend}
+                      />
                     ))}
                   </div>
 
@@ -1418,7 +1505,7 @@ export function UniversalWorkspace({
                       rows={3}
                     />
                     <div className="uw-composer-footer">
-                      <span>{selected.session.directory}</span>
+                      <span className="uw-composer-directory">{selected.session.directory}</span>
                       <div>
                         <small>Shift+Enter for newline</small>
                         <BeautifulButton variant="primary" disabled={!composer.trim() || sending} onClick={() => void sendPrompt()}>
@@ -1480,7 +1567,7 @@ export function UniversalWorkspace({
             <section className="uw-inspector-grid">
               <span>Project</span><b>{selected.projectName}</b>
               <span>Harness</span><b>{selected.agent.label}</b>
-              <span>Model</span><b>{modelLabel(selected.session.model)}</b>
+              <span>Model</span><b>{selectedModelLabel}</b>
               <span>Machine</span><b>{selected.machineName}</b>
               <span>Working directory</span><code>{selected.session.directory}</code>
               <span>Branch</span><b>{detail.vcs?.branch || "Unknown"}</b>
