@@ -1,7 +1,7 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequest, isDesktopPlatform } from "./desktopBridge"
 import { streamURL } from "./opencode-events"
-import { authHeader, baseUrl, hasCredentials, isValidServerConfig } from "./serverConfig"
+import { authHeader, baseUrl, hasCredentials, isValidServerConfig, routingHeaders } from "./serverConfig"
 import type { AttachmentPart } from "./attachments"
 import type {
   AgentOption,
@@ -132,13 +132,6 @@ type AgentResponse = Array<{
   hidden?: boolean
 }>
 
-function routingHeaders(config: ServerConfig): Record<string, string> {
-  // A direct OpenCode server does not know this compatibility header and may reject it during CORS
-  // preflight. Daemon-backed profiles have an agentId, while ACP bridge profiles can safely send it.
-  if (config.backend === "opencode" && !config.agentId) return {}
-  return { "X-Harness-Backend": config.backend }
-}
-
 async function requestWithHeaders<T>(config: ServerConfig, path: string, options: RequestOptions = {}): Promise<ResponseWithHeaders<T>> {
   const method = options.method ?? "GET"
   if (isDesktopPlatform()) {
@@ -154,7 +147,9 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
   const target = `${baseUrl(config)}${path}`
   const headers: Record<string, string> = {
     Accept: "application/json",
-    ...routingHeaders(config)
+    // CapacitorHttp goes out through the platform's own HTTP client, which never preflights, so the
+    // routing hint the browser has to withhold is safe to send from the packaged Android app.
+    ...routingHeaders(config, { preflight: !Capacitor.isNativePlatform() })
   }
   if (hasCredentials(config)) {
     headers.Authorization = authHeader(config)
