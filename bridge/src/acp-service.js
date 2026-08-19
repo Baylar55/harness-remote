@@ -231,6 +231,7 @@ export class AcpService {
   #replaying = new Set()
   #historyLoader
   #ownedSessions = new Set()
+  #adoptedSessions = new Set()
   #acpOpenSessions = new Set()
   #promptAcknowledgements = new Map()
   #titles = new Map()
@@ -316,13 +317,22 @@ export class AcpService {
     return sessionView(session, "idle", this.#titleFor(session.sessionId))
   }
 
-  /** Adopt a task session created by an older daemon so PI can open it without session/load. */
+  /**
+   * Adopt a task session created by an older daemon so PI can open it without session/load.
+   *
+   * Ownership here only means "this bridge may prompt it directly"; it does not mean the transcript
+   * in memory is the whole conversation. Everything the task said while no daemon was running lives
+   * in the harness's own journal, and marking the session loaded on adoption made that unreachable:
+   * opening a restarted task showed the one recorded prompt and nothing else until a new message
+   * streamed in. Tracking adoption separately keeps prompting lock-free while still letting the
+   * journal fill in what this process never saw.
+   */
   async adoptTaskSession(sessionID, { title, prompt } = {}) {
     await this.#refreshSessions()
     const session = this.#sessions.get(sessionID)
     if (!session || this.#deletedSessions.has(sessionID)) return false
     this.#ownedSessions.add(sessionID)
-    this.#loaded.add(sessionID)
+    this.#adoptedSessions.add(sessionID)
     if (title && !this.#titles.has(sessionID)) this.#titles.set(sessionID, title)
     const messages = this.#messages.get(sessionID) ?? []
     if (prompt && !messages.some((message) => message.info?.role === "user" && message.parts?.some((part) => part.text === prompt))) {
@@ -346,6 +356,7 @@ export class AcpService {
       await this.#historyLoader.renameSession(sessionID, normalized)
       this.#loaded.delete(sessionID)
       this.#ownedSessions.delete(sessionID)
+      this.#adoptedSessions.delete(sessionID)
       this.#configOptions.delete(sessionID)
       this.#commandCatalogs.delete(sessionID)
       this.#actionStates.delete(sessionID)
@@ -422,6 +433,7 @@ export class AcpService {
     this.#authoritativeActionStates.delete(sessionID)
     this.#loaded.delete(sessionID)
     this.#ownedSessions.delete(sessionID)
+    this.#adoptedSessions.delete(sessionID)
     this.#promptAcknowledgements.delete(sessionID)
     this.#chunkMessageIDs.delete(`${sessionID}:user`)
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
@@ -450,10 +462,20 @@ export class AcpService {
         this.#emit("session.error", sessionID, { message: "Harness session history could not be read" })
       }
     }
-    const externalHistory = Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
     const reloadHistory = refresh && this.#reloadOnHistoryRefresh
-    await this.#load(sessionID, reloadHistory || externalHistory)
+    await this.#load(sessionID, reloadHistory || this.#journalBacked(sessionID))
     return this.#messages.get(sessionID) ?? []
+  }
+
+  /**
+   * Whether the harness's own on-disk history is the authority for this session rather than what
+   * this process streamed. True for a session another client owns, and for an adopted task session
+   * until this bridge starts a turn on it — up to that point nothing about the conversation came
+   * through here, so re-reading the journal is what keeps the transcript current.
+   */
+  #journalBacked(sessionID) {
+    if (!this.#historyLoader) return false
+    return !this.#ownedSessions.has(sessionID) || this.#adoptedSessions.has(sessionID)
   }
 
   async todos(sessionID) {
@@ -681,6 +703,9 @@ export class AcpService {
   }
 
   #startTurn(sessionID, text, recorded = false, attachments = []) {
+    // From the first turn this bridge runs, its own stream is the live record for the session, the
+    // same way taking ownership of an external session stops the journal being re-read for it.
+    this.#adoptedSessions.delete(sessionID)
     const generation = (this.#turnGenerations.get(sessionID) ?? 0) + 1
     this.#turnGenerations.set(sessionID, generation)
     this.#cancelledSessions.delete(sessionID)
@@ -845,14 +870,23 @@ export class AcpService {
     // for both at once, which it does on every open. Each kind of load is tracked separately,
     // and a caller that never needed the options retries on its own rather than inheriting a
     // failure that does not apply to it.
-    const inFlight = this.#loads.get(sessionID)
-    if (inFlight && (inFlight.requireConfigOptions || !requireConfigOptions)) {
-      try {
-        await inFlight.promise
-        return
-      } catch (error) {
-        if (requireConfigOptions || !inFlight.requireConfigOptions) throw error
+    // Two loads must never overlap on one session even when they want different things: both blank
+    // #messages before replaying and then merge the replay back into what they captured first, so
+    // whichever finishes last wins and a caller that only asked for the transcript can read a
+    // half-rebuilt history. A load that needs the options therefore waits for a transcript-only
+    // load to settle instead of running beside it.
+    for (let inFlight = this.#loads.get(sessionID); inFlight; inFlight = this.#loads.get(sessionID)) {
+      if (inFlight.requireConfigOptions || !requireConfigOptions) {
+        try {
+          await inFlight.promise
+          return
+        } catch (error) {
+          if (requireConfigOptions || !inFlight.requireConfigOptions) throw error
+        }
+        break
       }
+      await inFlight.promise.catch(() => undefined)
+      if (this.#loads.get(sessionID) === inFlight) break
     }
     const promise = this.#loadSession(sessionID, requireConfigOptions)
     this.#loads.set(sessionID, { promise, requireConfigOptions })
@@ -882,7 +916,7 @@ export class AcpService {
             : mergeExternalHistory(persistedMessages, previousMessages)
           previousMessages = mergeFragmentedPiSnapshot(previousMessages)
           this.#messages.set(sessionID, previousMessages)
-          if (!this.#ownedSessions.has(sessionID) && !requireConfigOptions) {
+          if (this.#journalBacked(sessionID) && !requireConfigOptions) {
             this.#todos.set(sessionID, [])
             this.#loaded.add(sessionID)
             this.#persistSnapshot(sessionID)
