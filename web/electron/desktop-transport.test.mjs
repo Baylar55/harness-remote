@@ -70,6 +70,11 @@ server = createServer(async (request, response) => {
     response.write('{"partial":')
     return
   }
+  if (request.url.startsWith('/echo') || request.url.startsWith('/v1/') || request.url.startsWith('/global/')) {
+    response.setHeader('content-type', 'application/json')
+    response.end(JSON.stringify({ url: request.url, backend: request.headers['x-harness-backend'] ?? null }))
+    return
+  }
   response.statusCode = 404
   response.end()
 })
@@ -155,4 +160,43 @@ test('HTTP errors expose status without matching prose', async () => {
   const missing = await executeDesktopRequest(localProfile, { path: '/missing' })
   assert.equal(missing.error.code, 'http')
   assert.equal(missing.error.status, 404)
+})
+
+test('the registry keeps the selected agent, which is the only thing that routes a profile', async () => {
+  const scoped = { ...localProfile, backend: 'codex', agentId: 'codex' }
+  assert.deepEqual(validateDesktopProfile(scoped), scoped)
+  assert.equal(validateDesktopProfile({ ...scoped, agentId: '  ' }).agentId, undefined)
+  assert.throws(() => validateDesktopProfile({ ...scoped, agentId: '../codex' }), /agent/)
+  assert.throws(() => validateDesktopProfile({ ...scoped, agentId: 'co dex' }), /agent/)
+  assert.throws(() => validateDesktopProfile({ ...scoped, agentId: 42 }), /agent/)
+
+  const directory = await mkdtemp(join(tmpdir(), 'harness-remote-agents-'))
+  const registry = new ProfileRegistry(join(directory, 'profiles.json'))
+  await registry.replace([scoped])
+  assert.equal(registry.get(scoped.id).agentId, 'codex')
+  // Switching only the agent is a real change: treating it as unchanged left the event stream
+  // subscribed to the agent the user just navigated away from.
+  const switched = await registry.replace([{ ...scoped, backend: 'pi', agentId: 'pi' }])
+  assert.deepEqual(switched.changedProfileIDs, [scoped.id])
+  await rm(directory, { recursive: true, force: true })
+})
+
+test('desktop requests carry the profile scope the browser sends, and leave machine routes alone', async () => {
+  const scoped = { ...localProfile, backend: 'codex', agentId: 'pi' }
+  const agentRequest = await executeDesktopRequest(scoped, { path: '/echo/session' })
+  assert.deepEqual(agentRequest.response.data, { url: '/v1/agents/pi/echo/session', backend: 'codex' })
+
+  // TaskDesk and machine discovery are answered by the daemon itself; scoping them to the
+  // profile's agent aims them at a bridge where those routes do not exist.
+  for (const path of ['/v1/machine', '/global/machine', '/v1/projects', '/v1/tasks', '/v1/tasks/abc/launch', '/v1/agents/omp/models']) {
+    const machineRequest = await executeDesktopRequest(scoped, { path })
+    assert.equal(machineRequest.response.data.url, path, `${path} should reach the daemon unscoped`)
+  }
+  const withQuery = await executeDesktopRequest(scoped, { path: '/v1/tasks?limit=1' })
+  assert.equal(withQuery.response.data.url, '/v1/tasks?limit=1')
+
+  // Nothing preflights a request from the main process, so an unscoped OpenCode profile still says
+  // which harness it wants — which is what lets a daemon route it somewhere other than its primary.
+  const unscoped = await executeDesktopRequest({ ...localProfile, backend: 'opencode' }, { path: '/echo/session' })
+  assert.deepEqual(unscoped.response.data, { url: '/echo/session', backend: 'opencode' })
 })

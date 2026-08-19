@@ -9,6 +9,9 @@ const i18n = readFileSync(new URL('./i18n.ts', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 const shell = readFileSync(new URL('./components/shell.tsx', import.meta.url), 'utf8')
 const panels = readFileSync(new URL('./components/panels.tsx', import.meta.url), 'utf8')
+const serverConfig = readFileSync(new URL('./serverConfig.ts', import.meta.url), 'utf8')
+const desktopRequestTransport = readFileSync(new URL('../electron/request-transport.ts', import.meta.url), 'utf8')
+const desktopEventTransport = readFileSync(new URL('../electron/event-transport.ts', import.meta.url), 'utf8')
 
 const testConnection = app.match(/async function testConnection[\s\S]*?async function refreshSessions/)
 assert.ok(testConnection, 'testConnection function should be present')
@@ -80,11 +83,17 @@ assert.match(panels, /setName\(event\.target\.value\)[\s\S]*?setNameEdited\(true
 // Agent-scoped URLs are the primary routing contract. The backend header is a compatibility guard
 // for profiles saved by older builds with no agentId, or with an agentId that points at the old primary.
 // A raw OpenCode server must not receive the custom header because its CORS policy does not know it.
-assert.ok(api.includes('function routingHeaders(config: ServerConfig)'), 'API requests should centralize the compatibility routing hint')
-assert.ok(api.includes('return { "X-Harness-Backend": config.backend }'), 'daemon requests should identify the selected harness backend')
-assert.ok(api.includes('if (config.backend === "opencode" && !config.agentId) return {}'), 'direct legacy OpenCode servers must not receive the daemon routing header')
+// The rule lives with the URL builders, not with one transport: the browser and the desktop app take
+// separate request paths, and a header only the browser sent is how the desktop app came to route
+// every server to the daemon's primary agent.
+assert.match(serverConfig, /export function routingHeaders\(\s*config: Pick<ServerConfig, "backend" \| "agentId">/, 'the routing hint should be defined once beside the URL builders')
+assert.ok(serverConfig.includes('return { "X-Harness-Backend": config.backend }'), 'daemon requests should identify the selected harness backend')
+assert.ok(serverConfig.includes('if (preflight && config.backend === "opencode" && !config.agentId?.trim()) return {}'), 'direct legacy OpenCode servers must not receive the daemon routing header from the browser')
+assert.equal(/function routingHeaders/.test(api), false, 'api.ts should reuse the shared routing hint rather than defining its own')
 assert.ok(api.includes('...routingHeaders(config)'), 'ordinary API requests should carry the selected harness routing hint')
 assert.match(api, /eventStream\(config: ServerConfig\)[\s\S]*?routingHeaders\(config\)/, 'browser SSE should preserve the selected harness routing hint too')
+assert.ok(desktopRequestTransport.includes('...routingHeaders(profile, { preflight: false })'), 'desktop requests never preflight, so they always carry the routing hint')
+assert.ok(desktopEventTransport.includes('...routingHeaders(profile, { preflight: false })'), 'desktop SSE never preflights, so it always carries the routing hint')
 
 // The server picker used to caption itself with a visually-hidden span, but no rule ever hid it: the
 // caption rendered as stray text above the header. Every class the picker and its actions rely on has

@@ -9,6 +9,7 @@ const MAX_PROFILE_COUNT = 100
 const MAX_PROFILE_ID_LENGTH = 128
 const MAX_HOST_LENGTH = 2048
 const MAX_CREDENTIAL_LENGTH = 4096
+const MAX_AGENT_ID_LENGTH = 128
 
 export class DesktopProfileError extends Error {
   constructor(message: string) {
@@ -47,6 +48,21 @@ function validateHost(host: unknown): string {
   return value
 }
 
+/**
+ * The id becomes a path segment, so it is held to what the daemon itself accepts for an agent name
+ * rather than merely being escaped: anything with a separator or an encodable character in it would
+ * be a way to aim a profile at a path other than the agent the user picked.
+ */
+function validateAgentID(value: unknown): string | undefined {
+  if (typeof value !== "string") throw new DesktopProfileError("Profile agent is invalid")
+  const agentID = value.trim()
+  if (!agentID) return undefined
+  if (agentID.length > MAX_AGENT_ID_LENGTH || !/^[A-Za-z0-9._-]+$/.test(agentID)) {
+    throw new DesktopProfileError("Profile agent is invalid")
+  }
+  return agentID
+}
+
 export function validateDesktopProfile(value: unknown): DesktopProfile {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new DesktopProfileError("Profile is invalid")
   const candidate = value as Partial<DesktopProfile>
@@ -63,7 +79,21 @@ export function validateDesktopProfile(value: unknown): DesktopProfile {
   if (candidate.username.length > MAX_CREDENTIAL_LENGTH || candidate.password.length > MAX_CREDENTIAL_LENGTH || hasControlCharacters(candidate.username) || hasControlCharacters(candidate.password)) {
     throw new DesktopProfileError("Profile credentials are invalid")
   }
-  const profile = { id, backend: candidate.backend, host, port, username: candidate.username, password: candidate.password }
+  // A daemon-backed profile is only distinguishable from every other agent on the same machine by
+  // its agent id: it is what puts /v1/agents/<id> in front of the path and what the event stream is
+  // scoped by. Dropping it here left main holding a machine-root target for every profile, so the
+  // desktop app sent all of them to the daemon's primary agent and each server showed that one
+  // agent's sessions. The renderer already carries the field; main has to keep it to route at all.
+  const agentId = candidate.agentId === undefined ? undefined : validateAgentID(candidate.agentId)
+  const profile = {
+    id,
+    backend: candidate.backend,
+    host,
+    port,
+    username: candidate.username,
+    password: candidate.password,
+    ...(agentId ? { agentId } : {})
+  }
   try {
     new URL(baseUrl(profile))
   } catch {
@@ -101,6 +131,7 @@ function sameProfile(left: DesktopProfile, right: DesktopProfile): boolean {
     && left.port === right.port
     && left.username === right.username
     && left.password === right.password
+    && left.agentId === right.agentId
 }
 
 /** Main-owned allowlist. Renderer profile mutation represents user-approved Settings state. */

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { WebContents } from "electron"
-import { baseUrl } from "../src/serverConfig.js"
+import { baseUrl, routingHeaders } from "../src/serverConfig.js"
 import { parseSSEFrame, type ParsedOpenCodeEvent } from "../src/sse-parser.js"
 import { ProfileRegistry, type ProfileRegistryChange } from "./profile-registry.js"
 import type {
@@ -160,7 +160,7 @@ export class DesktopEventTransport {
     subscription.controller = controller
     let response: Response
     try {
-      const headers: Record<string, string> = { Accept: "text/event-stream" }
+      const headers: Record<string, string> = { Accept: "text/event-stream", ...routingHeaders(profile, { preflight: false }) }
       const authorization = authHeader(profile)
       if (authorization) headers.Authorization = authorization
       response = await fetch(streamURL(profile, subscription.options), { headers, redirect: "manual", signal: controller.signal })

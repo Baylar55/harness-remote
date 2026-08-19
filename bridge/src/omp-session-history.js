@@ -30,6 +30,18 @@ function messageParts(content, messageID) {
   })
 }
 
+/**
+ * A turn that failed is journalled as an assistant message with no content and the provider's own
+ * sentence in `errorMessage`. Skipping those for having no parts made a rate-limited or unpaid
+ * session look like it had simply lost its replies: the transcript showed the prompts and nothing
+ * back, with no way to tell a failure from a missing message.
+ */
+function messageError(message) {
+  const detail = typeof message?.errorMessage === "string" ? message.errorMessage.trim() : ""
+  if (!detail) return undefined
+  return { name: "HarnessTurnError", message: detail }
+}
+
 export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp", "agent", "sessions")) {
   const sessionFiles = new Map()
 
@@ -97,14 +109,16 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
       if (role !== "user" && role !== "assistant") continue
       const messageID = record.id ?? `${sessionID}:${messages.length}`
       const parts = messageParts(record.message.content, messageID)
-      if (parts.length === 0) continue
+      const error = messageError(record.message)
+      if (parts.length === 0 && !error) continue
       const created = Date.parse(record.timestamp ?? "")
       messages.push({
         info: {
           id: messageID,
           role,
           sessionID,
-          time: { created: Number.isFinite(created) ? created : Date.now() }
+          time: { created: Number.isFinite(created) ? created : Date.now() },
+          ...(error ? { error } : {})
         },
         parts
       })

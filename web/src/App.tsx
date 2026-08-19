@@ -235,6 +235,53 @@ function extractText(msg: MessageEnvelope): string {
     .trim()
 }
 
+/**
+ * A turn that ended in a provider or harness failure carries no text and no parts worth rendering,
+ * only the bookkeeping `step-start`. Left unread, the transcript showed the prompt and then nothing
+ * at all, which reads as the reply having gone missing rather than as the model having failed — and
+ * on a session where every turn failed, as the app showing only the messages the user sent.
+ *
+ * OpenCode nests the sentence worth reading under `data.message`, frequently as a JSON document of
+ * its own, so unwrap one level before giving up and showing the error's name.
+ */
+function messageFailure(message: MessageEnvelope): string | undefined {
+  const error = message.info.error
+  if (!error) return undefined
+  const detail = error.data?.message ?? error.message
+  if (typeof detail === "string" && detail.trim()) {
+    try {
+      const parsed = JSON.parse(detail) as { message?: unknown }
+      if (parsed && typeof parsed === "object" && typeof parsed.message === "string" && parsed.message.trim()) {
+        return parsed.message.trim()
+      }
+    } catch {
+      // Not every provider wraps its message in JSON; the plain sentence is already what we want.
+    }
+    return detail.trim()
+  }
+  return typeof error.name === "string" && error.name.trim() ? error.name.trim() : undefined
+}
+
+/** Bookkeeping parts a harness emits around a turn; on their own they are not content to show. */
+function isTurnScaffolding(part: MessagePart): boolean {
+  return part.type === "step-start" || part.type === "step-finish"
+}
+
+/**
+ * A harness that retries a failing turn journals one failed assistant message per attempt, so a
+ * single rate-limited prompt arrives as a dozen messages all saying the same thing. Consecutive
+ * content-free failures with the same reason are one failure as far as the reader is concerned.
+ */
+function collapseRepeatedFailures(messages: (MessageEnvelope & { text: string })[]): (MessageEnvelope & { text: string })[] {
+  const isBareFailure = (message: MessageEnvelope & { text: string }) =>
+    !message.text && Boolean(messageFailure(message)) && message.parts.every(isTurnScaffolding)
+  return messages.filter((message, index) => {
+    const previous = messages[index - 1]
+    if (!previous || !isBareFailure(message) || !isBareFailure(previous)) return true
+    return messageFailure(previous) !== messageFailure(message)
+  })
+}
+
 /** Wraps a message with its extracted text, reusing the previous wrapper when the underlying message object is
  *  unchanged. applyStreamedPartUpdate/applyStreamedPartDelta already keep unrelated messages referentially
  *  identical across streamed updates — without this cache, mapping over the whole array would create a brand
@@ -1796,6 +1843,26 @@ function MessageContextMenu({
   )
 }
 
+/** The failure that replaced a reply, shown in the bubble it belongs to rather than as a transient
+ *  banner: it is part of the transcript and stays readable when the session is reopened later. */
+function MessageFailureView({ messages, t }: { messages: MessageEnvelope[]; t: Translator }) {
+  const failures = messages.flatMap((message) => {
+    const failure = messageFailure(message)
+    return failure ? [{ id: message.info.id, failure }] : []
+  })
+  if (failures.length === 0) return null
+  return (
+    <>
+      {failures.map((entry) => (
+        <p key={`failure-${entry.id}`} className="message-failure" role="status">
+          <span className="message-failure-label">{t('detail.turnFailed')}</span>
+          <span className="message-failure-detail">{entry.failure}</span>
+        </p>
+      ))}
+    </>
+  )
+}
+
 /** Renders one run's continuous timeline (see groupRenderedMessages) as a single message bubble, resolving
  *  each item's timestamp to the specific message that produced it. */
 function ConversationRunView({
@@ -1856,6 +1923,7 @@ function ConversationRunView({
           />
         )
       )}
+      <MessageFailureView messages={[...messagesByID.values()]} t={t} />
     </MessageContextMenu>
   )
 }
@@ -1908,6 +1976,7 @@ const MessageArticle = memo(function MessageArticle({
           />
         )
       )}
+      <MessageFailureView messages={[message]} t={t} />
     </MessageContextMenu>
   )
 })
@@ -2399,10 +2468,11 @@ function App() {
 
   const renderedMessages = useMemo(() => {
     const revertMessageID = config.backend === "opencode" ? selectedSession?.revertMessageID : undefined
-    return [...messages, ...optimisticUserMessages]
+    const visible = [...messages, ...optimisticUserMessages]
       .filter((message) => !revertMessageID || message.info.id < revertMessageID)
       .map(toRenderedMessage)
-      .filter((message) => message.text || message.parts.some((part) => part.type !== "step-start" && part.type !== "step-finish"))
+      .filter((message) => message.text || messageFailure(message) || message.parts.some((part) => !isTurnScaffolding(part)))
+    return collapseRepeatedFailures(visible)
   }, [config.backend, messages, optimisticUserMessages, selectedSession?.revertMessageID])
 
   const timelineGroups = useMemo(() => groupRenderedMessages(renderedMessages), [renderedMessages])
