@@ -60,6 +60,7 @@ type TaskDeskView = "overview" | "tasks" | "sessions" | "projects" | "needs" | "
 type TaskFilter = "all" | "active" | "review" | "finished" | "failed"
 type DetailTab = "review" | "conversation" | "diff" | "runs"
 type ProductTaskState = "draft" | "active" | "review" | "finished" | "failed" | "cancelled"
+type SessionFocusRequest = { sessionID: string; requestID: number }
 
 type RuntimeMachine = {
   key: string
@@ -359,7 +360,7 @@ function ContinueTaskModal({ record, onClose, onContinued }: { record: TaskRecor
   )
 }
 
-function QuestionAttentionCard({ item, onResolved, onOpenSessions }: { item: Extract<AttentionItem, { type: "question" }>; onResolved: () => void; onOpenSessions: () => void }) {
+function QuestionAttentionCard({ item, onResolved, onOpenSession }: { item: Extract<AttentionItem, { type: "question" }>; onResolved: () => void; onOpenSession: (runtime: RuntimeMachine, sessionID: string) => void }) {
   const [answers, setAnswers] = useState<Record<number, string[]>>({})
   const [sending, setSending] = useState(false)
   const config = configForAgent(item.runtime, item.agent)
@@ -379,7 +380,7 @@ function QuestionAttentionCard({ item, onResolved, onOpenSessions }: { item: Ext
     <article className="td3-attention-card">
       <header><span className="td3-attention-icon">?</span><div><strong>Question</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div></header>
       {item.request.questions.map((question, index) => <div className="td3-question" key={`${item.request.id}-${index}`}><p>{question.question}</p><div>{question.options.map((option) => { const selected = answers[index]?.includes(option.label) || false; return <button type="button" key={option.label} className={selected ? "selected" : ""} onClick={() => setAnswers((current) => ({ ...current, [index]: question.multiple ? (selected ? (current[index] || []).filter((value) => value !== option.label) : [...(current[index] || []), option.label]) : [option.label] }))}>{option.label}</button> })}</div></div>)}
-      <footer><button type="button" className="td3-link-button" onClick={onOpenSessions}>Open Sessions</button><button type="button" className="td3-button primary" disabled={sending} onClick={() => void reply()}>{sending ? "Sending..." : "Answer"}</button></footer>
+      <footer><button type="button" className="td3-link-button" onClick={() => onOpenSession(item.runtime, item.request.sessionID)}>Open Session</button><button type="button" className="td3-button primary" disabled={sending} onClick={() => void reply()}>{sending ? "Sending..." : "Answer"}</button></footer>
     </article>
   )
 }
@@ -397,6 +398,7 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
   const [attention, setAttention] = useState<AttentionItem[]>([])
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [continueOpen, setContinueOpen] = useState(false)
+  const [sessionFocusRequest, setSessionFocusRequest] = useState<SessionFocusRequest | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const refreshInFlight = useRef(false)
@@ -541,6 +543,13 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
     setActionError(null)
   }
 
+  function openNativeSession(runtime: RuntimeMachine, sessionID: string) {
+    setMachineScope(runtime.machine.id)
+    onActiveMachineID(runtime.machine.id)
+    setSessionFocusRequest((current) => ({ sessionID, requestID: (current?.requestID ?? 0) + 1 }))
+    setView("sessions")
+  }
+
   async function finishSelected() {
     if (!selected || actionBusy) return
     setActionBusy(true)
@@ -635,14 +644,14 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
                     {!detail.loading && detailTab === "runs" ? <div className="td3-runs"><header><h3>Run history</h3><p>Each continuation creates a new native Session while the Task remains the durable unit.</p></header>{taskRunHistory(selected.task).length === 0 ? <div className="td3-empty-state"><span>This Task has not started a Run yet.</span></div> : [...taskRunHistory(selected.task)].reverse().map((run, index) => <article key={run.id || index}><span className="td3-run-index">#{taskRunHistory(selected.task).length - index}</span><div><strong>{run.id || "Run"}</strong><small>{run.prompt || "Task run"}</small></div><dl><dt>Session</dt><dd>{runSessionID(run) || "-"}</dd><dt>Started</dt><dd>{formatDate(run.startedAt)}</dd><dt>Finished</dt><dd>{formatDate(run.finishedAt)}</dd></dl></article>)}</div> : null}
                     {detail.error ? <div className="td3-inline-error">{detail.error}</div> : null}
                   </div>
-                  <footer className="td3-detail-actions"><div className="td3-detail-actions-primary">{selectedSessionID ? <button type="button" className="td3-button" onClick={() => setView("sessions")}>Open Session</button> : null}{["review", "failed", "cancelled", "finished"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button" onClick={() => setContinueOpen(true)}>Continue</button> : null}{!selected.task.finishedAt && !["active", "draft"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button primary" disabled={actionBusy} onClick={() => void finishSelected()}>Finish Task</button> : null}</div>{selected.task.workspace.mode === "worktree" && productTaskState(selected.task) !== "active" ? <button type="button" className="td3-button danger" disabled={actionBusy} onClick={() => void cleanupSelected()}>Cleanup Workspace</button> : null}{actionError ? <span className="td3-action-error">{actionError}</span> : null}</footer>
+                  <footer className="td3-detail-actions"><div className="td3-detail-actions-primary">{selectedSessionID ? <button type="button" className="td3-button" onClick={() => openNativeSession(selected.runtime, selectedSessionID)}>Open Session</button> : null}{["review", "failed", "cancelled", "finished"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button" onClick={() => setContinueOpen(true)}>Continue</button> : null}{!selected.task.finishedAt && !["active", "draft"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button primary" disabled={actionBusy} onClick={() => void finishSelected()}>Finish Task</button> : null}</div>{selected.task.workspace.mode === "worktree" && productTaskState(selected.task) !== "active" ? <button type="button" className="td3-button danger" disabled={actionBusy} onClick={() => void cleanupSelected()}>Cleanup Workspace</button> : null}{actionError ? <span className="td3-action-error">{actionError}</span> : null}</footer>
                 </>
               )}
             </aside> : null}
           </main>
         ) : null}
 
-        {view === "sessions" ? <main className="td3-sessions-embedded"><UniversalWorkspace profiles={sessionProfiles} activeProfileID={activeMachineID} onPersistProfiles={(nextMachines, nextActiveID) => { onPersistMachines(nextMachines as WorkspaceMachine[]); onActiveMachineID(nextActiveID) }} legacyView={legacyView} /></main> : null}
+        {view === "sessions" ? <main className="td3-sessions-embedded"><UniversalWorkspace profiles={sessionProfiles} activeProfileID={activeMachineID} focusSessionRequest={sessionFocusRequest} onPersistProfiles={(nextMachines, nextActiveID) => { onPersistMachines(nextMachines as WorkspaceMachine[]); onActiveMachineID(nextActiveID) }} legacyView={legacyView} /></main> : null}
 
         {view === "projects" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Machine catalog</small><h1>Projects</h1><p>Projects are daemon-known roots used by Tasks. Ordinary Sessions can still use their native directories.</p></div></section><div className="td3-card-grid">{runtimes.flatMap((runtime) => runtime.projects.map((project) => <article key={`${runtime.key}|${project.id}`}><FolderIcon size={20} /><div><h3>{project.name}</h3><code>{project.path}</code><span>{runtime.snapshot?.machine.name || runtime.machine.name} · {project.kind}</span></div><button onClick={() => { setMachineScope(runtime.machine.id); onActiveMachineID(runtime.machine.id); setView("tasks"); setNewTaskOpen(true) }}>New Task</button></article>))}</div></main> : null}
 
@@ -650,7 +659,7 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
 
         {view === "machines" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Fleet</small><h1>Machines</h1><p>Execution, credentials and source code stay local to each configured machine.</p></div><button className="td3-button primary" onClick={onManageMachines}>Manage machines</button></section><div className="td3-card-grid">{runtimes.map((runtime) => <article key={runtime.key}><ServerIcon size={22} /><div><h3>{runtime.snapshot?.machine.name || runtime.machine.name}</h3><code>{runtime.machine.config.host}:{runtime.machine.config.port}</code><span>{runtime.agents.length} agents · {runtime.tasks.length} Tasks</span>{runtime.error ? <small className="td3-card-error">{runtime.error}</small> : null}</div><b className={`td3-machine-state ${runtime.state}`}>{runtime.state}</b></article>)}</div></main> : null}
 
-        {view === "needs" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Attention inbox</small><h1>Needs You</h1><p>Questions and permission requests from native harness Sessions.</p></div></section><div className="td3-attention-list">{attention.length === 0 ? <div className="td3-empty-state"><strong>Nothing needs you right now.</strong></div> : attention.map((item) => item.type === "permission" ? <article className="td3-attention-card" key={item.key}><header><span className="td3-attention-icon warning">!</span><div><strong>Permission request</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div></header><p>{item.request.permission}</p>{item.request.patterns?.length ? <code>{item.request.patterns.join(", ")}</code> : null}<footer><button className="td3-button danger" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "reject", item.task?.workspace.path).then(() => refresh())}>Reject</button><button className="td3-button" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "once", item.task?.workspace.path).then(() => refresh())}>Once</button><button className="td3-button primary" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "always", item.task?.workspace.path).then(() => refresh())}>Always</button></footer></article> : <QuestionAttentionCard key={item.key} item={item} onResolved={() => void refresh()} onOpenSessions={() => setView("sessions")} />)}</div></main> : null}
+        {view === "needs" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Attention inbox</small><h1>Needs You</h1><p>Questions and permission requests from native harness Sessions.</p></div></section><div className="td3-attention-list">{attention.length === 0 ? <div className="td3-empty-state"><strong>Nothing needs you right now.</strong></div> : attention.map((item) => item.type === "permission" ? <article className="td3-attention-card" key={item.key}><header><span className="td3-attention-icon warning">!</span><div><strong>Permission request</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div></header><p>{item.request.permission}</p>{item.request.patterns?.length ? <code>{item.request.patterns.join(", ")}</code> : null}<footer><button type="button" className="td3-link-button" onClick={() => openNativeSession(item.runtime, item.request.sessionID)}>Open Session</button><button className="td3-button danger" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "reject", item.task?.workspace.path).then(() => refresh())}>Reject</button><button className="td3-button" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "once", item.task?.workspace.path).then(() => refresh())}>Once</button><button className="td3-button primary" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "always", item.task?.workspace.path).then(() => refresh())}>Always</button></footer></article> : <QuestionAttentionCard key={item.key} item={item} onResolved={() => void refresh()} onOpenSession={openNativeSession} />)}</div></main> : null}
 
         {view === "classic" ? <main className="td3-classic-integrated"><div className="td3-classic-notice"><div><small>Legacy surface</small><strong>Classic 2.x</strong><span>Kept intact during TaskDesk validation.</span></div><button className="td3-button" onClick={() => setView("tasks")}>Back to Tasks</button></div><div className="td3-classic-integrated-host">{legacyView}</div></main> : null}
       </div>
