@@ -22,6 +22,19 @@ export type TaskWorkspace = {
   source?: string
 }
 
+export type MachineTaskRun = {
+  id?: string
+  agentId?: string
+  sessionId?: string | null
+  sessionID?: string | null
+  status?: string
+  transport?: string | null
+  directory?: string
+  prompt?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
 export type MachineTask = {
   id: string
   machineId: string
@@ -32,9 +45,39 @@ export type MachineTask = {
   model?: ModelSelection | null
   status: string
   workspace: TaskWorkspace
-  run: null | { id?: string; sessionId?: string; sessionID?: string; status?: string }
+  run: null | MachineTaskRun
+  runs?: MachineTaskRun[]
+  error?: { message?: string } | null
   createdAt: string
   updatedAt: string
+}
+
+export type TaskWorkspaceInspection = {
+  managed: boolean
+  dirty: boolean
+  changeCount: number
+  commitsAhead?: number
+  commitsBehind?: number
+  mergedIntoSource?: boolean
+  branchMissing?: boolean
+  sourceHead?: string
+  branchHead?: string
+}
+
+export type TaskCleanup = {
+  removed: boolean
+  branchDeleted: boolean
+}
+
+export type TaskCleanupResponse = {
+  task: MachineTask
+  cleanup: TaskCleanup
+}
+
+export type TaskFinishResponse = {
+  task: MachineTask
+  result: TaskWorkspaceInspection
+  cleanup: TaskCleanup
 }
 
 export type AgentModelCatalog = {
@@ -189,5 +232,25 @@ export const taskClient = {
 
   launch(config: ServerConfig, taskId: string): Promise<MachineTask> {
     return machineRequest<MachineTask>(config, `/v1/tasks/${encodeURIComponent(taskId)}/launch`, { method: "POST", body: {} })
+  },
+
+  continueTask(config: ServerConfig, taskId: string, prompt: string): Promise<MachineTask> {
+    return machineRequest<MachineTask>(config, `/v1/tasks/${encodeURIComponent(taskId)}/continue`, { method: "POST", body: { prompt } })
+  },
+
+  inspectResult(config: ServerConfig, taskId: string): Promise<TaskWorkspaceInspection> {
+    return machineRequest<TaskWorkspaceInspection>(config, `/v1/tasks/${encodeURIComponent(taskId)}/result`)
+  },
+
+  inspectWorkspace(config: ServerConfig, taskId: string): Promise<TaskWorkspaceInspection> {
+    return machineRequest<TaskWorkspaceInspection>(config, `/v1/tasks/${encodeURIComponent(taskId)}/worktree`)
+  },
+
+  cleanupWorkspace(config: ServerConfig, taskId: string): Promise<TaskCleanupResponse> {
+    return machineRequest<TaskCleanupResponse>(config, `/v1/tasks/${encodeURIComponent(taskId)}/worktree/cleanup`, { method: "POST", body: {} })
+  },
+
+  finish(config: ServerConfig, taskId: string): Promise<TaskFinishResponse> {
+    return machineRequest<TaskFinishResponse>(config, `/v1/tasks/${encodeURIComponent(taskId)}/finish`, { method: "POST", body: {} })
   }
 }
