@@ -383,7 +383,7 @@ export function TaskDeskV3({ machines, activeMachineID, onActiveMachineID, onPer
     if (activeMachineID && machines.some((machine) => machine.id === activeMachineID)) setMachineScope(activeMachineID)
   }, [activeMachineID])
 
-  const refresh = useCallback(async (silent = false) => {
+  const refresh = useCallback(async (_silent = false) => {
     if (refreshInFlight.current) return
     refreshInFlight.current = true
     try {
