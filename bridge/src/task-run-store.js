@@ -38,6 +38,7 @@ export class TaskRunStore extends TaskStore {
       run: nextRun,
       runs,
       error: error ? { message: error instanceof Error ? error.message : String(error) } : null,
+      finishedAt: status === "starting" ? null : task.finishedAt ?? null,
       updatedAt: this.clock()
     }
     this.tasks[index] = updated
