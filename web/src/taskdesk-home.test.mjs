@@ -136,6 +136,23 @@ test("Sessions stays inside the persistent TaskDesk product shell without the ol
   assert.match(css, /\.td3-sessions-embedded \.uw-shell/)
 })
 
+test("Open Session navigates from a Task or attention item to the exact native Session", () => {
+  const taskDesk = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
+  const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+
+  assert.match(taskDesk, /type SessionFocusRequest = \{ sessionID: string; requestID: number \}/)
+  assert.match(taskDesk, /function openNativeSession\(runtime: RuntimeMachine, sessionID: string\)/)
+  assert.match(taskDesk, /setSessionFocusRequest/)
+  assert.match(taskDesk, /focusSessionRequest=\{sessionFocusRequest\}/)
+  assert.match(taskDesk, /openNativeSession\(selected\.runtime, selectedSessionID\)/)
+  assert.match(workspace, /focusSessionRequest\?: \{ sessionID: string; requestID: number \} \| null/)
+  assert.match(workspace, /collected\.find\(\(item\) => item\.session\.id === focusSessionRequest\.sessionID\)/)
+  assert.match(workspace, /setMachineFilter\(target\.machineKey\)/)
+  assert.match(workspace, /setProjectFilter\("all"\)/)
+  assert.match(workspace, /setDetailTab\("conversation"\)/)
+  assert.match(workspace, /setSelectedKey\(target\.key\)/)
+})
+
 test("TaskDesk distinguishes completed Runs awaiting review from explicitly finished Tasks", () => {
   const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
   const finishServer = readFileSync(new URL("../../bridge/src/task-finish-server.js", import.meta.url), "utf8")
@@ -149,6 +166,17 @@ test("TaskDesk distinguishes completed Runs awaiting review from explicitly fini
   assert.match(finishServer, /taskStore\.markFinished/)
   assert.doesNotMatch(finishServer, /worktreeManager\.cleanup/)
   assert.doesNotMatch(finishServer, /taskStore\.clearWorkspace/)
+})
+
+test("TaskDesk unified styling keeps dense product text readable across Tasks and Sessions", () => {
+  const css = readFileSync(new URL("./taskdesk-v3-unified.css", import.meta.url), "utf8")
+
+  assert.match(css, /\.td3-view-context small[\s\S]*?font-size: 11\.5px/)
+  assert.match(css, /\.td3-detail-eyebrow[\s\S]*?font-size: 10\.5px/)
+  assert.match(css, /\.td3-sessions-embedded \.uw-global-search input[\s\S]*?font-size: 12\.5px/)
+  assert.match(css, /\.td3-sessions-embedded \.uw-session-title-row strong[\s\S]*?font-size: 12\.5px/)
+  assert.match(css, /\.td3-sessions-embedded \.uw-markdown,[\s\S]*?font-size: 12\.5px/)
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
 })
 
 test("TaskDesk v3 protects Task detail from stale asynchronous responses", () => {
