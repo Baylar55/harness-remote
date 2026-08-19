@@ -24,14 +24,15 @@
 }
 
 .td3-view-context strong {
-  font-size: 12.5px;
-  line-height: 1.2;
+  font-size: 13px;
+  line-height: 1.25;
 }
 
 .td3-view-context small {
   margin-top: 2px;
-  color: #74839a;
-  font-size: 10.5px;
+  color: #8492a6;
+  font-size: 11.5px;
+  line-height: 1.3;
 }
 
 /* Product lifecycle states: a completed Run is not the same thing as a finished Task. */
@@ -89,7 +90,7 @@
 }
 
 @keyframes td3-detail-enter {
-  from { opacity: .65; transform: translateX(8px); }
+  from { opacity: .72; transform: translateX(8px); }
   to { opacity: 1; transform: translateX(0); }
 }
 
@@ -103,11 +104,11 @@
 
 .td3-detail-eyebrow {
   display: block;
-  margin-bottom: 4px;
-  color: #7189c8;
-  font-size: 9.5px;
+  margin-bottom: 5px;
+  color: #8298cf;
+  font-size: 10.5px;
   font-weight: 750;
-  letter-spacing: .08em;
+  letter-spacing: .065em;
   text-transform: uppercase;
 }
 
@@ -119,87 +120,92 @@
 }
 
 .td3-detail-close {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(148,163,184,.14);
+  border: 1px solid rgba(148,163,184,.16);
   border-radius: 8px;
-  color: #9eacbf;
-  background: rgba(255,255,255,.025);
+  color: #a8b5c7;
+  background: rgba(255,255,255,.028);
   cursor: pointer;
 }
 
 .td3-detail-close:hover {
   color: #eef3fa;
-  border-color: rgba(148,163,184,.26);
-  background: rgba(255,255,255,.05);
+  border-color: rgba(148,163,184,.28);
+  background: rgba(255,255,255,.055);
+}
+
+.td3-detail-close:focus-visible {
+  outline: 2px solid rgba(79,124,255,.62);
+  outline-offset: 2px;
 }
 
 .td3-review-hero {
-  min-height: 96px;
+  min-height: 100px;
   display: grid;
   grid-template-columns: minmax(0,1fr) auto;
   align-items: center;
   gap: 18px;
-  margin-bottom: 10px;
-  padding: 15px 16px;
+  margin-bottom: 12px;
+  padding: 16px 17px;
   border: 1px solid rgba(111,137,206,.2);
   border-radius: 12px;
-  background: linear-gradient(120deg, rgba(53,78,137,.13), rgba(15,24,37,.64) 52%);
+  background: rgba(15,24,37,.78);
 }
 
 .td3-review-hero > div:first-child small {
-  color: #7f96cf;
-  font-size: 9.5px;
+  color: #8aa0d5;
+  font-size: 10.5px;
   font-weight: 750;
-  letter-spacing: .08em;
+  letter-spacing: .065em;
   text-transform: uppercase;
 }
 
 .td3-review-hero h3 {
   max-width: 52ch;
-  margin: 5px 0 0;
+  margin: 6px 0 0;
   color: #e8eef7;
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: 650;
   line-height: 1.45;
 }
 
 .td3-review-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(54px,auto));
+  grid-template-columns: repeat(3, minmax(60px,auto));
   gap: 7px;
 }
 
 .td3-review-metrics span {
-  min-width: 58px;
-  min-height: 54px;
+  min-width: 62px;
+  min-height: 58px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 7px 9px;
-  border: 1px solid rgba(148,163,184,.1);
+  padding: 8px 10px;
+  border: 1px solid rgba(148,163,184,.11);
   border-radius: 9px;
-  background: rgba(6,11,18,.36);
+  background: rgba(6,11,18,.34);
   text-align: center;
 }
 
 .td3-review-metrics small {
-  color: #718096;
-  font-size: 9px;
+  color: #8492a6;
+  font-size: 10px;
 }
 
 .td3-review-metrics b {
-  margin-top: 2px;
+  margin-top: 3px;
   color: #e6edf7;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .td3-detail-actions {
   gap: 8px;
   justify-content: space-between;
-  padding: 10px 13px;
+  padding: 11px 13px;
 }
 
 .td3-detail-actions-primary {
@@ -208,7 +214,7 @@
   gap: 7px;
 }
 
-/* Sessions is now a TaskDesk view, not a second full-screen application. */
+/* Sessions is a TaskDesk workspace, not a nested application. */
 .td3-sessions-embedded {
   min-width: 0;
   min-height: 0;
@@ -222,20 +228,23 @@
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: 50px minmax(0,1fr);
+  grid-template-rows: 52px minmax(0,1fr);
   background: transparent;
+  font-family: inherit;
 }
 
+/* This is an in-view toolbar, so remove the old app branding/actions but keep session search. */
 .td3-sessions-embedded .uw-topbar {
-  height: 50px;
-  min-height: 50px;
+  height: 52px;
+  min-height: 52px;
   display: grid;
-  grid-template-columns: minmax(280px, 520px);
+  grid-template-columns: minmax(300px, 560px);
   align-items: center;
   justify-content: start;
-  padding: 7px 14px;
-  border-bottom: 1px solid rgba(148,163,184,.08);
-  background: rgba(10,17,27,.72);
+  padding: 7px 15px;
+  border-bottom: 1px solid rgba(148,163,184,.09);
+  background: rgba(9,15,24,.72);
+  backdrop-filter: none;
 }
 
 .td3-sessions-embedded .uw-brand,
@@ -244,8 +253,15 @@
 }
 
 .td3-sessions-embedded .uw-global-search {
-  width: min(520px,100%);
+  width: min(560px,100%);
   max-width: none;
+  height: 36px;
+  border-radius: 9px;
+  background: rgba(17,25,39,.58);
+}
+
+.td3-sessions-embedded .uw-global-search input {
+  font-size: 12.5px;
 }
 
 .td3-sessions-embedded .uw-global-search kbd {
@@ -255,7 +271,7 @@
 .td3-sessions-embedded .uw-layout {
   min-height: 0;
   height: auto;
-  grid-template-columns: 176px minmax(290px,350px) minmax(0,1fr) auto;
+  grid-template-columns: 182px minmax(300px,356px) minmax(0,1fr) auto;
   background: transparent;
 }
 
@@ -263,9 +279,10 @@
   min-width: 0;
   padding-top: 10px;
   border-right-color: rgba(148,163,184,.08);
-  background: rgba(8,14,23,.62);
+  background: rgba(8,14,23,.54);
 }
 
+/* Machine selection belongs to the outer TaskDesk shell. */
 .td3-sessions-embedded .uw-nav .uw-machines-section {
   display: none;
 }
@@ -275,18 +292,44 @@
 }
 
 .td3-sessions-embedded .uw-nav-label {
-  color: #65758a;
-  font-size: 9px;
-  letter-spacing: .07em;
+  color: #74849a;
+  font-size: 10px;
+  letter-spacing: .055em;
+}
+
+.td3-sessions-embedded .uw-nav-section > button,
+.td3-sessions-embedded .uw-nav-bottom > button {
+  min-height: 36px;
+}
+
+.td3-sessions-embedded .uw-nav-section > button > span:nth-child(2),
+.td3-sessions-embedded .uw-nav-bottom > button > span:nth-child(2) {
+  font-size: 11.5px;
 }
 
 .td3-sessions-embedded .uw-new-button {
   margin-inline: 8px;
+  min-height: 38px;
 }
 
 .td3-sessions-embedded .uw-session-column {
   border-right-color: rgba(148,163,184,.08);
-  background: rgba(10,17,27,.42);
+  background: rgba(10,17,27,.4);
+}
+
+.td3-sessions-embedded .uw-session-column-header h2 {
+  font-size: 14px;
+}
+
+.td3-sessions-embedded .uw-session-column-header span,
+.td3-sessions-embedded .uw-session-meta,
+.td3-sessions-embedded .uw-session-footer,
+.td3-sessions-embedded .uw-session-preview {
+  font-size: 11px;
+}
+
+.td3-sessions-embedded .uw-session-title-row strong {
+  font-size: 12.5px;
 }
 
 .td3-sessions-embedded .uw-main,
@@ -295,12 +338,16 @@
 }
 
 .td3-sessions-embedded .uw-session-header {
-  background: rgba(8,14,23,.44);
+  background: rgba(8,14,23,.42);
+}
+
+.td3-sessions-embedded .uw-session-heading h1 {
+  font-size: 17px;
 }
 
 .td3-sessions-embedded .uw-context-strip small,
 .td3-sessions-embedded .uw-inspector-label {
-  font-size: 10px;
+  font-size: 10.5px;
 }
 
 .td3-sessions-embedded .uw-context-strip b,
@@ -308,8 +355,18 @@
   font-size: 11.5px;
 }
 
+.td3-sessions-embedded .uw-markdown,
+.td3-sessions-embedded .uw-message-body {
+  font-size: 12.5px;
+}
+
+.td3-sessions-embedded .uw-composer-shell textarea {
+  font-size: 13px;
+}
+
 .td3-sessions-embedded .uw-composer-footer > .uw-composer-directory {
   font-size: 13px;
+  line-height: 1.4;
 }
 
 /* Classic is deliberately legacy, but it still lives inside the TaskDesk frame. */
@@ -324,7 +381,7 @@
 }
 
 .td3-classic-notice {
-  min-height: 54px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -342,20 +399,20 @@
 }
 
 .td3-classic-notice small {
-  color: #75849a;
-  font-size: 9px;
+  color: #8492a6;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: .08em;
+  letter-spacing: .065em;
 }
 
 .td3-classic-notice strong {
   color: #e6edf7;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .td3-classic-notice span {
-  color: #7f8da0;
-  font-size: 10.5px;
+  color: #8e9caf;
+  font-size: 11px;
 }
 
 .td3-classic-integrated-host {
@@ -373,7 +430,7 @@
   }
 
   .td3-sessions-embedded .uw-layout {
-    grid-template-columns: 150px minmax(270px,320px) minmax(0,1fr);
+    grid-template-columns: 156px minmax(276px,326px) minmax(0,1fr);
   }
 
   .td3-sessions-embedded .uw-inspector {
@@ -395,7 +452,7 @@
   }
 
   .td3-sessions-embedded .uw-layout {
-    grid-template-columns: minmax(260px,320px) minmax(0,1fr);
+    grid-template-columns: minmax(276px,326px) minmax(0,1fr);
   }
 
   .td3-sessions-embedded .uw-nav {
@@ -425,15 +482,16 @@
   .td3-detail-actions-primary {
     width: 100%;
     overflow-x: auto;
+    padding-bottom: 2px;
   }
 
   .td3-sessions-embedded .uw-shell {
-    grid-template-rows: 48px minmax(0,1fr);
+    grid-template-rows: 50px minmax(0,1fr);
   }
 
   .td3-sessions-embedded .uw-topbar {
-    min-height: 48px;
-    height: 48px;
+    min-height: 50px;
+    height: 50px;
     grid-template-columns: minmax(0,1fr);
     padding-inline: 9px;
   }
@@ -448,7 +506,11 @@
 
   .td3-sessions-embedded .uw-main {
     position: absolute;
-    inset: 48px 0 57px 0;
+    inset: 50px 0 57px 0;
+  }
+
+  .td3-sessions-embedded .uw-session-header {
+    min-height: 72px;
   }
 
   .td3-classic-notice > div {
