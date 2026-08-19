@@ -27,19 +27,27 @@ export class TaskRunController {
   }
 
   async #adoptAcpTaskSession(task) {
-    if (!task.run?.sessionId || task.run.transport !== "acp") return
+    if (!task.run?.sessionId || task.run.transport !== "acp") return null
     const service = this.acpService?.(task.agentId)
-    if (!service) return
+    if (!service) return null
     const title = task.prompt?.trim().split("\n")[0].slice(0, 60)
-    try { await service.adoptTaskSession(task.run.sessionId, { title, prompt: task.run?.prompt || task.prompt }) } catch {}
+    try {
+      return await service.adoptTaskSession(task.run.sessionId, { title, prompt: task.run?.prompt || task.prompt })
+    } catch {
+      return null
+    }
   }
 
   async reconcileAll() {
     for (const task of await this.taskStore.list()) {
-      await this.#adoptAcpTaskSession(task)
+      const adoptedAcpSession = await this.#adoptAcpTaskSession(task)
       if (!["starting", "running"].includes(task.status)) continue
       if (!task.run?.id) {
         try { await this.taskStore.setRunState(task.id, { status: "failed", error: new Error("Active task has no persisted run identity") }) } catch {}
+        continue
+      }
+      if (task.run.transport === "acp" && adoptedAcpSession === false) {
+        await this.#terminal(task.id, task.run, "failed", new Error("Task session is no longer available after daemon restart"))
         continue
       }
       let state = "unknown"

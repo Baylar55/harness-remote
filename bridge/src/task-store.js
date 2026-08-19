@@ -20,7 +20,7 @@ function normalizeTaskHistory(task) {
     : task.run
       ? [task.run]
       : []
-  return { ...task, runs }
+  return { ...task, runs, finishedAt: task.finishedAt ?? null }
 }
 
 export class TaskStore {
@@ -93,6 +93,7 @@ export class TaskStore {
       run: null,
       runs: [],
       error: null,
+      finishedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp
     }
@@ -108,6 +109,22 @@ export class TaskStore {
     const task = this.tasks[index]
     if (task.status !== "draft") throw taskError("invalid_state", "Only draft tasks can change workspace")
     const updated = { ...task, workspace: structuredClone(workspace), updatedAt: this.clock() }
+    this.tasks[index] = updated
+    await this.persist()
+    return structuredClone(updated)
+  }
+
+  async markFinished(taskID) {
+    await this.load()
+    const index = this.tasks.findIndex((task) => task.id === taskID)
+    if (index < 0) throw taskError("unknown_task", `Unknown task: ${taskID}`)
+    const task = this.tasks[index]
+    if (task.status === "starting" || task.status === "running") {
+      throw taskError("task_active", "An active task cannot be finished")
+    }
+    if (task.finishedAt) return structuredClone(task)
+    const timestamp = this.clock()
+    const updated = { ...task, finishedAt: timestamp, updatedAt: timestamp }
     this.tasks[index] = updated
     await this.persist()
     return structuredClone(updated)

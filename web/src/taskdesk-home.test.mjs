@@ -56,7 +56,7 @@ test("TaskDesk sorts Tasks by durable task activity rather than session order", 
   assert.deepEqual(sortTasksByActivity([older, newer]).map((item) => item.id), ["newer", "older"])
 })
 
-test("TaskDesk machine configuration remains independent from Classic profiles", () => {
+test("TaskDesk machine configuration remains independent from Classic profiles and activates the unified shell", () => {
   const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
   const machineStorage = readFileSync(new URL("./workspaceMachines.ts", import.meta.url), "utf8")
   const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
@@ -66,12 +66,14 @@ test("TaskDesk machine configuration remains independent from Classic profiles",
   assert.match(taskDeskBoundary[0], /loadWorkspaceMachines/)
   assert.doesNotMatch(taskDeskBoundary[0], /loadServerProfiles/)
   assert.match(machineStorage, /harness-remote\.workspace\.machines\.v1/)
-  assert.match(standalone, /<TaskDeskV3/)
+  assert.match(standalone, /import \{ TaskDeskV3Unified \} from "\.\/taskdesk-v3-unified"/)
+  assert.match(standalone, /<TaskDeskV3Unified/)
+  assert.doesNotMatch(standalone, /<TaskDeskV3\n/)
   assert.match(standalone, /\+ Add machine/)
 })
 
 test("TaskDesk v3 exposes Tasks as a separate durable product surface", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
 
   assert.match(source, /type TaskDeskView = "overview" \| "tasks" \| "sessions"/)
   assert.match(source, />Tasks</)
@@ -83,18 +85,17 @@ test("TaskDesk v3 exposes Tasks as a separate durable product surface", () => {
 })
 
 test("TaskDesk v3 New Task uses real machine task APIs and explicit workspace choice", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
 
   assert.match(source, /taskClient\.createTask/)
   assert.match(source, /taskClient\.prepareWorktree/)
   assert.match(source, /taskClient\.launch/)
   assert.match(source, /Use an isolated Git worktree/)
   assert.match(source, /Project directory/)
-  assert.match(source, /Machine -> Project -> Agent -> Model -> Workspace -> Task|machine, project, model and workspace/i)
 })
 
 test("TaskDesk v3 Task detail uses the native Run session and lifecycle APIs", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
   const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
 
   assert.match(source, /api\.loadMessages\(config, sessionID, directory\)/)
@@ -108,8 +109,50 @@ test("TaskDesk v3 Task detail uses the native Run session and lifecycle APIs", (
   assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/result/)
 })
 
+test("Task clicks explicitly open a closable review detail instead of silently changing selection", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
+  const css = readFileSync(new URL("./taskdesk-v3-unified.css", import.meta.url), "utf8")
+
+  assert.match(source, /const \[detailOpen, setDetailOpen\] = useState\(false\)/)
+  assert.match(source, /function openTask\(record: TaskRecord/)
+  assert.match(source, /setDetailOpen\(true\)/)
+  assert.match(source, /onClick=\{\(\) => openTask\(record\)\}/)
+  assert.match(source, /aria-label="Close Task detail"/)
+  assert.match(source, /setDetailOpen\(false\)/)
+  assert.match(css, /\.td3-tasks-layout-unified\.detail-open/)
+  assert.match(css, /@keyframes td3-detail-enter/)
+})
+
+test("Sessions stays inside the persistent TaskDesk product shell without the old floating return button", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
+  const css = readFileSync(new URL("./taskdesk-v3-unified.css", import.meta.url), "utf8")
+
+  assert.match(source, /<div className="td3-shell td3-shell-unified">[\s\S]*?\{nav\}[\s\S]*?\{topbar\}/)
+  assert.match(source, /view === "sessions" \? <main className="td3-sessions-embedded"><UniversalWorkspace/)
+  assert.match(source, /const sessionProfiles = machineScope === "all" \? machines : machines\.filter/)
+  assert.doesNotMatch(source, /td3-session-mode/)
+  assert.doesNotMatch(source, /td3-return-button/)
+  assert.match(css, /\.td3-sessions-embedded \.uw-brand,[\s\S]*?\.td3-sessions-embedded \.uw-top-actions[\s\S]*?display: none/)
+  assert.match(css, /\.td3-sessions-embedded \.uw-shell/)
+})
+
+test("TaskDesk distinguishes completed Runs awaiting review from explicitly finished Tasks", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
+  const finishServer = readFileSync(new URL("../../bridge/src/task-finish-server.js", import.meta.url), "utf8")
+
+  assert.match(source, /if \(task\.finishedAt\) return "finished"/)
+  assert.match(source, /if \(status === "completed"\) return "review"/)
+  assert.match(source, /Ready for review/)
+  assert.match(source, />Finish Task</)
+  assert.match(source, />Cleanup Workspace</)
+  assert.doesNotMatch(source, /Review \/ Finish/)
+  assert.match(finishServer, /taskStore\.markFinished/)
+  assert.doesNotMatch(finishServer, /worktreeManager\.cleanup/)
+  assert.doesNotMatch(finishServer, /taskStore\.clearWorkspace/)
+})
+
 test("TaskDesk v3 protects Task detail from stale asynchronous responses", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
 
   assert.match(source, /const detailGeneration = useRef\(0\)/)
   assert.match(source, /const generation = \+\+detailGeneration\.current/)
@@ -119,7 +162,7 @@ test("TaskDesk v3 protects Task detail from stale asynchronous responses", () =>
 })
 
 test("TaskDesk v3 aggregates native questions and permissions into Needs You", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
 
   assert.match(source, /api\.loadQuestions\(config\)/)
   assert.match(source, /api\.loadPermissions\(config\)/)

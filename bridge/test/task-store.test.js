@@ -29,6 +29,7 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
       run: null,
       runs: [],
       error: null,
+      finishedAt: null,
       createdAt: "2026-08-13T13:00:00.000Z",
       updatedAt: "2026-08-13T13:00:00.000Z"
     })
@@ -44,7 +45,7 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
   }
 })
 
-test("legacy single-run tasks load with a compatible runs history", async () => {
+test("legacy single-run tasks load with a compatible runs history and open lifecycle", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-history-"))
   try {
     const store = new TaskStore({ machineID: "machine-1", stateDirectory })
@@ -58,6 +59,44 @@ test("legacy single-run tasks load with a compatible runs history", async () => 
     const [loaded] = await store.list()
     assert.deepEqual(loaded.runs, [legacyRun])
     assert.deepEqual(loaded.run, legacyRun)
+    assert.equal(loaded.finishedAt, null)
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
+test("markFinished closes a terminal task without changing its workspace", async () => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-finish-"))
+  try {
+    let now = "2026-08-13T13:00:00.000Z"
+    const project = { id: "machine-1:project", name: "repo", path: "/work/repo", kind: "git" }
+    const store = new TaskStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1", clock: () => now })
+    await store.create({ project, agentId: "codex", prompt: "Do work" })
+    store.tasks[0] = {
+      ...store.tasks[0],
+      status: "completed",
+      workspace: { mode: "worktree", path: "/state/worktrees/task-1", branch: "task/task-1", source: "/work/repo" }
+    }
+    await store.persist()
+    now = "2026-08-13T14:00:00.000Z"
+    const finished = await store.markFinished("task-1")
+    assert.equal(finished.finishedAt, now)
+    assert.equal(finished.workspace.mode, "worktree")
+    assert.equal(finished.status, "completed")
+    assert.equal(finished.updatedAt, now)
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
+test("markFinished refuses an active task", async () => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-active-finish-"))
+  try {
+    const project = { id: "machine-1:project", name: "repo", path: "/work/repo", kind: "git" }
+    const store = new TaskStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
+    await store.create({ project, agentId: "codex", prompt: "Do work" })
+    store.tasks[0] = { ...store.tasks[0], status: "running" }
+    await assert.rejects(() => store.markFinished("task-1"), (error) => error.code === "task_active")
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }

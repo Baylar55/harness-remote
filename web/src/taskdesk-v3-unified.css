@@ -1,0 +1,461 @@
+.td3-shell-unified {
+  --td3-surface-strong: #0d1521;
+  --td3-surface-raised: #111b29;
+  --td3-text-soft: #9eacbf;
+}
+
+.td3-topbar-unified {
+  position: relative;
+  z-index: 20;
+}
+
+.td3-view-context {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #cbd7e5;
+}
+
+.td3-view-context > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.td3-view-context strong {
+  font-size: 12.5px;
+  line-height: 1.2;
+}
+
+.td3-view-context small {
+  margin-top: 2px;
+  color: #74839a;
+  font-size: 10.5px;
+}
+
+/* Product lifecycle states: a completed Run is not the same thing as a finished Task. */
+.td3-status-dot.td3-status-review {
+  border-color: #fbbf24;
+  box-shadow: 0 0 8px rgba(251,191,36,.2);
+}
+
+.td3-status-dot.td3-status-finished {
+  border-color: #4ade80;
+}
+
+.td3-status-pill.td3-status-review {
+  color: #f6d78e;
+  background: rgba(180,105,0,.16);
+}
+
+.td3-status-pill.td3-status-finished {
+  color: #91eab0;
+  background: rgba(34,197,94,.12);
+}
+
+.td3-status-dot.td3-status-active {
+  border-color: #5b82ff;
+  box-shadow: 0 0 8px rgba(79,124,255,.34);
+}
+
+.td3-status-pill.td3-status-active {
+  color: #a9bcff;
+  background: rgba(79,124,255,.14);
+}
+
+.td3-status-dot.td3-status-draft {
+  border-color: #718096;
+}
+
+.td3-status-pill.td3-status-draft {
+  color: #aab6c6;
+  background: rgba(148,163,184,.1);
+}
+
+/* A Task click opens a real detail surface. With no Task open, the list owns the canvas. */
+.td3-tasks-layout-unified {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.td3-tasks-layout-unified.detail-open {
+  grid-template-columns: minmax(620px, 1.15fr) minmax(440px, .85fr);
+}
+
+.td3-task-detail-open {
+  min-width: 0;
+  animation: td3-detail-enter 150ms ease-out;
+  box-shadow: -18px 0 50px rgba(0,0,0,.16);
+}
+
+@keyframes td3-detail-enter {
+  from { opacity: .65; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .td3-task-detail-open { animation: none; }
+}
+
+.td3-detail-title-line > div:first-child {
+  min-width: 0;
+}
+
+.td3-detail-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: #7189c8;
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.td3-detail-title-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.td3-detail-close {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(148,163,184,.14);
+  border-radius: 8px;
+  color: #9eacbf;
+  background: rgba(255,255,255,.025);
+  cursor: pointer;
+}
+
+.td3-detail-close:hover {
+  color: #eef3fa;
+  border-color: rgba(148,163,184,.26);
+  background: rgba(255,255,255,.05);
+}
+
+.td3-review-hero {
+  min-height: 96px;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 10px;
+  padding: 15px 16px;
+  border: 1px solid rgba(111,137,206,.2);
+  border-radius: 12px;
+  background: linear-gradient(120deg, rgba(53,78,137,.13), rgba(15,24,37,.64) 52%);
+}
+
+.td3-review-hero > div:first-child small {
+  color: #7f96cf;
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.td3-review-hero h3 {
+  max-width: 52ch;
+  margin: 5px 0 0;
+  color: #e8eef7;
+  font-size: 13.5px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.td3-review-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(54px,auto));
+  gap: 7px;
+}
+
+.td3-review-metrics span {
+  min-width: 58px;
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 7px 9px;
+  border: 1px solid rgba(148,163,184,.1);
+  border-radius: 9px;
+  background: rgba(6,11,18,.36);
+  text-align: center;
+}
+
+.td3-review-metrics small {
+  color: #718096;
+  font-size: 9px;
+}
+
+.td3-review-metrics b {
+  margin-top: 2px;
+  color: #e6edf7;
+  font-size: 13px;
+}
+
+.td3-detail-actions {
+  gap: 8px;
+  justify-content: space-between;
+  padding: 10px 13px;
+}
+
+.td3-detail-actions-primary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Sessions is now a TaskDesk view, not a second full-screen application. */
+.td3-sessions-embedded {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  background: #080e17;
+}
+
+.td3-sessions-embedded .uw-shell {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 50px minmax(0,1fr);
+  background: transparent;
+}
+
+.td3-sessions-embedded .uw-topbar {
+  height: 50px;
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: minmax(280px, 520px);
+  align-items: center;
+  justify-content: start;
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(148,163,184,.08);
+  background: rgba(10,17,27,.72);
+}
+
+.td3-sessions-embedded .uw-brand,
+.td3-sessions-embedded .uw-top-actions {
+  display: none;
+}
+
+.td3-sessions-embedded .uw-global-search {
+  width: min(520px,100%);
+  max-width: none;
+}
+
+.td3-sessions-embedded .uw-global-search kbd {
+  display: none;
+}
+
+.td3-sessions-embedded .uw-layout {
+  min-height: 0;
+  height: auto;
+  grid-template-columns: 176px minmax(290px,350px) minmax(0,1fr) auto;
+  background: transparent;
+}
+
+.td3-sessions-embedded .uw-nav {
+  min-width: 0;
+  padding-top: 10px;
+  border-right-color: rgba(148,163,184,.08);
+  background: rgba(8,14,23,.62);
+}
+
+.td3-sessions-embedded .uw-nav .uw-machines-section {
+  display: none;
+}
+
+.td3-sessions-embedded .uw-nav-section {
+  padding-inline: 8px;
+}
+
+.td3-sessions-embedded .uw-nav-label {
+  color: #65758a;
+  font-size: 9px;
+  letter-spacing: .07em;
+}
+
+.td3-sessions-embedded .uw-new-button {
+  margin-inline: 8px;
+}
+
+.td3-sessions-embedded .uw-session-column {
+  border-right-color: rgba(148,163,184,.08);
+  background: rgba(10,17,27,.42);
+}
+
+.td3-sessions-embedded .uw-main,
+.td3-sessions-embedded .uw-inspector {
+  background: transparent;
+}
+
+.td3-sessions-embedded .uw-session-header {
+  background: rgba(8,14,23,.44);
+}
+
+.td3-sessions-embedded .uw-context-strip small,
+.td3-sessions-embedded .uw-inspector-label {
+  font-size: 10px;
+}
+
+.td3-sessions-embedded .uw-context-strip b,
+.td3-sessions-embedded .uw-context-model-select {
+  font-size: 11.5px;
+}
+
+.td3-sessions-embedded .uw-composer-footer > .uw-composer-directory {
+  font-size: 13px;
+}
+
+/* Classic is deliberately legacy, but it still lives inside the TaskDesk frame. */
+.td3-classic-integrated {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr);
+  overflow: hidden;
+  background: #080e17;
+}
+
+.td3-classic-notice {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(148,163,184,.08);
+  background: rgba(10,17,27,.72);
+}
+
+.td3-classic-notice > div {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.td3-classic-notice small {
+  color: #75849a;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.td3-classic-notice strong {
+  color: #e6edf7;
+  font-size: 12px;
+}
+
+.td3-classic-notice span {
+  color: #7f8da0;
+  font-size: 10.5px;
+}
+
+.td3-classic-integrated-host {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.td3-classic-integrated-host > * {
+  height: 100%;
+}
+
+@media (max-width: 1220px) {
+  .td3-tasks-layout-unified.detail-open {
+    grid-template-columns: minmax(520px,1fr) minmax(400px,.9fr);
+  }
+
+  .td3-sessions-embedded .uw-layout {
+    grid-template-columns: 150px minmax(270px,320px) minmax(0,1fr);
+  }
+
+  .td3-sessions-embedded .uw-inspector {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .td3-tasks-layout-unified.detail-open {
+    grid-template-columns: minmax(0,1fr);
+  }
+
+  .td3-tasks-layout-unified.detail-open .td3-task-detail-open {
+    position: absolute;
+    inset: 66px 0 0 64px;
+    z-index: 30;
+    border-left: 1px solid var(--td3-border);
+    box-shadow: -24px 0 60px rgba(0,0,0,.3);
+  }
+
+  .td3-sessions-embedded .uw-layout {
+    grid-template-columns: minmax(260px,320px) minmax(0,1fr);
+  }
+
+  .td3-sessions-embedded .uw-nav {
+    display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .td3-tasks-layout-unified.detail-open .td3-task-detail-open {
+    inset: 0 0 57px 0;
+    z-index: 70;
+  }
+
+  .td3-review-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .td3-review-metrics {
+    grid-template-columns: repeat(3,1fr);
+  }
+
+  .td3-detail-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .td3-detail-actions-primary {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .td3-sessions-embedded .uw-shell {
+    grid-template-rows: 48px minmax(0,1fr);
+  }
+
+  .td3-sessions-embedded .uw-topbar {
+    min-height: 48px;
+    height: 48px;
+    grid-template-columns: minmax(0,1fr);
+    padding-inline: 9px;
+  }
+
+  .td3-sessions-embedded .uw-layout {
+    grid-template-columns: minmax(0,1fr);
+  }
+
+  .td3-sessions-embedded .uw-session-column {
+    width: 100%;
+  }
+
+  .td3-sessions-embedded .uw-main {
+    position: absolute;
+    inset: 48px 0 57px 0;
+  }
+
+  .td3-classic-notice > div {
+    grid-template-columns: auto auto;
+  }
+
+  .td3-classic-notice span {
+    display: none;
+  }
+}
