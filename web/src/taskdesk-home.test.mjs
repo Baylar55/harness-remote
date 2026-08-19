@@ -115,5 +115,18 @@ test("Universal workspace gives supported harness replies their own local visual
   assert.match(source, /function HarnessAvatar/)
   assert.match(source, /agentBackend=\{selected\.agent\.backend\}/)
   assert.match(readableFixes, /\.uw-avatar-agent img/)
-  assert.match(readableFixes, /\.uw-composer-directory[\s\S]*?font-size: 13\.5px/)
+  assert.match(readableFixes, /\.uw-composer-footer > \.uw-composer-directory[\s\S]*?font-size: 13px/)
+  assert.match(readableFixes, /\.uw-context-strip b,[\s\S]*?\.uw-context-model-select[\s\S]*?font-size: 11\.5px/)
+})
+
+test("Universal workspace never renders stale detail for a newly selected session", () => {
+  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /const \[detailSessionKey, setDetailSessionKey\] = useState<string \| null>\(null\)/)
+  assert.match(source, /const selectedKeyRef = useRef<string \| null>\(null\)/)
+  assert.match(source, /const detailReady = Boolean\(selected && detailSessionKey === selected\.key\)/)
+  assert.match(source, /if \(selectedKeyRef\.current !== item\.key\) return/)
+  assert.match(source, /setDetailSessionKey\(item\.key\)/)
+  assert.match(source, /detailLoading \|\| !detailReady/)
+  assert.match(source, /Loading session…/)
 })
