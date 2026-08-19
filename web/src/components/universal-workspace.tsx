@@ -90,6 +90,7 @@ type SelectedDetail = {
 type UniversalWorkspaceProps = {
   profiles: SavedServerProfile[]
   activeProfileID: string
+  focusSessionRequest?: { sessionID: string; requestID: number } | null
   onPersistProfiles: (profiles: SavedServerProfile[], activeProfileID: string) => void
   legacyView: ReactNode
 }
@@ -857,7 +858,7 @@ function QuestionPanel({
           {question.custom ? (
             <input
               value={custom[index] || ""}
-              onChange={(event) => setCustom((current) => ({ ...current, [index]: event.target.value }))}
+              onChange={(event) => setCustom((current) => ({ ...current, [index]: event.target.value }))
               placeholder="Custom answer…"
             />
           ) : null}
@@ -882,6 +883,7 @@ function QuestionPanel({
 export function UniversalWorkspace({
   profiles,
   activeProfileID,
+  focusSessionRequest,
   onPersistProfiles,
   legacyView
 }: UniversalWorkspaceProps) {
@@ -915,6 +917,7 @@ export function UniversalWorkspace({
   const refreshGeneration = useRef(0)
   const refreshInFlight = useRef(false)
   const selectedKeyRef = useRef<string | null>(null)
+  const appliedFocusRequest = useRef<number | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const selected = sessions.find((item) => item.key === selectedKey) || null
@@ -1011,6 +1014,10 @@ export function UniversalWorkspace({
       setMachines(nextMachines)
       setSessions(collected)
       setSelectedKey((current) => {
+        const focused = focusSessionRequest?.sessionID
+          ? collected.find((item) => item.session.id === focusSessionRequest.sessionID)
+          : undefined
+        if (focused) return focused.key
         if (current && collected.some((item) => item.key === current)) return current
         return collected[0]?.key || null
       })
@@ -1034,13 +1041,26 @@ export function UniversalWorkspace({
       }
       refreshInFlight.current = false
     }
-  }, [profiles])
+  }, [profiles, focusSessionRequest?.sessionID])
 
   useEffect(() => {
     void refreshAll(false)
     const timer = window.setInterval(() => void refreshAll(true), REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [refreshAll])
+
+  useEffect(() => {
+    if (!focusSessionRequest || appliedFocusRequest.current === focusSessionRequest.requestID) return
+    const target = sessions.find((item) => item.session.id === focusSessionRequest.sessionID)
+    if (!target) return
+    appliedFocusRequest.current = focusSessionRequest.requestID
+    setMachineFilter(target.machineKey)
+    setProjectFilter("all")
+    setFilter("all")
+    setQuery("")
+    setDetailTab("conversation")
+    setSelectedKey(target.key)
+  }, [focusSessionRequest, sessions])
 
   const loadDetail = useCallback(async (item: UniversalSession, silent = false) => {
     if (!silent) setDetailLoading(true)
