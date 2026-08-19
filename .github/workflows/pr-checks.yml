@@ -66,6 +66,8 @@ jobs:
           npm run test:machine-payload
           npm run test:platform
           npm run test:completion-audio
+          npm run test:completion-timing
+          npm run test:native-response
         working-directory: web
 
       - name: Run bridge tests
