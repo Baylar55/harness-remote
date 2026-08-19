@@ -138,7 +138,7 @@ test("Sessions stays inside the persistent TaskDesk product shell without the ol
 
 test("TaskDesk distinguishes completed Runs awaiting review from explicitly finished Tasks", () => {
   const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-  const finishServer = readFileSync(new URL("../bridge/src/task-finish-server.js", import.meta.url), "utf8")
+  const finishServer = readFileSync(new URL("../../bridge/src/task-finish-server.js", import.meta.url), "utf8")
 
   assert.match(source, /if \(task\.finishedAt\) return "finished"/)
   assert.match(source, /if \(status === "completed"\) return "review"/)
