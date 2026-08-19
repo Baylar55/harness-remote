@@ -38,8 +38,8 @@ import {
 } from "../Icons"
 
 const REMARK_PLUGINS = [remarkGfm]
-const REFRESH_INTERVAL_MS = 4_000
-const DETAIL_REFRESH_INTERVAL_MS = 2_500
+const REFRESH_INTERVAL_MS = 10_000
+const DETAIL_REFRESH_INTERVAL_MS = 5_000
 const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000
 const PINNED_STORAGE_KEY = "harness-remote.universal-workspace.pinned"
 const HARNESS_ICON_FILES: Record<string, string> = {
@@ -198,14 +198,6 @@ function extractText(message: MessageEnvelope): string {
     .trim()
 }
 
-function latestReadableText(messages: MessageEnvelope[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const text = extractText(messages[index])
-    if (text) return text.replace(/\s+/g, " ").trim()
-  }
-  return ""
-}
-
 function modelLabel(model?: Session["model"] | ModelSelection | null): string {
   if (!model) return "Default model"
   const candidate = "modelID" in model ? model.modelID : model.id
@@ -240,6 +232,10 @@ function loadPinned(): Set<string> {
   } catch {
     return new Set()
   }
+}
+
+function pageIsVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden"
 }
 
 function BeautifulButton({
@@ -414,14 +410,12 @@ function SessionCard({
   item,
   selected,
   pinned,
-  preview,
   onSelect,
   onTogglePin
 }: {
   item: UniversalSession
   selected: boolean
   pinned: boolean
-  preview?: string
   onSelect: () => void
   onTogglePin: () => void
 }) {
@@ -439,7 +433,7 @@ function SessionCard({
           {item.agent.label} · {modelLabel(session.model)} · {item.machineName}
         </span>
         <span className="uw-session-preview">
-          {preview || (session.summary?.files ? `${session.summary.files} files changed · +${session.summary.additions} −${session.summary.deletions}` : item.session.directory)}
+          {session.summary?.files ? `${session.summary.files} files changed · +${session.summary.additions} −${session.summary.deletions}` : item.session.directory}
         </span>
         <span className="uw-session-footer">
           <span>{item.projectName}</span>
@@ -889,7 +883,6 @@ export function UniversalWorkspace({
 }: UniversalWorkspaceProps) {
   const [machines, setMachines] = useState<MachineSource[]>([])
   const [sessions, setSessions] = useState<UniversalSession[]>([])
-  const [previews, setPreviews] = useState<Record<string, string>>({})
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [filter, setFilter] = useState<WorkspaceFilter>("all")
   const [projectFilter, setProjectFilter] = useState<string>("all")
@@ -916,6 +909,7 @@ export function UniversalWorkspace({
   const [questionRevision, setQuestionRevision] = useState(0)
   const refreshGeneration = useRef(0)
   const refreshInFlight = useRef(false)
+  const detailInFlight = useRef(false)
   const selectedKeyRef = useRef<string | null>(null)
   const appliedFocusRequest = useRef<number | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -1021,16 +1015,6 @@ export function UniversalWorkspace({
         if (current && collected.some((item) => item.key === current)) return current
         return collected[0]?.key || null
       })
-
-      const topSessions = collected.slice(0, 18)
-      void Promise.all(topSessions.map(async (item) => {
-        try {
-          const latest = await api.loadLatestMessage(item.config, item.session.id, item.session.directory)
-          const preview = latestReadableText(latest)
-          if (preview) setPreviews((current) => current[item.key] === preview ? current : { ...current, [item.key]: preview })
-        } catch {
-        }
-      }))
     } catch (reason) {
       if (generation !== refreshGeneration.current) return
       setGlobalError(reason instanceof Error ? reason.message : String(reason))
@@ -1045,7 +1029,9 @@ export function UniversalWorkspace({
 
   useEffect(() => {
     void refreshAll(false)
-    const timer = window.setInterval(() => void refreshAll(true), REFRESH_INTERVAL_MS)
+    const timer = window.setInterval(() => {
+      if (pageIsVisible()) void refreshAll(true)
+    }, REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [refreshAll])
 
@@ -1063,6 +1049,8 @@ export function UniversalWorkspace({
   }, [focusSessionRequest, sessions])
 
   const loadDetail = useCallback(async (item: UniversalSession, silent = false) => {
+    if (detailInFlight.current && silent) return
+    detailInFlight.current = true
     if (!silent) setDetailLoading(true)
     try {
       const [messages, diff, todos, vcs, questions, permissions] = await Promise.all([
@@ -1088,11 +1076,13 @@ export function UniversalWorkspace({
         setGlobalError(reason instanceof Error ? reason.message : String(reason))
       }
     } finally {
+      detailInFlight.current = false
       if (!silent && selectedKeyRef.current === item.key) setDetailLoading(false)
     }
   }, [])
 
   useEffect(() => {
+    detailInFlight.current = false
     if (!selected) {
       setDetail(EMPTY_DETAIL)
       setDetailSessionKey(null)
@@ -1103,7 +1093,9 @@ export function UniversalWorkspace({
     setDetailSessionKey(null)
     setDetailLoading(true)
     void loadDetail(selected, false)
-    const timer = window.setInterval(() => void loadDetail(selected, true), DETAIL_REFRESH_INTERVAL_MS)
+    const timer = window.setInterval(() => {
+      if (pageIsVisible()) void loadDetail(selected, true)
+    }, DETAIL_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [selected?.key, questionRevision, loadDetail])
 
@@ -1170,11 +1162,10 @@ export function UniversalWorkspace({
         item.agent.label,
         item.machineName,
         item.session.directory,
-        modelLabel(item.session.model),
-        previews[item.key]
+        modelLabel(item.session.model)
       ].some((value) => value?.toLowerCase().includes(needle))
     })
-  }, [machineScopedSessions, projectFilter, query, previews])
+  }, [machineScopedSessions, projectFilter, query])
 
   const counts = useMemo(() => ({
     all: scopedSessions.length,
@@ -1423,7 +1414,6 @@ export function UniversalWorkspace({
                 item={item}
                 selected={selectedKey === item.key}
                 pinned={pinned.has(item.key)}
-                preview={previews[item.key]}
                 onSelect={() => {
                   setSelectedKey(item.key)
                   setDetailTab("conversation")
