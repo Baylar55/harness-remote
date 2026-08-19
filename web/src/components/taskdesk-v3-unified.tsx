@@ -43,8 +43,8 @@ import {
 import { UniversalWorkspace } from "./universal-workspace"
 import "../taskdesk-v3-unified.css"
 
-const REFRESH_MS = 4_000
-const DETAIL_REFRESH_MS = 2_500
+const REFRESH_MS = 10_000
+const DETAIL_REFRESH_MS = 5_000
 const REMARK_PLUGINS = [remarkGfm]
 
 const HARNESS_ICON_FILES: Record<string, string> = {
@@ -217,6 +217,10 @@ function emptyDetail(ownerKey: string | null = null, loading = false): TaskDetai
 
 function taskForSession(runtime: RuntimeMachine, sessionID: string): ProductTask | undefined {
   return runtime.tasks.find((task) => taskRunHistory(task).some((run) => runSessionID(run) === sessionID))
+}
+
+function pageIsVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden"
 }
 
 function NewTaskModal({
@@ -450,14 +454,17 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
 
   useEffect(() => {
     void refresh()
-    const timer = window.setInterval(() => void refresh(), REFRESH_MS)
+    if (view === "sessions" || view === "classic") return
+    const timer = window.setInterval(() => {
+      if (pageIsVisible()) void refresh()
+    }, REFRESH_MS)
     return () => window.clearInterval(timer)
-  }, [refresh])
+  }, [refresh, view])
 
   const records = useMemo(() => runtimes.flatMap((runtime) => runtime.tasks.map((task) => ({ key: `${runtime.key}|${task.id}`, runtime, task }))), [runtimes])
   const selected = records.find((record) => record.key === selectedKey) || null
 
-  const loadDetail = useCallback(async (record: TaskRecord, silent = false) => {
+  const loadDetail = useCallback(async (record: TaskRecord, tab: DetailTab, silent = false) => {
     if (detailInFlight.current && silent) return
     detailInFlight.current = true
     const generation = ++detailGeneration.current
@@ -473,11 +480,15 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
       }
       const config = configForAgent(record.runtime, agent)
       const directory = record.task.run?.directory || record.task.workspace.path
+      const needsMessages = tab === "review" || tab === "conversation"
+      const needsDiff = tab === "review" || tab === "diff"
+      const needsTodos = tab === "review"
+      const needsVcs = tab === "review"
       const [messages, diff, todos, vcs, result] = await Promise.all([
-        api.loadMessages(config, sessionID, directory).catch(() => []),
-        api.loadDiff(config, sessionID, directory).catch(() => []),
-        api.loadTodo(config, sessionID, directory).catch(() => []),
-        api.loadVcs(config, directory).catch(() => null),
+        needsMessages ? api.loadMessages(config, sessionID, directory).catch(() => []) : Promise.resolve([] as MessageEnvelope[]),
+        needsDiff ? api.loadDiff(config, sessionID, directory).catch(() => []) : Promise.resolve([] as DiffFile[]),
+        needsTodos ? api.loadTodo(config, sessionID, directory).catch(() => []) : Promise.resolve([] as TodoItem[]),
+        needsVcs ? api.loadVcs(config, directory).catch(() => null) : Promise.resolve(null as VcsStatus | null),
         resultPromise
       ])
       if (generation !== detailGeneration.current) return
@@ -492,15 +503,17 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
   useEffect(() => {
     detailGeneration.current += 1
     detailInFlight.current = false
-    if (!selected || !detailOpen) {
+    if (view !== "tasks" || !selected || !detailOpen) {
       setDetail(emptyDetail())
       return
     }
     setDetail(emptyDetail(selected.key, true))
-    void loadDetail(selected, false)
-    const timer = window.setInterval(() => void loadDetail(selected, true), DETAIL_REFRESH_MS)
+    void loadDetail(selected, detailTab, false)
+    const timer = window.setInterval(() => {
+      if (pageIsVisible()) void loadDetail(selected, detailTab, true)
+    }, DETAIL_REFRESH_MS)
     return () => window.clearInterval(timer)
-  }, [selected?.key, selected?.task.updatedAt, detailOpen, loadDetail])
+  }, [selected?.key, selected?.task.updatedAt, detailOpen, detailTab, view, loadDetail])
 
   const scopedRecords = useMemo(() => records.filter((record) => machineScope === "all" || record.runtime.machine.id === machineScope), [records, machineScope])
   const filteredRecords = useMemo(() => {
