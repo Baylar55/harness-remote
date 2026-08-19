@@ -31,7 +31,7 @@ export class TaskRunController {
     const service = this.acpService?.(task.agentId)
     if (!service) return
     const title = task.prompt?.trim().split("\n")[0].slice(0, 60)
-    try { await service.adoptTaskSession(task.run.sessionId, { title, prompt: task.prompt }) } catch {}
+    try { await service.adoptTaskSession(task.run.sessionId, { title, prompt: task.run?.prompt || task.prompt }) } catch {}
   }
 
   async reconcileAll() {
@@ -70,31 +70,54 @@ export class TaskRunController {
     return { task: updated, cleanup }
   }
 
-  async launch(taskID) {
+  async launch(taskID, options = {}) {
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
-    if (task.status !== "draft") throw taskLaunchError("invalid_state", "Only draft tasks can be launched")
-    if (task.project?.kind === "git" && task.workspace?.mode !== "worktree") throw taskLaunchError("workspace_required", "Git tasks must prepare an isolated worktree before launch")
+    if (!["draft", "completed", "failed", "cancelled"].includes(task.status)) {
+      throw taskLaunchError("invalid_state", "Only draft or terminal tasks can start a run")
+    }
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
 
-    const run = { id: this.runIDFactory(), agentId: task.agentId, sessionId: null, transport: null, directory: task.workspace.path, startedAt: this.clock() }
+    const requestedPrompt = typeof options.prompt === "string" ? options.prompt.trim() : ""
+    const runPrompt = requestedPrompt || task.prompt
+    if (!runPrompt) throw taskLaunchError("invalid_state", "A run prompt is required")
+
+    const run = {
+      id: this.runIDFactory(),
+      agentId: task.agentId,
+      sessionId: null,
+      transport: null,
+      directory: task.workspace.path,
+      prompt: runPrompt,
+      startedAt: this.clock()
+    }
     let current = await this.taskStore.setRunState(taskID, { status: "starting", run })
+    const currentForRun = () => ({ ...current, prompt: runPrompt })
     try {
-      const session = await this.taskLauncher.createSession(current)
+      const session = await this.taskLauncher.createSession(currentForRun())
       const linkedRun = { ...run, sessionId: session.sessionId, transport: session.transport }
       current = await this.taskStore.setRunState(taskID, { status: "starting", run: linkedRun, expectedRunId: run.id })
-      // A transport may complete or fail synchronously as startPrompt attaches its callbacks.
-      // Persist running first, so those callbacks can make a legal running -> terminal transition.
       current = await this.taskStore.setRunState(taskID, { status: "running", run: linkedRun, expectedRunId: linkedRun.id })
       const onFailed = (error) => void this.#terminal(taskID, linkedRun, "failed", error)
       onFailed.onFailed = onFailed
       onFailed.onCompleted = () => void this.#terminal(taskID, linkedRun, "completed")
-      await this.taskLauncher.startPrompt(current, session, onFailed)
+      await this.taskLauncher.startPrompt(currentForRun(), session, onFailed)
       return current
     } catch (error) {
       await this.#terminal(taskID, current.run ?? run, "failed", error)
       throw error
     }
+  }
+
+  async continue(taskID, prompt) {
+    const text = typeof prompt === "string" ? prompt.trim() : ""
+    if (!text) throw taskLaunchError("invalid_state", "A continuation prompt is required")
+    const task = await this.taskStore.get(taskID)
+    if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
+    if (!["completed", "failed", "cancelled"].includes(task.status)) {
+      throw taskLaunchError("invalid_state", "Only a terminal task can start another run")
+    }
+    return this.launch(taskID, { prompt: text })
   }
 }
