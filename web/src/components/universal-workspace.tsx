@@ -42,12 +42,12 @@ const REFRESH_INTERVAL_MS = 4_000
 const DETAIL_REFRESH_INTERVAL_MS = 2_500
 const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000
 const PINNED_STORAGE_KEY = "harness-remote.universal-workspace.pinned"
-const HARNESS_ICON_URLS: Record<string, string> = {
-  codex: "https://openai.com/favicon.ico",
-  claude: "https://claude.ai/favicon.ico",
-  opencode: "https://opencode.ai/favicon.ico",
-  omp: "https://omp.sh/favicon.ico",
-  pi: "https://pi.dev/favicon.ico"
+const HARNESS_ICON_FILES: Record<string, string> = {
+  codex: "codex.svg",
+  claude: "claude.svg",
+  opencode: "opencode.svg",
+  omp: "omp.svg",
+  pi: "pi.svg"
 }
 
 type WorkspaceFilter = "all" | "working" | "needs-you" | "idle" | "pinned"
@@ -207,6 +207,11 @@ function modelOptionKey(model: ModelSelection): string {
   return `${model.providerID}/${model.modelID}/${model.variant || ""}`
 }
 
+function harnessIconUrl(backend: string): string | undefined {
+  const file = HARNESS_ICON_FILES[backend.toLowerCase()]
+  return file ? `${import.meta.env.BASE_URL}harness-icons/${file}` : undefined
+}
+
 function uniqueEndpointProfiles(profiles: SavedServerProfile[]): SavedServerProfile[] {
   const seen = new Set<string>()
   return profiles.filter((profile) => {
@@ -359,7 +364,7 @@ function ToolCard({ message }: { message: MessageEnvelope }) {
 
 function HarnessAvatar({ backend, label }: { backend: string; label: string }) {
   const [failed, setFailed] = useState(false)
-  const source = HARNESS_ICON_URLS[backend.toLowerCase()]
+  const source = harnessIconUrl(backend)
   return (
     <div className="uw-avatar uw-avatar-agent" title={label}>
       {source && !failed ? (
@@ -1004,7 +1009,6 @@ export function UniversalWorkspace({
           const preview = latestReadableText(latest)
           if (preview) setPreviews((current) => current[item.key] === preview ? current : { ...current, [item.key]: preview })
         } catch {
-          // A preview is optional. The session itself remains fully usable.
         }
       }))
     } catch (reason) {
