@@ -31,7 +31,7 @@ function manager({ dirty = false, branchMissing = false } = {}) {
       if (args.at(-1) === "HEAD") return { stdout: "source-head\n" }
       return { stdout: "branch-head\n" }
     },
-    async cleanup() { return { removed: true, branchDeleted: false } }
+    async cleanup() { throw new Error("finish must not clean the workspace") }
   }
 }
 
@@ -53,16 +53,16 @@ test("result inspection falls back to the worktree head when the branch ref is m
   assert.equal(result.mergedIntoSource, false)
 })
 
-test("finish releases an inactive clean worktree and preserves its result", async () => {
+test("finish marks an inactive task finished while preserving its worktree and result", async () => {
   const innerServer = new EventEmitter()
-  let cleared = false
-  const task = { id: "t", status: "completed", workspace, project: { path: "/repo" } }
+  let marked = false
+  const task = { id: "t", status: "completed", workspace, project: { path: "/repo" }, finishedAt: null }
   const server = createTaskFinishServer({
     innerServer,
     config: { username: "", password: "", corsOrigins: [] },
     taskStore: {
       async get() { return task },
-      async clearWorkspace() { cleared = true; return { ...task, workspace: { mode: "project", path: "/repo" } } }
+      async markFinished() { marked = true; return { ...task, finishedAt: "2026-08-19T14:00:00.000Z" } }
     },
     worktreeManager: manager()
   })
@@ -72,9 +72,34 @@ test("finish releases an inactive clean worktree and preserves its result", asyn
     assert.equal(response.status, 200)
     const body = await response.json()
     assert.equal(body.result.commitsAhead, 3)
-    assert.equal(body.cleanup.branchDeleted, false)
-    assert.equal(body.task.workspace.mode, "project")
-    assert.equal(cleared, true)
+    assert.deepEqual(body.cleanup, { removed: false, branchDeleted: false })
+    assert.equal(body.task.workspace.mode, "worktree")
+    assert.equal(body.task.finishedAt, "2026-08-19T14:00:00.000Z")
+    assert.equal(marked, true)
+  } finally {
+    await close(server)
+  }
+})
+
+test("finish may close a task with uncommitted work because cleanup is a separate action", async () => {
+  const innerServer = new EventEmitter()
+  const task = { id: "t", status: "completed", workspace, project: { path: "/repo" } }
+  const server = createTaskFinishServer({
+    innerServer,
+    config: { username: "", password: "", corsOrigins: [] },
+    taskStore: {
+      async get() { return task },
+      async markFinished() { return { ...task, finishedAt: "2026-08-19T14:00:00.000Z" } }
+    },
+    worktreeManager: manager({ dirty: true })
+  })
+  const port = await listen(server)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tasks/t/finish`, { method: "POST" })
+    assert.equal(response.status, 200)
+    const body = await response.json()
+    assert.equal(body.result.dirty, true)
+    assert.equal(body.result.changeCount, 1)
   } finally {
     await close(server)
   }
@@ -92,7 +117,7 @@ test("finish waits for restart reconciliation before deciding whether a task is 
     config: { username: "", password: "", corsOrigins: [] },
     taskStore: {
       async get() { return task },
-      async clearWorkspace() { return { ...task, workspace: { mode: "project", path: "/repo" } } }
+      async markFinished() { return { ...task, finishedAt: "2026-08-19T14:00:00.000Z" } }
     },
     worktreeManager: manager(),
     taskRunController
