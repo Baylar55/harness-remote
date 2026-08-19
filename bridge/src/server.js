@@ -289,8 +289,17 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           return
         }
         if (request.method === "GET" && operation === "message") {
-          const messages = await service.messages(sessionID, url.searchParams.get("refresh") === "1")
           const limit = messageLimit(url)
+          // TaskDesk used to ask for the latest message of 18 sessions every four seconds. On ACP
+          // those reads materialise complete harness journals before slicing, so one tiny preview
+          // could cost an entire transcript. In daemon mode previews are intentionally omitted until
+          // the session index carries its own lightweight preview field. The UI already falls back
+          // to directory/summary metadata, and opening the session still loads the real transcript.
+          if (machineRegistry && limit === 1 && url.searchParams.get("refresh") !== "1") {
+            writeJSON(response, 200, [])
+            return
+          }
+          const messages = await service.messages(sessionID, url.searchParams.get("refresh") === "1")
           writeJSON(response, 200, limit === undefined ? messages : messages.slice(-limit))
           return
         }
