@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequest, isDesktopPlatform } from "./desktopBridge"
+import { normalizeNativeResponseData } from "./nativeResponse"
 import { streamURL } from "./opencode-events"
 import { authHeader, baseUrl, hasCredentials, isValidServerConfig, routingHeaders } from "./serverConfig"
 import type { AttachmentPart } from "./attachments"
@@ -81,23 +82,6 @@ function normalizeHeaders(headers: Record<string, unknown> | undefined): Record<
   return Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value.join(", ") : String(value)])
   )
-}
-
-/**
- * CapacitorHttp normally decodes JSON, but native engines can still hand a JSON response back as a
- * string depending on the server headers and platform. The browser path always calls response.json(),
- * so returning the string unchanged makes Android the only client that can turn a session array into
- * an iterable string. Parse JSON-looking native strings here while preserving ordinary text bodies.
- */
-function normalizeNativeResponseData(data: unknown): unknown {
-  if (typeof data !== "string") return data
-  const trimmed = data.trim()
-  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) return data
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return data
-  }
 }
 
 type ConfigProvidersResponse = {

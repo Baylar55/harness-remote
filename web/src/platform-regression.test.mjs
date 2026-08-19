@@ -15,8 +15,10 @@ assert.match(api, /if \(isDesktopPlatform\(\)\)/, 'Electron must select desktop 
 assert.match(api, /desktopRequest\(config,/, 'Desktop request must resolve profile only after synchronization finishes')
 assert.doesNotMatch(api, /desktopProfileID\(config\)/, 'API must not resolve an unacknowledged desktop profile before waiting for synchronization')
 assert.match(desktopBridge, /profileId: string/, 'Desktop stream adapter must accept profile ID, not URL')
-assert.match(api, /function normalizeNativeResponseData\(data: unknown\): unknown/, 'Native transport must normalize stringified JSON payloads')
-assert.match(api, /return JSON\.parse\(trimmed\)/, 'Native JSON normalizer must parse JSON-looking strings')
+// What this suite is about is transport selection, so it checks that the native branch is the one
+// wired to the normalizer. The rule the normalizer implements is exercised for real in
+// native-response.test.mjs rather than asserted against the text of its own source.
+assert.match(api, /from "\.\/nativeResponse"/, 'Native normalization must come from the module that is unit tested')
 assert.match(api, /normalizeNativeResponseData\(response\.data\) as T/, 'Capacitor responses must use native JSON normalization before reaching API callers')
 assert.match(machineClient, /if \(typeof parsed === "string"\)/, 'native machine discovery must accept a JSON string payload')
 assert.match(machineClient, /parsed = JSON\.parse\(parsed\)/, 'stringified machine discovery payloads must be decoded')
