@@ -32,6 +32,34 @@ test("POST launch returns the persisted running task", async () => {
   }
 })
 
+test("POST continue forwards the new run prompt", async () => {
+  const innerServer = new EventEmitter()
+  const calls = []
+  const server = createTaskLaunchServer({
+    innerServer,
+    config: { username: "", password: "", corsOrigins: [] },
+    taskRunController: {
+      async continue(id, prompt) {
+        calls.push([id, prompt])
+        return { id, status: "running", run: { id: "run-2", sessionId: "session-2", prompt } }
+      }
+    }
+  })
+  const port = await listen(server)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tasks/task-1/continue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "Add tests" })
+    })
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).run.sessionId, "session-2")
+    assert.deepEqual(calls, [["task-1", "Add tests"]])
+  } finally {
+    await close(server)
+  }
+})
+
 test("launch maps coded missing tasks to 404 and delegates unrelated routes", async () => {
   const innerServer = new EventEmitter()
   let delegated = false
