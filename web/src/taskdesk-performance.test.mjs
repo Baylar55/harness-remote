@@ -49,3 +49,14 @@ test("ACP bridge has lightweight session indexing, bounded message responses and
   assert.match(source, /messages\.slice\(-limit\)/)
   assert.match(source, /url\.pathname === "\/v1\/diagnostics"/)
 })
+
+test("TaskDesk mobile keeps Agents aligned and exposes Sessions without translucent overlays", () => {
+  const polish = readFileSync(new URL("./v3-polish.css", import.meta.url), "utf8")
+
+  assert.match(polish, /article:has\(> \.td3-agent-badge\)[\s\S]*?grid-template-columns: minmax\(152px, 178px\) minmax\(0, 1fr\)/)
+  assert.match(polish, /\.td3-tasks-layout-unified\.detail-open \.td3-task-list-pane[\s\S]*?display: none/)
+  assert.match(polish, /\.td3-task-detail-open[\s\S]*?background: #080e17[\s\S]*?box-shadow: none/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-layout[\s\S]*?grid-template-rows: minmax\(180px, 34%\) minmax\(0, 1fr\)/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-session-column[\s\S]*?transform: none/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-main[\s\S]*?position: relative[\s\S]*?background: #080e17/)
+})
