@@ -56,16 +56,7 @@ test("TaskDesk sorts Tasks by durable task activity rather than session order", 
   assert.deepEqual(sortTasksByActivity([older, newer]).map((item) => item.id), ["newer", "older"])
 })
 
-test("Universal workspace cannot starve initial loading with overlapping polls", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-  assert.match(source, /const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000/)
-  assert.match(source, /const refreshInFlight = useRef\(false\)/)
-  assert.match(source, /if \(refreshInFlight\.current\) return/)
-  assert.match(source, /await withTimeout\(Promise\.all\(\[/)
-  assert.match(source, /refreshInFlight\.current = false/)
-})
-
-test("Universal workspace machine configuration is independent from Classic profiles", () => {
+test("TaskDesk machine configuration remains independent from Classic profiles", () => {
   const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
   const machineStorage = readFileSync(new URL("./workspaceMachines.ts", import.meta.url), "utf8")
   const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
@@ -75,8 +66,75 @@ test("Universal workspace machine configuration is independent from Classic prof
   assert.match(taskDeskBoundary[0], /loadWorkspaceMachines/)
   assert.doesNotMatch(taskDeskBoundary[0], /loadServerProfiles/)
   assert.match(machineStorage, /harness-remote\.workspace\.machines\.v1/)
+  assert.match(standalone, /<TaskDeskV3/)
   assert.match(standalone, /\+ Add machine/)
-  assert.match(standalone, /Classic connections are separate/)
+})
+
+test("TaskDesk v3 exposes Tasks as a separate durable product surface", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /type TaskDeskView = "overview" \| "tasks" \| "sessions"/)
+  assert.match(source, />Tasks</)
+  assert.match(source, />Sessions</)
+  assert.match(source, /Task → Run → Session/)
+  assert.match(source, /Run history/)
+  assert.match(source, /taskRunHistory\(selected\.task\)/)
+  assert.match(source, /<UniversalWorkspace/)
+})
+
+test("TaskDesk v3 New Task uses real machine task APIs and explicit workspace choice", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /taskClient\.createTask/)
+  assert.match(source, /taskClient\.prepareWorktree/)
+  assert.match(source, /taskClient\.launch/)
+  assert.match(source, /Use an isolated Git worktree/)
+  assert.match(source, /Project directory/)
+  assert.match(source, /Machine -> Project -> Agent -> Model -> Workspace -> Task|machine, project, model and workspace/i)
+})
+
+test("TaskDesk v3 Task detail uses the native Run session and lifecycle APIs", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+  const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
+
+  assert.match(source, /api\.loadMessages\(config, sessionID, directory\)/)
+  assert.match(source, /api\.loadDiff\(config, sessionID, directory\)/)
+  assert.match(source, /taskClient\.inspectResult/)
+  assert.match(source, /taskClient\.finish/)
+  assert.match(source, /taskClient\.cleanupWorkspace/)
+  assert.match(source, /taskClient\.continueTask/)
+  assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/continue/)
+  assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/finish/)
+  assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/result/)
+})
+
+test("TaskDesk v3 protects Task detail from stale asynchronous responses", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /const detailGeneration = useRef\(0\)/)
+  assert.match(source, /const generation = \+\+detailGeneration\.current/)
+  assert.match(source, /if \(generation !== detailGeneration\.current\) return/)
+  assert.match(source, /ownerKey: record\.key/)
+  assert.match(source, /detail\.ownerKey === selected\.key/)
+})
+
+test("TaskDesk v3 aggregates native questions and permissions into Needs You", () => {
+  const source = readFileSync(new URL("./components/taskdesk-v3.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /api\.loadQuestions\(config\)/)
+  assert.match(source, /api\.loadPermissions\(config\)/)
+  assert.match(source, /api\.replyPermission/)
+  assert.match(source, /api\.replyQuestion/)
+  assert.match(source, />Needs You</)
+})
+
+test("Universal workspace cannot starve initial loading with overlapping polls", () => {
+  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+  assert.match(source, /const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000/)
+  assert.match(source, /const refreshInFlight = useRef\(false\)/)
+  assert.match(source, /if \(refreshInFlight\.current\) return/)
+  assert.match(source, /await withTimeout\(Promise\.all\(\[/)
+  assert.match(source, /refreshInFlight\.current = false/)
 })
 
 test("Universal workspace counts and projects follow the selected machine scope", () => {

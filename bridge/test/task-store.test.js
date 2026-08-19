@@ -27,6 +27,8 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
       status: "draft",
       workspace: { mode: "project", path: "/work/repo" },
       run: null,
+      runs: [],
+      error: null,
       createdAt: "2026-08-13T13:00:00.000Z",
       updatedAt: "2026-08-13T13:00:00.000Z"
     })
@@ -37,6 +39,25 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
     assert.equal(disk.version, 1)
     assert.equal(disk.machineId, "machine-1")
     assert.deepEqual(disk.tasks, [created])
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
+test("legacy single-run tasks load with a compatible runs history", async () => {
+  const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-history-"))
+  try {
+    const store = new TaskStore({ machineID: "machine-1", stateDirectory })
+    await mkdir(stateDirectory, { recursive: true })
+    const legacyRun = { id: "run-1", sessionId: "session-1", startedAt: "2026-08-13T13:00:00.000Z" }
+    await writeFile(store.file, JSON.stringify({
+      version: 1,
+      machineId: "machine-1",
+      tasks: [{ id: "task-1", status: "completed", run: legacyRun }]
+    }), "utf8")
+    const [loaded] = await store.list()
+    assert.deepEqual(loaded.runs, [legacyRun])
+    assert.deepEqual(loaded.run, legacyRun)
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }

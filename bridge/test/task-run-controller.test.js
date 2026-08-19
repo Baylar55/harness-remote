@@ -11,6 +11,7 @@ function draft(overrides = {}) {
     project: { kind: "git", path: "/repo" },
     workspace: { mode: "worktree", path: "/state/worktrees/task-1" },
     run: null,
+    runs: [],
     ...overrides
   }
 }
@@ -31,7 +32,7 @@ test("launch persists run identity before starting the prompt and ends running",
       calls.push(["session", task.status])
       return { sessionId: "session-1", transport: "acp", directory: task.workspace.path }
     },
-    async startPrompt(task, session) { calls.push(["prompt", task.status, session.sessionId]) }
+    async startPrompt(task, session) { calls.push(["prompt", task.status, session.sessionId, task.prompt]) }
   }
   const controller = new TaskRunController({ taskStore: store, taskLauncher: launcher, runIDFactory: () => "run-1", clock: () => "2026-08-13T18:00:00.000Z" })
 
@@ -44,7 +45,7 @@ test("launch persists run identity before starting the prompt and ends running",
     ["session", "starting"],
     ["state", "starting", "session-1"],
     ["state", "running", "session-1"],
-    ["prompt", "running", "session-1"]
+    ["prompt", "running", "session-1", "Fix it"]
   ])
 })
 
@@ -71,9 +72,67 @@ test("a synchronous prompt completion cannot race the starting to running transi
   assert.equal(current.status, "completed")
 })
 
-test("Git tasks cannot launch from the primary checkout", async () => {
-  const controller = new TaskRunController({ taskStore: { async get() { return draft({ workspace: { mode: "project", path: "/repo" } }) } }, taskLauncher: {} })
-  await assert.rejects(() => controller.launch("task-1"), /isolated worktree/)
+test("Git tasks can intentionally launch from the project checkout", async () => {
+  let current = draft({ workspace: { mode: "project", path: "/repo" } })
+  const store = {
+    async get() { return structuredClone(current) },
+    async setRunState(_id, update) {
+      current = { ...current, status: update.status, run: structuredClone(update.run) }
+      return structuredClone(current)
+    }
+  }
+  const controller = new TaskRunController({
+    taskStore: store,
+    taskLauncher: {
+      async createSession(task) {
+        assert.equal(task.workspace.mode, "project")
+        assert.equal(task.workspace.path, "/repo")
+        return { sessionId: "session-project", transport: "acp" }
+      },
+      async startPrompt() {}
+    },
+    runIDFactory: () => "run-project"
+  })
+  const launched = await controller.launch("task-1")
+  assert.equal(launched.status, "running")
+  assert.equal(launched.run.directory, "/repo")
+})
+
+test("a terminal task can continue with a new run and prompt", async () => {
+  let current = draft({
+    status: "completed",
+    run: { id: "run-1", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1" },
+    runs: [{ id: "run-1", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1" }]
+  })
+  let createdPrompt
+  let sentPrompt
+  const store = {
+    async list() { return [] },
+    async get() { return structuredClone(current) },
+    async setRunState(_id, update) {
+      current = { ...current, status: update.status, run: structuredClone(update.run) }
+      return structuredClone(current)
+    }
+  }
+  const controller = new TaskRunController({
+    taskStore: store,
+    taskLauncher: {
+      async createSession(task) {
+        createdPrompt = task.prompt
+        return { sessionId: "session-2", transport: "acp", directory: task.workspace.path }
+      },
+      async startPrompt(task) { sentPrompt = task.prompt }
+    },
+    runIDFactory: () => "run-2"
+  })
+
+  const continued = await controller.continue("task-1", "Now add regression tests")
+  assert.equal(continued.status, "running")
+  assert.equal(continued.run.id, "run-2")
+  assert.equal(continued.run.sessionId, "session-2")
+  assert.equal(continued.run.prompt, "Now add regression tests")
+  assert.equal(createdPrompt, "Now add regression tests")
+  assert.equal(sentPrompt, "Now add regression tests")
 })
 
 test("launch failures persist failed state", async () => {

@@ -13,6 +13,16 @@ function taskError(code, message) {
   return error
 }
 
+function normalizeTaskHistory(task) {
+  if (!task || typeof task !== "object") return task
+  const runs = Array.isArray(task.runs)
+    ? task.runs
+    : task.run
+      ? [task.run]
+      : []
+  return { ...task, runs }
+}
+
 export class TaskStore {
   constructor({ machineID, stateDirectory, idFactory = randomUUID, clock = () => new Date().toISOString(), warn = (message) => process.stderr.write(`${message}\n`) }) {
     this.machineID = machineID
@@ -29,7 +39,8 @@ export class TaskStore {
     if (this.loaded) return
     try {
       const parsed = JSON.parse(await readFile(this.file, "utf8"))
-      this.tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+      const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+      this.tasks = tasks.map(normalizeTaskHistory)
     } catch (error) {
       if (error?.code === "ENOENT") {
         this.tasks = []
@@ -80,6 +91,8 @@ export class TaskStore {
       status: "draft",
       workspace: { mode: "project", path: project.path },
       run: null,
+      runs: [],
+      error: null,
       createdAt: timestamp,
       updatedAt: timestamp
     }
