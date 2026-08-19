@@ -22,6 +22,27 @@ export function baseUrl(config: ServerConfig): string {
   return agentID ? `${machine}/v1/agents/${encodeURIComponent(agentID)}` : machine
 }
 
+/**
+ * The daemon corrects a stale or wrongly-scoped agent id from this header, so it is what keeps a
+ * profile pointed at the harness the user chose even when the path scope cannot be trusted. It lives
+ * here rather than beside either transport because the browser and the desktop app have separate
+ * request paths, and a header only one of them sent is how the desktop app came to route every
+ * server to the daemon's primary agent.
+ *
+ * A direct OpenCode server does not know the header and may reject it during CORS preflight, so a
+ * profile with no agent id — which is what a pre-daemon OpenCode connection looks like — sends none
+ * from the browser. Nothing preflights a request made from the desktop app's main process or from a
+ * native HTTP client, and a server that does not know the header simply ignores it, so those pass
+ * `preflight: false` and keep the hint that tells a daemon which harness was asked for.
+ */
+export function routingHeaders(
+  config: Pick<ServerConfig, "backend" | "agentId">,
+  { preflight = true }: { preflight?: boolean } = {}
+): Record<string, string> {
+  if (preflight && config.backend === "opencode" && !config.agentId?.trim()) return {}
+  return { "X-Harness-Backend": config.backend }
+}
+
 /** Useful when a caller already has a path and does not build through baseUrl. */
 export function agentScopedPath(config: ServerConfig, path: string): string {
   const agentID = config.agentId?.trim()

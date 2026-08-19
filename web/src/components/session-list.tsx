@@ -216,7 +216,10 @@ export function SessionSidebar({
       </div>
       <div className="sidebar-sessions" ref={sidebarSessionsRef} onScroll={onScroll}>
         {groups.length === 0 ? <p className="subtle sidebar-empty">{offline ? t('sessions.offlineHint') : t('sessions.emptyTitle')}</p> : groups.map((group) => (
-          <section key={group.directory} className="sidebar-group">
+          // Groups only merge runs of adjacent sessions, and the list is ordered by activity, so one
+          // directory legitimately produces several groups. Keying on the directory made those
+          // collide, and React reserves the right to drop or duplicate children when it happens.
+          <section key={`${group.directory}:${group.sessions[0].id}`} className="sidebar-group">
             <div className="sidebar-group-label" title={group.directory}><FolderIcon size={12} /><span>{projectLabel(group.directory)}</span><span className="sidebar-group-count">{group.sessions.length}</span></div>
             {group.sessions.map((session) => <SessionCard key={session.id} session={session} {...sessionCardProps} />)}
           </section>

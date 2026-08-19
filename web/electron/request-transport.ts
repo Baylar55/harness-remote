@@ -1,4 +1,4 @@
-import { agentScopedPath, machineBaseUrl } from "../src/serverConfig.js"
+import { agentScopedPath, machineBaseUrl, routingHeaders } from "../src/serverConfig.js"
 import type { DesktopProfile, DesktopRequest, DesktopRequestResult } from "./ipc-contract.js"
 
 export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -61,6 +61,14 @@ async function readBoundedBody(response: Response, onReader?: (reader: ReadableS
   return new TextDecoder().decode(bytes)
 }
 
+/**
+ * What the machine daemon answers itself rather than handing to one agent's bridge: the machine
+ * descriptor, the project and task surface behind TaskDesk, and any path the caller already scoped
+ * to an agent of its own choosing. Prefixing these with the profile's agent aims them at a bridge
+ * where they do not exist, so the profile's scope applies to everything except these.
+ */
+const MACHINE_SCOPED_PATH = /^\/(?:v1\/machine|global\/machine|v1\/projects|v1\/tasks(?:\/|$)|v1\/agents\/)/
+
 function validPath(path: unknown): path is string {
   return typeof path === "string"
     && path.length <= MAX_PATH_LENGTH
@@ -77,9 +85,13 @@ function targetURL(profile: DesktopProfile, path: string): URL | null {
   } catch {
     return null
   }
-  const machineScoped = path === "/v1/machine" || path === "/global/machine"
-  const scopedPath = machineScoped ? path : agentScopedPath(profile, path)
   let target: URL
+  try {
+    target = new URL(path, approved.origin)
+  } catch {
+    return null
+  }
+  const scopedPath = MACHINE_SCOPED_PATH.test(target.pathname) ? path : agentScopedPath(profile, path)
   try {
     target = new URL(scopedPath, approved.origin)
   } catch {
@@ -126,7 +138,7 @@ export async function executeDesktopRequest(profile: DesktopProfile, request: De
     controller.abort()
     void activeReader?.cancel().catch(() => undefined)
   }, timeout)
-  const headers: Record<string, string> = { Accept: "application/json" }
+  const headers: Record<string, string> = { Accept: "application/json", ...routingHeaders(profile, { preflight: false }) }
   if (profile.username && profile.password) {
     headers.Authorization = `Basic ${Buffer.from(`${profile.username}:${profile.password}`, "utf8").toString("base64")}`
   }

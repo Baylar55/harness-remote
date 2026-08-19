@@ -6,6 +6,7 @@ import { api, isValidServerConfig } from "./api"
 import { backendDisplayName } from "./backendSetup"
 import { installCompletionAudioGuard } from "./completion-audio"
 import { ConnectServerWizard } from "./components/panels"
+import { StandaloneUniversalWorkspace } from "./components/standalone-universal-workspace"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { createTranslator, normalizeLanguage } from "./i18n"
 import { discoverMachine } from "./machineClient"
@@ -17,14 +18,19 @@ import {
 } from "./serverProfiles"
 import { SERVER_STORAGE_KEYS } from "./storageKeys"
 import type { MachineSnapshot, ServerConfig } from "./types"
+import {
+  loadWorkspaceMachines,
+  persistWorkspaceMachines,
+  type WorkspaceMachine
+} from "./workspaceMachines"
 import "./styles.css"
 import "./v3-polish.css"
+import "./universal-workspace.css"
+import "./universal-workspace-readable.css"
+import "./universal-workspace-readable-fixes.css"
 
 installCompletionAudioGuard()
 
-// Creating a session is a deliberate multi-step action. A stray click on the dimmed page around
-// the dialog must not throw the user's folder selection away; only the dialog's explicit close or
-// cancel controls dismiss it.
 document.addEventListener("click", (event) => {
   const target = event.target
   if (!(target instanceof HTMLElement) || !target.classList.contains("modal-backdrop")) return
@@ -53,7 +59,8 @@ function profileRoutingKey(profileID: string, config: ServerConfig): string {
   })
 }
 
-function AppProfileBoundary() {
+/** Classic keeps its existing saved-server lifecycle. It is intentionally isolated from TaskDesk machines. */
+function ClassicBoundary() {
   const [revision, setRevision] = useState(0)
   const [checkedRoutingKey, setCheckedRoutingKey] = useState<string | null>(null)
   const profiles = useMemo(loadServerProfiles, [revision])
@@ -68,9 +75,6 @@ function AppProfileBoundary() {
 
   useEffect(() => {
     const onProfileChanged = () => {
-      // Settings edits can persist while the user is still typing. If a stale profile-change event
-      // lands during that edit, remounting App would close the modal and start a connection using a
-      // half-edited draft. Keep the editor stable; explicit server selection already updates App.
       if (document.querySelector(".settings")) return
       setCheckedRoutingKey(null)
       setRevision((value) => value + 1)
@@ -105,6 +109,12 @@ function AppProfileBoundary() {
     }
   }, [activeProfile, needsRoutingDiscovery, profiles, routingKey])
 
+  const persistClassicProfiles = (nextProfiles: typeof profiles, nextActiveProfileID: string) => {
+    persistServerProfiles(nextProfiles, nextActiveProfileID)
+    setCheckedRoutingKey(null)
+    setRevision((value) => value + 1)
+  }
+
   if (needsInitialSetup) {
     return (
       <ConnectServerWizard
@@ -136,9 +146,7 @@ function AppProfileBoundary() {
                 ? { ...profile, name: name.trim() || profile.name, config: routedConfig }
                 : profile
             )
-            persistServerProfiles(nextProfiles, activeProfile.id)
-            setCheckedRoutingKey(null)
-            setRevision((value) => value + 1)
+            persistClassicProfiles(nextProfiles, activeProfile.id)
           })()
         }}
       />
@@ -158,8 +166,26 @@ function AppProfileBoundary() {
   return <App key={revision} />
 }
 
+function TaskDeskBoundary() {
+  const [revision, setRevision] = useState(0)
+  const machines = useMemo(loadWorkspaceMachines, [revision])
+
+  const persistMachines = (nextMachines: WorkspaceMachine[]) => {
+    persistWorkspaceMachines(nextMachines)
+    setRevision((value) => value + 1)
+  }
+
+  return (
+    <StandaloneUniversalWorkspace
+      machines={machines}
+      onPersistMachines={persistMachines}
+      legacyView={<ClassicBoundary />}
+    />
+  )
+}
+
 async function renderApp() {
-  let content: React.ReactNode = <AppProfileBoundary />
+  let content: React.ReactNode = <TaskDeskBoundary />
   if (taskDeskTestMode) {
     const { TaskDeskTestPage } = await import("./TaskDeskTestPage")
     content = <TaskDeskTestPage />
@@ -175,6 +201,19 @@ async function renderApp() {
 }
 
 void renderApp()
+
+if (import.meta.env.DEV && !Capacitor.isNativePlatform() && !window.harnessDesktop?.platform.isDesktop) {
+  if ("serviceWorker" in navigator) {
+    void navigator.serviceWorker.getRegistrations().then((registrations) =>
+      Promise.all(registrations.map((registration) => registration.unregister()))
+    )
+  }
+  if ("caches" in window) {
+    void caches.keys().then((keys) =>
+      Promise.all(keys.filter((key) => key.startsWith("harness-remote-")).map((key) => caches.delete(key)))
+    )
+  }
+}
 
 if (import.meta.env.PROD && !Capacitor.isNativePlatform() && !window.harnessDesktop?.platform.isDesktop && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {

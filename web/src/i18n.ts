@@ -114,6 +114,7 @@ type TranslationKey =
   | 'detail.nothingToUndo'
   | 'detail.nothingToRedo'
   | 'detail.revertToMessage'
+  | 'detail.turnFailed'
   | 'detail.undoConfirm'
   | 'detail.revertConfirm'
   | 'detail.send'
@@ -410,6 +411,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.nothingToUndo': 'Nothing to undo in this session.',
     'detail.nothingToRedo': 'Nothing to redo in this session.',
     'detail.revertToMessage': 'Revert to this message',
+    'detail.turnFailed': 'The reply failed:',
     'detail.undoConfirm': 'Undo the last turn and restore its file changes?',
     'detail.revertConfirm': 'Revert the conversation and file changes to this message?',
     'detail.send': 'Send',
@@ -705,6 +707,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.nothingToUndo': 'Non c’è nulla da annullare in questa sessione.',
     'detail.nothingToRedo': 'Non c’è nulla da ripristinare in questa sessione.',
     'detail.revertToMessage': 'Ripristina fino a questo messaggio',
+    'detail.turnFailed': 'La risposta è fallita:',
     'detail.undoConfirm': 'Annullare l’ultimo turno e ripristinare le sue modifiche ai file?',
     'detail.revertConfirm': 'Ripristinare conversazione e modifiche ai file fino a questo messaggio?',
     'detail.send': 'Invia',
@@ -1000,6 +1003,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.nothingToUndo': '此工作階段沒有可復原的內容。',
     'detail.nothingToRedo': '此工作階段沒有可重做的內容。',
     'detail.revertToMessage': '還原到這則訊息',
+    'detail.turnFailed': '回覆失敗：',
     'detail.undoConfirm': '要復原上一個回合及其檔案變更嗎？',
     'detail.revertConfirm': '要將對話和檔案變更還原到這則訊息嗎？',
     'detail.send': '傳送',
@@ -1244,6 +1248,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.nothingToUndo': '此会话没有可撤销的内容。',
     'detail.nothingToRedo': '此会话没有可重做的内容。',
     'detail.revertToMessage': '还原到这条消息',
+    'detail.turnFailed': '回复失败：',
     'detail.undoConfirm': '要撤销上一轮及其文件更改吗？',
     'detail.revertConfirm': '要将对话和文件更改还原到这条消息吗？',
     'detail.send': '发送',
