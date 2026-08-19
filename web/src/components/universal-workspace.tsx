@@ -94,6 +94,15 @@ type UniversalWorkspaceProps = {
   legacyView: ReactNode
 }
 
+const EMPTY_DETAIL: SelectedDetail = {
+  messages: [],
+  diff: [],
+  todos: [],
+  vcs: null,
+  questions: [],
+  permissions: []
+}
+
 function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs = AGENT_SESSION_LOAD_TIMEOUT_MS): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = window.setTimeout(
@@ -887,7 +896,8 @@ export function UniversalWorkspace({
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [globalError, setGlobalError] = useState<string | null>(null)
-  const [detail, setDetail] = useState<SelectedDetail>({ messages: [], diff: [], todos: [], vcs: null, questions: [], permissions: [] })
+  const [detail, setDetail] = useState<SelectedDetail>(EMPTY_DETAIL)
+  const [detailSessionKey, setDetailSessionKey] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<DetailTab>("conversation")
   const [composer, setComposer] = useState("")
@@ -904,10 +914,13 @@ export function UniversalWorkspace({
   const [questionRevision, setQuestionRevision] = useState(0)
   const refreshGeneration = useRef(0)
   const refreshInFlight = useRef(false)
+  const selectedKeyRef = useRef<string | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const selected = sessions.find((item) => item.key === selectedKey) || null
+  selectedKeyRef.current = selectedKey
   const selectedSessionModel = sessionModels.find((model) => modelOptionKey(model) === sessionModelKey)
+  const detailReady = Boolean(selected && detailSessionKey === selected.key)
 
   const refreshAll = useCallback(async (silent = false) => {
     if (refreshInFlight.current) return
@@ -1040,6 +1053,7 @@ export function UniversalWorkspace({
         api.loadQuestions(item.config, item.session.directory).catch(() => []),
         api.loadPermissions(item.config, item.session.directory).catch(() => [])
       ])
+      if (selectedKeyRef.current !== item.key) return
       setDetail({
         messages,
         diff,
@@ -1048,18 +1062,26 @@ export function UniversalWorkspace({
         questions: questions.filter((request) => request.sessionID === item.session.id),
         permissions: permissions.filter((request) => request.sessionID === item.session.id)
       })
+      setDetailSessionKey(item.key)
     } catch (reason) {
-      if (!silent) setGlobalError(reason instanceof Error ? reason.message : String(reason))
+      if (!silent && selectedKeyRef.current === item.key) {
+        setGlobalError(reason instanceof Error ? reason.message : String(reason))
+      }
     } finally {
-      if (!silent) setDetailLoading(false)
+      if (!silent && selectedKeyRef.current === item.key) setDetailLoading(false)
     }
   }, [])
 
   useEffect(() => {
     if (!selected) {
-      setDetail({ messages: [], diff: [], todos: [], vcs: null, questions: [], permissions: [] })
+      setDetail(EMPTY_DETAIL)
+      setDetailSessionKey(null)
+      setDetailLoading(false)
       return
     }
+    setDetail(EMPTY_DETAIL)
+    setDetailSessionKey(null)
+    setDetailLoading(true)
     void loadDetail(selected, false)
     const timer = window.setInterval(() => void loadDetail(selected, true), DETAIL_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
@@ -1099,9 +1121,9 @@ export function UniversalWorkspace({
   }, [selected?.key])
 
   useEffect(() => {
-    if (!transcriptRef.current || detailTab !== "conversation") return
+    if (!transcriptRef.current || detailTab !== "conversation" || !detailReady) return
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
-  }, [selected?.key, detail.messages.length, detailTab])
+  }, [selected?.key, detail.messages.length, detailTab, detailReady])
 
   useEffect(() => {
     localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify([...pinned]))
@@ -1220,8 +1242,8 @@ export function UniversalWorkspace({
   const selectedMachine = selected ? machines.find((machine) => machine.key === selected.machineKey) : undefined
   const activeProfile = profiles.find((profile) => profile.id === activeProfileID) || profiles[0]
   const connectionProfile = profiles.find((profile) => profile.id === connectionProfileID) || null
-  const selectedQuestions = detail.questions
-  const selectedPermissions = detail.permissions
+  const selectedQuestions = detailReady ? detail.questions : []
+  const selectedPermissions = detailReady ? detail.permissions : []
   const selectedModelLabel = selectedSessionModel ? modelLabel(selectedSessionModel) : modelLabel(selected?.session.model)
 
   if (classicOpen) {
@@ -1474,15 +1496,15 @@ export function UniversalWorkspace({
               <div className="uw-detail-tabs">
                 <button type="button" className={detailTab === "conversation" ? "active" : ""} onClick={() => setDetailTab("conversation")}>Conversation</button>
                 <button type="button" className={detailTab === "changes" ? "active" : ""} onClick={() => setDetailTab("changes")}>
-                  Changes <span>{detail.diff.length}</span>
+                  Changes <span>{detailReady ? detail.diff.length : 0}</span>
                 </button>
               </div>
 
               {detailTab === "conversation" ? (
                 <>
                   <div className="uw-transcript" ref={transcriptRef}>
-                    {detailLoading && detail.messages.length === 0 ? (
-                      <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading conversation…</strong></div>
+                    {detailLoading || !detailReady ? (
+                      <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading session…</strong></div>
                     ) : detail.messages.length === 0 ? (
                       <div className="uw-empty-panel"><ChatIcon size={24} /><strong>This session has no messages yet.</strong></div>
                     ) : detail.messages.map((message) => (
@@ -1512,7 +1534,7 @@ export function UniversalWorkspace({
                       <span className="uw-composer-directory">{selected.session.directory}</span>
                       <div>
                         <small>Shift+Enter for newline</small>
-                        <BeautifulButton variant="primary" disabled={!composer.trim() || sending} onClick={() => void sendPrompt()}>
+                        <BeautifulButton variant="primary" disabled={!composer.trim() || sending || !detailReady} onClick={() => void sendPrompt()}>
                           {sending ? <LoadingIcon size={15} /> : "↑"}
                           {sending ? "Sending" : "Send"}
                         </BeautifulButton>
@@ -1520,6 +1542,10 @@ export function UniversalWorkspace({
                     </div>
                   </div>
                 </>
+              ) : detailLoading || !detailReady ? (
+                <div className="uw-changes-pane">
+                  <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading session…</strong></div>
+                </div>
               ) : (
                 <div className="uw-changes-pane">
                   <header>
@@ -1574,7 +1600,7 @@ export function UniversalWorkspace({
               <span>Model</span><b>{selectedModelLabel}</b>
               <span>Machine</span><b>{selected.machineName}</b>
               <span>Working directory</span><code>{selected.session.directory}</code>
-              <span>Branch</span><b>{detail.vcs?.branch || "Unknown"}</b>
+              <span>Branch</span><b>{detailReady ? detail.vcs?.branch || "Unknown" : "Loading…"}</b>
               <span>Last active</span><b>{formatRelative(selected.session.time.updated)} ago</b>
             </section>
 
@@ -1608,20 +1634,21 @@ export function UniversalWorkspace({
             <section className="uw-inspector-section">
               <div className="uw-inspector-section-heading">
                 <span className="uw-inspector-label">Files touched</span>
-                <button type="button" onClick={() => setDetailTab("changes")}>{detail.diff.length ? `View ${detail.diff.length}` : ""}</button>
+                <button type="button" onClick={() => setDetailTab("changes")}>{detailReady && detail.diff.length ? `View ${detail.diff.length}` : ""}</button>
               </div>
               <div className="uw-file-list">
-                {detail.diff.slice(0, 8).map((file) => (
+                {detailReady ? detail.diff.slice(0, 8).map((file) => (
                   <button type="button" key={file.file} onClick={() => setDetailTab("changes")}>
                     <code>{file.file}</code>
                     <span><b>+{file.additions}</b><i>−{file.deletions}</i></span>
                   </button>
-                ))}
-                {detail.diff.length === 0 ? <p>No diff reported yet.</p> : null}
+                )) : null}
+                {detailReady && detail.diff.length === 0 ? <p>No diff reported yet.</p> : null}
+                {!detailReady ? <p>Loading session…</p> : null}
               </div>
             </section>
 
-            {detail.todos.length > 0 ? (
+            {detailReady && detail.todos.length > 0 ? (
               <section className="uw-inspector-section">
                 <span className="uw-inspector-label">Agent plan</span>
                 <div className="uw-todo-list">
@@ -1685,7 +1712,7 @@ export function UniversalWorkspace({
       {handoffOpen && selected ? (
         <HandoffModal
           current={selected}
-          messages={detail.messages}
+          messages={detailReady ? detail.messages : []}
           machines={machines.filter((machine) => machine.state === "online" && machine.agents.length > 0)}
           onClose={() => setHandoffOpen(false)}
           onCreated={(machine, agent, created) => {
