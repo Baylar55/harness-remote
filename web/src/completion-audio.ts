@@ -88,7 +88,13 @@ export function cancelCompletionAudio(sessionID: string): void {
   armed.delete(sessionID)
 }
 
-export function observeCompletionStatuses(statuses: Record<string, SessionStatus>): void {
+/**
+ * Returns the sessions this observation completed, in the order they played. The transport callers
+ * ignore it; it is what makes the timing rules — armed but idle plays nothing, working then idle
+ * plays once, an aborted or failed turn plays never — checkable without a DOM to hear through.
+ */
+export function observeCompletionStatuses(statuses: Record<string, SessionStatus>): string[] {
+  const completed: string[] = []
   for (const [sessionID, entry] of armed) {
     const sessionStatus = statuses[sessionID]
     if (!sessionStatus) continue
@@ -98,11 +104,18 @@ export function observeCompletionStatuses(statuses: Record<string, SessionStatus
     }
     if (!entry.sawWorking && !entry.sawAssistantActivity) continue
     armed.delete(sessionID)
+    completed.push(sessionID)
     playCompletion()
   }
+  return completed
 }
 
-function noteSuppressedAssistantAudioRequest(): void {
+/**
+ * The first assistant fragment. It is evidence that the turn produced output — which is what lets a
+ * harness that never reports a working status still complete — and explicitly not a reason to play:
+ * the sound waits for the status to come back idle.
+ */
+export function noteAssistantActivity(): void {
   const entry = mostLikelyActiveCompletion()
   if (entry) entry.sawAssistantActivity = true
 }
@@ -190,7 +203,7 @@ export function installCompletionAudioGuard(): void {
     // App.tsx currently requests its completion sound as soon as the first assistant fragment
     // arrives. Suppress that premature playback and use it only as evidence that assistant output
     // has started; the authoritative playback happens after session/status returns to idle.
-    noteSuppressedAssistantAudioRequest()
+    noteAssistantActivity()
     return Promise.resolve()
   }
 

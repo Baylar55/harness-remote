@@ -11,7 +11,7 @@ assert.match(source, /\/abort/, "abort must cancel an armed completion")
 assert.match(source, /\/session\/status/, "session status is the authoritative completion source")
 assert.match(source, /WORKING_STATES = new Set\(\["busy", "retry", "waiting"\]\)/)
 assert.match(source, /if \(!entry\.sawWorking && !entry\.sawAssistantActivity\) continue/, "idle before work starts must not play")
-assert.match(source, /noteSuppressedAssistantAudioRequest\(\)/, "the old first-fragment sound request must be suppressed")
+assert.match(source, /noteAssistantActivity\(\)/, "the old first-fragment sound request must be suppressed")
 assert.match(source, /primePlayback\(\)/, "playback must be primed at user submission time for native WebView")
 assert.match(source, /CapacitorHttp\.request = async/, "native HTTP status polling must drive the same completion tracker")
 
