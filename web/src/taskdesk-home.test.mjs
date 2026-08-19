@@ -89,3 +89,28 @@ test("Universal workspace counts and projects follow the selected machine scope"
   assert.match(source, /function selectMachine\(machine: MachineSource\)[\s\S]*?setProjectFilter\("all"\)/)
   assert.match(source, /currentItem\?\.machineKey === machine\.key/)
 })
+
+test("Universal workspace resolves and can change the model of the selected session", () => {
+  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /api\.listModels\(selected\.config, selected\.session\.directory, selected\.session\.id\)/)
+  assert.match(source, /models\.find\(\(model\) => model\.isDefault\)/)
+  assert.match(source, /className="uw-context-model-select"/)
+  assert.match(source, /setSessionModelKey\(event\.target\.value\)/)
+  assert.match(source, /const model = selectedSessionModel/)
+  assert.match(source, /api\.sendPrompt\(selected\.config, selected\.session\.id, text, selected\.session\.directory, model\)/)
+})
+
+test("Universal workspace gives supported harness replies their own visual identity", () => {
+  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+  const readableFixes = readFileSync(new URL("./universal-workspace-readable-fixes.css", import.meta.url), "utf8")
+
+  assert.match(source, /const HARNESS_ICON_URLS/)
+  for (const backend of ["codex", "claude", "opencode", "omp", "pi"]) {
+    assert.match(source, new RegExp(`${backend}:`))
+  }
+  assert.match(source, /function HarnessAvatar/)
+  assert.match(source, /agentBackend=\{selected\.agent\.backend\}/)
+  assert.match(readableFixes, /\.uw-avatar-agent img/)
+  assert.match(readableFixes, /\.uw-composer-directory[\s\S]*?font-size: 13\.5px/)
+})
