@@ -9,6 +9,7 @@ const ATTACHMENT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", 
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const MAX_ATTACHMENT_TOTAL_BYTES = 15 * 1024 * 1024
+const MAX_MESSAGE_PAGE = 500
 
 /** base64 carries 3 bytes per 4 characters, so measure it rather than decoding megabytes to count them. */
 function base64ByteLength(value) {
@@ -72,14 +73,45 @@ function modelWireName(model) {
   return model.providerID && modelID ? `${model.providerID}/${modelID}` : undefined
 }
 
+function sameListedDirectory(left, right) {
+  if (!left || !right) return false
+  const normalize = (value) => {
+    const resolved = path.resolve(value).replace(/[\\/]+$/, "")
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved
+  }
+  return normalize(left) === normalize(right)
+}
+
+function listedSessionView(session, service) {
+  const updated = Date.parse(session.updatedAt ?? "")
+  const timestamp = Number.isFinite(updated) ? updated : Date.now()
+  return {
+    id: session.sessionId,
+    title: session.title || `Session ${String(session.sessionId).slice(0, 8)}`,
+    directory: session.cwd,
+    time: { created: timestamp, updated: timestamp },
+    summary: { additions: 0, deletions: 0, files: 0 },
+    model: undefined,
+    status: service.status(session.sessionId)
+  }
+}
+
+function messageLimit(url) {
+  const raw = url.searchParams.get("limit")
+  if (raw === null || raw === "") return undefined
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 1) throw new Error("Message limit must be a positive integer")
+  return Math.min(value, MAX_MESSAGE_PAGE)
+}
+
 /**
  * The app's model API is OpenCode's, which names a model `provider/model`. ACP has no such rule:
- * OMP and PI happen to use that shape, while Claude Code's adapter offers bare ids — `sonnet`,
+ * OMP and PI happen to use that shape, while Claude Code's adapter offers bare ids, `sonnet`,
  * `opus[1m]`. Splitting on "/" and requiring both halves silently dropped every one of them, which
  * is why that backend looked like it exposed no models at all.
  *
  * A bare id is presented under the backend's own name instead, so it reads and behaves like the
- * others — `claude/sonnet`. `AcpService.setModel` puts it back to the id the agent knows.
+ * others, `claude/sonnet`. `AcpService.setModel` puts it back to the id the agent knows.
  */
 function providersResponse(models, fallbackProviderID) {
   const providers = new Map()
@@ -118,6 +150,17 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     if (!hiddenSessionIDs?.size) return sessions
     return sessions.filter((session) => !hiddenSessionIDs.has(session.id))
   }
+  // TaskDesk only needs index metadata to render the Sessions list and status counts. Calling
+  // AcpService.listSessions here used to restore every persisted transcript snapshot into memory,
+  // so merely opening the app could retain gigabytes of historical messages. The experimental
+  // global listing and status route deliberately stay on the harness's lightweight session index.
+  const listVisibleSessionMetadata = async (directory) => {
+    const sessions = await acp.listSessions()
+    return sessions
+      .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
+      .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
+      .map((session) => listedSessionView(session, service))
+  }
 
   const server = http.createServer(async (request, response) => {
     applyCorsHeaders(request, response, config)
@@ -142,6 +185,21 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           return
         }
         writeJSON(response, 200, machineRegistry.snapshot())
+        return
+      }
+      if (request.method === "GET" && url.pathname === "/v1/diagnostics") {
+        const memory = process.memoryUsage()
+        writeJSON(response, 200, {
+          pid: process.pid,
+          uptimeSeconds: Math.round(process.uptime()),
+          memory: {
+            rss: memory.rss,
+            heapTotal: memory.heapTotal,
+            heapUsed: memory.heapUsed,
+            external: memory.external,
+            arrayBuffers: memory.arrayBuffers
+          }
+        })
         return
       }
       if (request.method === "GET" && (url.pathname === "/v1/health" || url.pathname === "/global/health")) {
@@ -179,12 +237,16 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
         })
         return
       }
-      if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session" || url.pathname === "/experimental/session")) {
+      if (request.method === "GET" && url.pathname === "/experimental/session") {
+        writeJSON(response, 200, await listVisibleSessionMetadata(directory))
+        return
+      }
+      if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session")) {
         writeJSON(response, 200, await listVisibleSessions(directory))
         return
       }
       if (request.method === "GET" && url.pathname === "/session/status") {
-        const statuses = Object.fromEntries((await listVisibleSessions(directory)).map((session) => [session.id, service.status(session.id)]))
+        const statuses = Object.fromEntries((await listVisibleSessionMetadata(directory)).map((session) => [session.id, session.status]))
         writeJSON(response, 200, statuses)
         return
       }
@@ -227,7 +289,9 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           return
         }
         if (request.method === "GET" && operation === "message") {
-          writeJSON(response, 200, await service.messages(sessionID, url.searchParams.get("refresh") === "1"))
+          const messages = await service.messages(sessionID, url.searchParams.get("refresh") === "1")
+          const limit = messageLimit(url)
+          writeJSON(response, 200, limit === undefined ? messages : messages.slice(-limit))
           return
         }
         if (request.method === "GET" && operation === "todo") {
