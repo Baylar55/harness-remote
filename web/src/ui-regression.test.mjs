@@ -9,6 +9,7 @@ const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 const shell = readFileSync(new URL('./components/shell.tsx', import.meta.url), 'utf8')
 const panels = readFileSync(new URL('./components/panels.tsx', import.meta.url), 'utf8')
 const sessionList = readFileSync(new URL('./components/session-list.tsx', import.meta.url), 'utf8')
+const i18n = readFileSync(new URL('./i18n.ts', import.meta.url), 'utf8')
 const composerView = readFileSync(new URL('./components/session-composer.tsx', import.meta.url), 'utf8')
 const taskDialog = readFileSync(new URL('./components/task-launch-dialog.tsx', import.meta.url), 'utf8')
 const taskDeskTestPage = readFileSync(new URL('./TaskDeskTestPage.tsx', import.meta.url), 'utf8')
@@ -620,6 +621,22 @@ assert.match(styles, /\.task-launch-context,[\s\S]*?\.task-launch-worktree\s*\{[
 assert.match(styles, /@media \(max-width: 780px\)[\s\S]*?\.task-launch-form\s*\{[^}]*grid-template-columns:\s*1fr/, 'TaskDesk launch must collapse to one mobile form column')
 assert.match(styles, /\.task-launch-check input\[type="checkbox"\]\s*\{[^}]*width:\s*1\.125rem;[^}]*max-width:\s*1\.125rem;[^}]*min-height:\s*1\.125rem/, 'TaskDesk worktree checkbox must never inherit full-width text-input sizing')
 assert.match(styles, /\.task-launch-close\s*\{[^}]*margin-left:\s*auto/, 'TaskDesk close control must stay anchored to the header’s right edge')
+
+// A turn that ends in a provider failure has no text and no parts but the bookkeeping step markers.
+// Filtering those out left the prompt on screen with nothing after it — indistinguishable from a
+// reply that went missing, and on a session where every turn failed, from the app showing only what
+// the user typed. The reason has to survive the content filter and reach a bubble.
+assert.match(app, /function messageFailure\(message: MessageEnvelope\): string \| undefined/, 'a failed turn should have one place that reads its reason')
+assert.match(app, /messageFailure\(message\) \|\| message\.parts\.some\(\(part\) => !isTurnScaffolding\(part\)\)/, 'the content filter must keep a message whose only content is its failure')
+assert.ok(app.includes('<MessageFailureView messages={[message]} t={t} />'), 'a standalone bubble should render its own failure')
+assert.ok(app.includes('<MessageFailureView messages={[...messagesByID.values()]} t={t} />'), 'a merged run should render the failures of every message in it')
+assert.match(app, /function collapseRepeatedFailures/, 'retried failures should collapse instead of repeating one reason per attempt')
+assert.match(styles, /\.message-failure\s*\{[^}]*background:\s*var\(--danger-soft\)/, 'a failed turn should read as a failure rather than as ordinary reply text')
+assert.ok(i18n.includes("'detail.turnFailed'"), 'the failed-turn label should be translated')
+
+// Groups merge only runs of adjacent same-directory sessions, so one directory can produce several
+// groups and keying them by directory alone lets React drop or duplicate them.
+assert.match(sessionList, /key=\{`\$\{group\.directory\}:\$\{group\.sessions\[0\]\.id\}`\}/, 'sidebar groups need a key unique per group, not per directory')
 
 console.log('ui regression tests passed')
 
