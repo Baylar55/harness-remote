@@ -1,5 +1,14 @@
 import { TaskStore } from "./task-store.js"
 
+function updateRunHistory(task, run) {
+  const runs = Array.isArray(task.runs) ? task.runs.map((entry) => structuredClone(entry)) : []
+  if (!run?.id) return runs
+  const index = runs.findIndex((entry) => entry?.id === run.id)
+  if (index >= 0) runs[index] = structuredClone(run)
+  else runs.push(structuredClone(run))
+  return runs
+}
+
 export class TaskRunStore extends TaskStore {
   async setRunState(taskID, { status, run, error = null, expectedRunId }) {
     await this.load()
@@ -8,8 +17,8 @@ export class TaskRunStore extends TaskStore {
     const task = this.tasks[index]
 
     if (expectedRunId !== undefined && task.run?.id !== expectedRunId) return structuredClone(task)
-    if (status === "starting" && task.status !== "draft" && task.status !== "starting") {
-      throw new Error("Only draft tasks can start a run")
+    if (status === "starting" && !["draft", "starting", "completed", "failed", "cancelled"].includes(task.status)) {
+      throw new Error("Task cannot start a new run from its current state")
     }
     if (status === "running" && task.status !== "starting") throw new Error("Task is not starting")
     if (status === "running" && !run?.sessionId) throw new Error("Running task requires a session id")
@@ -22,10 +31,12 @@ export class TaskRunStore extends TaskStore {
     if ((status === "completed" || status === "failed") && nextRun && !nextRun.finishedAt) {
       nextRun.finishedAt = this.clock()
     }
+    const runs = updateRunHistory(task, nextRun)
     const updated = {
       ...task,
       status,
       run: nextRun,
+      runs,
       error: error ? { message: error instanceof Error ? error.message : String(error) } : null,
       updatedAt: this.clock()
     }
