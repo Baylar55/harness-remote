@@ -88,7 +88,22 @@ export function installTaskDeskMobileNavigation(): () => void {
 
   let openExactSession = false
   let openCreatedSession = false
+  let manuallySelectedSession: HTMLButtonElement | null = null
+  let restoringManualSelection = false
   const media = window.matchMedia(MOBILE_QUERY)
+
+  const restoreManualSelection = () => {
+    if (!media.matches || restoringManualSelection || !manuallySelectedSession?.isConnected) return
+    const root = sessionsRoot()
+    if (!root?.classList.contains(SESSION_DETAIL_CLASS) || manuallySelectedSession.classList.contains("selected")) return
+    restoringManualSelection = true
+    queueMicrotask(() => {
+      if (manuallySelectedSession?.isConnected && !manuallySelectedSession.classList.contains("selected")) {
+        manuallySelectedSession.click()
+      }
+      restoringManualSelection = false
+    })
+  }
 
   const sync = () => {
     const root = sessionsRoot()
@@ -97,6 +112,7 @@ export function installTaskDeskMobileNavigation(): () => void {
       root?.querySelector(`.${BACK_BUTTON_CLASS}`)?.remove()
       document.querySelector(`.${NEW_TASK_BUTTON_CLASS}`)?.remove()
       document.querySelector(`.${NEW_SESSION_BUTTON_CLASS}`)?.remove()
+      manuallySelectedSession = null
       return
     }
     if (root && (openExactSession || openCreatedSession)) {
@@ -109,6 +125,7 @@ export function installTaskDeskMobileNavigation(): () => void {
     }
     ensureSessionBackButton()
     ensureMobileCreateActions()
+    restoreManualSelection()
   }
 
   const onClick = (event: MouseEvent) => {
@@ -117,6 +134,7 @@ export function installTaskDeskMobileNavigation(): () => void {
 
     if (target.closest(`.${BACK_BUTTON_CLASS}`)) {
       event.preventDefault()
+      manuallySelectedSession = null
       showSessionList()
       queueMicrotask(ensureMobileCreateActions)
       return
@@ -126,6 +144,7 @@ export function installTaskDeskMobileNavigation(): () => void {
     if (taskDeskNav && buttonLabel(taskDeskNav).includes("Sessions")) {
       openExactSession = false
       openCreatedSession = false
+      manuallySelectedSession = null
       queueMicrotask(() => {
         showSessionList()
         ensureMobileCreateActions()
@@ -136,10 +155,13 @@ export function installTaskDeskMobileNavigation(): () => void {
     const openSessionButton = target.closest(".td3-task-detail-open button")
     if (openSessionButton && buttonLabel(openSessionButton) === "Open Session") {
       openExactSession = true
+      manuallySelectedSession = null
       return
     }
 
-    if (target.closest(".td3-sessions-embedded .uw-session-card")) {
+    const sessionCard = target.closest<HTMLButtonElement>(".td3-sessions-embedded .uw-session-card")
+    if (sessionCard) {
+      manuallySelectedSession = sessionCard
       queueMicrotask(() => {
         showSessionDetail()
         ensureSessionBackButton()
@@ -151,11 +173,12 @@ export function installTaskDeskMobileNavigation(): () => void {
     const label = buttonLabel(modalButton)
     if (label.includes("Start session") || label.includes("Create handoff session")) {
       openCreatedSession = true
+      manuallySelectedSession = null
     }
   }
 
   const observer = new MutationObserver(sync)
-  observer.observe(document.body, { childList: true, subtree: true })
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] })
   document.addEventListener("click", onClick, true)
   media.addEventListener("change", sync)
   sync()
