@@ -2,13 +2,23 @@ export class BoundedLru {
   #entries = new Map()
   #weight = 0
 
-  constructor({ maxEntries = 8, maxWeight = Infinity, weightOf = () => 1 } = {}) {
+  constructor({
+    maxEntries = 8,
+    maxWeight = Infinity,
+    weightOf = () => 1,
+    canEvict = () => true,
+    onEvict = () => {}
+  } = {}) {
     if (!Number.isInteger(maxEntries) || maxEntries < 1) throw new Error("maxEntries must be a positive integer")
     if (!(maxWeight > 0)) throw new Error("maxWeight must be greater than zero")
     if (typeof weightOf !== "function") throw new Error("weightOf must be a function")
+    if (typeof canEvict !== "function") throw new Error("canEvict must be a function")
+    if (typeof onEvict !== "function") throw new Error("onEvict must be a function")
     this.maxEntries = maxEntries
     this.maxWeight = maxWeight
     this.weightOf = weightOf
+    this.canEvict = canEvict
+    this.onEvict = onEvict
   }
 
   get size() {
@@ -23,6 +33,10 @@ export class BoundedLru {
     return this.#entries.has(key)
   }
 
+  peek(key) {
+    return this.#entries.get(key)?.value
+  }
+
   get(key) {
     const entry = this.#entries.get(key)
     if (!entry) return undefined
@@ -32,7 +46,7 @@ export class BoundedLru {
   }
 
   set(key, value) {
-    const weight = Math.max(0, Number(this.weightOf(value, key)) || 0)
+    const weight = this.#weightFor(value, key)
     const previous = this.#entries.get(key)
     if (previous) {
       this.#weight -= previous.weight
@@ -42,6 +56,25 @@ export class BoundedLru {
     this.#weight += weight
     this.#evict()
     return this
+  }
+
+  refresh(key) {
+    const entry = this.#entries.get(key)
+    if (!entry) return false
+    const weight = this.#weightFor(entry.value, key)
+    this.#weight += weight - entry.weight
+    entry.weight = weight
+    this.#evict()
+    return true
+  }
+
+  refreshAll() {
+    for (const [key, entry] of this.#entries) {
+      const weight = this.#weightFor(entry.value, key)
+      this.#weight += weight - entry.weight
+      entry.weight = weight
+    }
+    this.#evict()
   }
 
   delete(key) {
@@ -61,11 +94,32 @@ export class BoundedLru {
     return this.#entries.keys()
   }
 
+  values() {
+    return Array.from(this.#entries.values(), (entry) => entry.value).values()
+  }
+
+  entries() {
+    return Array.from(this.#entries, ([key, entry]) => [key, entry.value]).values()
+  }
+
+  #weightFor(value, key) {
+    return Math.max(0, Number(this.weightOf(value, key)) || 0)
+  }
+
   #evict() {
     while (this.#entries.size > this.maxEntries || this.#weight > this.maxWeight) {
-      const oldestKey = this.#entries.keys().next().value
-      if (oldestKey === undefined) break
-      this.delete(oldestKey)
+      let victim
+      for (const [key, entry] of this.#entries) {
+        if (this.canEvict(key, entry.value)) {
+          victim = key
+          break
+        }
+      }
+      if (victim === undefined) break
+      const entry = this.#entries.get(victim)
+      if (!entry) break
+      this.delete(victim)
+      this.onEvict(victim, entry.value, entry.weight)
     }
   }
 }
