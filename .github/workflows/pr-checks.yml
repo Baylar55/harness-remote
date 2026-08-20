@@ -1,11 +1,5 @@
 name: PR checks
 
-# The regression suites only ran on `main`, inside the Pages deploy, so a pull request was merged
-# blind and a red suite was discovered after the fact — by which point the deploy that gates the
-# hosted app had already failed. The same gap hid the APK: it is built on `main` and on tags, so a
-# change to the app could not be installed on a phone until after it landed. Both run here instead,
-# on the pull request, which is where the answer is still cheap to act on.
-
 "on":
   workflow_dispatch: {}
   pull_request:
@@ -17,8 +11,6 @@ name: PR checks
 permissions:
   contents: read
 
-# A pull request that is pushed to twice in a minute does not need the first Android build to
-# finish: it takes the longest and its APK is already stale.
 concurrency:
   group: pr-checks-${{ github.ref }}
   cancel-in-progress: true
@@ -30,25 +22,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-
       - name: Install web dependencies
         run: npm ci
         working-directory: web
-
-      # `npm run build` is `tsc -b && vite build`, so this type-checks as well as bundles.
       - name: Type-check and build web app
         run: npm run build
         working-directory: web
-
-      # The same list the Pages deploy gates on, plus `test:platform`. Keep the two in step: a suite
-      # that runs only after the merge is the situation this workflow exists to end.
       - name: Run web regression tests
         run: |
           npm run test:i18n
@@ -69,16 +54,10 @@ jobs:
           npm run test:completion-timing
           npm run test:native-response
         working-directory: web
-
       - name: Run bridge tests
         run: npm test
         working-directory: bridge
 
-  # The bridge is the half of this repository that touches the filesystem, and it ships inside the
-  # desktop app for all three platforms — which is where its tests were first run on anything but
-  # Linux, on `main`, after the merge. A test that compared a path against the raw `mkdtemp` result
-  # passed here and failed there, because the temporary directory is a symlink on macOS and an 8.3
-  # alias on Windows. Node and the test suite are cheap; the two extra runners close that window.
   bridge-platforms:
     name: Bridge tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -89,12 +68,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
-
       - name: Run bridge tests
         run: npm test
         working-directory: bridge
@@ -106,55 +83,42 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-
       - name: Install web dependencies
         run: npm ci
         working-directory: web
-
       - name: Build web app
         run: npm run build
         working-directory: web
-
       - name: Setup JDK 21
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
-
       - name: Install Android 36 SDK packages
         run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
-
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses
-
       - name: Add Capacitor Android platform
         run: |
           if [ ! -d android ]; then
             npx cap add android
           fi
         working-directory: web
-
-      # Pull-request APKs are disposable test builds. Icon generation is cosmetic and depends on an
-      # on-demand npx install, so it must not block verification of unrelated application changes.
       - name: Generate Android app icon assets
         continue-on-error: true
         run: npx @capacitor/assets generate --android --assetPath public --iconBackgroundColor '#FFFFFF' --iconBackgroundColorDark '#FFFFFF'
         working-directory: web
-
       - name: Sync Capacitor project
         run: npm run cap:sync:android
         working-directory: web
-
       - name: Read app version
         id: version
         run: |
@@ -162,34 +126,19 @@ jobs:
           VERSION_CODE=$(node -e "const [major, minor, patch] = process.argv[1].split('.').map(Number); console.log((major * 10000) + (minor * 100) + patch)" "$APP_VERSION")
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-
       - name: Sync Android version metadata
         run: node web/scripts/sync-android-version.mjs "${{ steps.version.outputs.app_version }}" "${{ steps.version.outputs.version_code }}"
-
-      # Same applicationId as the installed release build plus a different signing key means Android
-      # refuses the install outright, so trying a pull request would cost you the app you already
-      # have and its configured servers. This gives the debug build its own id and launcher label.
       - name: Give the debug build its own application id
         run: node web/scripts/set-debug-app-id.mjs
-
-      # `assembleDebug` signs with the auto-generated debug keystore, so this needs none of the
-      # release signing secrets and works on a pull request from a fork.
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace --no-daemon
         working-directory: web/android
-
       - name: Verify debug APK signature
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose web/android/app/build/outputs/apk/debug/app-debug.apk
-
-      # The head SHA, not `github.sha`: on a pull request the latter is the ephemeral merge commit,
-      # which names nothing you can check out to reproduce the build.
       - name: Name the artifact after the commit it was built from
         id: build
         run: echo "sha=$(git rev-parse --short "${{ github.event.pull_request.head.sha || github.sha }}")" >> "$GITHUB_OUTPUT"
-
-      # Two weeks is longer than any pull request needs its APK, and the default 90 days would leave
-      # one build per push sitting in the Actions tab for a quarter.
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v7
         with:
@@ -197,3 +146,366 @@ jobs:
           path: web/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+  integrate-live-paging:
+    name: Integrate TaskDesk live refresh and paging
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'integration/taskdesk-candidate-2026-08-20'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v7
+        with:
+          ref: integration/taskdesk-candidate-2026-08-20
+          fetch-depth: 2
+      - name: Apply live refresh and transcript paging
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}")
+              file.write_text(text.replace(old, new))
+
+          api = 'web/src/api.ts'
+          old = '''  loadMessages(config: ServerConfig, sessionID: string, directory?: string, refreshHistory = false) {
+              const refresh = refreshHistory ? "&refresh=1" : ""
+              return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100${refresh}`, directory))
+            },'''
+          new = '''  async loadMessagePage(config: ServerConfig, sessionID: string, directory?: string, before?: string, limit = 100) {
+              const cursor = before ? `&before=${encodeURIComponent(before)}` : ""
+              const response = await requestWithHeaders<MessageEnvelope[]>(
+                config,
+                withDirectory(`/session/${sessionID}/message?limit=${limit}${cursor}`, directory)
+              )
+              return {
+                messages: response.data,
+                before: response.headers["x-next-cursor"] || null,
+                hasMore: response.headers["x-has-more"] === "1"
+              }
+            },
+
+            loadMessages(config: ServerConfig, sessionID: string, directory?: string, refreshHistory = false) {
+              const refresh = refreshHistory ? "&refresh=1" : ""
+              return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100${refresh}`, directory))
+            },'''
+          replace_once(api, old, new)
+
+          i18n = 'web/src/taskdesk-i18n.ts'
+          old = '''  "action.backToSessions": { en: "Back to Sessions", it: "Torna alle Sessioni", "zh-TW": "返回工作階段", "zh-CN": "返回会话" },'''
+          new = old + '''
+            "action.loadEarlier": { en: "Load earlier messages", it: "Carica messaggi precedenti", "zh-TW": "載入較早的訊息", "zh-CN": "加载更早的消息" },'''
+          replace_once(i18n, old, new)
+
+          workspace = 'web/src/components/universal-workspace.tsx'
+          replace_once(workspace,
+              'import { backendDisplayName } from "../backendSetup"\n',
+              'import { backendDisplayName } from "../backendSetup"\nimport { isDesktopPlatform } from "../desktopBridge"\nimport { subscribeTaskDeskLiveEvents } from "../taskdesk-live-events"\n')
+          replace_once(workspace,
+              'const REFRESH_INTERVAL_MS = 10_000\nconst DETAIL_REFRESH_INTERVAL_MS = 5_000\n',
+              'const REFRESH_INTERVAL_MS = 60_000\nconst DETAIL_REFRESH_INTERVAL_MS = 30_000\nconst EVENT_METADATA_THROTTLE_MS = 750\nconst EVENT_DETAIL_THROTTLE_MS = 350\n')
+          old = '''function pageIsVisible(): boolean {
+            return typeof document === "undefined" || document.visibilityState !== "hidden"
+          }
+          '''
+          new = old + '''
+          function mergeRecentMessagePage(current: MessageEnvelope[], recent: MessageEnvelope[]): MessageEnvelope[] {
+            if (current.length === 0) return recent
+            if (recent.length === 0) return current
+            const recentIDs = new Set(recent.map((message) => message.info.id))
+            const boundary = recent[0]?.info.time.created ?? Number.POSITIVE_INFINITY
+            const older = current.filter((message) => !recentIDs.has(message.info.id) && message.info.time.created < boundary)
+            return [...older, ...recent]
+          }
+          '''
+          replace_once(workspace, old, new)
+          replace_once(workspace,
+              '  const [questionRevision, setQuestionRevision] = useState(0)\n',
+              '  const [questionRevision, setQuestionRevision] = useState(0)\n  const [detailBefore, setDetailBefore] = useState<string | null>(null)\n  const [detailHasMore, setDetailHasMore] = useState(false)\n  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false)\n')
+          replace_once(workspace,
+              '  const transcriptRef = useRef<HTMLDivElement>(null)\n\n  const selected = sessions.find((item) => item.key === selectedKey) || null\n  selectedKeyRef.current = selectedKey\n',
+              '  const transcriptRef = useRef<HTMLDivElement>(null)\n  const selectedRef = useRef<UniversalSession | null>(null)\n  const preserveTranscriptScrollRef = useRef(false)\n\n  const selected = sessions.find((item) => item.key === selectedKey) || null\n  selectedKeyRef.current = selectedKey\n  selectedRef.current = selected\n')
+
+          old = '''      const [messages, diff, todos, vcs, questions, permissions] = await Promise.all([
+                api.loadMessages(item.config, item.session.id, item.session.directory),
+                api.loadDiff(item.config, item.session.id, item.session.directory).catch(() => []),
+                api.loadTodo(item.config, item.session.id, item.session.directory).catch(() => []),
+                api.loadVcs(item.config, item.session.directory).catch(() => null),
+                api.loadQuestions(item.config, item.session.directory).catch(() => []),
+                api.loadPermissions(item.config, item.session.directory).catch(() => [])
+              ])
+              if (selectedKeyRef.current !== item.key) return
+              setDetail({
+                messages,
+                diff,
+                todos,
+                vcs,
+                questions: questions.filter((request) => request.sessionID === item.session.id),
+                permissions: permissions.filter((request) => request.sessionID === item.session.id)
+              })
+              setDetailSessionKey(item.key)'''
+          new = '''      const [messagePage, diff, todos, vcs, questions, permissions] = await Promise.all([
+                api.loadMessagePage(item.config, item.session.id, item.session.directory),
+                api.loadDiff(item.config, item.session.id, item.session.directory).catch(() => []),
+                api.loadTodo(item.config, item.session.id, item.session.directory).catch(() => []),
+                api.loadVcs(item.config, item.session.directory).catch(() => null),
+                api.loadQuestions(item.config, item.session.directory).catch(() => []),
+                api.loadPermissions(item.config, item.session.directory).catch(() => [])
+              ])
+              if (selectedKeyRef.current !== item.key) return
+              setDetail((current) => ({
+                messages: silent ? mergeRecentMessagePage(current.messages, messagePage.messages) : messagePage.messages,
+                diff,
+                todos,
+                vcs,
+                questions: questions.filter((request) => request.sessionID === item.session.id),
+                permissions: permissions.filter((request) => request.sessionID === item.session.id)
+              }))
+              if (!silent) {
+                setDetailBefore(messagePage.before)
+                setDetailHasMore(messagePage.hasMore)
+              }
+              setDetailSessionKey(item.key)'''
+          replace_once(workspace, old, new)
+
+          old = '''  }, [])
+
+            useEffect(() => {
+              detailInFlight.current = false'''
+          new = '''  }, [])
+
+            const refreshMessages = useCallback(async (item: UniversalSession) => {
+              try {
+                const page = await api.loadMessagePage(item.config, item.session.id, item.session.directory)
+                if (selectedKeyRef.current !== item.key) return
+                setDetail((current) => ({ ...current, messages: mergeRecentMessagePage(current.messages, page.messages) }))
+                setDetailSessionKey(item.key)
+              } catch {
+                // Reconciliation polling remains available if one live refresh fails.
+              }
+            }, [])
+
+            useEffect(() => {
+              detailInFlight.current = false'''
+          replace_once(workspace, old, new)
+
+          old = '''      setDetail(EMPTY_DETAIL)
+              setDetailSessionKey(null)
+              setDetailLoading(false)
+              return
+            }
+            setDetail(EMPTY_DETAIL)
+            setDetailSessionKey(null)
+            setDetailLoading(true)'''
+          new = '''      setDetail(EMPTY_DETAIL)
+              setDetailSessionKey(null)
+              setDetailBefore(null)
+              setDetailHasMore(false)
+              setDetailLoading(false)
+              return
+            }
+            setDetail(EMPTY_DETAIL)
+            setDetailSessionKey(null)
+            setDetailBefore(null)
+            setDetailHasMore(false)
+            setDetailLoading(true)'''
+          replace_once(workspace, old, new)
+
+          marker = '''  }, [selected?.key, questionRevision, loadDetail])
+
+            useEffect(() => {
+              if (!selected) {'''
+          insert = '''  }, [selected?.key, questionRevision, loadDetail])
+
+            useEffect(() => {
+              if (machines.length === 0) return
+              const subscriptions: Array<{ close(): void }> = []
+              let metadataTimer: number | undefined
+              let detailTimer: number | undefined
+              let messageTimer: number | undefined
+              let messageRefreshInFlight = false
+
+              const scheduleMetadata = () => {
+                if (metadataTimer !== undefined) return
+                metadataTimer = window.setTimeout(() => {
+                  metadataTimer = undefined
+                  if (pageIsVisible()) void refreshAll(true)
+                }, EVENT_METADATA_THROTTLE_MS)
+              }
+              const scheduleDetail = (sessionID?: string) => {
+                if (detailTimer !== undefined) return
+                detailTimer = window.setTimeout(() => {
+                  detailTimer = undefined
+                  const current = selectedRef.current
+                  if (!current || (sessionID && current.session.id !== sessionID) || !pageIsVisible()) return
+                  void loadDetail(current, true)
+                }, EVENT_DETAIL_THROTTLE_MS)
+              }
+              const scheduleMessages = (sessionID?: string) => {
+                if (messageTimer !== undefined) return
+                messageTimer = window.setTimeout(() => {
+                  messageTimer = undefined
+                  const current = selectedRef.current
+                  if (!current || (sessionID && current.session.id !== sessionID) || !pageIsVisible() || messageRefreshInFlight) return
+                  messageRefreshInFlight = true
+                  void refreshMessages(current).finally(() => { messageRefreshInFlight = false })
+                }, EVENT_DETAIL_THROTTLE_MS)
+              }
+              const onLiveEvent = (event: { type: string; sessionID?: string }) => {
+                if (!pageIsVisible()) return
+                if (event.type === "message.updated") {
+                  scheduleMessages(event.sessionID)
+                  return
+                }
+                if (event.type === "todo.updated" || event.type.includes("question") || event.type.includes("permission")) {
+                  scheduleDetail(event.sessionID)
+                  scheduleMetadata()
+                  return
+                }
+                if (event.type.startsWith("session.")) {
+                  scheduleMetadata()
+                  if (event.type === "session.updated") scheduleMessages(event.sessionID)
+                }
+              }
+              const openSubscription = (machine: MachineSource, config: ServerConfig) => {
+                subscriptions.push(subscribeTaskDeskLiveEvents({
+                  profile: machine.profile,
+                  config,
+                  onEvent: onLiveEvent
+                }))
+              }
+
+              for (const machine of machines) {
+                if (machine.state !== "online") continue
+                if (isDesktopPlatform()) {
+                  openSubscription(machine, machine.profile.config)
+                  continue
+                }
+                for (const agent of machine.agents) openSubscription(machine, configForAgent(machine, agent))
+              }
+
+              return () => {
+                for (const subscription of subscriptions) subscription.close()
+                if (metadataTimer !== undefined) window.clearTimeout(metadataTimer)
+                if (detailTimer !== undefined) window.clearTimeout(detailTimer)
+                if (messageTimer !== undefined) window.clearTimeout(messageTimer)
+              }
+            }, [machines, refreshAll, loadDetail, refreshMessages])
+
+            useEffect(() => {
+              if (!selected) {'''
+          replace_once(workspace, marker, insert)
+
+          replace_once(workspace,
+              '''  useEffect(() => {
+              if (!transcriptRef.current || detailTab !== "conversation" || !detailReady) return
+              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+            }, [selected?.key, detail.messages.length, detailTab, detailReady])''',
+              '''  useEffect(() => {
+              if (!transcriptRef.current || detailTab !== "conversation" || !detailReady) return
+              if (preserveTranscriptScrollRef.current) return
+              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+            }, [selected?.key, detail.messages.length, detailTab, detailReady])''')
+
+          marker = '''  async function sendPrompt() {'''
+          insert = '''  async function loadOlderMessages() {
+              if (!selected || !detailBefore || !detailHasMore || olderMessagesLoading) return
+              const targetKey = selected.key
+              const viewport = transcriptRef.current
+              const previousHeight = viewport?.scrollHeight ?? 0
+              preserveTranscriptScrollRef.current = true
+              setOlderMessagesLoading(true)
+              setGlobalError(null)
+              try {
+                const page = await api.loadMessagePage(
+                  selected.config,
+                  selected.session.id,
+                  selected.session.directory,
+                  detailBefore
+                )
+                if (selectedKeyRef.current !== targetKey) return
+                setDetail((current) => {
+                  const currentIDs = new Set(current.messages.map((message) => message.info.id))
+                  const older = page.messages.filter((message) => !currentIDs.has(message.info.id))
+                  return { ...current, messages: [...older, ...current.messages] }
+                })
+                setDetailBefore(page.before)
+                setDetailHasMore(page.hasMore)
+                window.requestAnimationFrame(() => {
+                  if (viewport && selectedKeyRef.current === targetKey) {
+                    viewport.scrollTop += viewport.scrollHeight - previousHeight
+                  }
+                  preserveTranscriptScrollRef.current = false
+                })
+              } catch (reason) {
+                preserveTranscriptScrollRef.current = false
+                setGlobalError(reason instanceof Error ? reason.message : String(reason))
+              } finally {
+                setOlderMessagesLoading(false)
+              }
+            }
+
+            async function sendPrompt() {'''
+          replace_once(workspace, marker, insert)
+
+          old = '''                  <div className="uw-transcript" ref={transcriptRef}>
+                                {detailLoading || !detailReady ? ('''
+          new = '''                  <div className="uw-transcript" ref={transcriptRef}>
+                                {detailReady && detailHasMore ? (
+                                  <div className="uw-history-loader">
+                                    <BeautifulButton disabled={olderMessagesLoading} onClick={() => void loadOlderMessages()}>
+                                      {olderMessagesLoading ? <LoadingIcon size={14} /> : null}
+                                      {t("action.loadEarlier")}
+                                    </BeautifulButton>
+                                  </div>
+                                ) : null}
+                                {detailLoading || !detailReady ? ('''
+          replace_once(workspace, old, new)
+
+          css = Path('web/src/universal-workspace.css')
+          css_text = css.read_text()
+          if '.uw-history-loader {' not in css_text:
+              css.write_text(css_text + '''\n\n.uw-history-loader {\n  display: flex;\n  justify-content: center;\n  padding: 6px 0 12px;\n}\n''')
+
+          tests = 'web/src/taskdesk-performance.test.mjs'
+          replace_once(tests, '  assert.match(workspace, /const REFRESH_INTERVAL_MS = 10_000/)\n  assert.match(workspace, /const DETAIL_REFRESH_INTERVAL_MS = 5_000/)\n',
+              '  assert.match(workspace, /const REFRESH_INTERVAL_MS = 60_000/)\n  assert.match(workspace, /const DETAIL_REFRESH_INTERVAL_MS = 30_000/)\n  assert.match(workspace, /subscribeTaskDeskLiveEvents/)\n  assert.match(workspace, /EVENT_DETAIL_THROTTLE_MS = 350/)\n')
+          test_file = Path(tests)
+          test_text = test_file.read_text()
+          anchor = '''test("Sessions list never fans out transcript reads for card previews", () => {'''
+          addition = '''test("TaskDesk pages old transcript history without replacing live refresh", () => {
+            const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+            const api = readFileSync(new URL("./api.ts", import.meta.url), "utf8")
+            const live = readFileSync(new URL("./taskdesk-live-events.ts", import.meta.url), "utf8")
+
+            assert.match(api, /async loadMessagePage/)
+            assert.match(api, /x-next-cursor/)
+            assert.match(api, /x-has-more/)
+            assert.match(workspace, /async function loadOlderMessages/)
+            assert.match(workspace, /detailHasMore/)
+            assert.match(workspace, /mergeRecentMessagePage/)
+            assert.match(workspace, /preserveTranscriptScrollRef/)
+            assert.match(live, /createNativeOpenCodeEventSubscription/)
+            assert.match(live, /createDesktopOpenCodeEventSubscription/)
+            assert.match(live, /createFetchOpenCodeEventSubscription/)
+          })
+
+          '''
+          if addition.strip() not in test_text:
+              if anchor not in test_text:
+                  raise SystemExit('performance test anchor missing')
+              test_file.write_text(test_text.replace(anchor, addition + anchor, 1))
+          PY
+
+          git checkout HEAD^ -- .github/workflows/pr-checks.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "perf(taskdesk): drive sessions from live events and paged history"
+          git push origin HEAD:integration/taskdesk-candidate-2026-08-20
