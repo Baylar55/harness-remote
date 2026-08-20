@@ -38,6 +38,25 @@ test("latest terminal result never crosses the latest user turn", () => {
   assert.equal(latestAssistantTerminalText(transcript), "")
 })
 
+test("tool activity in a later assistant envelope blocks earlier narration", () => {
+  const transcript = [
+    message("user-1", "user", [{ type: "text", text: "Fix it" }]),
+    message("assistant-text", "assistant", [{ type: "text", text: "I will inspect it." }]),
+    message("assistant-tool", "assistant", [{ type: "tool", tool: "Edit", state: { status: "completed" } }])
+  ]
+  assert.equal(latestAssistantTerminalText(transcript), "")
+})
+
+test("final text in a later assistant envelope wins after tool activity", () => {
+  const transcript = [
+    message("user-1", "user", [{ type: "text", text: "Fix it" }]),
+    message("assistant-text", "assistant", [{ type: "text", text: "I will inspect it." }]),
+    message("assistant-tool", "assistant", [{ type: "tool", tool: "Edit", state: { status: "completed" } }]),
+    message("assistant-final", "assistant", [{ type: "text", text: "The fix is complete." }])
+  ]
+  assert.equal(latestAssistantTerminalText(transcript), "The fix is complete.")
+})
+
 test("Task summary stays attached to its Run prompt after the Session is continued manually", () => {
   const transcript = [
     message("task-user", "user", [{ type: "text", text: "Fix the TaskDesk UI" }]),
