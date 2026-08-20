@@ -783,3 +783,31 @@
     font-size: 12px;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Keyboard focus
+   -------------------------------------------------------------------------- */
+
+/* Buttons, inputs and selects across both shells set `outline: 0` with nothing put back, so keyboard
+   focus was invisible on the navigation, the toolbar, the machine picker, the filters and every form
+   control. One ring, defined once, from the accent already used for selection. `:is()` keeps the
+   specificity high enough to beat the `outline: 0` on individual components. */
+.td3-shell :is(button, a[href], input, textarea, select, summary, [tabindex]):focus-visible,
+.uw-shell :is(button, a[href], input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--td3-focus);
+  outline-offset: 2px;
+}
+
+/* A full-bleed row or card would have its ring clipped by the scroller it lives in, so those draw it
+   inside their own box instead. */
+.td3-shell :is(.td3-task-row, .td3-recent-task, .td3-attention-row):focus-visible,
+.uw-shell .uw-session-card:focus-visible {
+  outline-offset: -2px;
+}
+
+/* The bottom tab bar sits flush against the viewport edge on a phone. */
+@media (max-width: 680px) {
+  .td3-shell .td3-sidebar nav button:focus-visible {
+    outline-offset: -2px;
+  }
+}

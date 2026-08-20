@@ -269,8 +269,11 @@ function Modal({
     const target = panel.current
     if (!target) return
     if (target.contains(document.activeElement)) return
-    const focusable = target.querySelector<HTMLElement>(
-      "textarea, input:not([type=hidden]), select, button:not([disabled]), [tabindex]:not([tabindex='-1'])"
+    // Prefer the field the dialog exists to collect. `querySelector` matches in document order, so a
+    // single list would always land on the header's close button instead of the prompt.
+    const field = target.querySelector<HTMLElement>("textarea, input:not([type=hidden]), select")
+    const focusable = field || target.querySelector<HTMLElement>(
+      "button:not([disabled]), [tabindex]:not([tabindex='-1'])"
     )
     focusable?.focus()
   }, [])
