@@ -56,10 +56,10 @@
   max-width: 220px;
   min-height: 27px;
   padding: 3px 24px 3px 7px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
+  border: 1px solid var(--td3-border-strong);
   border-radius: 6px;
-  color: #dce5f2;
-  background: #111a29;
+  color: var(--td3-text);
+  background: var(--td3-control);
   font-family: inherit;
   font-weight: 620;
   cursor: pointer;
@@ -109,7 +109,7 @@
 .uw-composer-footer > .uw-composer-directory {
   min-width: 0;
   overflow: hidden;
-  color: #aebbd0;
+  color: var(--td3-text-2);
   font-size: 13px;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -169,4 +169,37 @@
 
 .uw-empty-panel strong {
   font-size: 13px;
+}
+
+/* The Sessions pane declares 7-8.5px in a dozen places and this sheet exists to raise them back to a
+   readable size. These are the selectors it still missed, confirmed by measuring what the running app
+   actually renders rather than by reading the source: nothing here was above 7.5px on screen.
+   TaskDesk is meant to be dense, not unreadable. */
+
+.uw-diff-file summary span b,
+.uw-diff-file summary span i,
+.uw-file-list button b,
+.uw-file-list button i {
+  font-size: 10.5px;
+}
+
+.uw-todo-state {
+  font-size: 10px;
+}
+
+/* A 28px avatar carrying a three-character label needs the label to fit the circle, so this is a
+   size the initials can actually use rather than the 7.5px the source asked for. */
+.uw-avatar {
+  font-size: 10px;
+}
+
+/* White on the flat accent failed against the avatar's own fill; the label follows the accent-on-soft
+   role instead, which is defined per theme. */
+.uw-avatar-user {
+  color: var(--td3-on-accent);
+}
+
+.uw-attention-actions .uw-button,
+.uw-inspector-section-heading > button {
+  font-size: 11px;
 }

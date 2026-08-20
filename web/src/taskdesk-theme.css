@@ -1,0 +1,171 @@
+/* TaskDesk palette.
+ *
+ * The v3 surfaces were authored as literal dark hexes, so the saved appearance preference had
+ * nothing to act on: switching to Light changed `data-theme` and the shell stayed dark. Every colour
+ * the TaskDesk shell and its embedded Sessions pane use now resolves through one of these tokens, so
+ * a theme is a redefinition of this block rather than a second stylesheet.
+ *
+ * Dark is the default and stays byte-identical to what shipped. Light is defined only as overrides,
+ * which is what keeps the two from drifting apart.
+ *
+ * The tokens that matter most are the raises. A dark surface is lifted with a translucent white and
+ * a light surface with a translucent ink; a sheet that hard-codes `rgba(255,255,255,.03)` produces an
+ * invisible band on white no matter what the rest of the palette says. Every lift is a token for
+ * exactly that reason.
+ */
+
+:root {
+  /* Surfaces */
+  --td3-bg: #070c14;
+  --td3-panel: #0b121d;
+  --td3-panel-2: #0f1825;
+  --td3-panel-3: #131e2e;
+  --td3-elevated: #0c1420;
+  --td3-inset: #070c13;
+  --td3-control: #101927;
+  --td3-control-hover: #152133;
+  --td3-chrome: rgba(8, 14, 23, .9);
+  --td3-chrome-strong: rgba(8, 14, 23, .92);
+  --td3-rail: rgba(7, 12, 20, .94);
+  --td3-rail-mobile: rgba(7, 12, 20, .96);
+  --td3-rail-soft: rgba(8, 14, 23, .54);
+  --td3-veil: rgba(8, 14, 23, .58);
+  --td3-veil-soft: rgba(8, 14, 23, .42);
+  --td3-card: rgba(12, 19, 31, .74);
+  --td3-card-raised: linear-gradient(145deg, rgba(18, 29, 45, .82), rgba(10, 17, 28, .82));
+  --td3-sunken: rgba(15, 24, 37, .65);
+  --td3-sunken-strong: rgba(15, 24, 37, .78);
+  --td3-sunken-soft: rgba(15, 24, 37, .55);
+  --td3-field: rgba(15, 24, 37, .85);
+  --td3-scrim: rgba(2, 6, 12, .76);
+  --td3-page-glow: radial-gradient(circle at 58% -20%, rgba(79, 124, 255, .11), transparent 35%);
+
+  /* Text */
+  --td3-text: #edf3fb;
+  --td3-text-2: #cbd7e5;
+  --td3-text-3: #aeb9c8;
+  --td3-muted: #9aa8bc;
+  --td3-muted-2: #8f9cb0;
+  --td3-on-accent: #fff;
+  /* Foreground for a label sitting on --td3-blue-soft rather than on a solid accent fill. */
+  --td3-accent-on-soft: #fff;
+
+  /* Borders */
+  --td3-border: rgba(148, 163, 184, .13);
+  --td3-border-strong: rgba(148, 163, 184, .24);
+  --td3-border-soft: rgba(148, 163, 184, .08);
+
+  /* Lifts applied on top of a surface. Direction flips with the theme. */
+  --td3-raise-1: rgba(255, 255, 255, .018);
+  --td3-raise-2: rgba(255, 255, 255, .035);
+  --td3-raise-3: rgba(255, 255, 255, .055);
+
+  /* Accent */
+  --td3-blue: #4f7cff;
+  /* The primary button's label is white in both themes, so the fill has to be dark enough to
+     carry it: the old #5680ff -> #3d68e8 gradient measured 3.5:1 against white. */
+  --td3-blue-strong: #4166e0;
+  --td3-blue-deep: #2f52c4;
+  --td3-blue-text: #a9bcff;
+  --td3-blue-link: #8cacff;
+  --td3-blue-soft: rgba(79, 124, 255, .14);
+  --td3-blue-soft-2: rgba(79, 124, 255, .08);
+  --td3-blue-border: rgba(79, 124, 255, .35);
+  --td3-blue-border-soft: rgba(79, 124, 255, .24);
+  --td3-focus: rgba(79, 124, 255, .62);
+  --td3-selection-wash: linear-gradient(90deg, rgba(79, 124, 255, .14), rgba(79, 124, 255, .035));
+
+  /* Status */
+  --td3-green: #4ade80;
+  --td3-green-text: #89e9ad;
+  --td3-green-soft: rgba(34, 197, 94, .12);
+  --td3-yellow: #fbbf24;
+  --td3-yellow-text: #fcd98f;
+  --td3-yellow-soft: rgba(180, 105, 0, .17);
+  --td3-red: #f87171;
+  --td3-red-text: #fca5a5;
+  --td3-red-soft: rgba(239, 68, 68, .12);
+  --td3-red-border: rgba(248, 113, 113, .26);
+  --td3-attention-text: #fbd38d;
+  --td3-attention-soft: rgba(234, 88, 12, .14);
+
+  --td3-brand-mark: linear-gradient(145deg, rgba(63, 108, 228, .35), rgba(27, 50, 111, .45));
+  --td3-shadow-panel: 0 28px 100px rgba(0, 0, 0, .5);
+  --td3-shadow-pane: -18px 0 50px rgba(0, 0, 0, .16);
+}
+
+:root[data-theme="light"] {
+  --td3-bg: #f1f4f9;
+  --td3-panel: #fff;
+  --td3-panel-2: #f8fafd;
+  --td3-panel-3: #edf1f7;
+  --td3-elevated: #fff;
+  --td3-inset: #f2f5fa;
+  --td3-control: #fff;
+  --td3-control-hover: #eff3fa;
+  --td3-chrome: rgba(255, 255, 255, .92);
+  --td3-chrome-strong: rgba(255, 255, 255, .96);
+  --td3-rail: rgba(255, 255, 255, .95);
+  --td3-rail-mobile: rgba(255, 255, 255, .97);
+  --td3-rail-soft: rgba(246, 248, 252, .9);
+  --td3-veil: rgba(248, 250, 253, .92);
+  --td3-veil-soft: rgba(246, 249, 252, .8);
+  --td3-card: #fff;
+  --td3-card-raised: linear-gradient(145deg, #fff, #f5f8fc);
+  --td3-sunken: #f7f9fd;
+  --td3-sunken-strong: #f4f7fc;
+  --td3-sunken-soft: #f8fafd;
+  --td3-field: #fff;
+  --td3-scrim: rgba(15, 23, 42, .38);
+  --td3-page-glow: radial-gradient(circle at 58% -20%, rgba(47, 102, 245, .07), transparent 35%);
+
+  /* The dark ramp is four steps of near-white. Light needs real separation between them or the
+     secondary text reads as the same weight as the heading. */
+  --td3-text: #0d1526;
+  --td3-text-2: #26324a;
+  --td3-text-3: #3d4a63;
+  --td3-muted: #55617a;
+  --td3-muted-2: #5f6b85;
+  --td3-on-accent: #fff;
+  --td3-accent-on-soft: #1c47bd;
+
+  --td3-border: rgba(15, 23, 42, .12);
+  --td3-border-strong: rgba(15, 23, 42, .22);
+  --td3-border-soft: rgba(15, 23, 42, .07);
+
+  --td3-raise-1: rgba(15, 23, 42, .022);
+  --td3-raise-2: rgba(15, 23, 42, .05);
+  --td3-raise-3: rgba(15, 23, 42, .075);
+
+  --td3-blue: #2f66f5;
+  --td3-blue-strong: #2f66f5;
+  --td3-blue-deep: #1e4fd0;
+  --td3-blue-text: #1c47bd;
+  --td3-blue-link: #1e4fd0;
+  --td3-blue-soft: rgba(47, 102, 245, .1);
+  --td3-blue-soft-2: rgba(47, 102, 245, .06);
+  --td3-blue-border: rgba(47, 102, 245, .34);
+  --td3-blue-border-soft: rgba(47, 102, 245, .22);
+  --td3-focus: rgba(47, 102, 245, .5);
+  --td3-selection-wash: linear-gradient(90deg, rgba(47, 102, 245, .12), rgba(47, 102, 245, .03));
+
+  /* Status hues move to their readable-on-white variants rather than being tinted versions of the
+     dark ones, which would fail contrast against a white card. */
+  --td3-green: #0f7a52;
+  --td3-green-text: #0b6544;
+  --td3-green-soft: rgba(15, 122, 82, .1);
+  --td3-yellow: #b45309;
+  --td3-yellow-text: #8a4409;
+  --td3-yellow-soft: rgba(180, 83, 9, .1);
+  --td3-red: #c53434;
+  --td3-red-text: #b02525;
+  --td3-red-soft: rgba(197, 52, 52, .09);
+  --td3-red-border: rgba(197, 52, 52, .28);
+  --td3-attention-text: #92500a;
+  --td3-attention-soft: rgba(234, 88, 12, .1);
+
+  /* Darker than the accent so the white monogram on it clears 4.5:1. */
+  --td3-brand-mark: linear-gradient(145deg, #3a63d8, #2246a8);
+  --td3-shadow-panel: 0 24px 70px rgba(15, 23, 42, .16);
+  --td3-shadow-pane: -18px 0 50px rgba(15, 23, 42, .06);
+}

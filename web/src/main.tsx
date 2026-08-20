@@ -25,6 +25,7 @@ import {
   type WorkspaceMachine
 } from "./workspaceMachines"
 import "./styles.css"
+import "./taskdesk-theme.css"
 import "./universal-workspace.css"
 import "./universal-workspace-readable.css"
 import "./universal-workspace-readable-fixes.css"

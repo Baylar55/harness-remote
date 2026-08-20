@@ -7,22 +7,22 @@
   min-height: 27px;
   margin-top: 7px;
   padding: 0 9px;
-  border: 1px solid rgba(79, 124, 255, .24);
+  border: 1px solid var(--td3-blue-border-soft);
   border-radius: 7px;
-  color: #a9bcff;
-  background: rgba(79, 124, 255, .08);
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft-2);
   font: inherit;
   font-size: 10px;
   cursor: pointer;
 }
 
 .td3-run-review-button:hover {
-  color: #fff;
-  border-color: rgba(79, 124, 255, .4);
-  background: rgba(79, 124, 255, .14);
+  color: var(--td3-on-accent);
+  border-color: var(--td3-blue-border);
+  background: var(--td3-blue-soft);
 }
 
 .td3-run-review-button:focus-visible {
-  outline: 2px solid rgba(79, 124, 255, .62);
+  outline: 2px solid var(--td3-focus);
   outline-offset: 2px;
 }
