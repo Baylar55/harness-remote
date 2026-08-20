@@ -40,6 +40,8 @@ test("launch persists run identity before starting the prompt and ends running",
   assert.equal(result.status, "running")
   assert.equal(result.run.id, "run-1")
   assert.equal(result.run.sessionId, "session-1")
+  assert.equal(result.run.agentId, "codex")
+  assert.equal(result.run.role, "implement")
   assert.deepEqual(calls, [
     ["state", "starting", null],
     ["session", "starting"],
@@ -98,13 +100,54 @@ test("Git tasks can intentionally launch from the project checkout", async () =>
   assert.equal(launched.run.directory, "/repo")
 })
 
-test("a terminal task can continue with a new run and prompt", async () => {
+test("same-harness Continue creates a new Run but reuses the native Session", async () => {
   let current = draft({
     status: "completed",
-    run: { id: "run-1", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1" },
-    runs: [{ id: "run-1", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1" }]
+    run: { id: "run-1", sequence: 1, agentId: "codex", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1", prompt: "Fix it", finishedAt: "2026-08-13T18:00:00.000Z" },
+    runs: [{ id: "run-1", sequence: 1, agentId: "codex", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1", prompt: "Fix it", finishedAt: "2026-08-13T18:00:00.000Z" }]
   })
-  let createdPrompt
+  let resumed
+  let sentPrompt
+  const store = {
+    async list() { return [] },
+    async get() { return structuredClone(current) },
+    async setRunState(_id, update) {
+      current = { ...current, status: update.status, run: structuredClone(update.run) }
+      return structuredClone(current)
+    }
+  }
+  const controller = new TaskRunController({
+    taskStore: store,
+    taskLauncher: {
+      async resumeSession(task, previousRun) {
+        resumed = { task: structuredClone(task), previousRun: structuredClone(previousRun) }
+        return { sessionId: previousRun.sessionId, transport: "acp", directory: task.workspace.path }
+      },
+      async createSession() { throw new Error("Continue should not create a new Session") },
+      async startPrompt(task) { sentPrompt = task.prompt }
+    },
+    runIDFactory: () => "run-2"
+  })
+
+  const continued = await controller.continue("task-1", "Now add regression tests")
+  assert.equal(continued.status, "running")
+  assert.equal(continued.run.id, "run-2")
+  assert.equal(continued.run.sessionId, "session-1")
+  assert.equal(continued.run.agentId, "codex")
+  assert.equal(continued.run.role, "continue")
+  assert.equal(continued.run.prompt, "Now add regression tests")
+  assert.equal(resumed.previousRun.sessionId, "session-1")
+  assert.equal(sentPrompt, "Now add regression tests")
+})
+
+test("cross-harness Continue creates a new Session and sends explicit Task Context", async () => {
+  let current = draft({
+    status: "completed",
+    context: { version: 1, revision: 1, taskId: "task-1", objective: "Fix it", currentState: "completed", latestOutcome: { status: "completed", agentId: "codex", role: "implement" }, runSummaries: [] },
+    run: { id: "run-1", sequence: 1, agentId: "codex", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1", prompt: "Fix it", status: "completed", finishedAt: "2026-08-13T18:00:00.000Z" },
+    runs: [{ id: "run-1", sequence: 1, agentId: "codex", sessionId: "session-1", transport: "acp", directory: "/state/worktrees/task-1", prompt: "Fix it", status: "completed", finishedAt: "2026-08-13T18:00:00.000Z" }]
+  })
+  let createPrompt
   let sentPrompt
   const store = {
     async list() { return [] },
@@ -118,21 +161,58 @@ test("a terminal task can continue with a new run and prompt", async () => {
     taskStore: store,
     taskLauncher: {
       async createSession(task) {
-        createdPrompt = task.prompt
-        return { sessionId: "session-2", transport: "acp", directory: task.workspace.path }
+        createPrompt = task.prompt
+        assert.equal(task.agentId, "claude")
+        return { sessionId: "claude-session", transport: "acp", directory: task.workspace.path }
       },
       async startPrompt(task) { sentPrompt = task.prompt }
     },
+    worktreeManager: { async inspect() { return { managed: true, dirty: true, changeCount: 2, changedFiles: ["src/auth.js", "test/auth.test.js"] } } },
     runIDFactory: () => "run-2"
   })
 
-  const continued = await controller.continue("task-1", "Now add regression tests")
-  assert.equal(continued.status, "running")
-  assert.equal(continued.run.id, "run-2")
-  assert.equal(continued.run.sessionId, "session-2")
-  assert.equal(continued.run.prompt, "Now add regression tests")
-  assert.equal(createdPrompt, "Now add regression tests")
-  assert.equal(sentPrompt, "Now add regression tests")
+  const continued = await controller.continue("task-1", {
+    prompt: "Review the implementation and list security issues",
+    agentId: "claude",
+    model: { providerID: "anthropic", modelID: "claude-test" },
+    role: "review"
+  })
+
+  assert.equal(continued.run.agentId, "claude")
+  assert.equal(continued.run.sessionId, "claude-session")
+  assert.equal(continued.run.role, "review")
+  assert.equal(continued.run.contextRevision, 1)
+  assert.equal(continued.run.handoffFromRunId, "run-1")
+  assert.deepEqual(continued.run.model, { providerID: "anthropic", modelID: "claude-test" })
+  assert.match(createPrompt, /transferred by TaskDesk/)
+  assert.match(createPrompt, /TASK OBJECTIVE\nFix it/)
+  assert.match(createPrompt, /CHANGED FILES\n- src\/auth\.js\n- test\/auth\.test\.js/)
+  assert.match(createPrompt, /YOUR ROLE\nreview/)
+  assert.match(createPrompt, /USER INSTRUCTION\nReview the implementation and list security issues/)
+  assert.equal(sentPrompt, createPrompt)
+})
+
+test("Task Context preview is deterministic and includes workspace changes", async () => {
+  const current = draft({
+    status: "completed",
+    context: { version: 1, revision: 2, taskId: "task-1", objective: "Fix it", currentState: "completed", latestOutcome: null, runSummaries: [] },
+    run: { id: "run-2", sequence: 2, agentId: "pi", role: "test", sessionId: "pi-1", status: "completed", prompt: "Run tests", finishedAt: "2026-08-13T19:00:00.000Z" },
+    runs: []
+  })
+  const controller = new TaskRunController({
+    taskStore: { async list() { return [] }, async get() { return structuredClone(current) } },
+    taskLauncher: {},
+    worktreeManager: { async inspect() { return { managed: true, dirty: true, changeCount: 1, changedFiles: ["src/index.js"] } } }
+  })
+
+  const context = await controller.context("task-1")
+  assert.equal(context.version, 1)
+  assert.equal(context.revision, 2)
+  assert.equal(context.objective, "Fix it")
+  assert.equal(context.latestRun.agentId, "pi")
+  assert.equal(context.latestRun.role, "test")
+  assert.deepEqual(context.changedFiles, ["src/index.js"])
+  assert.equal(context.workspace.changeCount, 1)
 })
 
 test("launch failures persist failed state", async () => {
