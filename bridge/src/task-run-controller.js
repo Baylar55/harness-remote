@@ -91,8 +91,10 @@ export class TaskRunController {
     const runPrompt = requestedPrompt || task.prompt
     if (!runPrompt) throw taskLaunchError("invalid_state", "A run prompt is required")
 
+    const previousRunCount = Array.isArray(task.runs) ? task.runs.length : task.run ? 1 : 0
     const run = {
       id: this.runIDFactory(),
+      sequence: previousRunCount + 1,
       agentId: task.agentId,
       sessionId: null,
       transport: null,

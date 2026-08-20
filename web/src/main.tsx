@@ -17,6 +17,8 @@ import {
   persistServerProfiles
 } from "./serverProfiles"
 import { SERVER_STORAGE_KEYS } from "./storageKeys"
+import { installTaskDeskMobileNavigation } from "./taskdesk-mobile-navigation"
+import { installTaskDeskRunHistory } from "./taskdesk-run-history"
 import type { MachineSnapshot, ServerConfig } from "./types"
 import {
   loadWorkspaceMachines,
@@ -31,6 +33,8 @@ import "./universal-workspace-readable-fixes.css"
 import "./taskdesk-v3.css"
 
 installCompletionAudioGuard()
+installTaskDeskMobileNavigation()
+installTaskDeskRunHistory()
 
 document.addEventListener("click", (event) => {
   const target = event.target

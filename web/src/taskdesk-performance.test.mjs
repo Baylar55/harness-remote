@@ -50,13 +50,36 @@ test("ACP bridge has lightweight session indexing, bounded message responses and
   assert.match(source, /url\.pathname === "\/v1\/diagnostics"/)
 })
 
-test("TaskDesk mobile keeps Agents aligned and exposes Sessions without translucent overlays", () => {
+test("TaskDesk responsive layout uses focused mobile pages and at most two persistent Session panes", () => {
   const polish = readFileSync(new URL("./v3-polish.css", import.meta.url), "utf8")
+  const mobileNavigation = readFileSync(new URL("./taskdesk-mobile-navigation.ts", import.meta.url), "utf8")
 
   assert.match(polish, /article:has\(> \.td3-agent-badge\)[\s\S]*?grid-template-columns: minmax\(152px, 178px\) minmax\(0, 1fr\)/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-layout[\s\S]*?grid-template-columns: minmax\(300px, 360px\) minmax\(0, 1fr\)/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-nav[\s\S]*?display: none !important/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-inspector[\s\S]*?position: absolute/)
   assert.match(polish, /\.td3-tasks-layout-unified\.detail-open \.td3-task-list-pane[\s\S]*?display: none/)
-  assert.match(polish, /\.td3-task-detail-open[\s\S]*?background: #080e17[\s\S]*?box-shadow: none/)
-  assert.match(polish, /\.td3-sessions-embedded \.uw-layout[\s\S]*?grid-template-rows: minmax\(180px, 34%\) minmax\(0, 1fr\)/)
-  assert.match(polish, /\.td3-sessions-embedded \.uw-session-column[\s\S]*?transform: none/)
-  assert.match(polish, /\.td3-sessions-embedded \.uw-main[\s\S]*?position: relative[\s\S]*?background: #080e17/)
+  assert.match(polish, /\.td3-workspace:has\(\.td3-tasks-layout-unified\.detail-open\) > \.td3-topbar[\s\S]*?display: none/)
+  assert.match(polish, /\.td3-sessions-embedded \.uw-main[\s\S]*?display: none/)
+  assert.match(polish, /\.td3-sessions-embedded\.td3-mobile-session-detail \.uw-session-column[\s\S]*?display: none/)
+  assert.match(polish, /\.td3-sessions-embedded\.td3-mobile-session-detail \.uw-main[\s\S]*?display: flex/)
+
+  assert.match(mobileNavigation, /SESSION_DETAIL_CLASS = "td3-mobile-session-detail"/)
+  assert.match(mobileNavigation, /target\.closest<HTMLButtonElement>\("\.td3-sessions-embedded \.uw-session-card"\)/)
+  assert.match(mobileNavigation, /button\.textContent = "‹ Sessions"/)
+  assert.match(mobileNavigation, /showSessionList\(\)/)
+})
+
+test("TaskDesk mobile keeps create actions reachable and a manual Session choice stable", () => {
+  const mobileNavigation = readFileSync(new URL("./taskdesk-mobile-navigation.ts", import.meta.url), "utf8")
+
+  assert.match(mobileNavigation, /button\.textContent = "\+ New Task"/)
+  assert.match(mobileNavigation, /button\.textContent = "\+ New Session"/)
+  assert.match(mobileNavigation, /find\(\(candidate\) => buttonLabel\(candidate\) === "New Task"\)/)
+  assert.match(mobileNavigation, /root\.querySelector<HTMLButtonElement>\("\.uw-new-button"\)\?\.click\(\)/)
+  assert.match(mobileNavigation, /let manuallySelectedSession: HTMLButtonElement \| null = null/)
+  assert.match(mobileNavigation, /manuallySelectedSession = sessionCard/)
+  assert.match(mobileNavigation, /restoreManualSelection/)
+  assert.match(mobileNavigation, /manuallySelectedSession\.click\(\)/)
+  assert.match(mobileNavigation, /attributeFilter: \["class"\]/)
 })

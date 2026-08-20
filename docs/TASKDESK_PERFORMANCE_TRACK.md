@@ -19,8 +19,6 @@ Use daemon session events as the primary invalidation signal where available. Ev
 
 Opened transcripts may be cached for navigation responsiveness, but the cache must have explicit limits by session count and message count or approximate payload size. Least-recently-used entries are evicted first. Session listing, status counting and search must never depend on cached transcript bodies.
 
-Status: the branch now contains a generic count-and-weight bounded LRU primitive plus eviction/weight-accounting regression tests. It is not wired into transcript ownership yet, intentionally keeping that integration separate from the primitive itself.
-
 ### 3. Real history pagination
 
 Conversation APIs should support bounded pages and a cursor or before-token. Opening a session loads the newest page first. Older history is fetched only when the user requests or scrolls toward it. A small `limit=1` or preview request must never force the daemon to reconstruct a complete ACP history.

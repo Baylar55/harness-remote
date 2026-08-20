@@ -41,6 +41,11 @@ function acpModelWireName(model) {
   return model ? `${model.providerID}/${model.modelID}` : undefined
 }
 
+function taskSessionTitle(task) {
+  const base = `Task ${task.id.slice(0, 8)}`
+  return Number(task.run?.sequence) > 1 ? `${base} · Run ${task.run.sequence}` : base
+}
+
 export class TaskLauncher {
   constructor({ daemon, fetchImpl = fetch, acpService } = {}) {
     this.daemon = daemon
@@ -55,13 +60,14 @@ export class TaskLauncher {
       throw taskLaunchError("agent_unavailable", `Agent ${task.agentId} is unavailable`)
     }
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
+    const title = taskSessionTitle(task)
 
     if (entry.kind === "acp") {
       const service = this.acpService?.(task.agentId)
       if (service) {
         const session = await service.createSession({
           directory: task.workspace.path,
-          title: `Task ${task.id.slice(0, 8)}`,
+          title,
           model: acpModelWireName(task.model)
         })
         if (!session?.id) throw new Error(`Agent ${task.agentId} did not return a session id`)
@@ -96,7 +102,7 @@ export class TaskLauncher {
           // OpenCode assigns the model to a message, not to a session. Keep the session title
           // consistent with sessions created for other agents; the UI resolves task metadata
           // separately when it displays the session's selected model.
-          title: `Task ${task.id.slice(0, 8)}`
+          title
         })
       })
       const session = await responseJSON(response, `Creating ${task.agentId} session`)
