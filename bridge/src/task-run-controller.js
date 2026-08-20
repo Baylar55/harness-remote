@@ -82,7 +82,7 @@ function requestedRole(task, options = {}) {
 
 function completedRun(run, result) {
   const outcome = boundTaskOutcome(result?.outcome)
-  return outcome ? { ...run, outcome } : run
+  return outcome ? { ...run, outcome, outcomeVersion: 2 } : run
 }
 
 export class TaskRunController {
