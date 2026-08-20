@@ -1,20 +1,137 @@
 import { createReadStream } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { open, readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
-import { createInterface } from "node:readline"
+
+const BACKWARD_READ_BYTES = 64 * 1024
+
+function trimCarriageReturn(buffer) {
+  return buffer.length > 0 && buffer[buffer.length - 1] === 0x0d ? buffer.subarray(0, -1) : buffer
+}
+
+function messageFromLine(sessionID, line, offset) {
+  let record
+  try {
+    record = JSON.parse(trimCarriageReturn(line).toString("utf8"))
+  } catch {
+    return undefined
+  }
+  if (record?.type !== "event_msg") return undefined
+  const payload = record.payload
+  const role = payload?.type === "user_message" ? "user"
+    : payload?.type === "agent_message" || payload?.type === "agent_reasoning" ? "assistant"
+    : undefined
+  if (!role) return undefined
+
+  const type = payload.type === "agent_reasoning" ? "reasoning" : "text"
+  const text = payload.type === "agent_reasoning" ? payload.text : payload.message
+  if (typeof text !== "string" || !text) return undefined
+
+  // Rollouts are append-only. A byte offset is therefore both unique inside the file and stable as
+  // later turns are appended. The paged tail reader can derive it without first scanning all older
+  // lines, unlike the old ordinal-based id.
+  const messageID = `${sessionID}:byte:${offset}`
+  const created = Date.parse(record.timestamp ?? "")
+  return {
+    info: {
+      id: messageID,
+      role,
+      sessionID,
+      time: { created: Number.isFinite(created) ? created : Date.now() }
+    },
+    parts: [{ id: `${messageID}:${type}:0`, messageID, type, text }]
+  }
+}
+
+async function* forwardLines(file) {
+  let pending = Buffer.alloc(0)
+  let pendingStart = 0
+  for await (const chunk of createReadStream(file)) {
+    const data = pending.length > 0 ? Buffer.concat([pending, chunk]) : chunk
+    let lineStart = 0
+    for (let index = 0; index < data.length; index += 1) {
+      if (data[index] !== 0x0a) continue
+      yield { line: data.subarray(lineStart, index), offset: pendingStart + lineStart }
+      lineStart = index + 1
+    }
+    pending = lineStart < data.length ? Buffer.from(data.subarray(lineStart)) : Buffer.alloc(0)
+    pendingStart += lineStart
+  }
+  if (pending.length > 0) yield { line: pending, offset: pendingStart }
+}
+
+async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
+  const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
+  const handle = await open(file, "r")
+  try {
+    const { size } = await handle.stat()
+    let end = size
+    if (before !== undefined && before !== null && before !== "") {
+      const parsed = Number(before)
+      if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > size) {
+        throw new Error("Invalid Codex history cursor")
+      }
+      end = parsed
+    }
+
+    const found = []
+    let cursor = end
+    let carry = Buffer.alloc(0)
+
+    while (cursor > 0 && found.length <= boundedLimit) {
+      const start = Math.max(0, cursor - BACKWARD_READ_BYTES)
+      const chunk = Buffer.allocUnsafe(cursor - start)
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0
+        ? Buffer.concat([chunk.subarray(0, bytesRead), carry])
+        : chunk.subarray(0, bytesRead)
+
+      let lineEnd = data.length
+      for (let index = data.length - 1; index >= 0 && found.length <= boundedLimit; index -= 1) {
+        if (data[index] !== 0x0a) continue
+        const lineStart = index + 1
+        if (lineStart < lineEnd) {
+          const offset = start + lineStart
+          const message = messageFromLine(sessionID, data.subarray(lineStart, lineEnd), offset)
+          if (message) found.push({ message, offset })
+        }
+        lineEnd = index
+      }
+
+      if (start === 0) {
+        if (lineEnd > 0 && found.length <= boundedLimit) {
+          const message = messageFromLine(sessionID, data.subarray(0, lineEnd), 0)
+          if (message) found.push({ message, offset: 0 })
+        }
+        carry = Buffer.alloc(0)
+        cursor = 0
+      } else {
+        carry = lineEnd > 0 ? Buffer.from(data.subarray(0, lineEnd)) : Buffer.alloc(0)
+        cursor = start
+      }
+    }
+
+    const hasMore = found.length > boundedLimit
+    const newest = found.slice(0, boundedLimit)
+    const messages = newest.map((entry) => entry.message).reverse()
+    const nextBefore = hasMore && newest.length > 0 ? String(newest[newest.length - 1].offset) : null
+    return { messages, before: nextBefore, hasMore }
+  } finally {
+    await handle.close()
+  }
+}
 
 /**
  * Codex allows a single writer per thread and takes the lock for the whole time a client holds the
  * thread open, so `session/load` answers "thread <id> already has an active writer" for every
- * session the Codex desktop app or a `codex` CLI is sitting on — which is precisely the sessions a
+ * session the Codex desktop app or a `codex` CLI is sitting on, which is precisely the sessions a
  * user wants to look at from their phone. Reading the rollout the harness already wrote takes no
  * lock, so those sessions can be shown even while Codex itself owns them.
  *
  * The transcript comes from the `event_msg` records rather than the `response_item` ones: only the
  * former carry what the user actually saw. The latter also hold the instruction blocks Codex feeds
- * the model — AGENTS.md, the plugin list, the desktop app context — under the `user` role, which
- * would surface as the user's own turns.
+ * the model, AGENTS.md, the plugin list and desktop app context, under the `user` role, which would
+ * surface as the user's own turns.
  */
 export function createCodexHistoryLoader(sessionRoot = path.join(homedir(), ".codex", "sessions")) {
   const sessionFiles = new Map()
@@ -38,44 +155,22 @@ export function createCodexHistoryLoader(sessionRoot = path.join(homedir(), ".co
     }
   }
 
-  return async function loadCodexHistory(sessionID) {
+  const loadCodexHistory = async function loadCodexHistory(sessionID) {
     const file = await locateSession(sessionID)
     if (!file) return []
     const messages = []
-    const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity })
-    let ordinal = 0
-    for await (const line of lines) {
-      ordinal += 1
-      let record
-      try {
-        record = JSON.parse(line)
-      } catch {
-        continue
-      }
-      if (record?.type !== "event_msg") continue
-      const payload = record.payload
-      // A rollout is append-only, so the line number is a stable id across re-reads.
-      const messageID = `${sessionID}:${ordinal}`
-      const role = payload?.type === "user_message" ? "user"
-        : payload?.type === "agent_message" || payload?.type === "agent_reasoning" ? "assistant"
-        : undefined
-      if (!role) continue
-      // Reasoning is kept apart from spoken text so it renders collapsed, the way the replayed
-      // transcript of a session this bridge owns already does.
-      const type = payload.type === "agent_reasoning" ? "reasoning" : "text"
-      const text = payload.type === "agent_reasoning" ? payload.text : payload.message
-      if (typeof text !== "string" || !text) continue
-      const created = Date.parse(record.timestamp ?? "")
-      messages.push({
-        info: {
-          id: messageID,
-          role,
-          sessionID,
-          time: { created: Number.isFinite(created) ? created : Date.now() }
-        },
-        parts: [{ id: `${messageID}:${type}:0`, messageID, type, text }]
-      })
+    for await (const { line, offset } of forwardLines(file)) {
+      const message = messageFromLine(sessionID, line, offset)
+      if (message) messages.push(message)
     }
     return messages
   }
+
+  loadCodexHistory.page = async (sessionID, options = {}) => {
+    const file = await locateSession(sessionID)
+    if (!file) return { messages: [], before: null, hasMore: false }
+    return readCodexPage(file, sessionID, options)
+  }
+
+  return loadCodexHistory
 }
