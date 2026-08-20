@@ -218,6 +218,45 @@
     margin-left: 20px;
     margin-right: auto;
   }
+
+  /* Session actions stay in the top row, while metadata gets the full header width below them. This
+     avoids wrapping Project/Harness/Model into a narrow left column while the space below the action
+     buttons remains unused. */
+  .td3-shell-unified .td3-sessions-embedded .uw-session-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px 14px;
+  }
+
+  .td3-shell-unified .td3-sessions-embedded .uw-session-heading {
+    display: contents;
+  }
+
+  .td3-shell-unified .td3-sessions-embedded .uw-session-heading-title {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .td3-shell-unified .td3-sessions-embedded .uw-session-actions {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+    margin-left: 0;
+  }
+
+  .td3-shell-unified .td3-sessions-embedded .uw-context-strip {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+    max-width: none;
+    margin-top: 0;
+  }
+
+  .td3-shell-unified .td3-sessions-embedded .uw-context-strip > span {
+    max-width: min(240px, 100%);
+  }
 }
 
 /* Every context cell gets the same value row height as the model selector. Project, Harness,
@@ -239,4 +278,45 @@
   content: "↺";
   font-size: 17px;
   line-height: 1;
+}
+
+/* Restore the familiar three-dot waiting bubble in the conversation. prompt_async returns before the
+   assistant reply, so the immediate Sending spinner and the native Working status both keep the
+   indicator visible until the Session settles. */
+.td3-shell-unified .td3-sessions-embedded .uw-transcript::after {
+  display: none;
+  content: "";
+  width: 44px;
+  height: 28px;
+  margin: 2px 0 18px 40px;
+  border: 1px solid var(--td3-border-soft);
+  border-radius: 10px;
+  background-color: var(--td3-raise-2);
+  background-image:
+    radial-gradient(circle, var(--td3-text-3) 0 2.5px, transparent 3px),
+    radial-gradient(circle, var(--td3-text-3) 0 2.5px, transparent 3px),
+    radial-gradient(circle, var(--td3-text-3) 0 2.5px, transparent 3px);
+  background-repeat: no-repeat;
+  background-position: 11px 14px, 21px 14px, 31px 14px;
+}
+
+.td3-shell-unified .td3-sessions-embedded .uw-main:has(.uw-context-strip .uw-status-working) .uw-transcript::after,
+.td3-shell-unified .td3-sessions-embedded .uw-main:has(.uw-composer-footer .uw-button-primary svg) .uw-transcript::after {
+  display: block;
+  animation: uw-session-typing 1.1s ease-in-out infinite;
+}
+
+@keyframes uw-session-typing {
+  0%, 70%, 100% { background-position: 11px 14px, 21px 14px, 31px 14px; }
+  15% { background-position: 11px 9px, 21px 14px, 31px 14px; }
+  30% { background-position: 11px 14px, 21px 9px, 31px 14px; }
+  45% { background-position: 11px 14px, 21px 14px, 31px 9px; }
+  60% { background-position: 11px 14px, 21px 14px, 31px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .td3-shell-unified .td3-sessions-embedded .uw-main:has(.uw-context-strip .uw-status-working) .uw-transcript::after,
+  .td3-shell-unified .td3-sessions-embedded .uw-main:has(.uw-composer-footer .uw-button-primary svg) .uw-transcript::after {
+    animation: none;
+  }
 }
