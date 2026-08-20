@@ -70,6 +70,7 @@ test("refresh recomputes weight after a cached mutable transcript grows", () => 
   })
   cache.set("first", first)
   cache.set("second", second)
+  assert.equal(cache.get("first"), first, "the transcript being viewed becomes most-recently used")
   first.push(3, 4)
   cache.refresh("first")
 
