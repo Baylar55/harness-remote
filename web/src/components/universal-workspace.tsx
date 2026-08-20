@@ -940,6 +940,10 @@ export function UniversalWorkspace({
   selectedKeyRef.current = selectedKey
   const selectedSessionModel = sessionModels.find((model) => modelOptionKey(model) === sessionModelKey)
   const detailReady = Boolean(selected && detailSessionKey === selected.key)
+  const sessionWaiting = Boolean(
+    selected && detailReady && !detailLoading
+    && (sending || normalizeStatus(selected.status, selected.attention) === "working")
+  )
 
   const refreshAll = useCallback(async (silent = false) => {
     if (refreshInFlight.current) return
@@ -1172,7 +1176,7 @@ export function UniversalWorkspace({
   useEffect(() => {
     if (!transcriptRef.current || detailTab !== "conversation" || !detailReady) return
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
-  }, [selected?.key, detail.messages.length, detailTab, detailReady])
+  }, [selected?.key, detail.messages.length, detailTab, detailReady, sessionWaiting])
 
   useEffect(() => {
     localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify([...pinned]))
@@ -1564,7 +1568,7 @@ export function UniversalWorkspace({
                   <div className="uw-transcript" ref={transcriptRef}>
                     {detailLoading || !detailReady ? (
                       <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading session…</strong></div>
-                    ) : detail.messages.length === 0 ? (
+                    ) : detail.messages.length === 0 && !sessionWaiting ? (
                       <div className="uw-empty-panel"><ChatIcon size={24} /><strong>This session has no messages yet.</strong></div>
                     ) : detail.messages.map((message) => (
                       <MessageBubble
@@ -1574,6 +1578,13 @@ export function UniversalWorkspace({
                         agentBackend={selected.agent.backend}
                       />
                     ))}
+                    {sessionWaiting ? (
+                      <div className="uw-session-typing" role="status" aria-label="Waiting for agent response">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="uw-composer-shell">
