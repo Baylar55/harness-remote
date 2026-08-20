@@ -501,22 +501,23 @@ export class AcpService {
   async messagePage(sessionID, { limit = 100, before, refresh = false } = {}) {
     const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
     if (typeof this.#historyLoader?.page === "function" && !refresh && !this.#isBusy(sessionID)) {
-    try {
-      let pageOptions = { limit: boundedLimit, before }
-      if (this.#historyLoader.pageRequiresActiveLeaf) {
-        const authoritativeState = await this.#refreshActionState(sessionID, false)
-        if (authoritativeState?.activeSessionLeaf === undefined) pageOptions = null
-        else pageOptions = { ...pageOptions, activeSessionLeaf: authoritativeState.activeSessionLeaf }
+      try {
+        let pageOptions = { limit: boundedLimit, before }
+        if (this.#historyLoader.pageRequiresActiveLeaf) {
+          if (!this.#sessions.has(sessionID)) await this.#refreshSessions()
+          const authoritativeState = await this.#refreshActionState(sessionID, false)
+          if (authoritativeState?.activeSessionLeaf === undefined) pageOptions = null
+          else pageOptions = { ...pageOptions, activeSessionLeaf: authoritativeState.activeSessionLeaf }
+        }
+        if (pageOptions) {
+          const page = await this.#historyLoader.page(sessionID, pageOptions)
+          if (page && Array.isArray(page.messages)) return page
+        }
+      } catch {
+        this.#emit("session.error", sessionID, { message: "Harness session history page could not be read" })
       }
-      if (pageOptions) {
-        const page = await this.#historyLoader.page(sessionID, pageOptions)
-        if (page && Array.isArray(page.messages)) return page
-      }
-    } catch {
-      this.#emit("session.error", sessionID, { message: "Harness session history page could not be read" })
     }
-  }
-  const messages = await this.messages(sessionID, refresh)
+    const messages = await this.messages(sessionID, refresh)
     const requestedEnd = before
       ? messages.findIndex((message) => message?.info?.id === before)
       : messages.length
