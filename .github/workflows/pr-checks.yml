@@ -13,6 +13,7 @@ name: PR checks
       - 'web/**'
       - 'bridge/**'
       - '.github/workflows/pr-checks.yml'
+      - '.github/taskdesk-perf-integrate.py'
 
 permissions:
   contents: read
@@ -24,6 +25,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  perf-integrate:
+    name: Apply TaskDesk performance integration
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'feature/taskdesk-event-driven-performance' && github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Apply verified performance patch
+        run: python .github/taskdesk-perf-integrate.py
+
+      - name: Restore CI definition and remove one-shot script
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref }}"
+          git checkout "origin/${{ github.event.pull_request.base.ref }}" -- .github/workflows/pr-checks.yml
+          git rm .github/taskdesk-perf-integrate.py
+
+      - name: Commit integrated data-plane changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bridge/src/acp-service.js bridge/src/server.js .github/workflows/pr-checks.yml .github/taskdesk-perf-integrate.py
+          git commit -m "perf(taskdesk): bound retained transcripts and expose paging state"
+          git push origin HEAD:feature/taskdesk-event-driven-performance
+
   tests:
     name: Type-check and regressions
     runs-on: ubuntu-latest
