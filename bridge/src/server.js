@@ -82,9 +82,10 @@ function sameListedDirectory(left, right) {
   return normalize(left) === normalize(right)
 }
 
-function listedSessionView(session, service) {
-  const updated = Date.parse(session.updatedAt ?? "")
-  const timestamp = Number.isFinite(updated) ? updated : Date.now()
+function listedSessionView(session, service, liveUpdatedAt = 0) {
+  const listedUpdated = Date.parse(session.updatedAt ?? "")
+  const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
+  const timestamp = Math.max(listedTimestamp, liveUpdatedAt)
   return {
     id: session.sessionId,
     title: session.title || `Session ${String(session.sessionId).slice(0, 8)}`,
@@ -145,6 +146,17 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     nativeRenameCommand: profile.nativeRenameCommand
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
+  const liveSessionActivity = new Map()
+  const unsubscribeActivity = service.subscribe((event) => {
+    if (!event?.sessionId) return
+    if (event.type === "session.deleted") {
+      liveSessionActivity.delete(event.sessionId)
+      return
+    }
+    if (["session.created", "session.updated", "message.updated", "todo.updated"].includes(event.type)) {
+      liveSessionActivity.set(event.sessionId, Date.now())
+    }
+  })
   const listVisibleSessions = async (directory) => {
     const sessions = await service.listSessions(directory)
     if (!hiddenSessionIDs?.size) return sessions
@@ -154,12 +166,15 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   // AcpService.listSessions here used to restore every persisted transcript snapshot into memory,
   // so merely opening the app could retain gigabytes of historical messages. The experimental
   // global listing and status route deliberately stay on the harness's lightweight session index.
+  // Live activity is tracked separately so an active Session still sorts to the top without reading
+  // its transcript. Invalid or missing harness timestamps stay at zero instead of pretending to be
+  // freshly updated on every poll.
   const listVisibleSessionMetadata = async (directory) => {
     const sessions = await acp.listSessions()
     return sessions
       .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
       .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
-      .map((session) => listedSessionView(session, service))
+      .map((session) => listedSessionView(session, service, liveSessionActivity.get(session.sessionId) ?? 0))
   }
 
   const server = http.createServer(async (request, response) => {
@@ -365,6 +380,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
       writeJSON(response, 400, { error: error instanceof Error ? error.message : "Request failed" })
     }
   })
+  server.on("close", unsubscribeActivity)
   // The machine task launcher must use this exact service so task-created ACP sessions retain
   // their title, prompt, live messages, and ownership when the user switches harnesses.
   server.acpService = service
