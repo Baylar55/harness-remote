@@ -41,3 +41,39 @@ test("replacing and deleting entries keep the tracked weight exact", () => {
   assert.equal(cache.weight, 0)
   assert.equal(cache.size, 0)
 })
+
+test("protected active entries survive pressure while inactive entries are evicted", () => {
+  const protectedKeys = new Set(["active"])
+  const evicted = []
+  const cache = new BoundedLru({
+    maxEntries: 2,
+    canEvict: (key) => !protectedKeys.has(key),
+    onEvict: (key) => evicted.push(key)
+  })
+  cache.set("active", ["a"])
+  cache.set("old", ["b"])
+  cache.set("new", ["c"])
+
+  assert.equal(cache.has("active"), true)
+  assert.equal(cache.has("old"), false)
+  assert.equal(cache.has("new"), true)
+  assert.deepEqual(evicted, ["old"])
+})
+
+test("refresh recomputes weight after a cached mutable transcript grows", () => {
+  const first = [1]
+  const second = [2]
+  const cache = new BoundedLru({
+    maxEntries: 4,
+    maxWeight: 3,
+    weightOf: (messages) => messages.length
+  })
+  cache.set("first", first)
+  cache.set("second", second)
+  first.push(3, 4)
+  cache.refresh("first")
+
+  assert.equal(cache.has("second"), false)
+  assert.equal(cache.has("first"), true)
+  assert.equal(cache.weight, 3)
+})
