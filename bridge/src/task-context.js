@@ -8,10 +8,9 @@ function cleanRole(value, fallback = "continue") {
 }
 
 function runStatus(run, taskStatus) {
-  if (run?.finishedAt) {
-    if (taskStatus === "failed" && run.id) return "failed"
-    return "completed"
-  }
+  const persisted = cleanText(run?.status)
+  if (persisted) return persisted
+  if (run?.finishedAt) return taskStatus === "failed" ? "failed" : "completed"
   return taskStatus || "unknown"
 }
 
@@ -42,7 +41,7 @@ export function summarizeTaskRun(run, taskStatus = "unknown") {
 
 export function buildPersistedTaskContext(task, revision = task?.context?.revision ?? 0) {
   const runs = Array.isArray(task?.runs) ? task.runs : task?.run ? [task.run] : []
-  const runSummaries = runs.map((run) => summarizeTaskRun(run, run?.id === task?.run?.id ? task?.status : run?.finishedAt ? "completed" : "unknown")).filter(Boolean)
+  const runSummaries = runs.map((run) => summarizeTaskRun(run, run?.id === task?.run?.id ? task?.status : run?.status || (run?.finishedAt ? "completed" : "unknown"))).filter(Boolean)
   const latestRun = task?.run ? summarizeTaskRun(task.run, task.status) : null
   const errorMessage = cleanText(task?.error?.message)
   return {
@@ -98,23 +97,14 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
 
   const latest = context.latestRun || context.runSummaries?.at?.(-1)
   if (latest) {
-    lines.push(
-      "",
-      "PREVIOUS STEP",
-      `${latest.agentId || "unknown harness"} / ${latest.role || "continue"} / ${latest.status || "unknown"}`
-    )
+    lines.push("", "PREVIOUS STEP", `${latest.agentId || "unknown harness"} / ${latest.role || "continue"} / ${latest.status || "unknown"}`)
   }
-
-  if (context.latestOutcome?.error) {
-    lines.push("", "LATEST ERROR", context.latestOutcome.error)
-  }
-
+  if (context.latestOutcome?.error) lines.push("", "LATEST ERROR", context.latestOutcome.error)
   if (context.changedFiles?.length) {
     lines.push("", "CHANGED FILES", ...context.changedFiles.map((file) => `- ${file}`))
   } else if (context.workspace?.changeCount) {
     lines.push("", "WORKSPACE CHANGES", `${context.workspace.changeCount} changed file(s) are present in the shared workspace.`)
   }
-
   if (context.runSummaries?.length) {
     lines.push("", "RECENT TASK STEPS")
     for (const run of context.runSummaries.slice(-6)) {
@@ -122,19 +112,6 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
     }
   }
 
-  lines.push(
-    "",
-    "YOUR ROLE",
-    cleanRole(role),
-    "",
-    "TARGET HARNESS",
-    cleanText(targetAgentId) || "unknown",
-    "",
-    "USER INSTRUCTION",
-    cleanText(instruction),
-    "",
-    "Continue from the shared workspace and the transferred Task Context. Inspect the current files before assuming previous work is correct."
-  )
-
+  lines.push("", "YOUR ROLE", cleanRole(role), "", "TARGET HARNESS", cleanText(targetAgentId) || "unknown", "", "USER INSTRUCTION", cleanText(instruction), "", "Continue from the shared workspace and the transferred Task Context. Inspect the current files before assuming previous work is correct.")
   return lines.join("\n")
 }
