@@ -107,6 +107,13 @@ export class TaskLauncher {
     return entry
   }
 
+  async validateModelSelection(agentID, model) {
+    if (!model) return
+    await this.#entry(agentID)
+    if (typeof this.daemon.validateModel !== "function") return
+    await this.daemon.validateModel(agentID, model)
+  }
+
   async createSession(task) {
     const agentID = runAgentID(task)
     const model = runModel(task)
