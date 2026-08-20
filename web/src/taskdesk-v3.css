@@ -94,6 +94,12 @@
 .td3-button:hover:not(:disabled) { border-color: var(--td3-border-strong); background: var(--td3-control-hover); }
 .td3-button:disabled { opacity: .45; cursor: default; }
 .td3-button.primary { border-color: var(--td3-blue-border); color: var(--td3-on-accent); background: linear-gradient(180deg,var(--td3-blue-strong),var(--td3-blue-deep)); }
+/* The generic `.td3-button:hover` rule above outranks `.td3-button.primary` on class count alone
+   (three selector classes vs two), so without this it swaps the primary fill for the pale
+   `--td3-control-hover` on hover while leaving the label at `--td3-on-accent` white — unreadable
+   in the light theme. Repeating the fill here at equal specificity to the hover rule keeps the
+   button's own colours in charge of its own hover state. */
+.td3-button.primary:hover:not(:disabled) { border-color: var(--td3-blue-border); color: var(--td3-on-accent); background: linear-gradient(180deg,var(--td3-blue-deep),var(--td3-blue-deep)); }
 .td3-button.danger { border-color: var(--td3-red-border); color: var(--td3-red-text); background: var(--td3-red-soft); }
 
 .td3-page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 22px 24px 17px; }
@@ -240,7 +246,12 @@
 .td3-form-grid label, .td3-stack-field { display:flex; flex-direction:column; gap:5px; } .td3-form-grid label > span, .td3-stack-field > span { color:var(--td3-muted); font-size:10.5px; font-weight:650; }
 .td3-form-grid select, .td3-form-grid textarea, .td3-stack-field textarea { width:100%; border:1px solid var(--td3-border); border-radius:9px; outline:0; color:var(--td3-text); background:var(--td3-control); font-size:12px; } .td3-form-grid select { height:38px; padding:0 9px; } .td3-form-grid textarea, .td3-stack-field textarea { min-height:120px; padding:10px; resize:vertical; line-height:1.55; }
 .td3-form-wide { grid-column:1/-1; }
-.td3-workspace-choice { flex-direction:row !important; align-items:flex-start; gap:9px !important; padding:10px; border:1px solid var(--td3-border); border-radius:9px; background:var(--td3-raise-1); } .td3-workspace-choice input { margin-top:2px; } .td3-workspace-choice > span { display:flex; flex-direction:column; gap:2px; } .td3-workspace-choice strong { color:var(--td3-text-2); font-size:11px; } .td3-workspace-choice small { color:var(--td3-muted); font-size:10px; }
+.td3-workspace-choice { flex-direction:row !important; align-items:flex-start; gap:9px !important; padding:10px; border:1px solid var(--td3-border); border-radius:9px; background:var(--td3-raise-1); }
+/* The global `input { width: 100%; min-height: var(--control-h-lg) }` reset in styles.css still
+   applies here — margin-top alone didn't override it, so the checkbox stretched to the full width
+   of the row instead of sitting as a small control next to its label. */
+.td3-workspace-choice input { flex:none; width:15px; min-width:15px; max-width:15px; height:15px; min-height:15px; margin:2px 0 0; padding:0; border-radius:4px; accent-color:var(--td3-blue); }
+.td3-workspace-choice > span { display:flex; flex-direction:column; gap:2px; } .td3-workspace-choice strong { color:var(--td3-text-2); font-size:11px; } .td3-workspace-choice small { color:var(--td3-muted); font-size:10px; }
 .td3-modal > footer { min-height:58px; display:flex; align-items:center; justify-content:flex-end; gap:7px; padding:9px 17px; border-top:1px solid var(--td3-border); background:var(--td3-veil-soft); }
 .td3-continue-modal { width:min(590px,100%); }
 
