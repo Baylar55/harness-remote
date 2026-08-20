@@ -26,9 +26,12 @@ function largeTask(runCount = 40) {
 }
 
 test("persisted Task Context keeps only bounded recent Run summaries", () => {
-  const context = buildPersistedTaskContext(largeTask(), 40)
+  const task = largeTask()
+  const context = buildPersistedTaskContext(task, 40)
+  const runtime = buildTaskContext(task, { workspace: { dirty: false, changeCount: 0, changedFiles: [] } })
 
-  assert.equal(context.runCount, 40)
+  assert.equal(Object.hasOwn(context, "runCount"), false)
+  assert.equal(runtime.runCount, 40)
   assert.equal(context.runSummaries.length, 12)
   assert.equal(context.runSummaries[0].sequence, 29)
   assert.equal(context.runSummaries.at(-1).sequence, 40)
