@@ -7,6 +7,7 @@ const TASK_CONTEXT_ROUTE = /^\/v1\/tasks\/([^/]+)\/context$/
 const TASK_WORKTREE_ROUTE = /^\/v1\/tasks\/([^/]+)\/worktree$/
 const TASK_WORKTREE_CLEANUP_ROUTE = /^\/v1\/tasks\/([^/]+)\/worktree\/cleanup$/
 const LAUNCH_STATUS = new Map([
+  ["invalid_request", 400],
   ["unknown_task", 404],
   ["unknown_agent", 404],
   ["agent_unavailable", 503],
@@ -18,16 +19,28 @@ const LAUNCH_STATUS = new Map([
   ["worktree_dirty", 409],
   ["invalid_worktree", 409],
   ["worktree_outside_state", 409],
-  ["worktree_missing", 409]
+  ["worktree_missing", 409],
+  ["invalid_project", 409]
 ])
+
+function requestError(message) {
+  const error = new Error(message)
+  error.code = "invalid_request"
+  return error
+}
 
 async function readJSONBody(request) {
   let body = ""
   for await (const chunk of request) {
     body += chunk
-    if (body.length > 1_000_000) throw new Error("Request body is too large")
+    if (body.length > 1_000_000) throw requestError("Request body is too large")
   }
-  return body ? JSON.parse(body) : {}
+  if (!body) return {}
+  try {
+    return JSON.parse(body)
+  } catch {
+    throw requestError("Request body must be valid JSON")
+  }
 }
 
 export function launchStatus(error) {
@@ -64,6 +77,7 @@ export function createTaskLaunchServer({ innerServer, config, taskRunController,
         }
         const taskID = decodeURIComponent((launchMatch ?? continueMatch)[1])
         const body = await readJSONBody(request)
+        if (!body || typeof body !== "object" || Array.isArray(body)) throw requestError("Request body must be a JSON object")
         if (continueMatch) {
           writeJSON(response, 200, await taskRunController.continue(taskID, body))
         } else {
