@@ -65,7 +65,21 @@ test("TaskDesk responsive layout uses focused mobile pages and at most two persi
   assert.match(polish, /\.td3-sessions-embedded\.td3-mobile-session-detail \.uw-main[\s\S]*?display: flex/)
 
   assert.match(mobileNavigation, /SESSION_DETAIL_CLASS = "td3-mobile-session-detail"/)
-  assert.match(mobileNavigation, /target\.closest\("\.td3-sessions-embedded \.uw-session-card"\)/)
+  assert.match(mobileNavigation, /target\.closest<HTMLButtonElement>\("\.td3-sessions-embedded \.uw-session-card"\)/)
   assert.match(mobileNavigation, /button\.textContent = "‹ Sessions"/)
   assert.match(mobileNavigation, /showSessionList\(\)/)
+})
+
+test("TaskDesk mobile keeps create actions reachable and a manual Session choice stable", () => {
+  const mobileNavigation = readFileSync(new URL("./taskdesk-mobile-navigation.ts", import.meta.url), "utf8")
+
+  assert.match(mobileNavigation, /button\.textContent = "\+ New Task"/)
+  assert.match(mobileNavigation, /button\.textContent = "\+ New Session"/)
+  assert.match(mobileNavigation, /find\(\(candidate\) => buttonLabel\(candidate\) === "New Task"\)/)
+  assert.match(mobileNavigation, /root\.querySelector<HTMLButtonElement>\("\.uw-new-button"\)\?\.click\(\)/)
+  assert.match(mobileNavigation, /let manuallySelectedSession: HTMLButtonElement \| null = null/)
+  assert.match(mobileNavigation, /manuallySelectedSession = sessionCard/)
+  assert.match(mobileNavigation, /restoreManualSelection/)
+  assert.match(mobileNavigation, /manuallySelectedSession\.click\(\)/)
+  assert.match(mobileNavigation, /attributeFilter: \["class"\]/)
 })
