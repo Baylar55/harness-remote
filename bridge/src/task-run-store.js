@@ -1,4 +1,5 @@
 import { TaskStore } from "./task-store.js"
+import { buildPersistedTaskContext } from "./task-context.js"
 
 function updateRunHistory(task, run) {
   const runs = Array.isArray(task.runs) ? task.runs.map((entry) => structuredClone(entry)) : []
@@ -32,6 +33,9 @@ export class TaskRunStore extends TaskStore {
       nextRun.finishedAt = this.clock()
     }
     const runs = updateRunHistory(task, nextRun)
+    const terminalTransition = (status === "completed" || status === "failed") && !task.run?.finishedAt
+    const currentRevision = Number(task.context?.revision) || 0
+    const nextRevision = terminalTransition ? currentRevision + 1 : currentRevision
     const updated = {
       ...task,
       status,
@@ -41,6 +45,7 @@ export class TaskRunStore extends TaskStore {
       finishedAt: status === "starting" ? null : task.finishedAt ?? null,
       updatedAt: this.clock()
     }
+    updated.context = buildPersistedTaskContext(updated, nextRevision)
     this.tasks[index] = updated
     await this.persist()
     return structuredClone(updated)
