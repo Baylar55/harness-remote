@@ -205,6 +205,7 @@ export class TaskRunController {
     const agentID = requestedAgent(task, options)
     if (!agentID) throw taskLaunchError("unknown_agent", "A target harness is required")
     const model = requestedModel(task, agentID, options)
+    await this.taskLauncher.validateModelSelection?.(agentID, model)
     const role = requestedRole(task, options)
     const reuseSession = options.reuseSession === true
     const reusableRun = reuseSession ? latestRunForAgent(task, agentID, { requireSession: true }) : null
