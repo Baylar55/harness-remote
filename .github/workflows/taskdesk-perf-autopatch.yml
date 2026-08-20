@@ -1,0 +1,104 @@
+name: TaskDesk performance autopatch
+
+on:
+  push:
+    branches:
+      - feature/taskdesk-event-driven-performance
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply bounded transcript integration
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected one match, found {count}")
+              return text.replace(old, new, 1)
+
+          path = Path("bridge/src/acp-service.js")
+          text = path.read_text()
+          text = replace_once(
+              text,
+              'import path from "node:path"\n',
+              'import path from "node:path"\nimport { TranscriptCache } from "./transcript-cache.js"\n',
+              "transcript cache import"
+          )
+          text = replace_once(
+              text,
+              '  #messages = new Map()\n',
+              '''  #messages = new TranscriptCache({\n    maxEntries: 8,\n    maxWeight: 24 * 1024 * 1024,\n    isProtected: (sessionID) => this.#active.has(sessionID)\n      || this.#replaying.has(sessionID)\n      || Boolean(this.#queues.get(sessionID)?.length)\n  })\n''',
+              "message cache field"
+          )
+          text = replace_once(
+              text,
+              '''  subscribe(listener) {\n    this.#listeners.add(listener)\n    return () => this.#listeners.delete(listener)\n  }\n''',
+              '''  subscribe(listener) {\n    this.#listeners.add(listener)\n    return () => this.#listeners.delete(listener)\n  }\n\n  diagnostics() {\n    return {\n      transcriptCache: this.#messages.stats(),\n      activeSessions: this.#active.size,\n      queuedSessions: this.#queues.size,\n      inFlightLoads: this.#loads.size,\n      snapshotWrites: this.#snapshotWrites.size,\n      subscribers: this.#listeners.size\n    }\n  }\n''',
+              "service diagnostics"
+          )
+          marker = '''  /**\n   * Whether the harness's own on-disk history is the authority for this session rather than what\n'''
+          page_method = '''  async messagePage(sessionID, { limit = 100, before, refresh = false } = {}) {\n    const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))\n    if (typeof this.#historyLoader?.page === "function" && !refresh && !this.#isBusy(sessionID)) {\n      try {\n        const page = await this.#historyLoader.page(sessionID, { limit: boundedLimit, before })\n        if (page && Array.isArray(page.messages)) return page\n      } catch {\n        this.#emit("session.error", sessionID, { message: "Harness session history page could not be read" })\n      }\n    }\n    const messages = await this.messages(sessionID, refresh)\n    const requestedEnd = before\n      ? messages.findIndex((message) => message?.info?.id === before)\n      : messages.length\n    const end = requestedEnd >= 0 ? requestedEnd : messages.length\n    const start = Math.max(0, end - boundedLimit)\n    return {\n      messages: messages.slice(start, end),\n      before: start > 0 ? messages[start]?.info?.id ?? null : null,\n      hasMore: start > 0\n    }\n  }\n\n'''
+          if marker not in text:
+              raise SystemExit("message page insertion marker missing")
+          text = text.replace(marker, page_method + marker, 1)
+          text = replace_once(
+              text,
+              '''        const snapshot = JSON.stringify({\n          version: 1,\n          messages: this.#messages.get(sessionID) ?? [],\n          todos: this.#todos.get(sessionID) ?? [],\n''',
+              '''        const journalOwnsTranscript = Boolean(\n          this.#historyLoader && (this.#historyLoader.authoritativeHistory || this.#journalBacked(sessionID))\n        )\n        const snapshot = JSON.stringify({\n          version: 1,\n          messages: journalOwnsTranscript ? [] : this.#messages.get(sessionID) ?? [],\n          todos: this.#todos.get(sessionID) ?? [],\n''',
+              "snapshot transcript ownership"
+          )
+          path.write_text(text)
+
+          path = Path("bridge/src/server.js")
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '  const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs\n  const liveSessionActivity = new Map()\n',
+              '  const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs\n  const liveSessionActivity = new Map()\n  let sseClients = 0\n',
+              "SSE counter"
+          )
+          text = replace_once(
+              text,
+              '''          memory: {\n            rss: memory.rss,\n            heapTotal: memory.heapTotal,\n            heapUsed: memory.heapUsed,\n            external: memory.external,\n            arrayBuffers: memory.arrayBuffers\n          }\n''',
+              '''          memory: {\n            rss: memory.rss,\n            heapTotal: memory.heapTotal,\n            heapUsed: memory.heapUsed,\n            external: memory.external,\n            arrayBuffers: memory.arrayBuffers\n          },\n          sseClients,\n          service: service.diagnostics()\n''',
+              "diagnostics payload"
+          )
+          text = replace_once(
+              text,
+              '''        response.write(": connected\\n\\n")\n        const unsubscribe = service.subscribe((event) => writeSSE(response, event.type, event))\n        const heartbeat = setInterval(() => response.write(": ping\\n\\n"), config.heartbeatMs ?? 10_000)\n''',
+              '''        response.write(": connected\\n\\n")\n        sseClients += 1\n        const unsubscribe = service.subscribe((event) => writeSSE(response, event.type, event))\n        const heartbeat = setInterval(() => response.write(": ping\\n\\n"), config.heartbeatMs ?? 10_000)\n''',
+              "SSE increment"
+          )
+          text = replace_once(
+              text,
+              '''        request.on("close", () => {\n          clearInterval(heartbeat)\n          unsubscribe()\n        })\n''',
+              '''        request.on("close", () => {\n          clearInterval(heartbeat)\n          unsubscribe()\n          sseClients = Math.max(0, sseClients - 1)\n        })\n''',
+              "SSE decrement"
+          )
+          text = replace_once(
+              text,
+              '''          const messages = await service.messages(sessionID, url.searchParams.get("refresh") === "1")\n          writeJSON(response, 200, limit === undefined ? messages : messages.slice(-limit))\n          return\n''',
+              '''          if (limit !== undefined || url.searchParams.has("before")) {\n            const page = await service.messagePage(sessionID, {\n              limit: limit ?? 100,\n              before: url.searchParams.get("before") || undefined,\n              refresh: url.searchParams.get("refresh") === "1"\n            })\n            if (page.before) response.setHeader("X-Next-Cursor", page.before)\n            response.setHeader("X-Has-More", page.hasMore ? "1" : "0")\n            writeJSON(response, 200, page.messages)\n            return\n          }\n          writeJSON(response, 200, await service.messages(sessionID, url.searchParams.get("refresh") === "1"))\n          return\n''',
+              "message paging route"
+          )
+          path.write_text(text)
+      - name: Remove temporary workflow
+        run: git rm .github/workflows/taskdesk-perf-autopatch.yml
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bridge/src/acp-service.js bridge/src/server.js .github/workflows/taskdesk-perf-autopatch.yml
+          git commit -m "perf(taskdesk): bound retained transcripts and expose paging state"
+          git push origin HEAD:feature/taskdesk-event-driven-performance
