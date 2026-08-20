@@ -692,3 +692,65 @@ export const CheckIcon = ({ className = "", size = 20 }: { className?: string; s
     <path d="m5 13 4 4L19 7" />
   </svg>
 )
+export const TaskListIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Tasks"
+  >
+    <path d="m3 6 2 2 3.5-3.5" />
+    <path d="m3 13 2 2 3.5-3.5" />
+    <path d="M13 6h8" />
+    <path d="M13 13h8" />
+    <path d="M4 20h17" />
+  </svg>
+)
+
+export const AgentIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Agents"
+  >
+    <rect x="4" y="8" width="16" height="12" rx="3" />
+    <path d="M12 4v4" />
+    <circle cx="9" cy="14" r="1" />
+    <circle cx="15" cy="14" r="1" />
+  </svg>
+)
+
+export const AlertIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    role="img"
+    aria-label="Needs you"
+  >
+    <path d="M10.3 3.6 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z" />
+    <path d="M12 9v4" />
+    <path d="M12 17h.01" />
+  </svg>
+)

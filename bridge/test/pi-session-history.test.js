@@ -54,6 +54,53 @@ test("PI journal loader follows the current leaf instead of replaying abandoned 
   ])
 })
 
+test("PI journal pager follows only the active branch across cursor pages", async () => {
+  const { root, sessionID, file, project } = await fixture()
+  const records = [
+    { type: "session", version: 3, id: sessionID, parentId: null, timestamp: "2026-08-18T10:00:00.000Z", cwd: project },
+    { type: "message", id: "u0", parentId: sessionID, timestamp: "2026-08-18T10:00:01.000Z", message: { role: "user", content: [{ type: "text", text: "u0" }] } },
+    { type: "message", id: "a0", parentId: "u0", timestamp: "2026-08-18T10:00:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "a0" }] } },
+    { type: "message", id: "abandoned-a", parentId: "u0", timestamp: "2026-08-18T10:00:02.500Z", message: { role: "assistant", content: [{ type: "text", text: "abandoned" }] } },
+    { type: "message", id: "u1", parentId: "a0", timestamp: "2026-08-18T10:00:03.000Z", message: { role: "user", content: [{ type: "text", text: "u1" }] } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: "2026-08-18T10:00:04.000Z", message: { role: "assistant", content: [{ type: "text", text: "a1" }] } },
+    { type: "session_info", id: "n1", parentId: "a1", timestamp: "2026-08-18T10:00:05.000Z", name: "PI native title" },
+    { type: "message", id: "u2", parentId: "n1", timestamp: "2026-08-18T10:00:06.000Z", message: { role: "user", content: [{ type: "text", text: "u2" }] } },
+    { type: "message", id: "a2", parentId: "u2", timestamp: "2026-08-18T10:00:07.000Z", message: { role: "assistant", content: [{ type: "text", text: "a2" }] } },
+    { type: "session_info", id: "n2", parentId: "a2", timestamp: "2026-08-18T10:00:08.000Z", name: "PI final title" }
+  ]
+  await writeFile(file, records.map((record) => JSON.stringify(record)).join("\n") + "\n")
+
+  const loader = createPiHistoryLoader(root)
+  const full = visible(await loader(sessionID))
+  assert.deepEqual(full.map((entry) => entry.text), ["u0", "a0", "u1", "a1", "u2", "a2"])
+
+  const first = await loader.page(sessionID, { limit: 2 })
+  assert.deepEqual(visible(first.messages).map((entry) => entry.text), ["u2", "a2"])
+  assert.equal(first.hasMore, true)
+  assert.ok(first.before)
+
+  const second = await loader.page(sessionID, { limit: 2, before: first.before })
+  assert.deepEqual(visible(second.messages).map((entry) => entry.text), ["u1", "a1"])
+  assert.equal(second.hasMore, true)
+  assert.ok(second.before)
+
+  const third = await loader.page(sessionID, { limit: 2, before: second.before })
+  assert.deepEqual(visible(third.messages).map((entry) => entry.text), ["u0", "a0"])
+  assert.equal(third.hasMore, false)
+  assert.equal(third.before, null)
+
+  const ids = [...third.messages, ...second.messages, ...first.messages].map((message) => message.info.id)
+  assert.equal(new Set(ids).size, 6, "cursor pages must not duplicate a PI message")
+})
+
+test("PI journal pager rejects invalid cursors instead of silently changing branches", async () => {
+  const { root, sessionID } = await fixture()
+  const loader = createPiHistoryLoader(root)
+  await assert.rejects(() => loader.page(sessionID, { before: "not-a-valid-cursor", limit: 2 }), /Invalid PI history cursor/)
+  const impossible = Buffer.from(JSON.stringify({ offset: 0, target: "missing-parent" }), "utf8").toString("base64url")
+  await assert.rejects(() => loader.page(sessionID, { before: impossible, limit: 2 }), /Invalid PI history cursor/)
+})
+
 // Regression: a provider failure can leave ACP replay incomplete even though PI's journal is complete.
 test("PI journal stays authoritative after an ACP load when a provider error was retried", async () => {
   const { root, sessionID, file } = await fixture()

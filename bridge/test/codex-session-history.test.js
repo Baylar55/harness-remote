@@ -53,9 +53,8 @@ test("reads a Codex rollout as the conversation the user saw", async () => {
 })
 
 test("keeps message ids stable as a Codex rollout grows", async () => {
-  // A rollout is append-only and re-read on every refresh, so an id derived from the position of a
-  // record has to survive later turns being appended — otherwise each refresh would replace the
-  // whole transcript rather than extend it.
+  // A rollout is append-only and re-read on every refresh. Byte-offset ids survive later turns being
+  // appended and can also be recovered by the tail pager without scanning every older line first.
   const first = { timestamp: "2026-08-07T09:28:51.290Z", type: "event_msg", payload: { type: "user_message", message: "Prima" } }
   const second = { timestamp: "2026-08-07T09:29:51.290Z", type: "event_msg", payload: { type: "agent_message", message: "Seconda" } }
   const root = await writeRollout([first])
@@ -63,13 +62,77 @@ test("keeps message ids stable as a Codex rollout grows", async () => {
 
   try {
     const before = await createCodexHistoryLoader(root)(sessionID)
-    const after = await createCodexHistoryLoader(grown)(sessionID)
+    const loader = createCodexHistoryLoader(grown)
+    const after = await loader(sessionID)
+    const page = await loader.page(sessionID, { limit: 2 })
     assert.equal(after.length, 2)
     assert.equal(after[0].info.id, before[0].info.id)
     assert.equal(after[0].parts[0].id, before[0].parts[0].id)
+    assert.deepEqual(page.messages.map((message) => message.info.id), after.map((message) => message.info.id))
   } finally {
     await rm(root, { recursive: true, force: true })
     await rm(grown, { recursive: true, force: true })
+  }
+})
+
+test("pages a Codex rollout newest-first without duplicate or skipped messages", async () => {
+  const records = [
+    { timestamp: "2026-08-07T09:28:49.000Z", type: "session_meta", payload: { session_id: sessionID, cwd: "/tmp/project" } }
+  ]
+  for (let index = 0; index < 37; index += 1) {
+    records.push({
+      timestamp: new Date(Date.parse("2026-08-07T09:29:00.000Z") + index * 1000).toISOString(),
+      type: "event_msg",
+      payload: index % 2 === 0
+        ? { type: "user_message", message: `message-${index}` }
+        : { type: "agent_message", message: `message-${index}`, phase: "final" }
+    })
+    // Non-visible records make the journal materially larger without becoming transcript messages.
+    records.push({
+      timestamp: new Date(Date.parse("2026-08-07T09:29:00.500Z") + index * 1000).toISOString(),
+      type: "response_item",
+      payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "x".repeat(4096) }] }
+    })
+  }
+  const root = await writeRollout(records)
+
+  try {
+    const loader = createCodexHistoryLoader(root)
+    const first = await loader.page(sessionID, { limit: 10 })
+    assert.equal(first.messages.length, 10)
+    assert.equal(first.hasMore, true)
+    assert.ok(first.before)
+    assert.deepEqual(first.messages.map((message) => message.parts[0].text), Array.from({ length: 10 }, (_, offset) => `message-${27 + offset}`))
+
+    const second = await loader.page(sessionID, { limit: 10, before: first.before })
+    assert.equal(second.messages.length, 10)
+    assert.equal(second.hasMore, true)
+    assert.deepEqual(second.messages.map((message) => message.parts[0].text), Array.from({ length: 10 }, (_, offset) => `message-${17 + offset}`))
+    assert.equal(new Set([...first.messages, ...second.messages].map((message) => message.info.id)).size, 20)
+
+    let cursor = second.before
+    const collected = [...second.messages, ...first.messages]
+    while (cursor) {
+      const page = await loader.page(sessionID, { limit: 10, before: cursor })
+      collected.unshift(...page.messages)
+      cursor = page.before
+    }
+    assert.deepEqual(collected.map((message) => message.parts[0].text), Array.from({ length: 37 }, (_, index) => `message-${index}`))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("rejects invalid Codex history cursors", async () => {
+  const root = await writeRollout([
+    { timestamp: "2026-08-07T09:28:51.290Z", type: "event_msg", payload: { type: "user_message", message: "Hello" } }
+  ])
+  try {
+    const loader = createCodexHistoryLoader(root)
+    await assert.rejects(() => loader.page(sessionID, { limit: 10, before: "not-a-cursor" }), /Invalid Codex history cursor/)
+    await assert.rejects(() => loader.page(sessionID, { limit: 10, before: "999999999" }), /Invalid Codex history cursor/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
   }
 })
 
@@ -78,6 +141,7 @@ test("reports no history rather than failing when a rollout is absent", async ()
   try {
     const loadHistory = createCodexHistoryLoader(root)
     assert.deepEqual(await loadHistory(sessionID), [])
+    assert.deepEqual(await loadHistory.page(sessionID, { limit: 10 }), { messages: [], before: null, hasMore: false })
     assert.deepEqual(await loadHistory("../escape"), [], "a session id must not be able to walk the filesystem")
     assert.deepEqual(await createCodexHistoryLoader(path.join(root, "missing"))(sessionID), [])
   } finally {

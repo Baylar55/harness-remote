@@ -6,6 +6,7 @@ import { backendDisplayName } from "../backendSetup"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
 import { taskClient, type MachineProject } from "../taskClient"
 import type { SavedServerProfile } from "../serverProfiles"
+import { createTaskDeskTranslator, type TaskDeskTranslator } from "../taskdesk-i18n"
 import type {
   BackendKind,
   DiffFile,
@@ -23,6 +24,7 @@ import type {
   VcsStatus
 } from "../types"
 import {
+  ArrowLeftIcon,
   ChatIcon,
   CloseIcon,
   FolderIcon,
@@ -38,8 +40,8 @@ import {
 } from "../Icons"
 
 const REMARK_PLUGINS = [remarkGfm]
-const REFRESH_INTERVAL_MS = 4_000
-const DETAIL_REFRESH_INTERVAL_MS = 2_500
+const REFRESH_INTERVAL_MS = 10_000
+const DETAIL_REFRESH_INTERVAL_MS = 5_000
 const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000
 const PINNED_STORAGE_KEY = "harness-remote.universal-workspace.pinned"
 const HARNESS_ICON_FILES: Record<string, string> = {
@@ -90,6 +92,17 @@ type SelectedDetail = {
 type UniversalWorkspaceProps = {
   profiles: SavedServerProfile[]
   activeProfileID: string
+  focusSessionRequest?: { sessionID: string; requestID: number } | null
+  /**
+   * TaskDesk drives the phone master/detail stack, so the pane is a prop rather than something this
+   * component infers. Absent means the host is not stacking panes and both are laid out at once.
+   */
+  mobilePane?: "list" | "detail"
+  /** Incremented by the host to open New Session from chrome that lives outside this component. */
+  newSessionRequest?: number
+  onOpenSessionDetail?: () => void
+  onBackToSessionList?: () => void
+  t?: TaskDeskTranslator
   onPersistProfiles: (profiles: SavedServerProfile[], activeProfileID: string) => void
   legacyView: ReactNode
 }
@@ -197,14 +210,6 @@ function extractText(message: MessageEnvelope): string {
     .trim()
 }
 
-function latestReadableText(messages: MessageEnvelope[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const text = extractText(messages[index])
-    if (text) return text.replace(/\s+/g, " ").trim()
-  }
-  return ""
-}
-
 function modelLabel(model?: Session["model"] | ModelSelection | null): string {
   if (!model) return "Default model"
   const candidate = "modelID" in model ? model.modelID : model.id
@@ -239,6 +244,10 @@ function loadPinned(): Set<string> {
   } catch {
     return new Set()
   }
+}
+
+function pageIsVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden"
 }
 
 function BeautifulButton({
@@ -413,14 +422,12 @@ function SessionCard({
   item,
   selected,
   pinned,
-  preview,
   onSelect,
   onTogglePin
 }: {
   item: UniversalSession
   selected: boolean
   pinned: boolean
-  preview?: string
   onSelect: () => void
   onTogglePin: () => void
 }) {
@@ -438,7 +445,7 @@ function SessionCard({
           {item.agent.label} · {modelLabel(session.model)} · {item.machineName}
         </span>
         <span className="uw-session-preview">
-          {preview || (session.summary?.files ? `${session.summary.files} files changed · +${session.summary.additions} −${session.summary.deletions}` : item.session.directory)}
+          {session.summary?.files ? `${session.summary.files} files changed · +${session.summary.additions} −${session.summary.deletions}` : item.session.directory}
         </span>
         <span className="uw-session-footer">
           <span>{item.projectName}</span>
@@ -722,13 +729,17 @@ function HandoffModal({
   const initial = choices.find((choice) => choice.agent.id !== current.agent.id || choice.machine.key !== current.machineKey) || choices[0]
   const [choiceKey, setChoiceKey] = useState(initial ? `${initial.machine.key}|${initial.agent.id}` : "")
   const selected = choices.find((choice) => `${choice.machine.key}|${choice.agent.id}` === choiceKey) || initial
-  const targetProject = selected?.machine.projects.find((project) => project.name === current.projectName)
-    || selected?.machine.projects.find((project) => project.path === current.session.directory)
+  const sameMachine = selected?.machine.key === current.machineKey
+  const discoveredTargetProject = selected?.machine.projects.find((project) => project.path === current.session.directory)
+    || selected?.machine.projects.find((project) => project.name === current.projectName)
+  // Another harness on the same machine can safely use the exact workspace the current
+  // native Session already owns. Project discovery is only needed when crossing machines.
+  const targetDirectory = sameMachine ? current.session.directory : discoveredTargetProject?.path
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handoff() {
-    if (!selected || !targetProject || creating) return
+    if (!selected || !targetDirectory || creating) return
     setCreating(true)
     setError(null)
     try {
@@ -747,8 +758,8 @@ function HandoffModal({
         "Before changing anything, inspect the current repository state and continue from what is already on disk.",
         transcript ? `\nRecent conversation:\n${transcript}` : ""
       ].join("\n")
-      const created = await api.createSession(config, current.session.title || "Continued session", undefined, targetProject.path)
-      await api.sendPrompt(config, created.id, prompt, created.directory || targetProject.path)
+      const created = await api.createSession(config, current.session.title || "Continued session", undefined, targetDirectory)
+      await api.sendPrompt(config, created.id, prompt, created.directory || targetDirectory)
       onCreated(selected.machine, selected.agent, created)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -758,7 +769,7 @@ function HandoffModal({
   }
 
   return (
-    <Modal title="Continue with another agent" subtitle="Create a native session on another harness and hand over the recent context." onClose={onClose}>
+    <Modal title="Continue with another harness" subtitle="Create a native session on another harness and hand over the recent context." onClose={onClose}>
       <div className="uw-modal-body uw-form-grid">
         <label className="uw-form-span-2">
           <span>Target agent</span>
@@ -773,18 +784,18 @@ function HandoffModal({
         <div className="uw-handoff-summary uw-form-span-2">
           <strong>{current.session.title}</strong>
           <span>{current.agent.label} → {selected?.agent.label || "Agent"}</span>
-          <span>Project mapping: {targetProject ? targetProject.path : "No matching project on target machine"}</span>
+          <span>Workspace: {targetDirectory || "No matching project on target machine"}</span>
         </div>
-        {!targetProject ? (
+        {!targetDirectory ? (
           <div className="uw-inline-error uw-form-span-2">
-            Harness Remote cannot safely hand this session to that machine because the same project was not discovered there.
+            Harness Remote cannot safely hand this Session to another machine because the same project was not discovered there.
           </div>
         ) : null}
         {error ? <div className="uw-inline-error uw-form-span-2">{error}</div> : null}
       </div>
       <footer className="uw-modal-footer">
         <BeautifulButton onClick={onClose}>Cancel</BeautifulButton>
-        <BeautifulButton variant="primary" disabled={!selected || !targetProject || creating} onClick={() => void handoff()}>
+        <BeautifulButton variant="primary" disabled={!selected || !targetDirectory || creating} onClick={() => void handoff()}>
           {creating ? <LoadingIcon size={15} /> : <ChatIcon size={15} />}
           {creating ? "Handing off…" : "Create handoff session"}
         </BeautifulButton>
@@ -882,12 +893,18 @@ function QuestionPanel({
 export function UniversalWorkspace({
   profiles,
   activeProfileID,
+  focusSessionRequest,
+  mobilePane,
+  newSessionRequest,
+  onOpenSessionDetail,
+  onBackToSessionList,
+  t: hostTranslator,
   onPersistProfiles,
   legacyView
 }: UniversalWorkspaceProps) {
+  const t = useMemo(() => hostTranslator ?? createTaskDeskTranslator("en"), [hostTranslator])
   const [machines, setMachines] = useState<MachineSource[]>([])
   const [sessions, setSessions] = useState<UniversalSession[]>([])
-  const [previews, setPreviews] = useState<Record<string, string>>({})
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [filter, setFilter] = useState<WorkspaceFilter>("all")
   const [projectFilter, setProjectFilter] = useState<string>("all")
@@ -914,13 +931,19 @@ export function UniversalWorkspace({
   const [questionRevision, setQuestionRevision] = useState(0)
   const refreshGeneration = useRef(0)
   const refreshInFlight = useRef(false)
+  const detailInFlight = useRef(false)
   const selectedKeyRef = useRef<string | null>(null)
+  const appliedFocusRequest = useRef<number | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
 
   const selected = sessions.find((item) => item.key === selectedKey) || null
   selectedKeyRef.current = selectedKey
   const selectedSessionModel = sessionModels.find((model) => modelOptionKey(model) === sessionModelKey)
   const detailReady = Boolean(selected && detailSessionKey === selected.key)
+  const sessionWaiting = Boolean(
+    selected && detailReady && !detailLoading
+    && (sending || normalizeStatus(selected.status, selected.attention) === "working")
+  )
 
   const refreshAll = useCallback(async (silent = false) => {
     if (refreshInFlight.current) return
@@ -1010,20 +1033,24 @@ export function UniversalWorkspace({
       collected.sort((left, right) => right.session.time.updated - left.session.time.updated)
       setMachines(nextMachines)
       setSessions(collected)
+      // A focus request is a one-shot instruction. Re-applying it on every refresh is what made a
+      // manual Session choice snap back to whichever Session a Task or attention item last opened,
+      // for the rest of the session. The pending check honours it during the first refresh that can
+      // see the target — which is why it is here at all — and never again after it is applied.
+      const pendingFocus = focusSessionRequest && appliedFocusRequest.current !== focusSessionRequest.requestID
+        ? focusSessionRequest
+        : null
       setSelectedKey((current) => {
+        const focused = pendingFocus
+          ? collected.find((item) => item.session.id === pendingFocus.sessionID)
+          : undefined
+        if (focused) {
+          appliedFocusRequest.current = pendingFocus?.requestID ?? null
+          return focused.key
+        }
         if (current && collected.some((item) => item.key === current)) return current
         return collected[0]?.key || null
       })
-
-      const topSessions = collected.slice(0, 18)
-      void Promise.all(topSessions.map(async (item) => {
-        try {
-          const latest = await api.loadLatestMessage(item.config, item.session.id, item.session.directory)
-          const preview = latestReadableText(latest)
-          if (preview) setPreviews((current) => current[item.key] === preview ? current : { ...current, [item.key]: preview })
-        } catch {
-        }
-      }))
     } catch (reason) {
       if (generation !== refreshGeneration.current) return
       setGlobalError(reason instanceof Error ? reason.message : String(reason))
@@ -1034,15 +1061,37 @@ export function UniversalWorkspace({
       }
       refreshInFlight.current = false
     }
-  }, [profiles])
+  }, [profiles, focusSessionRequest?.sessionID, focusSessionRequest?.requestID])
 
   useEffect(() => {
     void refreshAll(false)
-    const timer = window.setInterval(() => void refreshAll(true), REFRESH_INTERVAL_MS)
+    const timer = window.setInterval(() => {
+      if (pageIsVisible()) void refreshAll(true)
+    }, REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [refreshAll])
 
+  useEffect(() => {
+    if (!newSessionRequest) return
+    setNewSessionOpen(true)
+  }, [newSessionRequest])
+
+  useEffect(() => {
+    if (!focusSessionRequest || appliedFocusRequest.current === focusSessionRequest.requestID) return
+    const target = sessions.find((item) => item.session.id === focusSessionRequest.sessionID)
+    if (!target) return
+    appliedFocusRequest.current = focusSessionRequest.requestID
+    setMachineFilter(target.machineKey)
+    setProjectFilter("all")
+    setFilter("all")
+    setQuery("")
+    setDetailTab("conversation")
+    setSelectedKey(target.key)
+  }, [focusSessionRequest, sessions])
+
   const loadDetail = useCallback(async (item: UniversalSession, silent = false) => {
+    if (detailInFlight.current && silent) return
+    detailInFlight.current = true
     if (!silent) setDetailLoading(true)
     try {
       const [messages, diff, todos, vcs, questions, permissions] = await Promise.all([
@@ -1068,11 +1117,13 @@ export function UniversalWorkspace({
         setGlobalError(reason instanceof Error ? reason.message : String(reason))
       }
     } finally {
+      detailInFlight.current = false
       if (!silent && selectedKeyRef.current === item.key) setDetailLoading(false)
     }
   }, [])
 
   useEffect(() => {
+    detailInFlight.current = false
     if (!selected) {
       setDetail(EMPTY_DETAIL)
       setDetailSessionKey(null)
@@ -1083,7 +1134,9 @@ export function UniversalWorkspace({
     setDetailSessionKey(null)
     setDetailLoading(true)
     void loadDetail(selected, false)
-    const timer = window.setInterval(() => void loadDetail(selected, true), DETAIL_REFRESH_INTERVAL_MS)
+    const timer = window.setInterval(() => {
+      if (pageIsVisible()) void loadDetail(selected, true)
+    }, DETAIL_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [selected?.key, questionRevision, loadDetail])
 
@@ -1123,7 +1176,7 @@ export function UniversalWorkspace({
   useEffect(() => {
     if (!transcriptRef.current || detailTab !== "conversation" || !detailReady) return
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
-  }, [selected?.key, detail.messages.length, detailTab, detailReady])
+  }, [selected?.key, detail.messages.length, detailTab, detailReady, sessionWaiting])
 
   useEffect(() => {
     localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify([...pinned]))
@@ -1150,11 +1203,10 @@ export function UniversalWorkspace({
         item.agent.label,
         item.machineName,
         item.session.directory,
-        modelLabel(item.session.model),
-        previews[item.key]
+        modelLabel(item.session.model)
       ].some((value) => value?.toLowerCase().includes(needle))
     })
-  }, [machineScopedSessions, projectFilter, query, previews])
+  }, [machineScopedSessions, projectFilter, query])
 
   const counts = useMemo(() => ({
     all: scopedSessions.length,
@@ -1403,10 +1455,10 @@ export function UniversalWorkspace({
                 item={item}
                 selected={selectedKey === item.key}
                 pinned={pinned.has(item.key)}
-                preview={previews[item.key]}
                 onSelect={() => {
                   setSelectedKey(item.key)
                   setDetailTab("conversation")
+                  onOpenSessionDetail?.()
                 }}
                 onTogglePin={() => setPinned((current) => {
                   const next = new Set(current)
@@ -1439,6 +1491,17 @@ export function UniversalWorkspace({
           ) : (
             <>
               <header className="uw-session-header">
+                {mobilePane === "detail" && onBackToSessionList ? (
+                  <button
+                    type="button"
+                    className="uw-session-back"
+                    onClick={onBackToSessionList}
+                    aria-label={t("action.backToSessions")}
+                  >
+                    <ArrowLeftIcon size={15} />
+                    <span>{t("nav.sessions")}</span>
+                  </button>
+                ) : null}
                 <div className="uw-session-heading">
                   <div className="uw-session-heading-title">
                     <h1>{selected.session.title || "Untitled session"}</h1>
@@ -1505,7 +1568,7 @@ export function UniversalWorkspace({
                   <div className="uw-transcript" ref={transcriptRef}>
                     {detailLoading || !detailReady ? (
                       <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading session…</strong></div>
-                    ) : detail.messages.length === 0 ? (
+                    ) : detail.messages.length === 0 && !sessionWaiting ? (
                       <div className="uw-empty-panel"><ChatIcon size={24} /><strong>This session has no messages yet.</strong></div>
                     ) : detail.messages.map((message) => (
                       <MessageBubble
@@ -1515,6 +1578,13 @@ export function UniversalWorkspace({
                         agentBackend={selected.agent.backend}
                       />
                     ))}
+                    {sessionWaiting ? (
+                      <div className="uw-session-typing" role="status" aria-label="Waiting for agent response">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="uw-composer-shell">

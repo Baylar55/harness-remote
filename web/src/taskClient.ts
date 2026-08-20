@@ -24,6 +24,7 @@ export type TaskWorkspace = {
 
 export type MachineTaskRun = {
   id?: string
+  sequence?: number
   agentId?: string
   sessionId?: string | null
   sessionID?: string | null

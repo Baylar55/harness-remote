@@ -4,6 +4,7 @@ import { Capacitor } from "@capacitor/core"
 import App from "./App"
 import { api, isValidServerConfig } from "./api"
 import { backendDisplayName } from "./backendSetup"
+import { installAppPreferences } from "./appPreferences"
 import { installCompletionAudioGuard } from "./completion-audio"
 import { ConnectServerWizard } from "./components/panels"
 import { StandaloneUniversalWorkspace } from "./components/standalone-universal-workspace"
@@ -24,12 +25,16 @@ import {
   type WorkspaceMachine
 } from "./workspaceMachines"
 import "./styles.css"
-import "./v3-polish.css"
+import "./taskdesk-theme.css"
 import "./universal-workspace.css"
 import "./universal-workspace-readable.css"
 import "./universal-workspace-readable-fixes.css"
 import "./taskdesk-v3.css"
+import "./taskdesk-v3-unified.css"
+import "./taskdesk-run-review.css"
+import "./v3-polish.css"
 
+installAppPreferences()
 installCompletionAudioGuard()
 
 document.addEventListener("click", (event) => {
