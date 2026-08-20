@@ -1,6 +1,8 @@
 import { taskLaunchError } from "./task-errors.js"
 import { promptModelBody } from "./task-model.js"
 
+const MAX_OUTCOME_CHARS = 6_000
+
 function basicAuthorization(username, password) {
   if (!username && !password) return undefined
   return `Basic ${Buffer.from(`${username ?? ""}:${password ?? ""}`).toString("base64")}`
@@ -60,6 +62,35 @@ function taskSessionTitle(task) {
   return Number(task.run?.sequence) > 1 ? `${base} · Run ${task.run.sequence}` : base
 }
 
+function boundOutcome(value) {
+  const text = typeof value === "string" ? value.trim() : ""
+  if (!text) return undefined
+  return text.length <= MAX_OUTCOME_CHARS ? text : `…${text.slice(-(MAX_OUTCOME_CHARS - 1))}`
+}
+
+function messageText(message) {
+  const parts = Array.isArray(message?.parts) ? message.parts : []
+  return parts.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n").trim()
+}
+
+function latestAssistantOutcome(messages) {
+  for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
+    if (messages[index]?.info?.role !== "assistant") continue
+    const text = boundOutcome(messageText(messages[index]))
+    if (text) return text
+  }
+  return undefined
+}
+
+function outcomeFromResult(result) {
+  if (!result || typeof result !== "object") return undefined
+  const direct = boundOutcome(result.outcome || result.text || result.content)
+  if (direct) return direct
+  if (Array.isArray(result.parts)) return boundOutcome(messageText(result))
+  if (result.message && typeof result.message === "object") return outcomeFromResult(result.message)
+  return undefined
+}
+
 export class TaskLauncher {
   constructor({ daemon, fetchImpl = fetch, acpService } = {}) {
     this.daemon = daemon
@@ -94,9 +125,7 @@ export class TaskLauncher {
       const result = await entry.host.request("session/new", { cwd: task.workspace.path, mcpServers: [] })
       if (!result?.sessionId) throw new Error(`Agent ${agentID} did not return a session id`)
       const value = acpModelValue(result.configOptions, model)
-      if (value) {
-        await entry.host.request("session/set_config_option", { sessionId: result.sessionId, configId: "model", value })
-      }
+      if (value) await entry.host.request("session/set_config_option", { sessionId: result.sessionId, configId: "model", value })
       return { sessionId: result.sessionId, transport: "acp", directory: task.workspace.path }
     }
 
@@ -122,9 +151,7 @@ export class TaskLauncher {
     const agentID = runAgentID(task)
     const model = runModel(task)
     if (!previousRun?.sessionId) throw taskLaunchError("session_unavailable", "The previous Task session is unavailable")
-    if (previousRun.agentId && previousRun.agentId !== agentID) {
-      throw taskLaunchError("session_unavailable", "A native Session can only be resumed by the harness that owns it")
-    }
+    if (previousRun.agentId && previousRun.agentId !== agentID) throw taskLaunchError("session_unavailable", "A native Session can only be resumed by the harness that owns it")
     const entry = await this.#entry(agentID)
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
     const modelChanged = !sameModel(previousRun.model ?? null, model)
@@ -139,11 +166,7 @@ export class TaskLauncher {
       }
       await entry.host.start()
       if (modelChanged && model) {
-        await entry.host.request("session/set_config_option", {
-          sessionId: previousRun.sessionId,
-          configId: "model",
-          value: acpModelWireName(model)
-        })
+        await entry.host.request("session/set_config_option", { sessionId: previousRun.sessionId, configId: "model", value: acpModelWireName(model) })
       }
       return { sessionId: previousRun.sessionId, transport: "acp", directory: task.workspace.path }
     }
@@ -167,13 +190,17 @@ export class TaskLauncher {
     if (entry.kind === "acp") {
       const service = this.acpService?.(agentID)
       if (service) {
-        void service.promptAndWait(run.sessionId, task.prompt).then((result) => onCompleted?.(result)).catch((error) => onFailed?.(error))
+        void service.promptAndWait(run.sessionId, task.prompt).then(async () => {
+          let outcome
+          try { outcome = latestAssistantOutcome(await service.messages(run.sessionId)) } catch {}
+          onCompleted?.({ outcome })
+        }).catch((error) => onFailed?.(error))
         return
       }
       void entry.host.request("session/prompt", {
         sessionId: run.sessionId,
         prompt: [{ type: "text", text: task.prompt }]
-      }, 300_000).then((result) => onCompleted?.(result)).catch((error) => onFailed?.(error))
+      }, 300_000).then((result) => onCompleted?.({ outcome: outcomeFromResult(result) })).catch((error) => onFailed?.(error))
       return
     }
 
@@ -183,7 +210,7 @@ export class TaskLauncher {
         headers: { "Content-Type": "application/json", ...(run.authorization ? { Authorization: run.authorization } : {}) },
         body: JSON.stringify({ parts: [{ type: "text", text: task.prompt }], model: promptModelBody(model), variant: model?.variant || undefined })
       }).then((response) => responseJSON(response, `Starting ${agentID} task`))
-        .then((result) => onCompleted?.(result))
+        .then((result) => onCompleted?.({ outcome: outcomeFromResult(result) }))
         .catch((error) => onFailed?.(error))
     }
   }
@@ -193,8 +220,7 @@ export class TaskLauncher {
     if (!run?.sessionId) return "unknown"
     const agentID = runAgentID(task, run)
     const entry = this.daemon.hostEntry(agentID)
-    if (!entry) return "unknown"
-    if (entry.kind === "acp" || entry.kind !== "http") return "unknown"
+    if (!entry || entry.kind !== "http") return "unknown"
 
     try {
       await entry.host.start?.()
