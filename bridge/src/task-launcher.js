@@ -41,6 +41,12 @@ function acpModelWireName(model) {
   return model ? `${model.providerID}/${model.modelID}` : undefined
 }
 
+function sameModel(left, right) {
+  if (!left && !right) return true
+  if (!left || !right) return false
+  return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
+}
+
 function runAgentID(task, run = task?.run) {
   return run?.agentId || task?.agentId
 }
@@ -80,11 +86,7 @@ export class TaskLauncher {
     if (entry.kind === "acp") {
       const service = this.acpService?.(agentID)
       if (service) {
-        const session = await service.createSession({
-          directory: task.workspace.path,
-          title,
-          model: acpModelWireName(model)
-        })
+        const session = await service.createSession({ directory: task.workspace.path, title, model: acpModelWireName(model) })
         if (!session?.id) throw new Error(`Agent ${agentID} did not return a session id`)
         return { sessionId: session.id, transport: "acp", directory: task.workspace.path }
       }
@@ -93,11 +95,7 @@ export class TaskLauncher {
       if (!result?.sessionId) throw new Error(`Agent ${agentID} did not return a session id`)
       const value = acpModelValue(result.configOptions, model)
       if (value) {
-        await entry.host.request("session/set_config_option", {
-          sessionId: result.sessionId,
-          configId: "model",
-          value
-        })
+        await entry.host.request("session/set_config_option", { sessionId: result.sessionId, configId: "model", value })
       }
       return { sessionId: result.sessionId, transport: "acp", directory: task.workspace.path }
     }
@@ -109,13 +107,8 @@ export class TaskLauncher {
       const authorization = basicAuthorization(entry.host.username, entry.host.password)
       const response = await this.fetchImpl(`${base}/session?directory=${encodeURIComponent(task.workspace.path)}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(authorization ? { Authorization: authorization } : {})
-        },
-        body: JSON.stringify({
-          title
-        })
+        headers: { "Content-Type": "application/json", ...(authorization ? { Authorization: authorization } : {}) },
+        body: JSON.stringify({ title })
       })
       const session = await responseJSON(response, `Creating ${agentID} session`)
       if (!session?.id) throw new Error(`Agent ${agentID} did not return a session id`)
@@ -134,17 +127,18 @@ export class TaskLauncher {
     }
     const entry = await this.#entry(agentID)
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
+    const modelChanged = !sameModel(previousRun.model ?? null, model)
 
     if (entry.kind === "acp") {
       const service = this.acpService?.(agentID)
       if (service) {
         const adopted = await service.adoptTaskSession(previousRun.sessionId, { title: taskSessionTitle(task) })
         if (adopted === false) throw taskLaunchError("session_unavailable", "The previous native Session can no longer be resumed")
-        if (model) await service.setModel(previousRun.sessionId, acpModelWireName(model))
+        if (modelChanged && model) await service.setModel(previousRun.sessionId, acpModelWireName(model))
         return { sessionId: previousRun.sessionId, transport: "acp", directory: task.workspace.path }
       }
       await entry.host.start()
-      if (model) {
+      if (modelChanged && model) {
         await entry.host.request("session/set_config_option", {
           sessionId: previousRun.sessionId,
           configId: "model",
@@ -173,36 +167,21 @@ export class TaskLauncher {
     if (entry.kind === "acp") {
       const service = this.acpService?.(agentID)
       if (service) {
-        void service.promptAndWait(run.sessionId, task.prompt).then((result) => {
-          onCompleted?.(result)
-        }).catch((error) => {
-          onFailed?.(error)
-        })
+        void service.promptAndWait(run.sessionId, task.prompt).then((result) => onCompleted?.(result)).catch((error) => onFailed?.(error))
         return
       }
       void entry.host.request("session/prompt", {
         sessionId: run.sessionId,
         prompt: [{ type: "text", text: task.prompt }]
-      }, 300_000).then((result) => {
-        onCompleted?.(result)
-      }).catch((error) => {
-        onFailed?.(error)
-      })
+      }, 300_000).then((result) => onCompleted?.(result)).catch((error) => onFailed?.(error))
       return
     }
 
     if (entry.kind === "http") {
       void this.fetchImpl(`${run.base}/session/${encodeURIComponent(run.sessionId)}/message?directory=${encodeURIComponent(task.workspace.path)}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(run.authorization ? { Authorization: run.authorization } : {})
-        },
-        body: JSON.stringify({
-          parts: [{ type: "text", text: task.prompt }],
-          model: promptModelBody(model),
-          variant: model?.variant || undefined
-        })
+        headers: { "Content-Type": "application/json", ...(run.authorization ? { Authorization: run.authorization } : {}) },
+        body: JSON.stringify({ parts: [{ type: "text", text: task.prompt }], model: promptModelBody(model), variant: model?.variant || undefined })
       }).then((response) => responseJSON(response, `Starting ${agentID} task`))
         .then((result) => onCompleted?.(result))
         .catch((error) => onFailed?.(error))
@@ -215,9 +194,7 @@ export class TaskLauncher {
     const agentID = runAgentID(task, run)
     const entry = this.daemon.hostEntry(agentID)
     if (!entry) return "unknown"
-
-    if (entry.kind === "acp") return "unknown"
-    if (entry.kind !== "http") return "unknown"
+    if (entry.kind === "acp" || entry.kind !== "http") return "unknown"
 
     try {
       await entry.host.start?.()
