@@ -103,6 +103,25 @@ test("TaskDesk session indexing stays metadata-only under historical snapshot pr
     assert.deepEqual(await previewResponse.json(), [])
     assert.equal(serviceEvents.length, 0, "a TaskDesk preview request must not materialize history")
 
+    // Raw ACP listings may keep an old timestamp while a Session is active through this daemon.
+    // A lightweight service event must update only the metadata clock, not force transcript reads.
+    const beforeActivity = Date.now()
+    acp.emit("notification", {
+      method: "session/update",
+      params: {
+        sessionId: sessionIDs[0],
+        update: { sessionUpdate: "available_commands_update", availableCommands: [] }
+      }
+    })
+    assert.equal(serviceEvents.at(-1)?.type, "session.updated")
+
+    const activeResponse = await fetch(`${baseURL}/experimental/session`)
+    assert.equal(activeResponse.status, 200)
+    const activeSessions = await activeResponse.json()
+    const recentlyActive = activeSessions.find((session) => session.id === sessionIDs[0])
+    assert.ok(recentlyActive.time.updated >= beforeActivity, "live daemon activity must win over a stale ACP listing timestamp")
+    assert.equal(serviceEvents.filter((event) => event.type === "session.error").length, 0, "activity sorting must not restore snapshots")
+
     const diagnosticsResponse = await fetch(`${baseURL}/v1/diagnostics`)
     assert.equal(diagnosticsResponse.status, 200)
     const diagnostics = await diagnosticsResponse.json()
