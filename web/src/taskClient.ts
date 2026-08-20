@@ -32,6 +32,7 @@ export type MachineTaskRun = {
   transport?: string | null
   directory?: string
   prompt?: string
+  outcome?: string
   startedAt?: string
   finishedAt?: string
 }
