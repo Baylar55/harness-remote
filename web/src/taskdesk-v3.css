@@ -90,16 +90,15 @@
 .td3-global-search { min-width: 0; height: 36px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--td3-border); border-radius: 9px; color: var(--td3-muted); background: var(--td3-field); }
 .td3-global-search input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--td3-text); background: transparent; font-size: 12px; }
 
-.td3-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--td3-border); border-radius: 9px; outline: 0; color: var(--td3-text-2); background: var(--td3-control); cursor: pointer; white-space: nowrap; }
-.td3-button:hover:not(:disabled) { border-color: var(--td3-border-strong); background: var(--td3-control-hover); }
+.td3-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; border: 1px solid var(--td3-border); border-radius: 9px; outline: 0; box-shadow: none; color: var(--td3-text-2); background: var(--td3-control); cursor: pointer; white-space: nowrap; transition: filter 120ms ease; }
+/* One rule for every variant instead of a colour swap per class: `filter` scales whatever fill and
+   border the button already has, so default, primary and danger all darken by the same amount and
+   never need their own hover colours (which drifted out of sync and, for primary, briefly swapped in
+   a pale fill that made its white label unreadable). No border/background swap also means no
+   translucent border seam flashing into a halo around the button. */
+.td3-button:hover:not(:disabled) { filter: brightness(0.92); box-shadow: none; }
 .td3-button:disabled { opacity: .45; cursor: default; }
 .td3-button.primary { border-color: var(--td3-blue-border); color: var(--td3-on-accent); background: linear-gradient(180deg,var(--td3-blue-strong),var(--td3-blue-deep)); }
-/* The generic `.td3-button:hover` rule above outranks `.td3-button.primary` on class count alone
-   (three selector classes vs two), so without this it swaps the primary fill for the pale
-   `--td3-control-hover` on hover while leaving the label at `--td3-on-accent` white — unreadable
-   in the light theme. Repeating the fill here at equal specificity to the hover rule keeps the
-   button's own colours in charge of its own hover state. */
-.td3-button.primary:hover:not(:disabled) { border-color: var(--td3-blue-border); color: var(--td3-on-accent); background: linear-gradient(180deg,var(--td3-blue-deep),var(--td3-blue-deep)); }
 .td3-button.danger { border-color: var(--td3-red-border); color: var(--td3-red-text); background: var(--td3-red-soft); }
 
 .td3-page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 22px 24px 17px; }
