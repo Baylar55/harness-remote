@@ -57,6 +57,46 @@ test("AcpService retains at most the bounded number of inactive transcripts", as
   assert.equal(loads.get("session-0"), 2, "an evicted transcript must be reloadable on demand")
 })
 
+test("messagePage uses an authoritative branch pager without materializing full history", async () => {
+  const sessionID = "omp-paged-session"
+  let fullLoads = 0
+  let pageOptions
+  const loader = async () => {
+    fullLoads += 1
+    return transcript(sessionID, "full history should not be read")
+  }
+  loader.pageRequiresActiveLeaf = true
+  loader.page = async (_sessionID, options) => {
+    pageOptions = options
+    return {
+      messages: transcript(sessionID, "bounded page"),
+      before: "older-cursor",
+      hasMore: true
+    }
+  }
+  const actionProviders = [{
+    id: "test-authoritative-leaf",
+    requiredCommands: [],
+    actions: [],
+    loadState: async () => ({
+      actions: [],
+      sessionRevision: "rev-1",
+      activeSessionLeaf: "leaf-42"
+    })
+  }]
+  const service = new AcpService(new ListingAcp([{
+    sessionId: sessionID,
+    cwd: "/repo",
+    updatedAt: "2026-08-20T10:00:00.000Z"
+  }]), { historyLoader: loader, actionProviders })
+
+  const page = await service.messagePage(sessionID, { limit: 25 })
+  assert.equal(fullLoads, 0, "a bounded page must not call the full journal loader")
+  assert.equal(page.messages[0].parts[0].text, "bounded page")
+  assert.equal(page.hasMore, true)
+  assert.deepEqual(pageOptions, { limit: 25, before: undefined, activeSessionLeaf: "leaf-42" })
+})
+
 test("authoritative journal transcripts are not duplicated into bridge snapshots", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "taskdesk-transcript-snapshot-"))
   try {
