@@ -39,7 +39,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
       {message.parts.map((part) => {
         if (part.type === "text" && part.text) {
           return (
-            <div className="uw-markdown" key={part.id}>
+            <div className="uw-markdown td3-markdown" key={part.id}>
               <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
             </div>
           )
@@ -51,7 +51,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
                 <span className="uw-tool-icon">…</span>
                 <span className="uw-tool-title">Reasoning</span>
               </summary>
-              <div className="uw-markdown">
+              <div className="uw-markdown td3-markdown">
                 <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
               </div>
             </details>
