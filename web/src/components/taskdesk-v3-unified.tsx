@@ -13,6 +13,7 @@ import {
 } from "../appPreferences"
 import { languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
+import { assistantTerminalTextForPrompt } from "../message-content"
 import {
   taskClient,
   type MachineProject,
@@ -62,6 +63,7 @@ import {
   SparkIcon,
   TaskListIcon
 } from "../Icons"
+import { TaskDeskMessageContent } from "./taskdesk-message-content"
 import { UniversalWorkspace } from "./universal-workspace"
 
 const REFRESH_MS = 10_000
@@ -178,23 +180,6 @@ function formatDate(value: string | undefined, t: TaskDeskTranslator): string {
   return Number.isFinite(timestamp)
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp)
     : value
-}
-
-function extractText(message: MessageEnvelope): string {
-  return message.parts
-    .filter((part) => part.type === "text" && part.text)
-    .map((part) => part.text || "")
-    .join("\n")
-    .trim()
-}
-
-function latestAssistantText(messages: MessageEnvelope[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === "user") continue
-    const text = extractText(messages[index])
-    if (text) return text
-  }
-  return ""
 }
 
 function taskWorkspaceLabel(task: ProductTask, t: TaskDeskTranslator): string {
@@ -594,16 +579,12 @@ function RunReviewModal({
         {loading ? <div className="td3-detail-loading"><LoadingIcon size={22} /><strong>{t("runs.archiveLoading")}</strong></div> : null}
         {!loading && error ? <div className="td3-inline-error" role="alert">{error}</div> : null}
         {!loading && !error && messages.length === 0 ? <div className="td3-empty-state"><span>{t("conversation.empty")}</span></div> : null}
-        {!loading && !error ? messages.map((message) => {
-          const text = extractText(message)
-          if (!text) return null
-          return (
-            <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}>
-              <header><strong>{message.info.role === "user" ? t("conversation.you") : agent?.label || t("conversation.agent")}</strong></header>
-              <div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown></div>
-            </article>
-          )
-        }) : null}
+        {!loading && !error ? messages.map((message) => (
+          <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}>
+            <header><strong>{message.info.role === "user" ? t("conversation.you") : agent?.label || t("conversation.agent")}</strong></header>
+            <TaskDeskMessageContent message={message} />
+          </article>
+        )) : null}
       </div>
       <footer>
         <button type="button" className="td3-button" onClick={onClose}>{t("nav.close")}</button>
@@ -1082,7 +1063,10 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
   const selectedAgent = selected?.runtime.agents.find((agent) => agent.id === selected.task.agentId)
   const selectedSessionID = selected ? runSessionID(selected.task.run) : null
   const detailReady = Boolean(selected && detail.ownerKey === selected.key && !detail.loading)
-  const summary = detailReady ? latestAssistantText(detail.messages) : ""
+  const summary = selected?.task.run?.outcome
+    || (detailReady && selected
+      ? assistantTerminalTextForPrompt(detail.messages, selected.task.run?.prompt || selected.task.prompt)
+      : "")
   const sessionProfiles = useMemo(
     () => machineScope === "all" ? machines : machines.filter((machine) => machine.id === machineScope),
     [machines, machineScope]
@@ -1553,15 +1537,12 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
                     ) : null}
                     {!detail.loading && detailTab === "conversation" ? (
                       <div className="td3-conversation">
-                        {detail.messages.length === 0 ? <div className="td3-empty-state"><span>{t("conversation.empty")}</span></div> : detail.messages.map((message) => {
-                          const text = extractText(message)
-                          return text ? (
-                            <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}>
-                              <header><strong>{message.info.role === "user" ? t("conversation.you") : selectedAgent?.label || t("conversation.agent")}</strong></header>
-                              <div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown></div>
-                            </article>
-                          ) : null
-                        })}
+                        {detail.messages.length === 0 ? <div className="td3-empty-state"><span>{t("conversation.empty")}</span></div> : detail.messages.map((message) => (
+                          <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}>
+                            <header><strong>{message.info.role === "user" ? t("conversation.you") : selectedAgent?.label || t("conversation.agent")}</strong></header>
+                            <TaskDeskMessageContent message={message} />
+                          </article>
+                        ))}
                       </div>
                     ) : null}
                     {!detail.loading && detailTab === "diff" ? (

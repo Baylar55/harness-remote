@@ -87,6 +87,77 @@ test("ACP task launch uses the bridge session service so the task remains visibl
   assert.equal(completed, true)
 })
 
+test("ACP task outcome keeps Claude-style final text after reasoning and tool activity", async () => {
+  const service = {
+    async promptAndWait() {},
+    async messages() {
+      return [
+        {
+          info: { id: "user-1", role: "user" },
+          parts: [{ type: "text", text: "Implement the fix" }]
+        },
+        {
+          info: { id: "assistant-1", role: "assistant" },
+          parts: [
+            { type: "text", text: "I will inspect this first." },
+            { type: "reasoning", text: "Need to find the relevant code." },
+            { type: "tool", tool: "Read", state: { status: "completed" } },
+            { type: "text", text: "Implemented the fix and opened PR #276." },
+            { type: "file", filename: "report.txt" }
+          ]
+        }
+      ]
+    }
+  }
+  const daemon = {
+    hostEntry: () => ({ kind: "acp", host: {} }),
+    registry: { host: () => ({ state: "available" }) }
+  }
+  const launcher = new TaskLauncher({ daemon, acpService: () => service })
+  let completed
+
+  await launcher.startPrompt(task({ agentId: "claude" }), { sessionId: "claude-session" }, {
+    onCompleted: (result) => { completed = result }
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(completed, { outcome: "Implemented the fix and opened PR #276." })
+})
+
+test("ACP task outcome does not promote pre-tool narration when no final answer was emitted", async () => {
+  const service = {
+    async promptAndWait() {},
+    async messages() {
+      return [
+        {
+          info: { id: "user-1", role: "user" },
+          parts: [{ type: "text", text: "Implement the fix" }]
+        },
+        {
+          info: { id: "assistant-1", role: "assistant" },
+          parts: [
+            { type: "text", text: "I will inspect this first." },
+            { type: "tool", tool: "Edit", state: { status: "completed" } }
+          ]
+        }
+      ]
+    }
+  }
+  const daemon = {
+    hostEntry: () => ({ kind: "acp", host: {} }),
+    registry: { host: () => ({ state: "available" }) }
+  }
+  const launcher = new TaskLauncher({ daemon, acpService: () => service })
+  let completed
+
+  await launcher.startPrompt(task({ agentId: "claude" }), { sessionId: "claude-session" }, {
+    onCompleted: (result) => { completed = result }
+  })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(completed, { outcome: undefined })
+})
+
 test("managed HTTP task launch sends selected model and variant", async () => {
   const requests = []
   const fetchImpl = async (url, options = {}) => {
@@ -121,6 +192,40 @@ test("managed HTTP task launch sends selected model and variant", async () => {
   const promptBody = JSON.parse(requests[1].options.body)
   assert.deepEqual(promptBody.model, { providerID: "openai", modelID: "gpt-x" })
   assert.equal(promptBody.variant, "high")
+})
+
+test("managed HTTP task outcome also refuses pre-tool narration without a final answer", async () => {
+  const host = { readinessHost: "127.0.0.1", port: 4096, async start() {} }
+  const daemon = {
+    hostEntry: () => ({ kind: "http", host }),
+    registry: { host: () => ({ state: "available" }) }
+  }
+  const launcher = new TaskLauncher({
+    daemon,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          info: { id: "message-1" },
+          parts: [
+            { type: "text", text: "I will inspect this first." },
+            { type: "tool", tool: "Edit", state: { status: "completed" } }
+          ]
+        }
+      }
+    })
+  })
+  let completed
+
+  await launcher.startPrompt(task({ agentId: "opencode" }), {
+    sessionId: "http-session",
+    base: "http://127.0.0.1:4096",
+    authorization: undefined
+  }, { onCompleted: (result) => { completed = result } })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(completed, { outcome: undefined })
 })
 
 test("managed HTTP task launch reports a provider failure after the prompt is accepted", async () => {

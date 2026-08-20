@@ -32,6 +32,8 @@ export type MachineTaskRun = {
   transport?: string | null
   directory?: string
   prompt?: string
+  outcome?: string
+  outcomeVersion?: number
   startedAt?: string
   finishedAt?: string
 }
@@ -207,6 +209,20 @@ function requireModelCatalog(value: unknown, path: string): AgentModelCatalog {
   }
 }
 
+function trustVersionedOutcome(run: MachineTaskRun): MachineTaskRun {
+  return typeof run.outcome === "string" && run.outcomeVersion !== 2
+    ? { ...run, outcome: undefined }
+    : run
+}
+
+function normalizeTaskOutcomes(task: MachineTask): MachineTask {
+  return {
+    ...task,
+    run: task.run ? trustVersionedOutcome(task.run) : null,
+    ...(Array.isArray(task.runs) ? { runs: task.runs.map(trustVersionedOutcome) } : {})
+  }
+}
+
 export const taskClient = {
   async listProjects(config: ServerConfig): Promise<MachineProject[]> {
     const payload = await machineRequest<unknown>(config, "/v1/projects")
@@ -215,7 +231,7 @@ export const taskClient = {
 
   async listTasks(config: ServerConfig): Promise<MachineTask[]> {
     const payload = await machineRequest<unknown>(config, "/v1/tasks")
-    return requireArray<MachineTask>(payload, "tasks", "/v1/tasks")
+    return requireArray<MachineTask>(payload, "tasks", "/v1/tasks").map(normalizeTaskOutcomes)
   },
 
   async listAgentModels(config: ServerConfig, agentId: string): Promise<AgentModelCatalog> {

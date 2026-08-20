@@ -74,6 +74,28 @@ test("a synchronous prompt completion cannot race the starting to running transi
   assert.equal(current.status, "completed")
 })
 
+test("completed task outcomes are persisted with the corrected outcome version", async () => {
+  let current = draft()
+  const store = {
+    async get() { return structuredClone(current) },
+    async setRunState(_id, update) {
+      current = { ...current, status: update.status, run: structuredClone(update.run), error: update.error }
+      return structuredClone(current)
+    }
+  }
+  const launcher = {
+    async createSession(task) { return { sessionId: "session-1", transport: "acp", directory: task.workspace.path } },
+    async startPrompt(_task, _session, callbacks) { callbacks.onCompleted({ outcome: "Final answer" }) }
+  }
+  const controller = new TaskRunController({ taskStore: store, taskLauncher: launcher, runIDFactory: () => "run-1" })
+
+  await controller.launch("task-1")
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(current.status, "completed")
+  assert.equal(current.run.outcome, "Final answer")
+  assert.equal(current.run.outcomeVersion, 2)
+})
+
 test("Git tasks can intentionally launch from the project checkout", async () => {
   let current = draft({ workspace: { mode: "project", path: "/repo" } })
   const store = {

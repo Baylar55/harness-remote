@@ -1,9 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import ReactMarkdown from "react-markdown"
-import remarkGfm from "remark-gfm"
 import { api, isValidServerConfig } from "../api"
 import { backendDisplayName } from "../backendSetup"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
+import { messageText } from "../message-content"
 import { taskClient, type MachineProject } from "../taskClient"
 import type { SavedServerProfile } from "../serverProfiles"
 import { createTaskDeskTranslator, type TaskDeskTranslator } from "../taskdesk-i18n"
@@ -38,8 +37,8 @@ import {
   SettingsIcon,
   StopCircleIcon
 } from "../Icons"
+import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
-const REMARK_PLUGINS = [remarkGfm]
 const REFRESH_INTERVAL_MS = 10_000
 const DETAIL_REFRESH_INTERVAL_MS = 5_000
 const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000
@@ -202,14 +201,6 @@ function formatClock(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp)
 }
 
-function extractText(message: MessageEnvelope): string {
-  return message.parts
-    .filter((part) => part.type === "text" && part.text)
-    .map((part) => part.text || "")
-    .join("\n")
-    .trim()
-}
-
 function modelLabel(model?: Session["model"] | ModelSelection | null): string {
   if (!model) return "Default model"
   const candidate = "modelID" in model ? model.modelID : model.id
@@ -347,39 +338,6 @@ function Modal({
   )
 }
 
-function ToolCard({ message }: { message: MessageEnvelope }) {
-  const tools = message.parts.filter((part) => part.type === "tool")
-  if (!tools.length) return null
-  return (
-    <div className="uw-tool-stack">
-      {tools.map((part) => {
-        const state = part.state
-        const status = state?.status || "running"
-        const input = state?.input || {}
-        const command = typeof input.command === "string"
-          ? input.command
-          : typeof input.filePath === "string"
-            ? input.filePath
-            : typeof input.path === "string"
-              ? input.path
-              : ""
-        const output = state?.error || state?.output || ""
-        return (
-          <details key={part.id} className={`uw-tool-card uw-tool-${status}`} open={status === "error"}>
-            <summary>
-              <span className="uw-tool-icon">{status === "completed" ? "✓" : status === "error" ? "!" : "⋯"}</span>
-              <span className="uw-tool-title">{state?.title || part.tool || "Tool"}</span>
-              {command ? <code>{command.length > 90 ? `${command.slice(0, 90)}…` : command}</code> : null}
-              <span className="uw-tool-status">{status}</span>
-            </summary>
-            {output ? <pre>{output.length > 4_000 ? `${output.slice(0, 4_000)}\n…` : output}</pre> : null}
-          </details>
-        )
-      })}
-    </div>
-  )
-}
-
 function HarnessAvatar({ backend, label }: { backend: string; label: string }) {
   const [failed, setFailed] = useState(false)
   const source = harnessIconUrl(backend)
@@ -394,7 +352,6 @@ function HarnessAvatar({ backend, label }: { backend: string; label: string }) {
 
 const MessageBubble = memo(function MessageBubble({ message, agentLabel, agentBackend }: { message: MessageEnvelope; agentLabel: string; agentBackend: string }) {
   const isUser = message.info.role === "user"
-  const text = extractText(message)
   return (
     <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
       {isUser ? (
@@ -407,12 +364,7 @@ const MessageBubble = memo(function MessageBubble({ message, agentLabel, agentBa
           <strong>{isUser ? "You" : agentLabel}</strong>
           <time>{formatClock(message.info.time.created)}</time>
         </header>
-        {text ? (
-          <div className="uw-markdown">
-            <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown>
-          </div>
-        ) : null}
-        <ToolCard message={message} />
+        <TaskDeskMessageContent message={message} />
       </div>
     </article>
   )
@@ -746,7 +698,7 @@ function HandoffModal({
       const config = configForAgent(selected.machine, selected.agent)
       const transcript = messages.slice(-10).map((message) => {
         const role = message.info.role === "user" ? "User" : current.agent.label
-        const text = extractText(message)
+        const text = messageText(message)
         return text ? `${role}: ${text}` : ""
       }).filter(Boolean).join("\n\n")
       const prompt = [
@@ -1033,10 +985,6 @@ export function UniversalWorkspace({
       collected.sort((left, right) => right.session.time.updated - left.session.time.updated)
       setMachines(nextMachines)
       setSessions(collected)
-      // A focus request is a one-shot instruction. Re-applying it on every refresh is what made a
-      // manual Session choice snap back to whichever Session a Task or attention item last opened,
-      // for the rest of the session. The pending check honours it during the first refresh that can
-      // see the target — which is why it is here at all — and never again after it is applied.
       const pendingFocus = focusSessionRequest && appliedFocusRequest.current !== focusSessionRequest.requestID
         ? focusSessionRequest
         : null
