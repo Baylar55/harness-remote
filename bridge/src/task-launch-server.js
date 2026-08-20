@@ -3,6 +3,7 @@ import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
 
 const TASK_LAUNCH_ROUTE = /^\/v1\/tasks\/([^/]+)\/launch$/
 const TASK_CONTINUE_ROUTE = /^\/v1\/tasks\/([^/]+)\/continue$/
+const TASK_CONTEXT_ROUTE = /^\/v1\/tasks\/([^/]+)\/context$/
 const TASK_WORKTREE_ROUTE = /^\/v1\/tasks\/([^/]+)\/worktree$/
 const TASK_WORKTREE_CLEANUP_ROUTE = /^\/v1\/tasks\/([^/]+)\/worktree\/cleanup$/
 const LAUNCH_STATUS = new Map([
@@ -12,6 +13,7 @@ const LAUNCH_STATUS = new Map([
   ["invalid_state", 409],
   ["workspace_required", 409],
   ["unsupported_agent", 409],
+  ["session_unavailable", 409],
   ["task_active", 409],
   ["worktree_dirty", 409],
   ["invalid_worktree", 409],
@@ -37,17 +39,23 @@ export function createTaskLaunchServer({ innerServer, config, taskRunController,
     const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     const launchMatch = TASK_LAUNCH_ROUTE.exec(requestURL.pathname)
     const continueMatch = TASK_CONTINUE_ROUTE.exec(requestURL.pathname)
+    const contextMatch = TASK_CONTEXT_ROUTE.exec(requestURL.pathname)
     const worktreeMatch = TASK_WORKTREE_ROUTE.exec(requestURL.pathname)
     const cleanupMatch = TASK_WORKTREE_CLEANUP_ROUTE.exec(requestURL.pathname)
     const inspect = worktreeMatch && request.method === "GET"
     const cleanup = cleanupMatch && request.method === "POST"
-    if (!launchMatch && !continueMatch && !inspect && !cleanup) {
+    const context = contextMatch && request.method === "GET"
+    if (!launchMatch && !continueMatch && !context && !inspect && !cleanup) {
       innerServer.emit("request", request, response)
       return
     }
 
     if (!authenticateDaemonRequest(request, response, config)) return
     try {
+      if (context) {
+        writeJSON(response, 200, await taskRunController.context(decodeURIComponent(contextMatch[1])))
+        return
+      }
       if (launchMatch || continueMatch) {
         if (request.method !== "POST") {
           response.writeHead(405, { Allow: "POST, OPTIONS" })
@@ -55,11 +63,11 @@ export function createTaskLaunchServer({ innerServer, config, taskRunController,
           return
         }
         const taskID = decodeURIComponent((launchMatch ?? continueMatch)[1])
+        const body = await readJSONBody(request)
         if (continueMatch) {
-          const body = await readJSONBody(request)
-          writeJSON(response, 200, await taskRunController.continue(taskID, body.prompt))
+          writeJSON(response, 200, await taskRunController.continue(taskID, body))
         } else {
-          writeJSON(response, 200, await taskRunController.launch(taskID))
+          writeJSON(response, 200, await taskRunController.launch(taskID, body))
         }
         return
       }
