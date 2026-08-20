@@ -78,3 +78,10 @@ test("TaskDesk renderer preserves native part order instead of regrouping text a
   assert.match(renderer, /part\.type === "reasoning"/)
   assert.match(renderer, /part\.type === "tool"/)
 })
+
+test("legacy unversioned persisted outcomes fall back to transcript reconstruction", () => {
+  const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
+  assert.match(client, /outcomeVersion\?: number/)
+  assert.match(client, /run\.outcomeVersion !== 2/)
+  assert.match(client, /\{ \.\.\.run, outcome: undefined \}/)
+})
