@@ -86,6 +86,7 @@ function terminalMessageText(message) {
       foundText = true
       continue
     }
+    if (part?.type !== "reasoning" && part?.type !== "tool") continue
     if (foundText) break
     return ""
   }
