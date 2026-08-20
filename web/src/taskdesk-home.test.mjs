@@ -209,6 +209,16 @@ test("TaskDesk v3 aggregates native questions and permissions into Needs You", (
   assert.equal(createTaskDeskTranslator("en")("nav.needs"), "Needs You")
 })
 
+test("Session handoff reuses the exact workspace when switching harnesses on the same machine", () => {
+  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+
+  assert.match(source, /const sameMachine = selected\?\.machine\.key === current\.machineKey/)
+  assert.match(source, /const targetDirectory = sameMachine \? current\.session\.directory : discoveredTargetProject\?\.path/)
+  assert.match(source, /api\.createSession\(config, current\.session\.title \|\| "Continued session", undefined, targetDirectory\)/)
+  assert.match(source, /disabled=\{!selected \|\| !targetDirectory \|\| creating\}/)
+  assert.doesNotMatch(source, /!selected \|\| !targetProject \|\| creating/)
+})
+
 test("Universal workspace cannot starve initial loading with overlapping polls", () => {
   const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
   assert.match(source, /const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000/)

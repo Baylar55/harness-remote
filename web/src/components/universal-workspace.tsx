@@ -729,13 +729,17 @@ function HandoffModal({
   const initial = choices.find((choice) => choice.agent.id !== current.agent.id || choice.machine.key !== current.machineKey) || choices[0]
   const [choiceKey, setChoiceKey] = useState(initial ? `${initial.machine.key}|${initial.agent.id}` : "")
   const selected = choices.find((choice) => `${choice.machine.key}|${choice.agent.id}` === choiceKey) || initial
-  const targetProject = selected?.machine.projects.find((project) => project.name === current.projectName)
-    || selected?.machine.projects.find((project) => project.path === current.session.directory)
+  const sameMachine = selected?.machine.key === current.machineKey
+  const discoveredTargetProject = selected?.machine.projects.find((project) => project.path === current.session.directory)
+    || selected?.machine.projects.find((project) => project.name === current.projectName)
+  // Another harness on the same machine can safely use the exact workspace the current
+  // native Session already owns. Project discovery is only needed when crossing machines.
+  const targetDirectory = sameMachine ? current.session.directory : discoveredTargetProject?.path
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function handoff() {
-    if (!selected || !targetProject || creating) return
+    if (!selected || !targetDirectory || creating) return
     setCreating(true)
     setError(null)
     try {
@@ -754,8 +758,8 @@ function HandoffModal({
         "Before changing anything, inspect the current repository state and continue from what is already on disk.",
         transcript ? `\nRecent conversation:\n${transcript}` : ""
       ].join("\n")
-      const created = await api.createSession(config, current.session.title || "Continued session", undefined, targetProject.path)
-      await api.sendPrompt(config, created.id, prompt, created.directory || targetProject.path)
+      const created = await api.createSession(config, current.session.title || "Continued session", undefined, targetDirectory)
+      await api.sendPrompt(config, created.id, prompt, created.directory || targetDirectory)
       onCreated(selected.machine, selected.agent, created)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -765,7 +769,7 @@ function HandoffModal({
   }
 
   return (
-    <Modal title="Continue with another agent" subtitle="Create a native session on another harness and hand over the recent context." onClose={onClose}>
+    <Modal title="Continue with another harness" subtitle="Create a native session on another harness and hand over the recent context." onClose={onClose}>
       <div className="uw-modal-body uw-form-grid">
         <label className="uw-form-span-2">
           <span>Target agent</span>
@@ -780,18 +784,18 @@ function HandoffModal({
         <div className="uw-handoff-summary uw-form-span-2">
           <strong>{current.session.title}</strong>
           <span>{current.agent.label} → {selected?.agent.label || "Agent"}</span>
-          <span>Project mapping: {targetProject ? targetProject.path : "No matching project on target machine"}</span>
+          <span>Workspace: {targetDirectory || "No matching project on target machine"}</span>
         </div>
-        {!targetProject ? (
+        {!targetDirectory ? (
           <div className="uw-inline-error uw-form-span-2">
-            Harness Remote cannot safely hand this session to that machine because the same project was not discovered there.
+            Harness Remote cannot safely hand this Session to another machine because the same project was not discovered there.
           </div>
         ) : null}
         {error ? <div className="uw-inline-error uw-form-span-2">{error}</div> : null}
       </div>
       <footer className="uw-modal-footer">
         <BeautifulButton onClick={onClose}>Cancel</BeautifulButton>
-        <BeautifulButton variant="primary" disabled={!selected || !targetProject || creating} onClick={() => void handoff()}>
+        <BeautifulButton variant="primary" disabled={!selected || !targetDirectory || creating} onClick={() => void handoff()}>
           {creating ? <LoadingIcon size={15} /> : <ChatIcon size={15} />}
           {creating ? "Handing off…" : "Create handoff session"}
         </BeautifulButton>
