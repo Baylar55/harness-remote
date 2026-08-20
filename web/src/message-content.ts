@@ -12,6 +12,7 @@ export function messageText(message: MessageEnvelope): string {
  * Return only the natural-language answer emitted after the last reasoning/tool activity in a
  * native message. Some ACP harnesses keep narration, reasoning, tool calls and the final answer in
  * one message, so concatenating every text part puts pre-tool narration into the Task result.
+ * Non-conversational parts such as files do not erase an otherwise valid final answer.
  */
 export function terminalMessageText(message: MessageEnvelope): string {
   const chunks: string[] = []
@@ -26,6 +27,7 @@ export function terminalMessageText(message: MessageEnvelope): string {
       foundText = true
       continue
     }
+    if (part.type !== "reasoning" && part.type !== "tool") continue
     if (foundText) break
     return ""
   }
