@@ -45,6 +45,12 @@ function changedFileFromPorcelain(line) {
   return renamed.at(-1)?.trim() || candidate
 }
 
+function statusView(result, managed) {
+  const changes = String(result?.stdout ?? "").split(/\r?\n/).filter(Boolean)
+  const changedFiles = changes.map(changedFileFromPorcelain).filter(Boolean)
+  return { managed, dirty: changes.length > 0, changeCount: changes.length, changedFiles }
+}
+
 export class WorktreeManager {
   constructor({ stateDirectory, runGit = defaultRunGit }) {
     this.stateDirectory = stateDirectory
@@ -71,9 +77,16 @@ export class WorktreeManager {
   async inspect(workspace) {
     await this.#assertManagedWorkspace(workspace)
     const result = await this.runGit(["-C", workspace.path, "status", "--porcelain=v1", "--untracked-files=all"])
-    const changes = String(result?.stdout ?? "").split(/\r?\n/).filter(Boolean)
-    const changedFiles = changes.map(changedFileFromPorcelain).filter(Boolean)
-    return { managed: true, dirty: changes.length > 0, changeCount: changes.length, changedFiles }
+    return statusView(result, true)
+  }
+
+  async inspectProject(projectPath) {
+    if (typeof projectPath !== "string" || !projectPath.trim()) {
+      throw worktreeError("invalid_project", "Task project path is unavailable")
+    }
+    await this.runGit(["-C", projectPath, "rev-parse", "--show-toplevel"])
+    const result = await this.runGit(["-C", projectPath, "status", "--porcelain=v1", "--untracked-files=all"])
+    return statusView(result, false)
   }
 
   async cleanup(workspace) {
