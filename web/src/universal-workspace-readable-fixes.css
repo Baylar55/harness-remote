@@ -203,3 +203,40 @@
 .uw-inspector-section-heading > button {
   font-size: 11px;
 }
+
+/* Real-browser fixes from the integrated candidate. The generic message column is centered for the
+   standalone workspace, but inside TaskDesk that made the conversation appear to start under the
+   Changes tab as the detail pane grew wider. Anchor the conversation and composer to the left edge
+   of the detail canvas so Conversation owns the content directly beneath it. */
+@media (min-width: 681px) {
+  .td3-shell-unified .td3-sessions-embedded .uw-message {
+    margin-left: 0;
+    margin-right: auto;
+  }
+
+  .td3-shell-unified .td3-sessions-embedded .uw-composer-shell {
+    margin-left: 20px;
+    margin-right: auto;
+  }
+}
+
+/* Every context cell gets the same value row height as the model selector. Project, Harness,
+   Machine and Status therefore align vertically with Model instead of sitting at the top of their
+   cards while the select is centred in a taller control. */
+.td3-shell-unified .td3-sessions-embedded .uw-context-strip > span > b {
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+}
+
+/* The control in the Sessions heading clears filters, it is not an overflow menu. Keep the existing
+   action but stop presenting it as a three-dot menu. */
+.td3-shell-unified .td3-sessions-embedded .uw-session-column-header > button > svg {
+  display: none;
+}
+
+.td3-shell-unified .td3-sessions-embedded .uw-session-column-header > button::after {
+  content: "↺";
+  font-size: 17px;
+  line-height: 1;
+}
