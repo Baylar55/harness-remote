@@ -31,7 +31,16 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
       error: null,
       finishedAt: null,
       createdAt: "2026-08-13T13:00:00.000Z",
-      updatedAt: "2026-08-13T13:00:00.000Z"
+      updatedAt: "2026-08-13T13:00:00.000Z",
+      context: {
+        version: 1,
+        revision: 0,
+        taskId: "task-1",
+        objective: "Fix issue #145",
+        currentState: "draft",
+        latestOutcome: null,
+        runSummaries: []
+      }
     })
 
     const second = new TaskStore({ machineID: "machine-1", stateDirectory })
@@ -45,7 +54,7 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
   }
 })
 
-test("legacy single-run tasks load with a compatible runs history and open lifecycle", async () => {
+test("legacy single-run tasks load with a compatible runs history and Task Context", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-history-"))
   try {
     const store = new TaskStore({ machineID: "machine-1", stateDirectory })
@@ -54,12 +63,15 @@ test("legacy single-run tasks load with a compatible runs history and open lifec
     await writeFile(store.file, JSON.stringify({
       version: 1,
       machineId: "machine-1",
-      tasks: [{ id: "task-1", status: "completed", run: legacyRun }]
+      tasks: [{ id: "task-1", status: "completed", prompt: "Legacy task", agentId: "codex", run: legacyRun }]
     }), "utf8")
     const [loaded] = await store.list()
     assert.deepEqual(loaded.runs, [legacyRun])
     assert.deepEqual(loaded.run, legacyRun)
     assert.equal(loaded.finishedAt, null)
+    assert.equal(loaded.context.version, 1)
+    assert.equal(loaded.context.objective, "Legacy task")
+    assert.equal(loaded.context.revision, 0)
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }

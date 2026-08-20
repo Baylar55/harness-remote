@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { buildPersistedTaskContext } from "./task-context.js"
 
 function machineFileName(machineID) {
   const digest = createHash("sha256").update(machineID).digest("hex").slice(0, 16)
@@ -20,7 +21,11 @@ function normalizeTaskHistory(task) {
     : task.run
       ? [task.run]
       : []
-  return { ...task, runs, finishedAt: task.finishedAt ?? null }
+  const normalized = { ...task, runs, finishedAt: task.finishedAt ?? null }
+  const revision = Number.isFinite(Number(task.context?.revision))
+    ? Number(task.context.revision)
+    : runs.filter((run) => run?.finishedAt).length
+  return { ...normalized, context: buildPersistedTaskContext(normalized, revision) }
 }
 
 export class TaskStore {
@@ -97,6 +102,7 @@ export class TaskStore {
       createdAt: timestamp,
       updatedAt: timestamp
     }
+    task.context = buildPersistedTaskContext(task, 0)
     this.tasks.push(task)
     await this.persist()
     return structuredClone(task)
@@ -125,6 +131,7 @@ export class TaskStore {
     if (task.finishedAt) return structuredClone(task)
     const timestamp = this.clock()
     const updated = { ...task, finishedAt: timestamp, updatedAt: timestamp }
+    updated.context = buildPersistedTaskContext(updated, task.context?.revision ?? 0)
     this.tasks[index] = updated
     await this.persist()
     return structuredClone(updated)
@@ -144,6 +151,7 @@ export class TaskStore {
       workspace: { mode: "project", path: task.project.path },
       updatedAt: this.clock()
     }
+    updated.context = buildPersistedTaskContext(updated, task.context?.revision ?? 0)
     this.tasks[index] = updated
     await this.persist()
     return structuredClone(updated)
