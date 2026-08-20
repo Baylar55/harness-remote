@@ -73,10 +73,33 @@ function messageText(message) {
   return parts.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n").trim()
 }
 
+function terminalMessageText(message) {
+  const parts = Array.isArray(message?.parts) ? message.parts : []
+  const chunks = []
+  let foundText = false
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]
+    if (part?.type === "text") {
+      const text = typeof part.text === "string" ? part.text.trim() : ""
+      if (!text) continue
+      chunks.push(part.text)
+      foundText = true
+      continue
+    }
+    if (foundText) break
+    return ""
+  }
+  return chunks.reverse().join("\n").trim()
+}
+
 function latestAssistantOutcome(messages) {
   for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
-    if (messages[index]?.info?.role !== "assistant") continue
-    const text = boundOutcome(messageText(messages[index]))
+    const message = messages[index]
+    // A Task run owns one user turn. Never fall through to an assistant answer from a previous turn
+    // when the latest turn ended in tool/reasoning activity without a natural-language result.
+    if (message?.info?.role === "user") break
+    if (message?.info?.role !== "assistant") continue
+    const text = boundOutcome(terminalMessageText(message))
     if (text) return text
   }
   return undefined
@@ -86,7 +109,7 @@ function outcomeFromResult(result) {
   if (!result || typeof result !== "object") return undefined
   const direct = boundOutcome(result.outcome || result.text || result.content)
   if (direct) return direct
-  if (Array.isArray(result.parts)) return boundOutcome(messageText(result))
+  if (Array.isArray(result.parts)) return boundOutcome(terminalMessageText(result) || messageText(result))
   if (result.message && typeof result.message === "object") return outcomeFromResult(result.message)
   return undefined
 }
