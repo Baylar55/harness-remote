@@ -1,5 +1,14 @@
+const MAX_OUTCOME_CHARS = 6_000
+const HANDOFF_OUTCOME_CHARS = 1_600
+
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : ""
+}
+
+function boundedText(value, limit = MAX_OUTCOME_CHARS) {
+  const text = cleanText(value)
+  if (text.length <= limit) return text
+  return `…${text.slice(-(limit - 1))}`
 }
 
 function cleanRole(value, fallback = "continue") {
@@ -24,6 +33,7 @@ export function summarizeTaskRun(run, taskStatus = "unknown") {
         ...(cleanText(run.model.variant) ? { variant: cleanText(run.model.variant) } : {})
       }
     : null
+  const outcome = boundedText(run.outcome)
   return {
     ...(run.id ? { id: run.id } : {}),
     ...(sequence ? { sequence } : {}),
@@ -33,6 +43,7 @@ export function summarizeTaskRun(run, taskStatus = "unknown") {
     ...(run.sessionId ? { sessionId: run.sessionId } : {}),
     status: runStatus(run, taskStatus),
     prompt: cleanText(run.prompt),
+    ...(outcome ? { outcome } : {}),
     ...(run.startedAt ? { startedAt: run.startedAt } : {}),
     ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
     ...(Number.isFinite(Number(run.contextRevision)) ? { contextRevision: Number(run.contextRevision) } : {})
@@ -55,6 +66,7 @@ export function buildPersistedTaskContext(task, revision = task?.context?.revisi
           status: latestRun.status,
           agentId: latestRun.agentId,
           role: latestRun.role,
+          ...(latestRun.outcome ? { text: latestRun.outcome } : {}),
           ...(errorMessage ? { error: errorMessage } : {})
         }
       : null,
@@ -96,9 +108,8 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
   ]
 
   const latest = context.latestRun || context.runSummaries?.at?.(-1)
-  if (latest) {
-    lines.push("", "PREVIOUS STEP", `${latest.agentId || "unknown harness"} / ${latest.role || "continue"} / ${latest.status || "unknown"}`)
-  }
+  if (latest) lines.push("", "PREVIOUS STEP", `${latest.agentId || "unknown harness"} / ${latest.role || "continue"} / ${latest.status || "unknown"}`)
+  if (context.latestOutcome?.text) lines.push("", "PREVIOUS RESULT", boundedText(context.latestOutcome.text, HANDOFF_OUTCOME_CHARS))
   if (context.latestOutcome?.error) lines.push("", "LATEST ERROR", context.latestOutcome.error)
   if (context.changedFiles?.length) {
     lines.push("", "CHANGED FILES", ...context.changedFiles.map((file) => `- ${file}`))
@@ -109,6 +120,7 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
     lines.push("", "RECENT TASK STEPS")
     for (const run of context.runSummaries.slice(-6)) {
       lines.push(`- Run ${run.sequence || "?"}: ${run.agentId || "unknown"} / ${run.role || "continue"} / ${run.status || "unknown"}`)
+      if (run.outcome) lines.push(`  Result: ${boundedText(run.outcome, HANDOFF_OUTCOME_CHARS)}`)
     }
   }
 
