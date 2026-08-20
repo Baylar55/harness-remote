@@ -149,6 +149,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
   const liveSessionActivity = new Map()
+  let sseClients = 0
   const unsubscribeActivity = service.subscribe((event) => {
     if (!event?.sessionId) return
     if (event.type === "session.deleted") {
@@ -215,7 +216,9 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
             heapUsed: memory.heapUsed,
             external: memory.external,
             arrayBuffers: memory.arrayBuffers
-          }
+          },
+          sseClients,
+          service: service.diagnostics()
         })
         return
       }
@@ -245,12 +248,14 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           Connection: "keep-alive"
         })
         response.write(": connected\n\n")
+        sseClients += 1
         const unsubscribe = service.subscribe((event) => writeSSE(response, event.type, event))
         const heartbeat = setInterval(() => response.write(": ping\n\n"), config.heartbeatMs ?? 10_000)
         heartbeat.unref?.()
         request.on("close", () => {
           clearInterval(heartbeat)
           unsubscribe()
+          sseClients = Math.max(0, sseClients - 1)
         })
         return
       }
@@ -316,8 +321,18 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
             writeJSON(response, 200, [])
             return
           }
-          const messages = await service.messages(sessionID, url.searchParams.get("refresh") === "1")
-          writeJSON(response, 200, limit === undefined ? messages : messages.slice(-limit))
+          if (limit !== undefined || url.searchParams.has("before")) {
+            const page = await service.messagePage(sessionID, {
+              limit: limit ?? 100,
+              before: url.searchParams.get("before") || undefined,
+              refresh: url.searchParams.get("refresh") === "1"
+            })
+            if (page.before) response.setHeader("X-Next-Cursor", page.before)
+            response.setHeader("X-Has-More", page.hasMore ? "1" : "0")
+            writeJSON(response, 200, page.messages)
+            return
+          }
+          writeJSON(response, 200, await service.messages(sessionID, url.searchParams.get("refresh") === "1"))
           return
         }
         if (request.method === "GET" && operation === "todo") {

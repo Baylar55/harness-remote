@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { TranscriptCache } from "./transcript-cache.js"
 import {
   listExtensionActions,
   loadExtensionActionState,
@@ -225,7 +226,18 @@ function commandInfoList(commands) {
 export class AcpService {
   #acp
   #sessions = new Map()
-  #messages = new Map()
+  #messages = new TranscriptCache({
+    maxEntries: 8,
+    maxWeight: 24 * 1024 * 1024,
+    isProtected: (sessionID) => this.#active.has(sessionID)
+      || this.#replaying.has(sessionID)
+      || this.#loads.has(sessionID)
+      || Boolean(this.#queues.get(sessionID)?.length),
+    onEvict: (sessionID) => {
+      this.#loaded.delete(sessionID)
+      this.#restoredSnapshots.delete(sessionID)
+    }
+  })
   #todos = new Map()
   #configOptions = new Map()
   #commandCatalogs = new Map()
@@ -285,6 +297,17 @@ export class AcpService {
   subscribe(listener) {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)
+  }
+
+  diagnostics() {
+    return {
+      transcriptCache: this.#messages.stats(),
+      activeSessions: this.#active.size,
+      queuedSessions: this.#queues.size,
+      inFlightLoads: this.#loads.size,
+      snapshotWrites: this.#snapshotWrites.size,
+      subscribers: this.#listeners.size
+    }
   }
 
   async listSessions(directory) {
@@ -473,6 +496,38 @@ export class AcpService {
     const reloadHistory = refresh && this.#reloadOnHistoryRefresh
     await this.#load(sessionID, reloadHistory || this.#journalBacked(sessionID))
     return this.#messages.get(sessionID) ?? []
+  }
+
+  async messagePage(sessionID, { limit = 100, before, refresh = false } = {}) {
+    const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
+    if (typeof this.#historyLoader?.page === "function" && !refresh && !this.#isBusy(sessionID)) {
+      try {
+        let pageOptions = { limit: boundedLimit, before }
+        if (this.#historyLoader.pageRequiresActiveLeaf) {
+          if (!this.#sessions.has(sessionID)) await this.#refreshSessions()
+          const authoritativeState = await this.#refreshActionState(sessionID, false)
+          if (authoritativeState?.activeSessionLeaf === undefined) pageOptions = null
+          else pageOptions = { ...pageOptions, activeSessionLeaf: authoritativeState.activeSessionLeaf }
+        }
+        if (pageOptions) {
+          const page = await this.#historyLoader.page(sessionID, pageOptions)
+          if (page && Array.isArray(page.messages)) return page
+        }
+      } catch {
+        this.#emit("session.error", sessionID, { message: "Harness session history page could not be read" })
+      }
+    }
+    const messages = await this.messages(sessionID, refresh)
+    const requestedEnd = before
+      ? messages.findIndex((message) => message?.info?.id === before)
+      : messages.length
+    const end = requestedEnd >= 0 ? requestedEnd : messages.length
+    const start = Math.max(0, end - boundedLimit)
+    return {
+      messages: messages.slice(start, end),
+      before: start > 0 ? messages[start]?.info?.id ?? null : null,
+      hasMore: start > 0
+    }
   }
 
   /**
@@ -845,9 +900,12 @@ export class AcpService {
     const writing = (async () => {
       await mkdir(this.#snapshotDirectory, { recursive: true })
       while (this.#dirtySnapshots.delete(sessionID)) {
+        const journalOwnsTranscript = Boolean(
+          this.#historyLoader && (this.#historyLoader.authoritativeHistory || this.#journalBacked(sessionID))
+        )
         const snapshot = JSON.stringify({
           version: 1,
-          messages: this.#messages.get(sessionID) ?? [],
+          messages: journalOwnsTranscript ? [] : this.#messages.get(sessionID) ?? [],
           todos: this.#todos.get(sessionID) ?? [],
           title: this.#titleFor(sessionID),
           deleted: this.#deletedSessions.has(sessionID)

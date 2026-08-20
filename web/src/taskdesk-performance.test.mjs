@@ -39,15 +39,22 @@ test("Task detail fetches only data required by the active review tab", () => {
   assert.match(source, /loadDetail\(selected, detailTab, true\)/)
 })
 
-test("ACP bridge has lightweight session indexing, bounded message responses and diagnostics", () => {
+test("ACP bridge has lightweight session indexing, cursor paging and cache diagnostics", () => {
   const source = readFileSync(new URL("../../bridge/src/server.js", import.meta.url), "utf8")
+  const service = readFileSync(new URL("../../bridge/src/acp-service.js", import.meta.url), "utf8")
 
   assert.match(source, /const listVisibleSessionMetadata = async/)
   assert.match(source, /url\.pathname === "\/experimental\/session"[\s\S]*?listVisibleSessionMetadata/)
   assert.match(source, /url\.pathname === "\/session\/status"[\s\S]*?listVisibleSessionMetadata/)
   assert.match(source, /const MAX_MESSAGE_PAGE = 500/)
-  assert.match(source, /messages\.slice\(-limit\)/)
+  assert.match(source, /service\.messagePage\(sessionID/)
+  assert.match(source, /url\.searchParams\.get\("before"\)/)
+  assert.match(source, /X-Next-Cursor/)
+  assert.match(source, /X-Has-More/)
   assert.match(source, /url\.pathname === "\/v1\/diagnostics"/)
+  assert.match(source, /service: service\.diagnostics\(\)/)
+  assert.match(service, /#messages = new TranscriptCache/)
+  assert.match(service, /async messagePage\(sessionID/)
 })
 
 test("TaskDesk responsive layout uses focused mobile pages and at most two persistent Session panes", () => {
