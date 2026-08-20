@@ -68,11 +68,6 @@ function boundOutcome(value) {
   return text.length <= MAX_OUTCOME_CHARS ? text : `…${text.slice(-(MAX_OUTCOME_CHARS - 1))}`
 }
 
-function messageText(message) {
-  const parts = Array.isArray(message?.parts) ? message.parts : []
-  return parts.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n").trim()
-}
-
 function terminalMessageText(message) {
   const parts = Array.isArray(message?.parts) ? message.parts : []
   const chunks = []
@@ -110,7 +105,7 @@ function outcomeFromResult(result) {
   if (!result || typeof result !== "object") return undefined
   const direct = boundOutcome(result.outcome || result.text || result.content)
   if (direct) return direct
-  if (Array.isArray(result.parts)) return boundOutcome(terminalMessageText(result) || messageText(result))
+  if (Array.isArray(result.parts)) return boundOutcome(terminalMessageText(result))
   if (result.message && typeof result.message === "object") return outcomeFromResult(result.message)
   return undefined
 }
