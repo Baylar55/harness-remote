@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
 import test from "node:test"
+import { AcpPromptEchoFilter } from "../src/acp-prompt-echo-filter.js"
 import { AcpService } from "../src/acp-service.js"
 
 class DuplicatePromptEchoAcp extends EventEmitter {
@@ -58,8 +59,12 @@ function textOf(message) {
   return (message.parts ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("")
 }
 
+function filteredService(acp) {
+  return new AcpService(new AcpPromptEchoFilter(acp, { tailMs: 10 }))
+}
+
 test("a repeated ACP echo of one live prompt is still rendered only once", async () => {
-  const service = new AcpService(new DuplicatePromptEchoAcp())
+  const service = filteredService(new DuplicatePromptEchoAcp())
   const session = await service.createSession({ directory: process.cwd(), title: "Task echo regression" })
 
   await service.promptAndWait(session.id, "Continue the task")
@@ -91,7 +96,7 @@ test("two separate turns with identical user text remain two real prompts", asyn
     }
   }
 
-  const service = new AcpService(new SeparateTurnsAcp())
+  const service = filteredService(new SeparateTurnsAcp())
   const session = await service.createSession({ directory: process.cwd(), title: "Repeated prompt regression" })
   await service.promptAndWait(session.id, "Same text")
   await service.promptAndWait(session.id, "Same text")
