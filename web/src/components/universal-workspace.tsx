@@ -6,6 +6,7 @@ import { backendDisplayName } from "../backendSetup"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
 import { taskClient, type MachineProject } from "../taskClient"
 import type { SavedServerProfile } from "../serverProfiles"
+import { createTaskDeskTranslator, type TaskDeskTranslator } from "../taskdesk-i18n"
 import type {
   BackendKind,
   DiffFile,
@@ -23,6 +24,7 @@ import type {
   VcsStatus
 } from "../types"
 import {
+  ArrowLeftIcon,
   ChatIcon,
   CloseIcon,
   FolderIcon,
@@ -91,6 +93,16 @@ type UniversalWorkspaceProps = {
   profiles: SavedServerProfile[]
   activeProfileID: string
   focusSessionRequest?: { sessionID: string; requestID: number } | null
+  /**
+   * TaskDesk drives the phone master/detail stack, so the pane is a prop rather than something this
+   * component infers. Absent means the host is not stacking panes and both are laid out at once.
+   */
+  mobilePane?: "list" | "detail"
+  /** Incremented by the host to open New Session from chrome that lives outside this component. */
+  newSessionRequest?: number
+  onOpenSessionDetail?: () => void
+  onBackToSessionList?: () => void
+  t?: TaskDeskTranslator
   onPersistProfiles: (profiles: SavedServerProfile[], activeProfileID: string) => void
   legacyView: ReactNode
 }
@@ -878,9 +890,15 @@ export function UniversalWorkspace({
   profiles,
   activeProfileID,
   focusSessionRequest,
+  mobilePane,
+  newSessionRequest,
+  onOpenSessionDetail,
+  onBackToSessionList,
+  t: hostTranslator,
   onPersistProfiles,
   legacyView
 }: UniversalWorkspaceProps) {
+  const t = useMemo(() => hostTranslator ?? createTaskDeskTranslator("en"), [hostTranslator])
   const [machines, setMachines] = useState<MachineSource[]>([])
   const [sessions, setSessions] = useState<UniversalSession[]>([])
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -1007,11 +1025,21 @@ export function UniversalWorkspace({
       collected.sort((left, right) => right.session.time.updated - left.session.time.updated)
       setMachines(nextMachines)
       setSessions(collected)
+      // A focus request is a one-shot instruction. Re-applying it on every refresh is what made a
+      // manual Session choice snap back to whichever Session a Task or attention item last opened,
+      // for the rest of the session. The pending check honours it during the first refresh that can
+      // see the target — which is why it is here at all — and never again after it is applied.
+      const pendingFocus = focusSessionRequest && appliedFocusRequest.current !== focusSessionRequest.requestID
+        ? focusSessionRequest
+        : null
       setSelectedKey((current) => {
-        const focused = focusSessionRequest?.sessionID
-          ? collected.find((item) => item.session.id === focusSessionRequest.sessionID)
+        const focused = pendingFocus
+          ? collected.find((item) => item.session.id === pendingFocus.sessionID)
           : undefined
-        if (focused) return focused.key
+        if (focused) {
+          appliedFocusRequest.current = pendingFocus?.requestID ?? null
+          return focused.key
+        }
         if (current && collected.some((item) => item.key === current)) return current
         return collected[0]?.key || null
       })
@@ -1025,7 +1053,7 @@ export function UniversalWorkspace({
       }
       refreshInFlight.current = false
     }
-  }, [profiles, focusSessionRequest?.sessionID])
+  }, [profiles, focusSessionRequest?.sessionID, focusSessionRequest?.requestID])
 
   useEffect(() => {
     void refreshAll(false)
@@ -1034,6 +1062,11 @@ export function UniversalWorkspace({
     }, REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [refreshAll])
+
+  useEffect(() => {
+    if (!newSessionRequest) return
+    setNewSessionOpen(true)
+  }, [newSessionRequest])
 
   useEffect(() => {
     if (!focusSessionRequest || appliedFocusRequest.current === focusSessionRequest.requestID) return
@@ -1417,6 +1450,7 @@ export function UniversalWorkspace({
                 onSelect={() => {
                   setSelectedKey(item.key)
                   setDetailTab("conversation")
+                  onOpenSessionDetail?.()
                 }}
                 onTogglePin={() => setPinned((current) => {
                   const next = new Set(current)
@@ -1449,6 +1483,17 @@ export function UniversalWorkspace({
           ) : (
             <>
               <header className="uw-session-header">
+                {mobilePane === "detail" && onBackToSessionList ? (
+                  <button
+                    type="button"
+                    className="uw-session-back"
+                    onClick={onBackToSessionList}
+                    aria-label={t("action.backToSessions")}
+                  >
+                    <ArrowLeftIcon size={15} />
+                    <span>{t("nav.sessions")}</span>
+                  </button>
+                ) : null}
                 <div className="uw-session-heading">
                   <div className="uw-session-heading-title">
                     <h1>{selected.session.title || "Untitled session"}</h1>

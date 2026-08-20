@@ -4,6 +4,7 @@ import { Capacitor } from "@capacitor/core"
 import App from "./App"
 import { api, isValidServerConfig } from "./api"
 import { backendDisplayName } from "./backendSetup"
+import { installAppPreferences } from "./appPreferences"
 import { installCompletionAudioGuard } from "./completion-audio"
 import { ConnectServerWizard } from "./components/panels"
 import { StandaloneUniversalWorkspace } from "./components/standalone-universal-workspace"
@@ -17,8 +18,6 @@ import {
   persistServerProfiles
 } from "./serverProfiles"
 import { SERVER_STORAGE_KEYS } from "./storageKeys"
-import { installTaskDeskMobileNavigation } from "./taskdesk-mobile-navigation"
-import { installTaskDeskRunHistory } from "./taskdesk-run-history"
 import type { MachineSnapshot, ServerConfig } from "./types"
 import {
   loadWorkspaceMachines,
@@ -26,15 +25,16 @@ import {
   type WorkspaceMachine
 } from "./workspaceMachines"
 import "./styles.css"
-import "./v3-polish.css"
 import "./universal-workspace.css"
 import "./universal-workspace-readable.css"
 import "./universal-workspace-readable-fixes.css"
 import "./taskdesk-v3.css"
+import "./taskdesk-v3-unified.css"
+import "./taskdesk-run-review.css"
+import "./v3-polish.css"
 
+installAppPreferences()
 installCompletionAudioGuard()
-installTaskDeskMobileNavigation()
-installTaskDeskRunHistory()
 
 document.addEventListener("click", (event) => {
   const target = event.target

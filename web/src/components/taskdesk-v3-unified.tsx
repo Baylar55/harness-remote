@@ -2,6 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { api } from "../api"
+import {
+  loadLanguage,
+  loadThemePreference,
+  persistLanguage,
+  persistThemePreference,
+  themePreferences,
+  APP_PREFERENCES_CHANGED_EVENT,
+  type ThemePreference
+} from "../appPreferences"
+import { languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
 import {
   taskClient,
@@ -10,6 +20,12 @@ import {
   type MachineTaskRun,
   type TaskWorkspaceInspection
 } from "../taskClient"
+import { createTaskDeskTranslator, type TaskDeskTranslator } from "../taskdesk-i18n"
+import {
+  TASKDESK_MOBILE_QUERY,
+  useBackNavigation,
+  useMediaQuery
+} from "../taskdesk-shell-navigation"
 import {
   agentLabel,
   modelLabel,
@@ -31,17 +47,22 @@ import type {
 } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
 import {
+  AgentIcon,
+  AlertIcon,
   ChatIcon,
   CloseIcon,
   FolderIcon,
   LoadingIcon,
+  MoreVerticalIcon,
   PlusIcon,
   RefreshIcon,
   SearchIcon,
-  ServerIcon
+  ServerIcon,
+  SettingsIcon,
+  SparkIcon,
+  TaskListIcon
 } from "../Icons"
 import { UniversalWorkspace } from "./universal-workspace"
-import "../taskdesk-v3-unified.css"
 
 const REFRESH_MS = 10_000
 const DETAIL_REFRESH_MS = 5_000
@@ -61,6 +82,7 @@ type TaskFilter = "all" | "active" | "review" | "finished" | "failed"
 type DetailTab = "review" | "conversation" | "diff" | "runs"
 type ProductTaskState = "draft" | "active" | "review" | "finished" | "failed" | "cancelled"
 type SessionFocusRequest = { sessionID: string; requestID: number }
+type SessionPane = "list" | "detail"
 
 type RuntimeMachine = {
   key: string
@@ -93,6 +115,8 @@ type TaskDetail = {
   result: TaskWorkspaceInspection | null
   error: string | null
 }
+
+type RunReviewTarget = { record: TaskRecord; run: MachineTaskRun; sequence: number }
 
 type Props = {
   machines: WorkspaceMachine[]
@@ -137,19 +161,19 @@ function runSessionID(run?: MachineTaskRun | null): string | null {
   return run?.sessionId || run?.sessionID || null
 }
 
-function formatRelative(value?: string | null): string {
+function formatRelative(value: string | null | undefined, t: TaskDeskTranslator): string {
   if (!value) return ""
   const timestamp = Date.parse(value)
   if (!Number.isFinite(timestamp)) return value
   const delta = Math.max(0, Date.now() - timestamp)
-  if (delta < 60_000) return "now"
-  if (delta < 3_600_000) return `${Math.max(1, Math.round(delta / 60_000))}m ago`
-  if (delta < 86_400_000) return `${Math.round(delta / 3_600_000)}h ago`
-  return `${Math.round(delta / 86_400_000)}d ago`
+  if (delta < 60_000) return t("time.now")
+  if (delta < 3_600_000) return t("time.minutes", { value: Math.max(1, Math.round(delta / 60_000)) })
+  if (delta < 86_400_000) return t("time.hours", { value: Math.round(delta / 3_600_000) })
+  return t("time.days", { value: Math.round(delta / 86_400_000) })
 }
 
-function formatDate(value?: string): string {
-  if (!value) return "Unknown"
+function formatDate(value: string | undefined, t: TaskDeskTranslator): string {
+  if (!value) return t("value.unknown")
   const timestamp = Date.parse(value)
   return Number.isFinite(timestamp)
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp)
@@ -173,8 +197,8 @@ function latestAssistantText(messages: MessageEnvelope[]): string {
   return ""
 }
 
-function taskWorkspaceLabel(task: ProductTask): string {
-  return task.workspace?.mode === "worktree" ? "Isolated worktree" : "Project directory"
+function taskWorkspaceLabel(task: ProductTask, t: TaskDeskTranslator): string {
+  return task.workspace?.mode === "worktree" ? t("workspace.worktree") : t("workspace.project")
 }
 
 function productTaskState(task: ProductTask): ProductTaskState {
@@ -187,14 +211,8 @@ function productTaskState(task: ProductTask): ProductTaskState {
   return "draft"
 }
 
-function productTaskLabel(task: ProductTask): string {
-  const state = productTaskState(task)
-  if (state === "active") return "Working"
-  if (state === "review") return "Ready for review"
-  if (state === "finished") return "Finished"
-  if (state === "failed") return "Failed"
-  if (state === "cancelled") return "Cancelled"
-  return "Draft"
+function productTaskLabel(task: ProductTask, t: TaskDeskTranslator): string {
+  return t(`state.${productTaskState(task)}` as "state.active")
 }
 
 function filterMatches(task: ProductTask, filter: TaskFilter): boolean {
@@ -223,14 +241,93 @@ function pageIsVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden"
 }
 
+function errorText(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason)
+}
+
+/**
+ * Every overlay closes the same three ways: its own close control, Escape, and Android back. The
+ * dialog therefore owns none of that logic — the shell's back stack does — and this wrapper only
+ * guarantees the parts a dialog must not get wrong: a labelled modal region, a backdrop that does
+ * not swallow clicks meant for the panel, and initial focus inside the dialog rather than left on
+ * whatever button opened it.
+ */
+function Modal({
+  label,
+  className = "",
+  onClose,
+  children
+}: {
+  label: string
+  className?: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  const panel = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    const target = panel.current
+    if (!target) return
+    if (target.contains(document.activeElement)) return
+    const focusable = target.querySelector<HTMLElement>(
+      "textarea, input:not([type=hidden]), select, button:not([disabled]), [tabindex]:not([tabindex='-1'])"
+    )
+    focusable?.focus()
+  }, [])
+
+  return (
+    <div className="td3-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section
+        ref={panel}
+        className={`td3-modal ${className}`.trim()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        {children}
+      </section>
+    </div>
+  )
+}
+
+function ModalHeader({
+  eyebrow,
+  title,
+  description,
+  closeLabel,
+  onClose
+}: {
+  eyebrow?: string
+  title: string
+  description?: string
+  closeLabel: string
+  onClose: () => void
+}) {
+  return (
+    <header>
+      <div>
+        {eyebrow ? <small>{eyebrow}</small> : null}
+        <h2>{title}</h2>
+        {description ? <p>{description}</p> : null}
+      </div>
+      <button type="button" onClick={onClose} aria-label={closeLabel} title={closeLabel}>
+        <CloseIcon size={17} />
+      </button>
+    </header>
+  )
+}
+
 function NewTaskModal({
   runtimes,
   initialMachineID,
+  t,
   onClose,
   onCreated
 }: {
   runtimes: RuntimeMachine[]
   initialMachineID: string
+  t: TaskDeskTranslator
   onClose: () => void
   onCreated: (runtime: RuntimeMachine, task: ProductTask) => void
 }) {
@@ -274,7 +371,7 @@ function NewTaskModal({
       if (generation === modelGeneration.current) {
         setModels([])
         setModelKey("")
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setError(errorText(reason))
       }
     }).finally(() => {
       if (generation === modelGeneration.current) setModelsLoading(false)
@@ -302,39 +399,89 @@ function NewTaskModal({
       onCreated(runtime, task)
       onClose()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(errorText(reason))
     } finally {
       setStarting(false)
     }
   }
 
   return (
-    <div className="td3-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="td3-modal td3-new-task" role="dialog" aria-modal="true" aria-label="New Task" onMouseDown={(event) => event.stopPropagation()}>
-        <header>
-          <div><small>Durable work</small><h2>New Task</h2><p>Choose where the work lives, which harness owns it, and the model that will run it.</p></div>
-          <button type="button" onClick={onClose} aria-label="Close"><CloseIcon size={17} /></button>
-        </header>
-        <div className="td3-modal-body td3-form-grid">
-          <label><span>Machine</span><select value={runtime?.machine.id || ""} onChange={(event) => setMachineID(event.target.value)}>{online.map((item) => <option key={item.machine.id} value={item.machine.id}>{item.snapshot?.machine.name || item.machine.name}</option>)}</select></label>
-          <label><span>Project</span><select value={projectID} onChange={(event) => setProjectID(event.target.value)}>{runtime?.projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label><span>Agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{agents.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-          <label><span>Model</span><select value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={modelsLoading}>{modelsLoading ? <option value="">Loading models...</option> : null}{!modelsLoading && models.length === 0 ? <option value="">Agent default</option> : null}{models.map((item) => { const key = `${item.providerID}|${item.modelID}|${item.variant || ""}`; return <option key={key} value={key}>{item.modelName}{item.variant ? ` (${item.variant})` : ""}</option> })}</select></label>
-          <label className="td3-form-wide"><span>Task</span><textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe the outcome you want the agent to deliver..." autoFocus /></label>
-          <label className="td3-workspace-choice td3-form-wide">
-            <input type="checkbox" checked={isolated} onChange={(event) => setIsolated(event.target.checked)} disabled={project?.kind !== "git"} />
-            <span><strong>Use an isolated Git worktree</strong><small>{project?.kind === "git" ? "Recommended. The Task gets its own branch and working directory." : "This project is not Git-backed, so it runs in the project directory."}</small></span>
-          </label>
-          {!isolated && project?.kind === "git" ? <div className="td3-inline-warning td3-form-wide">This Task will edit the selected project checkout directly.</div> : null}
-          {error ? <div className="td3-inline-error td3-form-wide">{error}</div> : null}
-        </div>
-        <footer><button type="button" className="td3-button" onClick={onClose}>Cancel</button><button type="button" className="td3-button primary" disabled={!canStart} onClick={() => void start()}>{starting ? <LoadingIcon size={15} /> : <PlusIcon size={15} />}{starting ? "Starting Task..." : "Start Task"}</button></footer>
-      </section>
-    </div>
+    <Modal label={t("action.newTask")} className="td3-new-task" onClose={onClose}>
+      <ModalHeader
+        eyebrow={t("newTask.eyebrow")}
+        title={t("action.newTask")}
+        description={t("newTask.subtitle")}
+        closeLabel={t("nav.close")}
+        onClose={onClose}
+      />
+      <div className="td3-modal-body td3-form-grid">
+        <label>
+          <span>{t("field.machine")}</span>
+          <select value={runtime?.machine.id || ""} onChange={(event) => setMachineID(event.target.value)}>
+            {online.map((item) => <option key={item.machine.id} value={item.machine.id}>{item.snapshot?.machine.name || item.machine.name}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>{t("field.project")}</span>
+          <select value={projectID} onChange={(event) => setProjectID(event.target.value)}>
+            {runtime?.projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>{t("field.agent")}</span>
+          <select value={agentID} onChange={(event) => setAgentID(event.target.value)}>
+            {agents.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>{t("field.model")}</span>
+          <select value={modelKey} onChange={(event) => setModelKey(event.target.value)} disabled={modelsLoading}>
+            {modelsLoading ? <option value="">{t("model.loading")}</option> : null}
+            {!modelsLoading && models.length === 0 ? <option value="">{t("model.agentDefault")}</option> : null}
+            {models.map((item) => {
+              const key = `${item.providerID}|${item.modelID}|${item.variant || ""}`
+              return <option key={key} value={key}>{item.modelName}{item.variant ? ` (${item.variant})` : ""}</option>
+            })}
+          </select>
+        </label>
+        <label className="td3-form-wide">
+          <span>{t("field.task")}</span>
+          <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={t("newTask.promptPlaceholder")} />
+        </label>
+        <label className="td3-workspace-choice td3-form-wide">
+          <input type="checkbox" checked={isolated} onChange={(event) => setIsolated(event.target.checked)} disabled={project?.kind !== "git"} />
+          <span>
+            <strong>{t("worktree.title")}</strong>
+            <small>{project?.kind === "git" ? t("worktree.recommended") : t("worktree.notGit")}</small>
+          </span>
+        </label>
+        {!isolated && project?.kind === "git" ? <div className="td3-inline-warning td3-form-wide">{t("worktree.warning")}</div> : null}
+        {online.length === 0 ? <div className="td3-inline-warning td3-form-wide">{t("newTask.noMachine")}</div> : null}
+        {runtime && runtime.projects.length === 0 ? <div className="td3-inline-warning td3-form-wide">{t("newTask.noProject")}</div> : null}
+        {error ? <div className="td3-inline-error td3-form-wide" role="alert">{error}</div> : null}
+      </div>
+      <footer>
+        <button type="button" className="td3-button" onClick={onClose}>{t("action.cancel")}</button>
+        <button type="button" className="td3-button primary" disabled={!canStart} onClick={() => void start()}>
+          {starting ? <LoadingIcon size={15} /> : <PlusIcon size={15} />}
+          {starting ? t("newTask.startingTask") : t("newTask.startTask")}
+        </button>
+      </footer>
+    </Modal>
   )
 }
 
-function ContinueTaskModal({ record, onClose, onContinued }: { record: TaskRecord; onClose: () => void; onContinued: (task: ProductTask) => void }) {
+function ContinueTaskModal({
+  record,
+  t,
+  onClose,
+  onContinued
+}: {
+  record: TaskRecord
+  t: TaskDeskTranslator
+  onClose: () => void
+  onContinued: (task: ProductTask) => void
+}) {
   const [prompt, setPrompt] = useState("")
   const [working, setWorking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -347,34 +494,262 @@ function ContinueTaskModal({ record, onClose, onContinued }: { record: TaskRecor
       onContinued(await taskClient.continueTask(record.runtime.machine.config, record.task.id, prompt.trim()) as ProductTask)
       onClose()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(errorText(reason))
     } finally {
       setWorking(false)
     }
   }
 
   return (
-    <div className="td3-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="td3-modal td3-continue-modal" role="dialog" aria-modal="true" aria-label="Continue Task" onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><small>New Run</small><h2>Continue Task</h2><p>{taskTitle(record.task)}</p></div><button type="button" onClick={onClose} aria-label="Close"><CloseIcon size={17} /></button></header>
-        <div className="td3-modal-body"><label className="td3-stack-field"><span>What should the next Run do?</span><textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Continue from the current workspace state and..." autoFocus /></label>{error ? <div className="td3-inline-error">{error}</div> : null}</div>
-        <footer><button type="button" className="td3-button" onClick={onClose}>Cancel</button><button type="button" className="td3-button primary" disabled={!prompt.trim() || working} onClick={() => void submit()}>{working ? <LoadingIcon size={15} /> : null}{working ? "Starting..." : "Start new Run"}</button></footer>
-      </section>
-    </div>
+    <Modal label={t("continue.title")} className="td3-continue-modal" onClose={onClose}>
+      <ModalHeader
+        eyebrow={t("continue.eyebrow")}
+        title={t("continue.title")}
+        description={taskTitle(record.task)}
+        closeLabel={t("nav.close")}
+        onClose={onClose}
+      />
+      <div className="td3-modal-body">
+        <label className="td3-stack-field">
+          <span>{t("continue.prompt")}</span>
+          <textarea rows={7} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder={t("continue.placeholder")} />
+        </label>
+        {error ? <div className="td3-inline-error" role="alert">{error}</div> : null}
+      </div>
+      <footer>
+        <button type="button" className="td3-button" onClick={onClose}>{t("action.cancel")}</button>
+        <button type="button" className="td3-button primary" disabled={!prompt.trim() || working} onClick={() => void submit()}>
+          {working ? <LoadingIcon size={15} /> : null}
+          {working ? t("continue.starting") : t("continue.start")}
+        </button>
+      </footer>
+    </Modal>
   )
 }
 
-function QuestionAttentionCard({ item, onResolved, onOpenSession }: { item: Extract<AttentionItem, { type: "question" }>; onResolved: () => void; onOpenSession: (runtime: RuntimeMachine, sessionID: string) => void }) {
+/**
+ * A previous Run stays reviewable product history. The shell already knows which machine, task and
+ * agent own the Run, so this loads one transcript on demand instead of re-listing every machine's
+ * tasks to work out where the Session came from, and it adds no polling.
+ */
+function RunReviewModal({
+  target,
+  t,
+  onClose
+}: {
+  target: RunReviewTarget
+  t: TaskDeskTranslator
+  onClose: () => void
+}) {
+  const [messages, setMessages] = useState<MessageEnvelope[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const { record, run, sequence } = target
+  const sessionID = runSessionID(run)
+  const agent = record.runtime.agents.find((candidate) => candidate.id === (run.agentId || record.task.agentId))
+
+  useEffect(() => {
+    if (!sessionID) return
+    if (!agent) {
+      setLoading(false)
+      setError(t("runs.agentUnavailable"))
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    const directory = run.directory || record.task.workspace.path
+    void api.loadMessages(configForAgent(record.runtime, agent), sessionID, directory).then((loaded) => {
+      if (!cancelled) setMessages(loaded)
+    }).catch((reason) => {
+      if (!cancelled) setError(errorText(reason))
+    }).finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionID, agent?.id])
+
+  return (
+    <Modal label={t("runs.archiveTitle", { sequence })} className="td3-run-review" onClose={onClose}>
+      <ModalHeader
+        eyebrow={t("runs.archiveEyebrow")}
+        title={t("runs.archiveTitle", { sequence })}
+        description={run.prompt || record.task.prompt}
+        closeLabel={t("runs.archiveClose")}
+        onClose={onClose}
+      />
+      <div className="td3-run-review-meta">
+        <span><small>{t("detail.session")}</small><b>{sessionID || t("value.unknown")}</b></span>
+        <span><small>{t("field.agent")}</small><b>{agent?.label || run.agentId || record.task.agentId}</b></span>
+        <span><small>{t("detail.machine")}</small><b>{record.runtime.snapshot?.machine.name || record.runtime.machine.name}</b></span>
+        <span><small>{t("column.status")}</small><b>{run.finishedAt ? t("runs.statusCompleted") : run.status || t("runs.statusRecorded")}</b></span>
+      </div>
+      <div className="td3-modal-body td3-conversation">
+        {loading ? <div className="td3-detail-loading"><LoadingIcon size={22} /><strong>{t("runs.archiveLoading")}</strong></div> : null}
+        {!loading && error ? <div className="td3-inline-error" role="alert">{error}</div> : null}
+        {!loading && !error && messages.length === 0 ? <div className="td3-empty-state"><span>{t("conversation.empty")}</span></div> : null}
+        {!loading && !error ? messages.map((message) => {
+          const text = extractText(message)
+          if (!text) return null
+          return (
+            <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}>
+              <header><strong>{message.info.role === "user" ? t("conversation.you") : agent?.label || t("conversation.agent")}</strong></header>
+              <div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown></div>
+            </article>
+          )
+        }) : null}
+      </div>
+      <footer>
+        <button type="button" className="td3-button" onClick={onClose}>{t("nav.close")}</button>
+      </footer>
+    </Modal>
+  )
+}
+
+function SettingsModal({
+  language,
+  theme,
+  t,
+  onLanguage,
+  onTheme,
+  onClose
+}: {
+  language: LanguageCode
+  theme: ThemePreference
+  t: TaskDeskTranslator
+  onLanguage: (language: LanguageCode) => void
+  onTheme: (theme: ThemePreference) => void
+  onClose: () => void
+}) {
+  const themeLabel: Record<ThemePreference, string> = {
+    system: t("settings.themeSystem"),
+    light: t("settings.themeLight"),
+    dark: t("settings.themeDark")
+  }
+
+  return (
+    <Modal label={t("settings.title")} className="td3-settings-modal" onClose={onClose}>
+      <ModalHeader
+        eyebrow={t("settings.eyebrow")}
+        title={t("settings.title")}
+        description={t("settings.subtitle")}
+        closeLabel={t("nav.close")}
+        onClose={onClose}
+      />
+      <div className="td3-modal-body td3-settings-body">
+        <fieldset className="td3-settings-group">
+          <legend>{t("settings.theme")}</legend>
+          <div className="td3-choice-row" role="radiogroup" aria-label={t("settings.theme")}>
+            {themePreferences.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="radio"
+                aria-checked={theme === option}
+                className={theme === option ? "active" : ""}
+                onClick={() => onTheme(option)}
+              >
+                {themeLabel[option]}
+              </button>
+            ))}
+          </div>
+          <p className="td3-settings-hint">{t("settings.themeHint")}</p>
+        </fieldset>
+
+        <fieldset className="td3-settings-group">
+          <legend>{t("settings.language")}</legend>
+          <div className="td3-choice-row" role="radiogroup" aria-label={t("settings.language")}>
+            {languageOptions.map((option) => (
+              <button
+                key={option.code}
+                type="button"
+                role="radio"
+                aria-checked={language === option.code}
+                lang={option.code}
+                className={language === option.code ? "active" : ""}
+                onClick={() => onLanguage(option.code)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <p className="td3-settings-hint">{t("settings.languageHint")}</p>
+        </fieldset>
+      </div>
+      <footer>
+        <button type="button" className="td3-button primary" onClick={onClose}>{t("settings.done")}</button>
+      </footer>
+    </Modal>
+  )
+}
+
+function MoreSheet({
+  items,
+  t,
+  onClose
+}: {
+  items: Array<{ id: string; label: string; icon: ReactNode; active?: boolean; onSelect: () => void }>
+  t: TaskDeskTranslator
+  onClose: () => void
+}) {
+  return (
+    <Modal label={t("nav.moreTitle")} className="td3-more-sheet" onClose={onClose}>
+      <ModalHeader
+        title={t("nav.moreTitle")}
+        description={t("nav.moreHint")}
+        closeLabel={t("nav.close")}
+        onClose={onClose}
+      />
+      <div className="td3-modal-body td3-more-list">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={item.active ? "active" : ""}
+            aria-current={item.active ? "page" : undefined}
+            onClick={() => {
+              item.onSelect()
+              onClose()
+            }}
+          >
+            {item.icon}
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </Modal>
+  )
+}
+
+function QuestionAttentionCard({
+  item,
+  t,
+  onResolved,
+  onOpenSession,
+  onError
+}: {
+  item: Extract<AttentionItem, { type: "question" }>
+  t: TaskDeskTranslator
+  onResolved: () => void
+  onOpenSession: (runtime: RuntimeMachine, sessionID: string) => void
+  onError: (message: string) => void
+}) {
   const [answers, setAnswers] = useState<Record<number, string[]>>({})
   const [sending, setSending] = useState(false)
   const config = configForAgent(item.runtime, item.agent)
 
   async function reply() {
+    if (sending) return
     setSending(true)
     try {
       const payload = item.request.questions.map((_question, index) => answers[index] || [])
       await api.replyQuestion(config, item.request.id, payload, item.task?.workspace.path)
       onResolved()
+    } catch (reason) {
+      onError(errorText(reason))
     } finally {
       setSending(false)
     }
@@ -382,9 +757,100 @@ function QuestionAttentionCard({ item, onResolved, onOpenSession }: { item: Extr
 
   return (
     <article className="td3-attention-card">
-      <header><span className="td3-attention-icon">?</span><div><strong>Question</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div></header>
-      {item.request.questions.map((question, index) => <div className="td3-question" key={`${item.request.id}-${index}`}><p>{question.question}</p><div>{question.options.map((option) => { const selected = answers[index]?.includes(option.label) || false; return <button type="button" key={option.label} className={selected ? "selected" : ""} onClick={() => setAnswers((current) => ({ ...current, [index]: question.multiple ? (selected ? (current[index] || []).filter((value) => value !== option.label) : [...(current[index] || []), option.label]) : [option.label] }))}>{option.label}</button> })}</div></div>)}
-      <footer><button type="button" className="td3-link-button" onClick={() => onOpenSession(item.runtime, item.request.sessionID)}>Open Session</button><button type="button" className="td3-button primary" disabled={sending} onClick={() => void reply()}>{sending ? "Sending..." : "Answer"}</button></footer>
+      <header>
+        <span className="td3-attention-icon">?</span>
+        <div>
+          <strong>{t("needs.question")}</strong>
+          <small>{item.task ? taskTitle(item.task) : item.agent.label}</small>
+        </div>
+        <span className="td3-attention-origin">{item.runtime.snapshot?.machine.name || item.runtime.machine.name}</span>
+      </header>
+      {item.request.questions.map((question, index) => (
+        <div className="td3-question" key={`${item.request.id}-${index}`}>
+          <p>{question.question}</p>
+          <div>
+            {question.options.map((option) => {
+              const selected = answers[index]?.includes(option.label) || false
+              return (
+                <button
+                  type="button"
+                  key={option.label}
+                  aria-pressed={selected}
+                  className={selected ? "selected" : ""}
+                  onClick={() => setAnswers((current) => ({
+                    ...current,
+                    [index]: question.multiple
+                      ? (selected ? (current[index] || []).filter((value) => value !== option.label) : [...(current[index] || []), option.label])
+                      : [option.label]
+                  }))}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+      <footer>
+        <button type="button" className="td3-link-button" onClick={() => onOpenSession(item.runtime, item.request.sessionID)}>
+          {t("action.openSession")}
+        </button>
+        <button type="button" className="td3-button primary" disabled={sending} onClick={() => void reply()}>
+          {sending ? t("action.sending") : t("action.answer")}
+        </button>
+      </footer>
+    </article>
+  )
+}
+
+function PermissionAttentionCard({
+  item,
+  t,
+  onResolved,
+  onOpenSession,
+  onError
+}: {
+  item: Extract<AttentionItem, { type: "permission" }>
+  t: TaskDeskTranslator
+  onResolved: () => void
+  onOpenSession: (runtime: RuntimeMachine, sessionID: string) => void
+  onError: (message: string) => void
+}) {
+  const [sending, setSending] = useState(false)
+
+  async function reply(decision: "once" | "always" | "reject") {
+    if (sending) return
+    setSending(true)
+    try {
+      await api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, decision, item.task?.workspace.path)
+      onResolved()
+    } catch (reason) {
+      onError(errorText(reason))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <article className="td3-attention-card">
+      <header>
+        <span className="td3-attention-icon warning">!</span>
+        <div>
+          <strong>{t("needs.permission")}</strong>
+          <small>{item.task ? taskTitle(item.task) : item.agent.label}</small>
+        </div>
+        <span className="td3-attention-origin">{item.runtime.snapshot?.machine.name || item.runtime.machine.name}</span>
+      </header>
+      <p>{item.request.permission}</p>
+      {item.request.patterns?.length ? <code>{item.request.patterns.join(", ")}</code> : null}
+      <footer>
+        <button type="button" className="td3-link-button" onClick={() => onOpenSession(item.runtime, item.request.sessionID)}>
+          {t("action.openSession")}
+        </button>
+        <button type="button" className="td3-button danger" disabled={sending} onClick={() => void reply("reject")}>{t("action.reject")}</button>
+        <button type="button" className="td3-button" disabled={sending} onClick={() => void reply("once")}>{t("action.once")}</button>
+        <button type="button" className="td3-button primary" disabled={sending} onClick={() => void reply("always")}>{t("action.always")}</button>
+      </footer>
     </article>
   )
 }
@@ -392,6 +858,8 @@ function QuestionAttentionCard({ item, onResolved, onOpenSession }: { item: Extr
 export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID, onPersistMachines, onManageMachines, legacyView }: Props) {
   const [view, setView] = useState<TaskDeskView>("tasks")
   const [runtimes, setRuntimes] = useState<RuntimeMachine[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState<TaskFilter>("all")
   const [query, setQuery] = useState("")
   const [machineScope, setMachineScope] = useState(activeMachineID || "all")
@@ -400,14 +868,35 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
   const [detailTab, setDetailTab] = useState<DetailTab>("review")
   const [detail, setDetail] = useState<TaskDetail>(() => emptyDetail())
   const [attention, setAttention] = useState<AttentionItem[]>([])
+  const [attentionError, setAttentionError] = useState<string | null>(null)
   const [newTaskOpen, setNewTaskOpen] = useState(false)
   const [continueOpen, setContinueOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [runReview, setRunReview] = useState<RunReviewTarget | null>(null)
   const [sessionFocusRequest, setSessionFocusRequest] = useState<SessionFocusRequest | null>(null)
+  const [sessionPane, setSessionPane] = useState<SessionPane>("list")
+  const [newSessionRequest, setNewSessionRequest] = useState(0)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
+  const [language, setLanguage] = useState<LanguageCode>(loadLanguage)
+  const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
   const refreshInFlight = useRef(false)
   const detailInFlight = useRef(false)
   const detailGeneration = useRef(0)
+  const detailHeading = useRef<HTMLHeadingElement>(null)
+
+  const isMobile = useMediaQuery(TASKDESK_MOBILE_QUERY)
+  const t = useMemo(() => createTaskDeskTranslator(language), [language])
+
+  useEffect(() => {
+    const sync = () => {
+      setLanguage(loadLanguage())
+      setTheme(loadThemePreference())
+    }
+    window.addEventListener(APP_PREFERENCES_CHANGED_EVENT, sync)
+    return () => window.removeEventListener(APP_PREFERENCES_CHANGED_EVENT, sync)
+  }, [])
 
   useEffect(() => {
     if (activeMachineID && machines.some((machine) => machine.id === activeMachineID)) setMachineScope(activeMachineID)
@@ -416,6 +905,7 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
   const refresh = useCallback(async () => {
     if (refreshInFlight.current) return
     refreshInFlight.current = true
+    setRefreshing(true)
     try {
       const next = await Promise.all(machines.map(async (machine): Promise<RuntimeMachine> => {
         try {
@@ -427,7 +917,7 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
           ])
           return { key: machine.id, machine, snapshot, projects, tasks: sortTasksByActivity(tasks) as ProductTask[], agents: selectableMachineAgents(snapshot), state: "online" }
         } catch (reason) {
-          return { key: machine.id, machine, snapshot: null, projects: [], tasks: [], agents: [], state: "offline", error: reason instanceof Error ? reason.message : String(reason) }
+          return { key: machine.id, machine, snapshot: null, projects: [], tasks: [], agents: [], state: "offline", error: errorText(reason) }
         }
       }))
       setRuntimes(next)
@@ -445,10 +935,21 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
       })))).flat()
       setAttention(nextAttention)
 
+      // A Task lives on its machine, so a single failed discovery empties that machine's list for
+      // one cycle. Dropping the selection on that would close the Task the user is reading and lose
+      // their place, so an unreachable owner keeps the selection and only a machine that answered
+      // without the Task can clear it.
       const records = next.flatMap((runtime) => runtime.tasks.map((task) => ({ key: `${runtime.key}|${task.id}`, runtime, task })))
-      setSelectedKey((current) => current && records.some((record) => record.key === current) ? current : null)
+      setSelectedKey((current) => {
+        if (!current) return current
+        if (records.some((record) => record.key === current)) return current
+        const owner = next.find((runtime) => current.startsWith(`${runtime.key}|`))
+        return owner && owner.state !== "online" ? current : null
+      })
+      setLoaded(true)
     } finally {
       refreshInFlight.current = false
+      setRefreshing(false)
     }
   }, [machines])
 
@@ -494,11 +995,18 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
       if (generation !== detailGeneration.current) return
       setDetail({ ownerKey: record.key, loading: false, messages, diff, todos, vcs, result, error: null })
     } catch (reason) {
-      if (generation === detailGeneration.current) setDetail({ ...emptyDetail(record.key), error: reason instanceof Error ? reason.message : String(reason) })
+      if (generation === detailGeneration.current) setDetail({ ...emptyDetail(record.key), error: errorText(reason) })
     } finally {
       detailInFlight.current = false
     }
   }, [])
+
+  // Which Task is open, which tab it shows and whether the pane exists at all are the only reasons
+  // to blank the detail and show a spinner. A running Task changes `updatedAt` on every poll, and
+  // treating that as a reason to reload from scratch replaced the Review, Conversation or Diff the
+  // user was reading with "Loading Task…" every few seconds and threw away their scroll position.
+  const selectedKeyForDetail = selected?.key ?? null
+  const detailVisible = view === "tasks" && Boolean(selected) && detailOpen
 
   useEffect(() => {
     detailGeneration.current += 1
@@ -513,9 +1021,23 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
       if (pageIsVisible()) void loadDetail(selected, detailTab, true)
     }, DETAIL_REFRESH_MS)
     return () => window.clearInterval(timer)
-  }, [selected?.key, selected?.task.updatedAt, detailOpen, detailTab, view, loadDetail])
+  }, [selectedKeyForDetail, detailOpen, detailTab, view, loadDetail])
 
+  const selectedUpdatedAt = selected?.task.updatedAt
+  useEffect(() => {
+    if (!detailVisible || !selected) return
+    void loadDetail(selected, detailTab, true)
+  }, [selectedUpdatedAt])
+
+  const scopedRuntimes = useMemo(
+    () => runtimes.filter((runtime) => machineScope === "all" || runtime.machine.id === machineScope),
+    [runtimes, machineScope]
+  )
   const scopedRecords = useMemo(() => records.filter((record) => machineScope === "all" || record.runtime.machine.id === machineScope), [records, machineScope])
+  const scopedAttention = useMemo(
+    () => attention.filter((item) => machineScope === "all" || item.runtime.machine.id === machineScope),
+    [attention, machineScope]
+  )
   const filteredRecords = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return scopedRecords.filter((record) => {
@@ -526,20 +1048,43 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
   }, [scopedRecords, query, filter])
 
   const counts = useMemo(() => ({
-    tasks: records.length,
-    active: records.filter((record) => productTaskState(record.task) === "active").length,
-    review: records.filter((record) => productTaskState(record.task) === "review").length,
-    finished: records.filter((record) => productTaskState(record.task) === "finished").length,
-    machines: runtimes.filter((runtime) => runtime.state === "online").length,
-    agents: runtimes.reduce((sum, runtime) => sum + runtime.agents.length, 0)
-  }), [records, runtimes])
+    tasks: scopedRecords.length,
+    active: scopedRecords.filter((record) => productTaskState(record.task) === "active").length,
+    review: scopedRecords.filter((record) => productTaskState(record.task) === "review").length,
+    finished: scopedRecords.filter((record) => productTaskState(record.task) === "finished").length,
+    machines: scopedRuntimes.filter((runtime) => runtime.state === "online").length,
+    agents: scopedRuntimes.reduce((sum, runtime) => sum + runtime.agents.length, 0)
+  }), [scopedRecords, scopedRuntimes])
 
-  const selectedRuntime = machineScope === "all" ? runtimes.find((runtime) => runtime.machine.id === activeMachineID) || runtimes[0] : runtimes.find((runtime) => runtime.machine.id === machineScope)
+  const scopeRuntime = machineScope === "all" ? null : scopedRuntimes[0] || null
+  const anyOnline = runtimes.some((runtime) => runtime.state === "online")
+  const scopeOnline = machineScope === "all" ? counts.machines > 0 : scopeRuntime?.state === "online"
+  // With every machine in scope the strip must describe the fleet, not whichever machine happens to
+  // be first: showing one machine's harnesses under the label "All machines" reads as a fact about
+  // the fleet and is wrong as soon as a second machine exposes something different.
+  const stripAgents = useMemo(() => {
+    const seen = new Set<string>()
+    const unique: MachineAgentHost[] = []
+    for (const runtime of scopedRuntimes) {
+      for (const agent of runtime.agents) {
+        const identity = machineScope === "all" ? agent.backend : agent.id
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        unique.push(agent)
+      }
+    }
+    return unique
+  }, [scopedRuntimes, machineScope])
+
   const selectedAgent = selected?.runtime.agents.find((agent) => agent.id === selected.task.agentId)
   const selectedSessionID = selected ? runSessionID(selected.task.run) : null
   const detailReady = Boolean(selected && detail.ownerKey === selected.key && !detail.loading)
   const summary = detailReady ? latestAssistantText(detail.messages) : ""
-  const sessionProfiles = machineScope === "all" ? machines : machines.filter((machine) => machine.id === machineScope)
+  const sessionProfiles = useMemo(
+    () => machineScope === "all" ? machines : machines.filter((machine) => machine.id === machineScope),
+    [machines, machineScope]
+  )
+  const detailChangeCount = detail.diff.length || detail.result?.changeCount || 0
 
   async function refreshAndReselect(taskID?: string, machineID?: string, openDetail = true) {
     await refresh()
@@ -556,12 +1101,44 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
     setActionError(null)
   }
 
+  function closeTaskDetail() {
+    setDetailOpen(false)
+    setActionError(null)
+  }
+
+  function goToView(next: TaskDeskView) {
+    setView(next)
+    // Sessions is a master/detail stack on a phone, so arriving from the navigation must always land
+    // on the list. Only an explicit Open Session drills straight into a conversation.
+    if (next === "sessions") setSessionPane("list")
+  }
+
   function openNativeSession(runtime: RuntimeMachine, sessionID: string) {
     setMachineScope(runtime.machine.id)
     onActiveMachineID(runtime.machine.id)
     setSessionFocusRequest((current) => ({ sessionID, requestID: (current?.requestID ?? 0) + 1 }))
+    setSessionPane("detail")
     setView("sessions")
   }
+
+  useEffect(() => {
+    if (!detailVisible || !isMobile) return
+    detailHeading.current?.focus()
+  }, [detailVisible, isMobile, selectedKeyForDetail])
+
+  // One ordered stack for Escape, Android's hardware back and the Android edge-swipe-back gesture,
+  // which the webview delivers as the same back event. Deepest surface first, so back never skips a
+  // layer and never leaves the app while something is still open.
+  useBackNavigation([
+    () => { if (!runReview) return false; setRunReview(null); return true },
+    () => { if (!moreOpen) return false; setMoreOpen(false); return true },
+    () => { if (!settingsOpen) return false; setSettingsOpen(false); return true },
+    () => { if (!continueOpen) return false; setContinueOpen(false); return true },
+    () => { if (!newTaskOpen) return false; setNewTaskOpen(false); return true },
+    () => { if (view !== "sessions" || sessionPane !== "detail" || !isMobile) return false; setSessionPane("list"); return true },
+    () => { if (view !== "tasks" || !detailOpen) return false; closeTaskDetail(); return true },
+    () => { if (view === "tasks") return false; goToView("tasks"); return true }
+  ])
 
   async function finishSelected() {
     if (!selected || actionBusy) return
@@ -571,7 +1148,7 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
       const response = await taskClient.finish(selected.runtime.machine.config, selected.task.id)
       await refreshAndReselect(response.task.id, selected.runtime.machine.id)
     } catch (reason) {
-      setActionError(reason instanceof Error ? reason.message : String(reason))
+      setActionError(errorText(reason))
     } finally {
       setActionBusy(false)
     }
@@ -579,43 +1156,179 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
 
   async function cleanupSelected() {
     if (!selected || actionBusy) return
-    if (!window.confirm("Release this Task's isolated worktree? Uncommitted changes are protected and will make the daemon refuse cleanup.")) return
+    if (!window.confirm(t("cleanup.confirm"))) return
     setActionBusy(true)
     setActionError(null)
     try {
       const response = await taskClient.cleanupWorkspace(selected.runtime.machine.config, selected.task.id)
       await refreshAndReselect(response.task.id, selected.runtime.machine.id)
     } catch (reason) {
-      setActionError(reason instanceof Error ? reason.message : String(reason))
+      setActionError(errorText(reason))
     } finally {
       setActionBusy(false)
     }
   }
 
+  function applyTheme(next: ThemePreference) {
+    setTheme(next)
+    persistThemePreference(next)
+  }
+
+  function applyLanguage(next: LanguageCode) {
+    setLanguage(next)
+    persistLanguage(next)
+  }
+
+  const navItems: Array<{ view: TaskDeskView; label: string; icon: ReactNode; count?: number; attention?: boolean }> = [
+    { view: "overview", label: t("nav.overview"), icon: <SparkIcon size={16} /> },
+    { view: "tasks", label: t("nav.tasks"), icon: <TaskListIcon size={16} />, count: counts.tasks },
+    { view: "sessions", label: t("nav.sessions"), icon: <ChatIcon size={16} /> },
+    { view: "projects", label: t("nav.projects"), icon: <FolderIcon size={16} /> },
+    { view: "needs", label: t("nav.needs"), icon: <AlertIcon size={16} />, count: attention.length, attention: true },
+    { view: "agents", label: t("nav.agents"), icon: <AgentIcon size={16} /> },
+    { view: "machines", label: t("nav.machines"), icon: <ServerIcon size={16} /> }
+  ]
+  // A phone gets four destinations plus More. Everything else stays reachable through the sheet
+  // rather than being hidden by an `nth-child` rule, which is how Machines and Manage machines
+  // became unreachable on a phone once the bottom bar ran out of room.
+  const mobilePrimary: TaskDeskView[] = ["tasks", "sessions", "needs", "projects"]
+  const primaryNav = isMobile ? navItems.filter((item) => mobilePrimary.includes(item.view)) : navItems
+  const overflowNav = isMobile ? navItems.filter((item) => !mobilePrimary.includes(item.view)) : []
+
+  const navButton = (item: typeof navItems[number]) => (
+    <button
+      key={item.view}
+      type="button"
+      className={view === item.view ? "active" : ""}
+      aria-current={view === item.view ? "page" : undefined}
+      onClick={() => goToView(item.view)}
+    >
+      {item.icon}
+      <span className="td3-nav-label">{item.label}</span>
+      {item.count ? <b className={item.attention ? "attention" : undefined}>{item.count}</b> : null}
+    </button>
+  )
+
+  const moreItems = [
+    ...overflowNav.map((item) => ({
+      id: item.view,
+      label: item.label,
+      icon: item.icon,
+      active: view === item.view,
+      onSelect: () => goToView(item.view)
+    })),
+    { id: "settings", label: t("nav.settings"), icon: <SettingsIcon size={16} />, onSelect: () => setSettingsOpen(true) },
+    { id: "manage", label: t("nav.manageMachines"), icon: <ServerIcon size={16} />, onSelect: onManageMachines },
+    { id: "classic", label: t("nav.classic"), icon: <ChatIcon size={16} />, active: view === "classic", onSelect: () => goToView("classic") }
+  ]
+
   const nav = (
     <aside className="td3-sidebar">
-      <div className="td3-brand"><span>TD</span><div><strong>TaskDesk v3</strong><small>Harness Remote</small></div></div>
-      <nav>
-        <button className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}><span>⌂</span>Overview</button>
-        <button className={view === "tasks" ? "active" : ""} onClick={() => setView("tasks")}><span>☷</span>Tasks<b>{counts.tasks}</b></button>
-        <button className={view === "sessions" ? "active" : ""} onClick={() => setView("sessions")}><ChatIcon size={16} />Sessions</button>
-        <button className={view === "projects" ? "active" : ""} onClick={() => setView("projects")}><FolderIcon size={16} />Projects</button>
-        <button className={view === "needs" ? "active" : ""} onClick={() => setView("needs")}><span>!</span>Needs You{attention.length ? <b className="attention">{attention.length}</b> : null}</button>
-        <button className={view === "agents" ? "active" : ""} onClick={() => setView("agents")}><span>◇</span>Agents</button>
-        <button className={view === "machines" ? "active" : ""} onClick={() => setView("machines")}><ServerIcon size={16} />Machines</button>
+      <div className="td3-brand">
+        <span>TD</span>
+        <div><strong>{t("brand.name")}</strong><small>{t("brand.product")}</small></div>
+      </div>
+      <nav aria-label={t("brand.name")}>
+        {primaryNav.map(navButton)}
+        {isMobile ? (
+          <button type="button" className={moreOpen ? "active" : ""} onClick={() => setMoreOpen(true)}>
+            <MoreVerticalIcon size={16} />
+            <span className="td3-nav-label">{t("nav.more")}</span>
+          </button>
+        ) : null}
       </nav>
-      <div className="td3-sidebar-bottom"><button className={view === "classic" ? "active" : ""} onClick={() => setView("classic")}>Classic 2.x</button><button onClick={onManageMachines}>Manage machines</button></div>
+      <div className="td3-sidebar-bottom">
+        <button type="button" onClick={() => setSettingsOpen(true)}><SettingsIcon size={15} /><span className="td3-nav-label">{t("nav.settings")}</span></button>
+        <button type="button" className={view === "classic" ? "active" : ""} aria-current={view === "classic" ? "page" : undefined} onClick={() => goToView("classic")}>
+          <ChatIcon size={15} /><span className="td3-nav-label">{t("nav.classic")}</span>
+        </button>
+        <button type="button" onClick={onManageMachines}><ServerIcon size={15} /><span className="td3-nav-label">{t("nav.manageMachines")}</span></button>
+      </div>
     </aside>
+  )
+
+  // The primary action follows the surface: Tasks-side views create a Task, the Sessions view
+  // creates a Session. Both are always rendered — the label collapses to an icon at narrow widths
+  // instead of the control being removed, which is what used to make New Task unreachable on every
+  // viewport below 1220px and New Session unreachable everywhere but a phone.
+  const primaryAction = view === "classic" ? null : view === "sessions" ? (
+    <button
+      type="button"
+      className="td3-button primary td3-topbar-primary"
+      onClick={() => setNewSessionRequest((value) => value + 1)}
+      title={t("action.newSession")}
+      aria-label={t("action.newSession")}
+    >
+      <PlusIcon size={15} />
+      <span className="td3-button-label">{t("action.newSession")}</span>
+    </button>
+  ) : (
+    <button
+      type="button"
+      className="td3-button primary td3-topbar-primary"
+      onClick={() => setNewTaskOpen(true)}
+      disabled={!anyOnline}
+      title={t("action.newTask")}
+      aria-label={t("action.newTask")}
+    >
+      <PlusIcon size={15} />
+      <span className="td3-button-label">{t("action.newTask")}</span>
+    </button>
   )
 
   const topbar = (
     <header className="td3-topbar td3-topbar-unified">
-      <div className="td3-machine-selector"><ServerIcon size={16} /><select value={machineScope} onChange={(event) => { const value = event.target.value; setMachineScope(value); if (value !== "all") onActiveMachineID(value) }}><option value="all">All machines</option>{runtimes.map((runtime) => <option key={runtime.machine.id} value={runtime.machine.id}>{runtime.snapshot?.machine.name || runtime.machine.name}</option>)}</select><span className={`td3-online-dot ${selectedRuntime?.state === "online" ? "online" : "offline"}`} /><small>{machineScope === "all" ? `${counts.machines}/${runtimes.length} online` : selectedRuntime?.state === "online" ? "Online" : "Offline"}</small></div>
-      <div className="td3-agent-strip">{selectedRuntime?.agents.slice(0, 5).map((agent) => <HarnessBadge key={agent.id} agent={agent} />)}</div>
-      {view === "sessions" ? <div className="td3-view-context"><ChatIcon size={16} /><div><strong>Sessions</strong><small>Native harness conversations</small></div></div> : <div className="td3-global-search"><SearchIcon size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search Tasks, projects, agents..." /></div>}
-      {view !== "sessions" && view !== "classic" ? <button type="button" className="td3-button primary" onClick={() => setNewTaskOpen(true)} disabled={!runtimes.some((runtime) => runtime.state === "online")}><PlusIcon size={15} />New Task</button> : <button type="button" className="td3-button" onClick={() => setView("tasks")}>Tasks</button>}
+      <div className="td3-machine-selector">
+        <ServerIcon size={16} />
+        <select
+          value={machineScope}
+          aria-label={t("machine.scopeLabel")}
+          onChange={(event) => {
+            const value = event.target.value
+            setMachineScope(value)
+            if (value !== "all") onActiveMachineID(value)
+          }}
+        >
+          <option value="all">{t("machine.all")}</option>
+          {runtimes.map((runtime) => <option key={runtime.machine.id} value={runtime.machine.id}>{runtime.snapshot?.machine.name || runtime.machine.name}</option>)}
+        </select>
+        <span className={`td3-online-dot ${scopeOnline ? "online" : "offline"}`} />
+        <small>{machineScope === "all"
+          ? t("machine.onlineCount", { online: counts.machines, total: runtimes.length })
+          : scopeOnline ? t("machine.online") : t("machine.offline")}</small>
+      </div>
+      <div className="td3-agent-strip">
+        {stripAgents.slice(0, 5).map((agent) => <HarnessBadge key={`${agent.backend}|${agent.id}`} agent={agent} />)}
+        {stripAgents.length > 5 ? <span className="td3-agent-overflow">+{stripAgents.length - 5}</span> : null}
+      </div>
+      {view === "sessions" ? (
+        <div className="td3-view-context">
+          <ChatIcon size={16} />
+          <div><strong>{t("nav.sessions")}</strong><small>{t("sessions.viewHint")}</small></div>
+        </div>
+      ) : (
+        <div className="td3-global-search">
+          <SearchIcon size={16} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("search.placeholder")} aria-label={t("search.placeholder")} />
+        </div>
+      )}
+      <div className="td3-topbar-actions">
+        <button
+          type="button"
+          className="td3-button td3-icon-button"
+          onClick={() => void refresh()}
+          disabled={refreshing}
+          title={t("action.refresh")}
+          aria-label={t("action.refresh")}
+        >
+          {refreshing ? <LoadingIcon size={15} /> : <RefreshIcon size={15} />}
+        </button>
+        {primaryAction}
+      </div>
     </header>
   )
+
+  const outsideScope = attention.length - scopedAttention.length
 
   return (
     <div className="td3-shell td3-shell-unified">
@@ -625,11 +1338,41 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
 
         {view === "overview" ? (
           <main className="td3-overview">
-            <section className="td3-page-heading"><div><small>Control plane</small><h1>Overview</h1><p>Durable Tasks, native Sessions and every coding harness in one place.</p></div><button type="button" className="td3-button" onClick={() => void refresh()}><RefreshIcon size={15} />Refresh</button></section>
-            <section className="td3-kpis"><article><span>Working</span><strong>{counts.active}</strong><small>active Task runs</small></article><article><span>Ready for review</span><strong>{counts.review}</strong><small>completed Runs awaiting you</small></article><article><span>Needs You</span><strong>{attention.length}</strong><small>questions and permissions</small></article><article><span>Machines</span><strong>{counts.machines}/{runtimes.length}</strong><small>online</small></article></section>
+            <section className="td3-page-heading">
+              <div><small>{t("overview.eyebrow")}</small><h1>{t("overview.title")}</h1><p>{t("overview.subtitle")}</p></div>
+            </section>
+            <section className="td3-kpis">
+              <article><span>{t("kpi.working")}</span><strong>{counts.active}</strong><small>{t("kpi.workingHint")}</small></article>
+              <article><span>{t("kpi.review")}</span><strong>{counts.review}</strong><small>{t("kpi.reviewHint")}</small></article>
+              <article><span>{t("nav.needs")}</span><strong>{scopedAttention.length}</strong><small>{t("kpi.needsHint")}</small></article>
+              <article><span>{t("kpi.machines")}</span><strong>{counts.machines}/{scopedRuntimes.length}</strong><small>{t("kpi.machinesHint")}</small></article>
+            </section>
             <div className="td3-overview-grid">
-              <section className="td3-panel"><header><div><h2>Recent Tasks</h2><p>Most recently active durable work.</p></div><button onClick={() => setView("tasks")}>View all</button></header>{records.slice(0, 6).map((record) => <button className="td3-recent-task" key={record.key} onClick={() => { setView("tasks"); openTask(record) }}><span className={`td3-status-dot td3-status-${productTaskState(record.task)}`} /><div><strong>{taskTitle(record.task)}</strong><small>{record.task.project.name} · {agentLabel(record.runtime.agents, record.task.agentId)}</small></div><time>{formatRelative(record.task.updatedAt)}</time></button>)}</section>
-              <section className="td3-panel"><header><div><h2>Needs You</h2><p>Agent questions and permission requests.</p></div><button onClick={() => setView("needs")}>View all</button></header>{attention.length === 0 ? <div className="td3-empty-mini">Nothing needs your attention.</div> : attention.slice(0, 5).map((item) => <button className="td3-attention-row" key={item.key} onClick={() => setView("needs")}><span>{item.type === "permission" ? "!" : "?"}</span><div><strong>{item.type === "permission" ? "Permission request" : "Question"}</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div></button>)}</section>
+              <section className="td3-panel">
+                <header>
+                  <div><h2>{t("panel.recentTasks")}</h2><p>{t("panel.recentTasksHint")}</p></div>
+                  <button type="button" onClick={() => goToView("tasks")}>{t("action.viewAll")}</button>
+                </header>
+                {scopedRecords.length === 0 ? <div className="td3-empty-mini">{t("panel.emptyRecentTasks")}</div> : scopedRecords.slice(0, 6).map((record) => (
+                  <button type="button" className="td3-recent-task" key={record.key} onClick={() => { goToView("tasks"); openTask(record) }}>
+                    <span className={`td3-status-dot td3-status-${productTaskState(record.task)}`} />
+                    <div><strong>{taskTitle(record.task)}</strong><small>{record.task.project.name} · {agentLabel(record.runtime.agents, record.task.agentId)}</small></div>
+                    <time>{formatRelative(record.task.updatedAt, t)}</time>
+                  </button>
+                ))}
+              </section>
+              <section className="td3-panel">
+                <header>
+                  <div><h2>{t("nav.needs")}</h2><p>{t("panel.needsYouHint")}</p></div>
+                  <button type="button" onClick={() => goToView("needs")}>{t("action.viewAll")}</button>
+                </header>
+                {scopedAttention.length === 0 ? <div className="td3-empty-mini">{t("needs.emptyMini")}</div> : scopedAttention.slice(0, 5).map((item) => (
+                  <button type="button" className="td3-attention-row" key={item.key} onClick={() => goToView("needs")}>
+                    <span>{item.type === "permission" ? "!" : "?"}</span>
+                    <div><strong>{item.type === "permission" ? t("needs.permission") : t("needs.question")}</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div>
+                  </button>
+                ))}
+              </section>
             </div>
           </main>
         ) : null}
@@ -637,48 +1380,416 @@ export function TaskDeskV3Unified({ machines, activeMachineID, onActiveMachineID
         {view === "tasks" ? (
           <main className={`td3-tasks-layout td3-tasks-layout-unified${detailOpen ? " detail-open" : ""}`}>
             <section className="td3-task-list-pane">
-              <div className="td3-page-heading compact"><div><small>Durable work</small><h1>Tasks</h1><p>One Task can contain multiple Runs and native Sessions.</p></div><button type="button" className="td3-button" onClick={() => void refresh()}><RefreshIcon size={15} /></button></div>
-              <div className="td3-filters">{(["all", "active", "review", "finished", "failed"] as TaskFilter[]).map((item) => <button key={item} className={filter === item ? "active" : ""} onClick={() => setFilter(item)}>{item === "all" ? "All" : item === "active" ? "Working" : item === "review" ? "Review" : item[0].toUpperCase() + item.slice(1)}<span>{item === "all" ? scopedRecords.length : scopedRecords.filter((record) => filterMatches(record.task, item)).length}</span></button>)}</div>
-              <div className="td3-task-table-head"><span>Task</span><span>Project</span><span>Agent</span><span>Model</span><span>Workspace</span><span>Status</span><span>Activity</span></div>
-              <div className="td3-task-list">{filteredRecords.length === 0 ? <div className="td3-empty-state"><strong>No Tasks match this view.</strong><span>Change filters or start a new Task.</span></div> : filteredRecords.map((record) => { const agent = record.runtime.agents.find((candidate) => candidate.id === record.task.agentId); const state = productTaskState(record.task); return <button type="button" className={`td3-task-row${record.key === selectedKey && detailOpen ? " selected" : ""}`} key={record.key} onClick={() => openTask(record)}><span className="td3-task-title"><i className={`td3-status-dot td3-status-${state}`} /><span><strong>{taskTitle(record.task)}</strong><small>{record.task.prompt.split(/\r?\n/).slice(1).join(" ").slice(0, 100) || record.runtime.snapshot?.machine.name || record.runtime.machine.name}</small></span></span><span>{record.task.project?.name || record.task.projectId}</span><span>{agent ? <HarnessBadge agent={agent} /> : record.task.agentId}</span><span>{modelLabel(record.task)}</span><span>{taskWorkspaceLabel(record.task)}</span><span><b className={`td3-status-pill td3-status-${state}`}>{productTaskLabel(record.task)}</b></span><time>{formatRelative(record.task.updatedAt)}</time></button> })}</div>
+              <div className="td3-page-heading compact">
+                <div><small>{t("tasks.eyebrow")}</small><h1>{t("nav.tasks")}</h1><p>{t("tasks.subtitle")}</p></div>
+              </div>
+              <div className="td3-filters" role="tablist" aria-label={t("column.status")}>
+                {(["all", "active", "review", "finished", "failed"] as TaskFilter[]).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    role="tab"
+                    aria-selected={filter === item}
+                    className={filter === item ? "active" : ""}
+                    onClick={() => setFilter(item)}
+                  >
+                    {t(`filter.${item}` as "filter.all")}
+                    <span>{item === "all" ? scopedRecords.length : scopedRecords.filter((record) => filterMatches(record.task, item)).length}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="td3-task-table-head" aria-hidden="true">
+                <span>{t("column.task")}</span>
+                <span>{t("column.project")}</span>
+                <span>{t("column.agent")}</span>
+                <span>{t("column.model")}</span>
+                <span>{t("column.workspace")}</span>
+                <span>{t("column.status")}</span>
+                <span>{t("column.activity")}</span>
+              </div>
+              <div className="td3-task-list">
+                {!loaded ? (
+                  <div className="td3-detail-loading"><LoadingIcon size={22} /><strong>{t("tasks.loading")}</strong></div>
+                ) : !anyOnline && runtimes.length > 0 ? (
+                  <div className="td3-empty-state">
+                    <strong>{t("tasks.offlineTitle")}</strong>
+                    <span>{t("tasks.offlineHint")}</span>
+                    <button type="button" className="td3-button" onClick={() => void refresh()}><RefreshIcon size={15} />{t("action.retry")}</button>
+                  </div>
+                ) : filteredRecords.length === 0 ? (
+                  <div className="td3-empty-state"><strong>{t("tasks.emptyTitle")}</strong><span>{t("tasks.emptyHint")}</span></div>
+                ) : filteredRecords.map((record) => {
+                  const agent = record.runtime.agents.find((candidate) => candidate.id === record.task.agentId)
+                  const state = productTaskState(record.task)
+                  return (
+                    <button
+                      type="button"
+                      className={`td3-task-row${record.key === selectedKey && detailOpen ? " selected" : ""}`}
+                      key={record.key}
+                      aria-expanded={record.key === selectedKey && detailOpen}
+                      onClick={() => openTask(record)}
+                    >
+                      <span className="td3-task-title">
+                        <i className={`td3-status-dot td3-status-${state}`} />
+                        <span>
+                          <strong>{taskTitle(record.task)}</strong>
+                          <small>{record.task.prompt.split(/\r?\n/).slice(1).join(" ").slice(0, 100) || record.runtime.snapshot?.machine.name || record.runtime.machine.name}</small>
+                        </span>
+                      </span>
+                      <span>{record.task.project?.name || record.task.projectId}</span>
+                      <span>{agent ? <HarnessBadge agent={agent} /> : record.task.agentId}</span>
+                      <span>{modelLabel(record.task)}</span>
+                      <span>{taskWorkspaceLabel(record.task, t)}</span>
+                      <span><b className={`td3-status-pill td3-status-${state}`}>{productTaskLabel(record.task, t)}</b></span>
+                      <time>{formatRelative(record.task.updatedAt, t)}</time>
+                    </button>
+                  )
+                })}
+              </div>
             </section>
 
-            {detailOpen ? <aside className="td3-task-detail td3-task-detail-open">
-              {!selected ? <div className="td3-empty-state"><strong>Select a Task</strong><span>Review, conversation, diff and Run history appear here.</span></div> : (
+            {detailOpen ? <aside className="td3-task-detail td3-task-detail-open" aria-label={t("detail.eyebrow")}>
+              {!selected ? <div className="td3-empty-state"><strong>{t("detail.selectTitle")}</strong><span>{t("detail.selectHint")}</span></div> : (
                 <>
-                  <header className="td3-detail-header"><div><div className="td3-detail-title-line"><div><small className="td3-detail-eyebrow">Task review</small><h2>{taskTitle(selected.task)}</h2></div><div className="td3-detail-title-actions"><b className={`td3-status-pill td3-status-${productTaskState(selected.task)}`}>{productTaskLabel(selected.task)}</b><button type="button" className="td3-detail-close" onClick={() => setDetailOpen(false)} aria-label="Close Task detail"><CloseIcon size={16} /></button></div></div><p>{selected.task.prompt}</p></div></header>
-                  <section className="td3-detail-meta"><span><small>Project</small><b>{selected.task.project.name}</b></span><span><small>Agent</small><b>{selectedAgent?.label || selected.task.agentId}</b></span><span><small>Model</small><b>{modelLabel(selected.task)}</b></span><span><small>Workspace</small><b>{taskWorkspaceLabel(selected.task)}</b></span><span><small>Machine</small><b>{selected.runtime.snapshot?.machine.name || selected.runtime.machine.name}</b></span><span><small>Run</small><b>{selected.task.run?.id || "Not started"}</b></span><span><small>Session</small><b>{selectedSessionID || "None"}</b></span><span><small>Branch</small><b>{selected.task.workspace.branch || detail.vcs?.branch || "Project checkout"}</b></span></section>
-                  <nav className="td3-detail-tabs">{(["review", "conversation", "diff", "runs"] as DetailTab[]).map((tab) => <button key={tab} className={detailTab === tab ? "active" : ""} onClick={() => setDetailTab(tab)}>{tab === "review" ? "Review" : tab[0].toUpperCase() + tab.slice(1)}{tab === "diff" && detail.diff.length ? <span>{detail.diff.length}</span> : null}</button>)}</nav>
+                  <header className="td3-detail-header">
+                    <div>
+                      <div className="td3-detail-title-line">
+                        <div>
+                          <small className="td3-detail-eyebrow">{t("detail.eyebrow")}</small>
+                          <h2 ref={detailHeading} tabIndex={-1}>{taskTitle(selected.task)}</h2>
+                        </div>
+                        <div className="td3-detail-title-actions">
+                          <b className={`td3-status-pill td3-status-${productTaskState(selected.task)}`}>{productTaskLabel(selected.task, t)}</b>
+                          <button type="button" className="td3-detail-close" onClick={closeTaskDetail} aria-label={t("detail.close")} title={t("detail.close")}>
+                            <CloseIcon size={16} />
+                          </button>
+                        </div>
+                      </div>
+                      <p>{selected.task.prompt}</p>
+                    </div>
+                  </header>
+                  <section className="td3-detail-meta">
+                    <span><small>{t("field.project")}</small><b>{selected.task.project.name}</b></span>
+                    <span><small>{t("field.agent")}</small><b>{selectedAgent?.label || selected.task.agentId}</b></span>
+                    <span><small>{t("field.model")}</small><b>{modelLabel(selected.task)}</b></span>
+                    <span><small>{t("column.workspace")}</small><b>{taskWorkspaceLabel(selected.task, t)}</b></span>
+                    <span><small>{t("detail.machine")}</small><b>{selected.runtime.snapshot?.machine.name || selected.runtime.machine.name}</b></span>
+                    <span><small>{t("detail.run")}</small><b>{selected.task.run?.id || t("value.notStarted")}</b></span>
+                    <span><small>{t("detail.session")}</small><b>{selectedSessionID || t("value.none")}</b></span>
+                    <span><small>{t("detail.branch")}</small><b>{selected.task.workspace.branch || detail.vcs?.branch || t("value.projectCheckout")}</b></span>
+                  </section>
+                  <nav className="td3-detail-tabs" role="tablist" aria-label={t("detail.eyebrow")}>
+                    {(["review", "conversation", "diff", "runs"] as DetailTab[]).map((tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        role="tab"
+                        aria-selected={detailTab === tab}
+                        className={detailTab === tab ? "active" : ""}
+                        onClick={() => setDetailTab(tab)}
+                      >
+                        {t(`tab.${tab}` as "tab.review")}
+                        {tab === "diff" && detailChangeCount ? <span>{detailChangeCount}</span> : null}
+                      </button>
+                    ))}
+                  </nav>
                   <div className="td3-detail-body">
-                    {detail.loading && detail.ownerKey === selected.key ? <div className="td3-detail-loading"><LoadingIcon size={22} /><strong>Loading Task...</strong></div> : null}
-                    {!detail.loading && detailTab === "review" ? <><section className="td3-review-hero"><div><small>Current outcome</small><h3>{productTaskState(selected.task) === "review" ? "Run complete. Review the result before finishing the Task." : productTaskState(selected.task) === "finished" ? "Task finished." : productTaskState(selected.task) === "active" ? "Agent is still working." : "Review the latest Task state."}</h3></div><div className="td3-review-metrics"><span><small>Files</small><b>{detail.diff.length || detail.result?.changeCount || 0}</b></span><span><small>Ahead</small><b>{detail.result?.commitsAhead ?? "-"}</b></span><span><small>Dirty</small><b>{detail.result?.dirty ? "Yes" : "No"}</b></span></div></section><section className="td3-relationship"><h3>Task → Run → Session</h3><div><article><small>Task</small><strong>{taskTitle(selected.task)}</strong><span>Durable work item</span></article><i>→</i><article><small>Run</small><strong>{selected.task.run?.id || "Not started"}</strong><span>{selected.task.run?.startedAt ? `Started ${formatRelative(selected.task.run.startedAt)}` : "No Run yet"}</span></article><i>→</i><article><small>Session</small><strong>{selectedSessionID || "None"}</strong><span>{selectedAgent?.label || selected.task.agentId}</span></article></div></section><div className="td3-detail-cards"><section><header><h3>Result Summary</h3></header>{summary ? <div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{summary}</ReactMarkdown></div> : <p className="td3-muted">No assistant result is available yet.</p>}{selected.task.error?.message ? <div className="td3-inline-error">{selected.task.error.message}</div> : null}</section><section><header><h3>Workspace</h3></header><dl><dt>Changed files</dt><dd>{detail.diff.length || detail.result?.changeCount || 0}</dd><dt>Commits ahead</dt><dd>{detail.result?.commitsAhead ?? "-"}</dd><dt>Commits behind</dt><dd>{detail.result?.commitsBehind ?? "-"}</dd><dt>Merged to source</dt><dd>{detail.result?.mergedIntoSource === undefined ? "-" : detail.result.mergedIntoSource ? "Yes" : "No"}</dd></dl>{detail.todos.length ? <div className="td3-todo-summary"><strong>Agent plan</strong>{detail.todos.slice(0, 5).map((todo) => <span key={todo.id}>{todo.status === "completed" ? "✓" : "•"} {todo.content}</span>)}</div> : null}</section></div></> : null}
-                    {!detail.loading && detailTab === "conversation" ? <div className="td3-conversation">{detail.messages.length === 0 ? <div className="td3-empty-state"><span>No conversation is available for this Run.</span></div> : detail.messages.map((message) => { const text = extractText(message); return text ? <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}><header><strong>{message.info.role === "user" ? "You" : selectedAgent?.label || "Agent"}</strong></header><div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown></div></article> : null })}</div> : null}
-                    {!detail.loading && detailTab === "diff" ? <div className="td3-diff-list">{detail.diff.length === 0 ? <div className="td3-empty-state"><span>No changed files were reported by the current Session.</span></div> : detail.diff.map((file) => <details key={file.file}><summary><code>{file.file}</code><span><b>+{file.additions}</b><i>-{file.deletions}</i></span></summary>{file.patch ? <pre>{file.patch}</pre> : <p>No patch text available.</p>}</details>)}</div> : null}
-                    {!detail.loading && detailTab === "runs" ? <div className="td3-runs"><header><h3>Run history</h3><p>Each continuation creates a new native Session while the Task remains the durable unit.</p></header>{taskRunHistory(selected.task).length === 0 ? <div className="td3-empty-state"><span>This Task has not started a Run yet.</span></div> : [...taskRunHistory(selected.task)].reverse().map((run, index) => <article key={run.id || index}><span className="td3-run-index">#{taskRunHistory(selected.task).length - index}</span><div><strong>{run.id || "Run"}</strong><small>{run.prompt || "Task run"}</small></div><dl><dt>Session</dt><dd>{runSessionID(run) || "-"}</dd><dt>Started</dt><dd>{formatDate(run.startedAt)}</dd><dt>Finished</dt><dd>{formatDate(run.finishedAt)}</dd></dl></article>)}</div> : null}
-                    {detail.error ? <div className="td3-inline-error">{detail.error}</div> : null}
+                    {detail.loading && detail.ownerKey === selected.key ? <div className="td3-detail-loading"><LoadingIcon size={22} /><strong>{t("detail.loading")}</strong></div> : null}
+                    {!detail.loading && detailTab === "review" ? (
+                      <>
+                        <section className="td3-review-hero">
+                          <div>
+                            <small>{t("review.eyebrow")}</small>
+                            <h3>{productTaskState(selected.task) === "review"
+                              ? t("review.runComplete")
+                              : productTaskState(selected.task) === "finished"
+                                ? t("review.finished")
+                                : productTaskState(selected.task) === "active"
+                                  ? t("review.working")
+                                  : t("review.default")}</h3>
+                          </div>
+                          <div className="td3-review-metrics">
+                            <span><small>{t("review.files")}</small><b>{detailChangeCount}</b></span>
+                            <span><small>{t("review.ahead")}</small><b>{detail.result?.commitsAhead ?? "-"}</b></span>
+                            <span><small>{t("review.dirty")}</small><b>{detail.result?.dirty ? t("value.yes") : t("value.no")}</b></span>
+                          </div>
+                        </section>
+                        <section className="td3-relationship">
+                          <h3>{t("relationship.title")}</h3>
+                          <div>
+                            <article><small>{t("column.task")}</small><strong>{taskTitle(selected.task)}</strong><span>{t("relationship.taskHint")}</span></article>
+                            <i aria-hidden="true">→</i>
+                            <article><small>{t("detail.run")}</small><strong>{selected.task.run?.id || t("value.notStarted")}</strong><span>{selected.task.run?.startedAt ? t("relationship.runStarted", { when: formatRelative(selected.task.run.startedAt, t) }) : t("relationship.noRun")}</span></article>
+                            <i aria-hidden="true">→</i>
+                            <article><small>{t("detail.session")}</small><strong>{selectedSessionID || t("value.none")}</strong><span>{selectedAgent?.label || selected.task.agentId}</span></article>
+                          </div>
+                        </section>
+                        <div className="td3-detail-cards">
+                          <section>
+                            <header><h3>{t("card.resultSummary")}</h3></header>
+                            {summary ? <div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{summary}</ReactMarkdown></div> : <p className="td3-muted">{t("card.noResult")}</p>}
+                            {selected.task.error?.message ? <div className="td3-inline-error" role="alert">{selected.task.error.message}</div> : null}
+                          </section>
+                          <section>
+                            <header><h3>{t("column.workspace")}</h3></header>
+                            <dl>
+                              <dt>{t("card.changedFiles")}</dt><dd>{detailChangeCount}</dd>
+                              <dt>{t("card.commitsAhead")}</dt><dd>{detail.result?.commitsAhead ?? "-"}</dd>
+                              <dt>{t("card.commitsBehind")}</dt><dd>{detail.result?.commitsBehind ?? "-"}</dd>
+                              <dt>{t("card.mergedToSource")}</dt><dd>{detail.result?.mergedIntoSource === undefined ? "-" : detail.result.mergedIntoSource ? t("value.yes") : t("value.no")}</dd>
+                            </dl>
+                            {detail.todos.length ? (
+                              <div className="td3-todo-summary">
+                                <strong>{t("card.agentPlan")}</strong>
+                                {detail.todos.slice(0, 5).map((todo) => <span key={todo.id}>{todo.status === "completed" ? "✓" : "•"} {todo.content}</span>)}
+                              </div>
+                            ) : null}
+                          </section>
+                        </div>
+                      </>
+                    ) : null}
+                    {!detail.loading && detailTab === "conversation" ? (
+                      <div className="td3-conversation">
+                        {detail.messages.length === 0 ? <div className="td3-empty-state"><span>{t("conversation.empty")}</span></div> : detail.messages.map((message) => {
+                          const text = extractText(message)
+                          return text ? (
+                            <article key={message.info.id} className={message.info.role === "user" ? "user" : "assistant"}>
+                              <header><strong>{message.info.role === "user" ? t("conversation.you") : selectedAgent?.label || t("conversation.agent")}</strong></header>
+                              <div className="td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown></div>
+                            </article>
+                          ) : null
+                        })}
+                      </div>
+                    ) : null}
+                    {!detail.loading && detailTab === "diff" ? (
+                      <div className="td3-diff-list">
+                        {detail.diff.length === 0 ? <div className="td3-empty-state"><span>{t("diff.empty")}</span></div> : detail.diff.map((file) => (
+                          <details key={file.file}>
+                            <summary><code>{file.file}</code><span><b>+{file.additions}</b><i>-{file.deletions}</i></span></summary>
+                            {file.patch ? <pre>{file.patch}</pre> : <p>{t("diff.noPatch")}</p>}
+                          </details>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!detail.loading && detailTab === "runs" ? (
+                      <div className="td3-runs">
+                        <header><h3>{t("runs.title")}</h3><p>{t("runs.hint")}</p></header>
+                        {taskRunHistory(selected.task).length === 0 ? <div className="td3-empty-state"><span>{t("runs.empty")}</span></div> : [...taskRunHistory(selected.task)].reverse().map((run, index) => {
+                          const total = taskRunHistory(selected.task).length
+                          const sequence = run.sequence ?? total - index
+                          const sessionID = runSessionID(run)
+                          return (
+                            <article key={run.id || index}>
+                              <span className="td3-run-index">#{sequence}</span>
+                              <div>
+                                <strong>{run.id || t("detail.run")}</strong>
+                                <small>{run.prompt || taskTitle(selected.task)}</small>
+                                {sessionID ? (
+                                  <button type="button" className="td3-run-review-button" onClick={() => setRunReview({ record: selected, run, sequence })}>
+                                    {t("runs.review")}
+                                  </button>
+                                ) : null}
+                              </div>
+                              <dl>
+                                <dt>{t("detail.session")}</dt><dd>{sessionID || "-"}</dd>
+                                <dt>{t("runs.started")}</dt><dd>{formatDate(run.startedAt, t)}</dd>
+                                <dt>{t("runs.finished")}</dt><dd>{formatDate(run.finishedAt, t)}</dd>
+                              </dl>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    ) : null}
+                    {detail.error ? <div className="td3-inline-error" role="alert">{detail.error}</div> : null}
                   </div>
-                  <footer className="td3-detail-actions"><div className="td3-detail-actions-primary">{selectedSessionID ? <button type="button" className="td3-button" onClick={() => openNativeSession(selected.runtime, selectedSessionID)}>Open Session</button> : null}{["review", "failed", "cancelled", "finished"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button" onClick={() => setContinueOpen(true)}>Continue</button> : null}{!selected.task.finishedAt && !["active", "draft"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button primary" disabled={actionBusy} onClick={() => void finishSelected()}>Finish Task</button> : null}</div>{selected.task.workspace.mode === "worktree" && productTaskState(selected.task) !== "active" ? <button type="button" className="td3-button danger" disabled={actionBusy} onClick={() => void cleanupSelected()}>Cleanup Workspace</button> : null}{actionError ? <span className="td3-action-error">{actionError}</span> : null}</footer>
+                  <footer className="td3-detail-actions">
+                    <div className="td3-detail-actions-primary">
+                      {selectedSessionID ? <button type="button" className="td3-button" onClick={() => openNativeSession(selected.runtime, selectedSessionID)}>{t("action.openSession")}</button> : null}
+                      {["review", "failed", "cancelled", "finished"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button" onClick={() => setContinueOpen(true)}>{t("action.continue")}</button> : null}
+                      {!selected.task.finishedAt && !["active", "draft"].includes(productTaskState(selected.task)) ? <button type="button" className="td3-button primary" disabled={actionBusy} onClick={() => void finishSelected()}>{t("action.finishTask")}</button> : null}
+                    </div>
+                    {selected.task.workspace.mode === "worktree" && productTaskState(selected.task) !== "active" ? <button type="button" className="td3-button danger" disabled={actionBusy} onClick={() => void cleanupSelected()}>{t("action.cleanupWorkspace")}</button> : null}
+                    {actionError ? <span className="td3-action-error" role="alert">{actionError}</span> : null}
+                  </footer>
                 </>
               )}
             </aside> : null}
           </main>
         ) : null}
 
-        {view === "sessions" ? <main className="td3-sessions-embedded"><UniversalWorkspace profiles={sessionProfiles} activeProfileID={activeMachineID} focusSessionRequest={sessionFocusRequest} onPersistProfiles={(nextMachines, nextActiveID) => { onPersistMachines(nextMachines as WorkspaceMachine[]); onActiveMachineID(nextActiveID) }} legacyView={legacyView} /></main> : null}
+        {view === "sessions" ? (
+          <main className={`td3-sessions-embedded${isMobile && sessionPane === "detail" ? " td3-mobile-session-detail" : ""}`}>
+            <UniversalWorkspace
+              profiles={sessionProfiles}
+              activeProfileID={activeMachineID}
+              focusSessionRequest={sessionFocusRequest}
+              mobilePane={isMobile ? sessionPane : undefined}
+              newSessionRequest={newSessionRequest}
+              onOpenSessionDetail={() => setSessionPane("detail")}
+              onBackToSessionList={() => setSessionPane("list")}
+              t={t}
+              onPersistProfiles={(nextMachines, nextActiveID) => {
+                onPersistMachines(nextMachines as WorkspaceMachine[])
+                onActiveMachineID(nextActiveID)
+              }}
+              legacyView={legacyView}
+            />
+          </main>
+        ) : null}
 
-        {view === "projects" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Machine catalog</small><h1>Projects</h1><p>Projects are daemon-known roots used by Tasks. Ordinary Sessions can still use their native directories.</p></div></section><div className="td3-card-grid">{runtimes.flatMap((runtime) => runtime.projects.map((project) => <article key={`${runtime.key}|${project.id}`}><FolderIcon size={20} /><div><h3>{project.name}</h3><code>{project.path}</code><span>{runtime.snapshot?.machine.name || runtime.machine.name} · {project.kind}</span></div><button onClick={() => { setMachineScope(runtime.machine.id); onActiveMachineID(runtime.machine.id); setView("tasks"); setNewTaskOpen(true) }}>New Task</button></article>))}</div></main> : null}
+        {view === "projects" ? (
+          <main className="td3-simple-page">
+            <section className="td3-page-heading">
+              <div><small>{t("projects.eyebrow")}</small><h1>{t("nav.projects")}</h1><p>{t("projects.subtitle")}</p></div>
+            </section>
+            <div className="td3-card-grid">
+              {scopedRuntimes.flatMap((runtime) => runtime.projects.map((project) => (
+                <article key={`${runtime.key}|${project.id}`}>
+                  <FolderIcon size={20} />
+                  <div>
+                    <h3>{project.name}</h3>
+                    <code>{project.path}</code>
+                    <span>{runtime.snapshot?.machine.name || runtime.machine.name} · {project.kind}</span>
+                  </div>
+                  <button type="button" onClick={() => { setMachineScope(runtime.machine.id); onActiveMachineID(runtime.machine.id); goToView("tasks"); setNewTaskOpen(true) }}>
+                    {t("action.newTask")}
+                  </button>
+                </article>
+              )))}
+            </div>
+            {scopedRuntimes.every((runtime) => runtime.projects.length === 0) ? <div className="td3-empty-state"><span>{t("projects.empty")}</span></div> : null}
+          </main>
+        ) : null}
 
-        {view === "agents" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Harnesses</small><h1>Agents</h1><p>Native coding harnesses discovered behind each machine daemon.</p></div></section><div className="td3-card-grid">{runtimes.flatMap((runtime) => runtime.agents.map((agent) => <article key={`${runtime.key}|${agent.id}`}><HarnessBadge agent={agent} /><div><h3>{agent.label}</h3><span>{runtime.snapshot?.machine.name || runtime.machine.name}</span><code>{agent.backend} · {agent.transport}</code></div></article>))}</div></main> : null}
+        {view === "agents" ? (
+          <main className="td3-simple-page">
+            <section className="td3-page-heading">
+              <div><small>{t("agents.eyebrow")}</small><h1>{t("nav.agents")}</h1><p>{t("agents.subtitle")}</p></div>
+            </section>
+            <div className="td3-card-grid">
+              {scopedRuntimes.flatMap((runtime) => runtime.agents.map((agent) => (
+                <article key={`${runtime.key}|${agent.id}`}>
+                  <HarnessBadge agent={agent} />
+                  <div>
+                    <h3>{agent.label}</h3>
+                    <span>{runtime.snapshot?.machine.name || runtime.machine.name}</span>
+                    <code>{agent.backend} · {agent.transport}</code>
+                  </div>
+                </article>
+              )))}
+            </div>
+            {counts.agents === 0 ? <div className="td3-empty-state"><span>{t("agents.empty")}</span></div> : null}
+          </main>
+        ) : null}
 
-        {view === "machines" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Fleet</small><h1>Machines</h1><p>Execution, credentials and source code stay local to each configured machine.</p></div><button className="td3-button primary" onClick={onManageMachines}>Manage machines</button></section><div className="td3-card-grid">{runtimes.map((runtime) => <article key={runtime.key}><ServerIcon size={22} /><div><h3>{runtime.snapshot?.machine.name || runtime.machine.name}</h3><code>{runtime.machine.config.host}:{runtime.machine.config.port}</code><span>{runtime.agents.length} agents · {runtime.tasks.length} Tasks</span>{runtime.error ? <small className="td3-card-error">{runtime.error}</small> : null}</div><b className={`td3-machine-state ${runtime.state}`}>{runtime.state}</b></article>)}</div></main> : null}
+        {view === "machines" ? (
+          <main className="td3-simple-page">
+            <section className="td3-page-heading">
+              <div><small>{t("machines.eyebrow")}</small><h1>{t("nav.machines")}</h1><p>{t("machines.subtitle")}</p></div>
+              <button type="button" className="td3-button primary" onClick={onManageMachines}>{t("nav.manageMachines")}</button>
+            </section>
+            <div className="td3-card-grid">
+              {runtimes.map((runtime) => (
+                <article key={runtime.key}>
+                  <ServerIcon size={22} />
+                  <div>
+                    <h3>{runtime.snapshot?.machine.name || runtime.machine.name}</h3>
+                    <code>{runtime.machine.config.host}:{runtime.machine.config.port}</code>
+                    <span>{t("machines.counts", { agents: runtime.agents.length, tasks: runtime.tasks.length })}</span>
+                    {runtime.error ? <small className="td3-card-error">{runtime.error === "Not a Harness machine daemon" ? t("machine.notDaemon") : runtime.error}</small> : null}
+                  </div>
+                  <b className={`td3-machine-state ${runtime.state}`}>{runtime.state === "online" ? t("machine.online") : t("machine.offline")}</b>
+                </article>
+              ))}
+            </div>
+            {runtimes.length === 0 ? <div className="td3-empty-state"><span>{t("machines.empty")}</span></div> : null}
+          </main>
+        ) : null}
 
-        {view === "needs" ? <main className="td3-simple-page"><section className="td3-page-heading"><div><small>Attention inbox</small><h1>Needs You</h1><p>Questions and permission requests from native harness Sessions.</p></div></section><div className="td3-attention-list">{attention.length === 0 ? <div className="td3-empty-state"><strong>Nothing needs you right now.</strong></div> : attention.map((item) => item.type === "permission" ? <article className="td3-attention-card" key={item.key}><header><span className="td3-attention-icon warning">!</span><div><strong>Permission request</strong><small>{item.task ? taskTitle(item.task) : item.agent.label}</small></div></header><p>{item.request.permission}</p>{item.request.patterns?.length ? <code>{item.request.patterns.join(", ")}</code> : null}<footer><button type="button" className="td3-link-button" onClick={() => openNativeSession(item.runtime, item.request.sessionID)}>Open Session</button><button className="td3-button danger" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "reject", item.task?.workspace.path).then(() => refresh())}>Reject</button><button className="td3-button" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "once", item.task?.workspace.path).then(() => refresh())}>Once</button><button className="td3-button primary" onClick={() => void api.replyPermission(configForAgent(item.runtime, item.agent), item.request.id, "always", item.task?.workspace.path).then(() => refresh())}>Always</button></footer></article> : <QuestionAttentionCard key={item.key} item={item} onResolved={() => void refresh()} onOpenSession={openNativeSession} />)}</div></main> : null}
+        {view === "needs" ? (
+          <main className="td3-simple-page">
+            <section className="td3-page-heading">
+              <div><small>{t("needs.eyebrow")}</small><h1>{t("needs.title")}</h1><p>{t("needs.subtitle")}</p></div>
+            </section>
+            {attentionError ? <div className="td3-page-error td3-inline-error" role="alert">{attentionError}</div> : null}
+            <div className="td3-attention-list">
+              {scopedAttention.length === 0 ? <div className="td3-empty-state"><strong>{t("needs.emptyTitle")}</strong></div> : scopedAttention.map((item) => item.type === "permission" ? (
+                <PermissionAttentionCard
+                  key={item.key}
+                  item={item}
+                  t={t}
+                  onResolved={() => { setAttentionError(null); void refresh() }}
+                  onOpenSession={openNativeSession}
+                  onError={setAttentionError}
+                />
+              ) : (
+                <QuestionAttentionCard
+                  key={item.key}
+                  item={item}
+                  t={t}
+                  onResolved={() => { setAttentionError(null); void refresh() }}
+                  onOpenSession={openNativeSession}
+                  onError={setAttentionError}
+                />
+              ))}
+            </div>
+            {outsideScope > 0 ? (
+              <div className="td3-scope-note">
+                <span>{t("needs.outsideScope", { count: outsideScope })}</span>
+                <button type="button" className="td3-link-button" onClick={() => setMachineScope("all")}>{t("needs.showAllMachines")}</button>
+              </div>
+            ) : null}
+          </main>
+        ) : null}
 
-        {view === "classic" ? <main className="td3-classic-integrated"><div className="td3-classic-notice"><div><small>Legacy surface</small><strong>Classic 2.x</strong><span>Kept intact during TaskDesk validation.</span></div><button className="td3-button" onClick={() => setView("tasks")}>Back to Tasks</button></div><div className="td3-classic-integrated-host">{legacyView}</div></main> : null}
+        {view === "classic" ? (
+          <main className="td3-classic-integrated">
+            <div className="td3-classic-notice">
+              <div><small>{t("classic.eyebrow")}</small><strong>{t("nav.classic")}</strong><span>{t("classic.hint")}</span></div>
+              <button type="button" className="td3-button" onClick={() => goToView("tasks")}>{t("action.backToTasks")}</button>
+            </div>
+            <div className="td3-classic-integrated-host">{legacyView}</div>
+          </main>
+        ) : null}
       </div>
 
-      {newTaskOpen ? <NewTaskModal runtimes={runtimes} initialMachineID={machineScope === "all" ? activeMachineID : machineScope} onClose={() => setNewTaskOpen(false)} onCreated={(runtime, task) => { setMachineScope(runtime.machine.id); onActiveMachineID(runtime.machine.id); setView("tasks"); setSelectedKey(`${runtime.key}|${task.id}`); setDetailOpen(true); setDetailTab("review"); void refreshAndReselect(task.id, runtime.machine.id) }} /> : null}
-      {continueOpen && selected ? <ContinueTaskModal record={selected} onClose={() => setContinueOpen(false)} onContinued={(task) => { setDetailTab("review"); void refreshAndReselect(task.id, selected.runtime.machine.id) }} /> : null}
+      {newTaskOpen ? (
+        <NewTaskModal
+          runtimes={runtimes}
+          initialMachineID={machineScope === "all" ? activeMachineID : machineScope}
+          t={t}
+          onClose={() => setNewTaskOpen(false)}
+          onCreated={(runtime, task) => {
+            setMachineScope(runtime.machine.id)
+            onActiveMachineID(runtime.machine.id)
+            goToView("tasks")
+            setSelectedKey(`${runtime.key}|${task.id}`)
+            setDetailOpen(true)
+            setDetailTab("review")
+            void refreshAndReselect(task.id, runtime.machine.id)
+          }}
+        />
+      ) : null}
+      {continueOpen && selected ? (
+        <ContinueTaskModal
+          record={selected}
+          t={t}
+          onClose={() => setContinueOpen(false)}
+          onContinued={(task) => { setDetailTab("review"); void refreshAndReselect(task.id, selected.runtime.machine.id) }}
+        />
+      ) : null}
+      {runReview ? <RunReviewModal target={runReview} t={t} onClose={() => setRunReview(null)} /> : null}
+      {settingsOpen ? (
+        <SettingsModal
+          language={language}
+          theme={theme}
+          t={t}
+          onLanguage={applyLanguage}
+          onTheme={applyTheme}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {moreOpen ? <MoreSheet items={moreItems} t={t} onClose={() => setMoreOpen(false)} /> : null}
     </div>
   )
 }

@@ -521,3 +521,271 @@
     display: none;
   }
 }
+
+/* --------------------------------------------------------------------------
+   Primary actions
+   -------------------------------------------------------------------------- */
+
+/* New Task and New Session are the two ways work begins, so neither is ever removed by a media
+   query. The group keeps them together at the end of the toolbar and the label — not the control —
+   is what collapses when the toolbar runs out of room. */
+.td3-topbar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.td3-icon-button {
+  width: 34px;
+  padding: 0;
+}
+
+.td3-topbar-primary {
+  max-width: 100%;
+}
+
+.td3-agent-overflow {
+  height: 31px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px dashed rgba(148,163,184,.2);
+  border-radius: 8px;
+  color: #8492a6;
+  font-size: 10.5px;
+}
+
+@media (max-width: 1100px) {
+  .td3-topbar-primary > .td3-button-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .td3-topbar-primary {
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Attention, scope and page-level errors
+   -------------------------------------------------------------------------- */
+
+/* Needs You is scoped like every other page, so an item on a machine outside the current scope has
+   to be accounted for rather than silently dropped. */
+.td3-scope-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 24px 24px;
+  padding: 9px 12px;
+  border: 1px solid var(--td3-border);
+  border-radius: 9px;
+  color: var(--td3-muted);
+  background: rgba(255,255,255,.018);
+  font-size: 11px;
+}
+
+.td3-attention-origin {
+  margin-left: auto;
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #8492a6;
+  background: rgba(255,255,255,.045);
+  font-size: 9.5px;
+}
+
+.td3-page-error {
+  margin: 0 24px 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Settings and the phone overflow sheet
+   -------------------------------------------------------------------------- */
+
+.td3-settings-modal,
+.td3-more-sheet {
+  width: min(520px, 100%);
+}
+
+.td3-settings-body {
+  display: grid;
+  gap: 16px;
+}
+
+.td3-settings-group {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.td3-settings-group > legend {
+  padding: 0;
+  margin-bottom: 8px;
+  color: #91a0b4;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+/* A segmented control rather than a select: three or four fixed choices are faster to read and to
+   hit than a dropdown, and each option keeps its own accessible checked state. */
+.td3-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.td3-choice-row button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--td3-border);
+  border-radius: 9px;
+  color: #aeb9c8;
+  background: rgba(255,255,255,.02);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.td3-choice-row button:hover {
+  color: #eef4fc;
+  border-color: var(--td3-border-strong);
+}
+
+.td3-choice-row button.active {
+  color: #fff;
+  border-color: rgba(103,139,255,.5);
+  background: rgba(79,124,255,.16);
+}
+
+.td3-choice-row button:focus-visible {
+  outline: 2px solid rgba(79,124,255,.62);
+  outline-offset: 2px;
+}
+
+.td3-settings-hint {
+  margin: 7px 0 0;
+  color: var(--td3-muted-2);
+  font-size: 10.5px;
+}
+
+.td3-more-list {
+  display: grid;
+  gap: 4px;
+}
+
+.td3-more-list button {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 22px minmax(0,1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: #c3cfdd;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.td3-more-list button:hover {
+  color: #eef4fc;
+  background: rgba(255,255,255,.035);
+}
+
+.td3-more-list button.active {
+  color: #fff;
+  border-color: rgba(79,124,255,.25);
+  background: rgba(79,124,255,.14);
+}
+
+/* --------------------------------------------------------------------------
+   Run review
+   -------------------------------------------------------------------------- */
+
+.td3-run-review {
+  width: min(760px, 100%);
+}
+
+.td3-run-review-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0,1fr));
+  gap: 1px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--td3-border);
+  background: rgba(255,255,255,.012);
+}
+
+.td3-run-review-meta span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 6px;
+}
+
+.td3-run-review-meta small {
+  color: #67758a;
+  font-size: 9.5px;
+}
+
+.td3-run-review-meta b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+  color: #c4cfdd;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+/* --------------------------------------------------------------------------
+   Embedded Sessions: master/detail back control
+   -------------------------------------------------------------------------- */
+
+.td3-sessions-embedded .uw-session-back {
+  display: none;
+}
+
+@media (max-width: 680px) {
+  .td3-run-review-meta,
+  .td3-settings-modal .td3-choice-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .td3-scope-note,
+  .td3-page-error {
+    margin-inline: 12px;
+  }
+
+  /* The back control is the phone's only way out of a conversation, so it sits in the header rather
+     than being injected above it, and the header reserves the row it needs. */
+  .td3-sessions-embedded.td3-mobile-session-detail .uw-session-back {
+    position: absolute;
+    top: 8px;
+    left: 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid rgba(148,163,184,.16);
+    border-radius: 8px;
+    color: #cbd7e5;
+    background: #101927;
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+}

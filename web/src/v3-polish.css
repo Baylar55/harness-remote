@@ -250,21 +250,6 @@
     padding: 48px 11px 9px;
   }
 
-  .td3-mobile-session-back {
-    position: absolute;
-    top: 8px;
-    left: 9px;
-    min-height: 32px;
-    padding: 0 10px;
-    border: 1px solid rgba(148, 163, 184, .16);
-    border-radius: 8px;
-    color: #cbd7e5;
-    background: #101927;
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
   .td3-shell-unified .td3-sessions-embedded .uw-session-actions {
     overflow-x: auto;
     flex-wrap: nowrap;
