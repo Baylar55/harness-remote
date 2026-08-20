@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto"
-import { buildTaskContext, formatTaskHandoff } from "./task-context.js"
+import { boundTaskOutcome, buildTaskContext, formatTaskHandoff } from "./task-context.js"
 import { taskLaunchError } from "./task-errors.js"
 import { normalizeTaskModel } from "./task-model.js"
 import { WorktreeManager } from "./worktree-manager.js"
+
+const MAX_AGENT_ID_CHARS = 160
+const MAX_ROLE_CHARS = 80
 
 function taskRuns(task) {
   if (Array.isArray(task?.runs) && task.runs.length) return task.runs
@@ -22,6 +25,40 @@ function latestRunForAgent(task, agentID, { requireSession = false } = {}) {
     return run
   }
   return null
+}
+
+function validateRunOptions(options) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw taskLaunchError("invalid_request", "Task Run options must be an object")
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "prompt") && typeof options.prompt !== "string") {
+    throw taskLaunchError("invalid_request", "Task Run prompt must be a string")
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "agentId")) {
+    if (typeof options.agentId !== "string" || !options.agentId.trim()) {
+      throw taskLaunchError("invalid_request", "Target harness must be a non-empty string")
+    }
+    if (options.agentId.trim().length > MAX_AGENT_ID_CHARS) {
+      throw taskLaunchError("invalid_request", "Target harness identifier is too long")
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "role")) {
+    if (typeof options.role !== "string" || !options.role.trim()) {
+      throw taskLaunchError("invalid_request", "Task Run role must be a non-empty string")
+    }
+    if (options.role.trim().length > MAX_ROLE_CHARS) {
+      throw taskLaunchError("invalid_request", "Task Run role is too long")
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "model") && options.model !== null && !normalizeTaskModel(options.model)) {
+    throw taskLaunchError("invalid_request", "Task Run model is malformed")
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "fresh") && typeof options.fresh !== "boolean") {
+    throw taskLaunchError("invalid_request", "Task Run fresh flag must be boolean")
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "mode") && !["fresh", "resume"].includes(options.mode)) {
+    throw taskLaunchError("invalid_request", "Task Run mode must be fresh or resume")
+  }
 }
 
 function requestedAgent(task, options = {}) {
@@ -44,7 +81,7 @@ function requestedRole(task, options = {}) {
 }
 
 function completedRun(run, result) {
-  const outcome = typeof result?.outcome === "string" ? result.outcome.trim() : ""
+  const outcome = boundTaskOutcome(result?.outcome)
   return outcome ? { ...run, outcome } : run
 }
 
@@ -86,20 +123,23 @@ export class TaskRunController {
 
   async #contextForTask(task) {
     let workspace = { managed: task.workspace?.mode === "worktree", dirty: false, changeCount: 0, changedFiles: [] }
-    if (task.workspace?.mode === "worktree" && this.worktreeManager) {
-      try {
+    if (!this.worktreeManager) return buildTaskContext(task, { workspace })
+    try {
+      if (task.workspace?.mode === "worktree") {
         workspace = await this.worktreeManager.inspect(task.workspace)
-      } catch {
-        // Context remains useful even when the workspace cannot be inspected temporarily.
+      } else if (task.workspace?.mode === "project" && task.project?.kind === "git" && typeof this.worktreeManager.inspectProject === "function") {
+        workspace = await this.worktreeManager.inspectProject(task.workspace.path || task.project.path)
       }
+    } catch {
+      // Context remains useful even when Git state cannot be inspected temporarily.
     }
     return buildTaskContext(task, { workspace })
   }
 
   async reconcileAll() {
     for (const task of await this.taskStore.list()) {
-      const adoptedAcpSession = await this.#adoptAcpTaskSession(task)
       if (!["starting", "running"].includes(task.status)) continue
+      const adoptedAcpSession = await this.#adoptAcpTaskSession(task)
       if (!task.run?.id) {
         try { await this.taskStore.setRunState(task.id, { status: "failed", error: new Error("Active task has no persisted run identity") }) } catch {}
         continue
@@ -126,9 +166,15 @@ export class TaskRunController {
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
-    if (task.workspace?.mode !== "worktree") return { managed: false, dirty: false, changeCount: 0, changedFiles: [] }
-    if (!this.worktreeManager) throw new Error("Worktree manager is not configured")
-    return this.worktreeManager.inspect(task.workspace)
+    if (!this.worktreeManager) {
+      if (task.workspace?.mode === "worktree") throw new Error("Worktree manager is not configured")
+      return { managed: false, dirty: false, changeCount: 0, changedFiles: [] }
+    }
+    if (task.workspace?.mode === "worktree") return this.worktreeManager.inspect(task.workspace)
+    if (task.workspace?.mode === "project" && task.project?.kind === "git" && typeof this.worktreeManager.inspectProject === "function") {
+      return this.worktreeManager.inspectProject(task.workspace.path || task.project.path)
+    }
+    return { managed: false, dirty: false, changeCount: 0, changedFiles: [] }
   }
 
   async cleanupWorkspace(taskID) {
@@ -144,6 +190,7 @@ export class TaskRunController {
   }
 
   async launch(taskID, options = {}) {
+    validateRunOptions(options)
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
@@ -213,7 +260,8 @@ export class TaskRunController {
   }
 
   async continue(taskID, input) {
-    const options = typeof input === "string" ? { prompt: input } : input && typeof input === "object" ? input : {}
+    const options = typeof input === "string" ? { prompt: input } : input && typeof input === "object" && !Array.isArray(input) ? input : {}
+    validateRunOptions(options)
     const text = typeof options.prompt === "string" ? options.prompt.trim() : ""
     if (!text) throw taskLaunchError("invalid_state", "A continuation prompt is required")
     await this.#awaitReconciliation()
@@ -223,7 +271,11 @@ export class TaskRunController {
 
     const agentID = requestedAgent(task, options)
     const explicitFresh = options.mode === "fresh" || options.fresh === true
+    const explicitResume = options.mode === "resume"
     const reusableRun = latestRunForAgent(task, agentID, { requireSession: true })
+    if (explicitResume && !reusableRun) {
+      throw taskLaunchError("session_unavailable", "No native Session for the selected harness can be resumed. Start a fresh Run instead.")
+    }
     const reuseSession = !explicitFresh && Boolean(reusableRun)
     if (!explicitFresh && agentID === runAgent(task, task.run) && !reusableRun) {
       throw taskLaunchError("session_unavailable", "The previous native Session cannot be resumed. Start a fresh Run explicitly instead.")
