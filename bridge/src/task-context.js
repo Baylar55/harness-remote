@@ -1,5 +1,12 @@
 const MAX_OUTCOME_CHARS = 6_000
+const MAX_OBJECTIVE_CHARS = 12_000
+const MAX_RUN_PROMPT_CHARS = 2_000
+const MAX_ERROR_CHARS = 2_000
+const MAX_CONTEXT_RUNS = 12
+const MAX_CHANGED_FILES = 80
+const MAX_CHANGED_FILE_CHARS = 500
 const HANDOFF_OUTCOME_CHARS = 1_600
+const HANDOFF_RECENT_RUNS = 6
 
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : ""
@@ -9,6 +16,10 @@ function boundedText(value, limit = MAX_OUTCOME_CHARS) {
   const text = cleanText(value)
   if (text.length <= limit) return text
   return `…${text.slice(-(limit - 1))}`
+}
+
+export function boundTaskOutcome(value) {
+  return boundedText(value, MAX_OUTCOME_CHARS)
 }
 
 function cleanRole(value, fallback = "continue") {
@@ -42,7 +53,7 @@ export function summarizeTaskRun(run, taskStatus = "unknown") {
     ...(model?.providerID && model?.modelID ? { model } : {}),
     ...(run.sessionId ? { sessionId: run.sessionId } : {}),
     status: runStatus(run, taskStatus),
-    prompt: cleanText(run.prompt),
+    prompt: boundedText(run.prompt, MAX_RUN_PROMPT_CHARS),
     ...(outcome ? { outcome } : {}),
     ...(run.startedAt ? { startedAt: run.startedAt } : {}),
     ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
@@ -51,16 +62,20 @@ export function summarizeTaskRun(run, taskStatus = "unknown") {
 }
 
 export function buildPersistedTaskContext(task, revision = task?.context?.revision ?? 0) {
-  const runs = Array.isArray(task?.runs) ? task.runs : task?.run ? [task.run] : []
-  const runSummaries = runs.map((run) => summarizeTaskRun(run, run?.id === task?.run?.id ? task?.status : run?.status || (run?.finishedAt ? "completed" : "unknown"))).filter(Boolean)
+  const allRuns = Array.isArray(task?.runs) ? task.runs : task?.run ? [task.run] : []
+  const recentRuns = allRuns.slice(-MAX_CONTEXT_RUNS)
+  const runSummaries = recentRuns
+    .map((run) => summarizeTaskRun(run, run?.id === task?.run?.id ? task?.status : run?.status || (run?.finishedAt ? "completed" : "unknown")))
+    .filter(Boolean)
   const latestRun = task?.run ? summarizeTaskRun(task.run, task.status) : null
-  const errorMessage = cleanText(task?.error?.message)
+  const errorMessage = boundedText(task?.error?.message, MAX_ERROR_CHARS)
   return {
     version: 1,
     revision: Math.max(0, Number(revision) || 0),
     taskId: task?.id || "",
-    objective: cleanText(task?.prompt),
+    objective: boundedText(task?.prompt, MAX_OBJECTIVE_CHARS),
     currentState: cleanText(task?.status) || "draft",
+    runCount: allRuns.length,
     latestOutcome: latestRun
       ? {
           status: latestRun.status,
@@ -75,20 +90,22 @@ export function buildPersistedTaskContext(task, revision = task?.context?.revisi
 }
 
 export function buildTaskContext(task, { workspace } = {}) {
-  const persisted = task?.context && task.context.version === 1
-    ? task.context
-    : buildPersistedTaskContext(task)
-  const changedFiles = Array.isArray(workspace?.changedFiles)
-    ? workspace.changedFiles.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim())
+  const revision = Number.isFinite(Number(task?.context?.revision)) ? Number(task.context.revision) : 0
+  const persisted = buildPersistedTaskContext(task, revision)
+  const allChangedFiles = Array.isArray(workspace?.changedFiles)
+    ? workspace.changedFiles.filter((value) => typeof value === "string" && value.trim()).map((value) => boundedText(value, MAX_CHANGED_FILE_CHARS))
     : []
+  const changedFiles = allChangedFiles.slice(0, MAX_CHANGED_FILES)
   return {
-    ...structuredClone(persisted),
+    ...persisted,
     currentState: cleanText(task?.status) || persisted.currentState || "draft",
     latestRun: task?.run ? summarizeTaskRun(task.run, task.status) : null,
     changedFiles,
     workspace: {
       dirty: Boolean(workspace?.dirty),
-      changeCount: Number(workspace?.changeCount) || changedFiles.length
+      changeCount: Number(workspace?.changeCount) || allChangedFiles.length,
+      listedChangeCount: changedFiles.length,
+      truncated: allChangedFiles.length > changedFiles.length
     },
     verification: null,
     unresolved: []
@@ -101,7 +118,7 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
     "The context below was transferred by TaskDesk. It is not native conversational memory from another harness.",
     "",
     "TASK OBJECTIVE",
-    context.objective || "(not recorded)",
+    boundedText(context.objective, MAX_OBJECTIVE_CHARS) || "(not recorded)",
     "",
     "CURRENT STATE",
     context.currentState || "unknown"
@@ -110,17 +127,21 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
   const latest = context.latestRun || context.runSummaries?.at?.(-1)
   if (latest) lines.push("", "PREVIOUS STEP", `${latest.agentId || "unknown harness"} / ${latest.role || "continue"} / ${latest.status || "unknown"}`)
   if (context.latestOutcome?.text) lines.push("", "PREVIOUS RESULT", boundedText(context.latestOutcome.text, HANDOFF_OUTCOME_CHARS))
-  if (context.latestOutcome?.error) lines.push("", "LATEST ERROR", context.latestOutcome.error)
+  if (context.latestOutcome?.error) lines.push("", "LATEST ERROR", boundedText(context.latestOutcome.error, MAX_ERROR_CHARS))
   if (context.changedFiles?.length) {
-    lines.push("", "CHANGED FILES", ...context.changedFiles.map((file) => `- ${file}`))
+    lines.push("", "CHANGED FILES", ...context.changedFiles.map((file) => `- ${boundedText(file, MAX_CHANGED_FILE_CHARS)}`))
+    if (context.workspace?.truncated) lines.push(`- …and ${Math.max(0, Number(context.workspace.changeCount) - context.changedFiles.length)} more changed file(s)`)
   } else if (context.workspace?.changeCount) {
     lines.push("", "WORKSPACE CHANGES", `${context.workspace.changeCount} changed file(s) are present in the shared workspace.`)
   }
   if (context.runSummaries?.length) {
     lines.push("", "RECENT TASK STEPS")
-    for (const run of context.runSummaries.slice(-6)) {
+    for (const run of context.runSummaries.slice(-HANDOFF_RECENT_RUNS)) {
       lines.push(`- Run ${run.sequence || "?"}: ${run.agentId || "unknown"} / ${run.role || "continue"} / ${run.status || "unknown"}`)
       if (run.outcome) lines.push(`  Result: ${boundedText(run.outcome, HANDOFF_OUTCOME_CHARS)}`)
+    }
+    if (Number(context.runCount) > context.runSummaries.length) {
+      lines.push(`- ${Number(context.runCount) - context.runSummaries.length} earlier Task step(s) retained in Task history but omitted from this handoff`)
     }
   }
 
