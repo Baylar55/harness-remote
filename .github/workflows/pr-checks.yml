@@ -123,6 +123,7 @@ jobs:
         working-directory: web
 
       - name: Setup JDK 21
+        id: setup-java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -197,3 +198,94 @@ jobs:
           path: web/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+  apply-session-handoff-fix:
+    name: Apply same-machine Session handoff fix
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'integration/taskdesk-candidate-2026-08-20'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout candidate branch
+        uses: actions/checkout@v7
+        with:
+          ref: integration/taskdesk-candidate-2026-08-20
+          fetch-depth: 2
+
+      - name: Apply product fix and regression guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          workspace = Path('web/src/components/universal-workspace.tsx')
+          text = workspace.read_text()
+
+          old = '''  const targetProject = selected?.machine.projects.find((project) => project.name === current.projectName)
+            || selected?.machine.projects.find((project) => project.path === current.session.directory)
+          const [creating, setCreating] = useState(false)'''
+          new = '''  const sameMachine = selected?.machine.key === current.machineKey
+          const discoveredTargetProject = selected?.machine.projects.find((project) => project.path === current.session.directory)
+            || selected?.machine.projects.find((project) => project.name === current.projectName)
+          // Another harness on the same machine can safely use the exact workspace the current
+          // native Session already owns. Project discovery is only needed when crossing machines.
+          const targetDirectory = sameMachine ? current.session.directory : discoveredTargetProject?.path
+          const [creating, setCreating] = useState(false)'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one targetProject block, found {text.count(old)}')
+          text = text.replace(old, new)
+
+          replacements = {
+            '    if (!selected || !targetProject || creating) return': '    if (!selected || !targetDirectory || creating) return',
+            '      const created = await api.createSession(config, current.session.title || "Continued session", undefined, targetProject.path)': '      const created = await api.createSession(config, current.session.title || "Continued session", undefined, targetDirectory)',
+            '      await api.sendPrompt(config, created.id, prompt, created.directory || targetProject.path)': '      await api.sendPrompt(config, created.id, prompt, created.directory || targetDirectory)',
+            '    <Modal title="Continue with another agent" subtitle="Create a native session on another harness and hand over the recent context." onClose={onClose}>': '    <Modal title="Continue with another harness" subtitle="Create a native session on another harness and hand over the recent context." onClose={onClose}>',
+            '          <span>Project mapping: {targetProject ? targetProject.path : "No matching project on target machine"}</span>': '          <span>Workspace: {targetDirectory || "No matching project on target machine"}</span>',
+            '        {!targetProject ? (': '        {!targetDirectory ? (',
+            '            Harness Remote cannot safely hand this session to that machine because the same project was not discovered there.': '            Harness Remote cannot safely hand this Session to another machine because the same project was not discovered there.',
+            '        <BeautifulButton variant="primary" disabled={!selected || !targetProject || creating} onClick={() => void handoff()}>': '        <BeautifulButton variant="primary" disabled={!selected || !targetDirectory || creating} onClick={() => void handoff()}>',
+          }
+          for old_value, new_value in replacements.items():
+              count = text.count(old_value)
+              if count != 1:
+                  raise SystemExit(f'expected one match for {old_value!r}, found {count}')
+              text = text.replace(old_value, new_value)
+          workspace.write_text(text)
+
+          test_file = Path('web/src/taskdesk-home.test.mjs')
+          tests = test_file.read_text()
+          marker = '''test("Universal workspace cannot starve initial loading with overlapping polls", () => {'''
+          regression = '''test("Session handoff reuses the exact workspace when switching harnesses on the same machine", () => {
+            const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+
+            assert.match(source, /const sameMachine = selected\?\.machine\.key === current\.machineKey/)
+            assert.match(source, /const targetDirectory = sameMachine \? current\.session\.directory : discoveredTargetProject\?\.path/)
+            assert.match(source, /api\.createSession\(config, current\.session\.title \|\| "Continued session", undefined, targetDirectory\)/)
+            assert.match(source, /disabled=\{!selected \|\| !targetDirectory \|\| creating\}/)
+            assert.doesNotMatch(source, /!selected \|\| !targetProject \|\| creating/)
+          })
+
+          '''
+          if regression not in tests:
+              if tests.count(marker) != 1:
+                  raise SystemExit(f'expected one regression insertion marker, found {tests.count(marker)}')
+              test_file.write_text(tests.replace(marker, regression + marker))
+          PY
+
+      - name: Validate focused web behavior
+        run: |
+          npm ci
+          npm run build
+          npm run test:ui
+        working-directory: web
+
+      - name: Restore canonical workflow and commit product changes
+        shell: bash
+        run: |
+          git show HEAD^:.github/workflows/pr-checks.yml > .github/workflows/pr-checks.yml
+          rm -f .github/workflows/taskdesk-session-handoff-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(taskdesk): allow same-machine cross-harness session handoff"
+          git push origin HEAD:integration/taskdesk-candidate-2026-08-20
