@@ -15,6 +15,7 @@ const LAUNCH_STATUS = new Map([
   ["workspace_required", 409],
   ["unsupported_agent", 409],
   ["session_unavailable", 409],
+  ["model_unavailable", 409],
   ["task_active", 409],
   ["worktree_dirty", 409],
   ["invalid_worktree", 409],
