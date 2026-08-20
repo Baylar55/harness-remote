@@ -194,6 +194,40 @@ test("managed HTTP task launch sends selected model and variant", async () => {
   assert.equal(promptBody.variant, "high")
 })
 
+test("managed HTTP task outcome also refuses pre-tool narration without a final answer", async () => {
+  const host = { readinessHost: "127.0.0.1", port: 4096, async start() {} }
+  const daemon = {
+    hostEntry: () => ({ kind: "http", host }),
+    registry: { host: () => ({ state: "available" }) }
+  }
+  const launcher = new TaskLauncher({
+    daemon,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          info: { id: "message-1" },
+          parts: [
+            { type: "text", text: "I will inspect this first." },
+            { type: "tool", tool: "Edit", state: { status: "completed" } }
+          ]
+        }
+      }
+    })
+  })
+  let completed
+
+  await launcher.startPrompt(task({ agentId: "opencode" }), {
+    sessionId: "http-session",
+    base: "http://127.0.0.1:4096",
+    authorization: undefined
+  }, { onCompleted: (result) => { completed = result } })
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(completed, { outcome: undefined })
+})
+
 test("managed HTTP task launch reports a provider failure after the prompt is accepted", async () => {
   const host = { readinessHost: "127.0.0.1", port: 4096, async start() {} }
   const daemon = {
