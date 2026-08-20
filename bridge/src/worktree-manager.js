@@ -38,6 +38,13 @@ async function defaultRunGit(args) {
   }
 }
 
+function changedFileFromPorcelain(line) {
+  const candidate = line.length > 3 ? line.slice(3).trim() : ""
+  if (!candidate) return ""
+  const renamed = candidate.split(" -> ")
+  return renamed.at(-1)?.trim() || candidate
+}
+
 export class WorktreeManager {
   constructor({ stateDirectory, runGit = defaultRunGit }) {
     this.stateDirectory = stateDirectory
@@ -65,7 +72,8 @@ export class WorktreeManager {
     await this.#assertManagedWorkspace(workspace)
     const result = await this.runGit(["-C", workspace.path, "status", "--porcelain=v1", "--untracked-files=all"])
     const changes = String(result?.stdout ?? "").split(/\r?\n/).filter(Boolean)
-    return { managed: true, dirty: changes.length > 0, changeCount: changes.length }
+    const changedFiles = changes.map(changedFileFromPorcelain).filter(Boolean)
+    return { managed: true, dirty: changes.length > 0, changeCount: changes.length, changedFiles }
   }
 
   async cleanup(workspace) {
