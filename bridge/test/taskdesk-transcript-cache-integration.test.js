@@ -84,6 +84,8 @@ test("messagePage uses an authoritative branch pager without materializing full 
       activeSessionLeaf: "leaf-42"
     })
   }]
+  // The first page request starts from a cold service, so session metadata must be listed
+  // without opening ACP replay or loading the full journal transcript.
   const service = new AcpService(new ListingAcp([{
     sessionId: sessionID,
     cwd: "/repo",
