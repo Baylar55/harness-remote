@@ -75,7 +75,6 @@ export function buildPersistedTaskContext(task, revision = task?.context?.revisi
     taskId: task?.id || "",
     objective: boundedText(task?.prompt, MAX_OBJECTIVE_CHARS),
     currentState: cleanText(task?.status) || "draft",
-    runCount: allRuns.length,
     latestOutcome: latestRun
       ? {
           status: latestRun.status,
@@ -92,12 +91,14 @@ export function buildPersistedTaskContext(task, revision = task?.context?.revisi
 export function buildTaskContext(task, { workspace } = {}) {
   const revision = Number.isFinite(Number(task?.context?.revision)) ? Number(task.context.revision) : 0
   const persisted = buildPersistedTaskContext(task, revision)
+  const allRuns = Array.isArray(task?.runs) ? task.runs : task?.run ? [task.run] : []
   const allChangedFiles = Array.isArray(workspace?.changedFiles)
     ? workspace.changedFiles.filter((value) => typeof value === "string" && value.trim()).map((value) => boundedText(value, MAX_CHANGED_FILE_CHARS))
     : []
   const changedFiles = allChangedFiles.slice(0, MAX_CHANGED_FILES)
   return {
     ...persisted,
+    runCount: allRuns.length,
     currentState: cleanText(task?.status) || persisted.currentState || "draft",
     latestRun: task?.run ? summarizeTaskRun(task.run, task.status) : null,
     changedFiles,
