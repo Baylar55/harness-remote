@@ -44,3 +44,30 @@ export function latestAssistantTerminalText(messages: MessageEnvelope[]): string
   }
   return ""
 }
+
+/**
+ * Recover the terminal answer for a particular Task run from a Session that may have been continued
+ * manually afterwards. The matching user prompt is the turn boundary, so later Session-only work
+ * cannot become the Task's result summary.
+ */
+export function assistantTerminalTextForPrompt(messages: MessageEnvelope[], prompt: string): string {
+  const expected = prompt.trim()
+  if (!expected) return ""
+
+  for (let userIndex = messages.length - 1; userIndex >= 0; userIndex -= 1) {
+    const user = messages[userIndex]
+    if (user.info.role !== "user" || messageText(user) !== expected) continue
+
+    let latest = ""
+    for (let index = userIndex + 1; index < messages.length; index += 1) {
+      const message = messages[index]
+      if (message.info.role === "user") break
+      if (message.info.role !== "assistant") continue
+      const text = terminalMessageText(message)
+      if (text) latest = text
+    }
+    return latest
+  }
+
+  return ""
+}
