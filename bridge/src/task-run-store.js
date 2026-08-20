@@ -29,6 +29,7 @@ export class TaskRunStore extends TaskStore {
     }
 
     const nextRun = structuredClone(run ?? task.run)
+    if (nextRun) nextRun.status = status
     if ((status === "completed" || status === "failed") && nextRun && !nextRun.finishedAt) {
       nextRun.finishedAt = this.clock()
     }
