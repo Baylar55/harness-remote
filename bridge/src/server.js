@@ -1,6 +1,7 @@
 import http from "node:http"
 import { readdir, realpath } from "node:fs/promises"
 import path from "node:path"
+import { AcpPromptEchoFilter } from "./acp-prompt-echo-filter.js"
 import { AcpService } from "./acp-service.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
@@ -139,7 +140,8 @@ function providersResponse(models, fallbackProviderID) {
 export function createBridgeServer({ config, acp, serviceOptions, machineRegistry }) {
   const backend = config.backend ?? "omp"
   const profile = harnessProfile(backend)
-  const service = new AcpService(acp, {
+  const serviceAcp = new AcpPromptEchoFilter(acp)
+  const service = new AcpService(serviceAcp, {
     ...serviceOptions,
     actionProviders: profile.actionProviders,
     preferListedTitles: profile.preferListedTitles,
