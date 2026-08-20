@@ -1,8 +1,10 @@
 import { createReadStream } from "node:fs"
-import { readdir } from "node:fs/promises"
+import { open, readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
 import { createInterface } from "node:readline"
+
+const BACKWARD_READ_BYTES = 64 * 1024
 
 function messageParts(content, messageID) {
   if (typeof content === "string") return [{ id: `${messageID}:text:0`, messageID, type: "text", text: content }]
@@ -42,6 +44,131 @@ function messageError(message) {
   return { name: "HarnessTurnError", message: detail }
 }
 
+function messageEnvelope(record, sessionID) {
+  if (record?.type !== "message") return undefined
+  const role = record.message?.role
+  if (role !== "user" && role !== "assistant") return undefined
+  const messageID = record.id
+  if (typeof messageID !== "string") return undefined
+  const parts = messageParts(record.message?.content, messageID)
+  const error = messageError(record.message)
+  if (parts.length === 0 && !error) return undefined
+  const created = Date.parse(record.timestamp ?? "")
+  return {
+    info: {
+      id: messageID,
+      role,
+      sessionID,
+      time: { created: Number.isFinite(created) ? created : Date.now() },
+      ...(error ? { error } : {})
+    },
+    parts
+  }
+}
+
+function encodePageCursor(offset, target) {
+  return Buffer.from(JSON.stringify({ offset, target }), "utf8").toString("base64url")
+}
+
+function decodePageCursor(value) {
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"))
+    if (!Number.isSafeInteger(parsed?.offset) || parsed.offset < 0 || typeof parsed?.target !== "string" || !parsed.target) {
+      return undefined
+    }
+    return parsed
+  } catch {
+    return undefined
+  }
+}
+
+function parseRecordBuffer(buffer) {
+  if (buffer.length > 0 && buffer[buffer.length - 1] === 0x0d) buffer = buffer.subarray(0, -1)
+  try {
+    const record = JSON.parse(buffer.toString("utf8"))
+    return record && typeof record === "object" ? record : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function readOmpPage(file, sessionID, { limit = 100, before, activeSessionLeaf } = {}) {
+  const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
+  if (activeSessionLeaf === null) return { messages: [], before: null, hasMore: false }
+  if (activeSessionLeaf === undefined && !before) return undefined
+
+  const handle = await open(file, "r")
+  try {
+    const { size } = await handle.stat()
+    const decoded = before ? decodePageCursor(before) : undefined
+    if (before && (!decoded || decoded.offset > size)) throw new Error("Invalid OMP history cursor")
+
+    let cursor = decoded?.offset ?? size
+    let target = decoded?.target ?? activeSessionLeaf
+    let matchedTarget = false
+    let carry = Buffer.alloc(0)
+    const messages = []
+    let resumeCursor = null
+    let hasMore = false
+    let done = false
+
+    while (cursor > 0 && !done) {
+      const start = Math.max(0, cursor - BACKWARD_READ_BYTES)
+      const chunk = Buffer.allocUnsafe(cursor - start)
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0
+        ? Buffer.concat([chunk.subarray(0, bytesRead), carry])
+        : chunk.subarray(0, bytesRead)
+
+      let lineEnd = data.length
+      const visit = (line, offset) => {
+        const record = parseRecordBuffer(line)
+        if (!record || typeof record.id !== "string" || record.id !== target) return
+        matchedTarget = true
+        target = typeof record.parentId === "string" && record.parentId ? record.parentId : undefined
+        const message = messageEnvelope(record, sessionID)
+        if (message) {
+          if (messages.length < boundedLimit) {
+            messages.push(message)
+            if (messages.length === boundedLimit && target) resumeCursor = encodePageCursor(offset, target)
+          } else {
+            hasMore = true
+            done = true
+          }
+        }
+        if (!target) done = true
+      }
+
+      for (let index = data.length - 1; index >= 0 && !done; index -= 1) {
+        if (data[index] !== 0x0a) continue
+        const lineStart = index + 1
+        if (lineStart < lineEnd) visit(data.subarray(lineStart, lineEnd), start + lineStart)
+        lineEnd = index
+      }
+      if (start === 0) {
+        if (lineEnd > 0 && !done) visit(data.subarray(0, lineEnd), 0)
+        carry = Buffer.alloc(0)
+        cursor = 0
+      } else {
+        carry = lineEnd > 0 ? Buffer.from(data.subarray(0, lineEnd)) : Buffer.alloc(0)
+        cursor = start
+      }
+    }
+
+    if (!matchedTarget) {
+      if (before) throw new Error("Invalid OMP history cursor")
+      throw new Error("OMP active session leaf is missing from transcript")
+    }
+    return {
+      messages: messages.slice(0, boundedLimit).reverse(),
+      before: hasMore ? resumeCursor : null,
+      hasMore
+    }
+  } finally {
+    await handle.close()
+  }
+}
+
 export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp", "agent", "sessions")) {
   const sessionFiles = new Map()
 
@@ -63,7 +190,7 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     }
   }
 
-  return async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
+  const loadOmpHistory = async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
     // JSONL is append-only: its final record may belong to an abandoned branch.
     // Without an authoritative selected leaf, ACP replay is safer than guessing.
     if (activeSessionLeaf === undefined) return []
@@ -102,27 +229,18 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
       throw new Error("OMP active session leaf is missing from transcript")
     }
 
-    const messages = []
-    for (const record of selected) {
-      if (record.type !== "message") continue
-      const role = record.message?.role
-      if (role !== "user" && role !== "assistant") continue
-      const messageID = record.id ?? `${sessionID}:${messages.length}`
-      const parts = messageParts(record.message.content, messageID)
-      const error = messageError(record.message)
-      if (parts.length === 0 && !error) continue
-      const created = Date.parse(record.timestamp ?? "")
-      messages.push({
-        info: {
-          id: messageID,
-          role,
-          sessionID,
-          time: { created: Number.isFinite(created) ? created : Date.now() },
-          ...(error ? { error } : {})
-        },
-        parts
-      })
-    }
-    return messages
+    return selected.flatMap((record) => {
+      const message = messageEnvelope(record, sessionID)
+      return message ? [message] : []
+    })
   }
+
+  loadOmpHistory.pageRequiresActiveLeaf = true
+  loadOmpHistory.page = async (sessionID, options = {}) => {
+    const file = await locateSession(sessionID)
+    if (!file) return { messages: [], before: null, hasMore: false }
+    return readOmpPage(file, sessionID, options)
+  }
+
+  return loadOmpHistory
 }
