@@ -67,7 +67,7 @@ test("prepare uses a resettable task branch so rollback leftovers do not wedge r
   }
 })
 
-test("inspect reports dirty work without changing it", async () => {
+test("inspect reports dirty work and changed files without changing it", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-worktree-inspect-"))
   const worktreePath = path.join(stateDirectory, "worktrees", "abc")
   try {
@@ -77,7 +77,8 @@ test("inspect reports dirty work without changing it", async () => {
     assert.deepEqual(await manager.inspect({ mode: "worktree", path: worktreePath, branch: "task/abc", source: "/repo" }), {
       managed: true,
       dirty: true,
-      changeCount: 2
+      changeCount: 2,
+      changedFiles: ["src/a.js", "new.txt"]
     })
     assert.deepEqual(calls, [["-C", worktreePath, "status", "--porcelain=v1", "--untracked-files=all"]])
   } finally {
