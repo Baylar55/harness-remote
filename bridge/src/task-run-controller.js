@@ -1,6 +1,26 @@
 import { randomUUID } from "node:crypto"
+import { buildTaskContext, formatTaskHandoff } from "./task-context.js"
 import { taskLaunchError } from "./task-errors.js"
+import { normalizeTaskModel } from "./task-model.js"
 import { WorktreeManager } from "./worktree-manager.js"
+
+function requestedAgent(task, options = {}) {
+  const explicit = typeof options.agentId === "string" ? options.agentId.trim() : ""
+  return explicit || task.run?.agentId || task.agentId
+}
+
+function requestedModel(task, targetAgent, options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, "model")) return normalizeTaskModel(options.model)
+  const previousAgent = task.run?.agentId || task.agentId
+  if (task.run && targetAgent !== previousAgent) return null
+  return normalizeTaskModel(task.run?.model ?? task.model)
+}
+
+function requestedRole(task, options = {}) {
+  const explicit = typeof options.role === "string" ? options.role.trim() : ""
+  if (explicit) return explicit
+  return task.run ? "continue" : "implement"
+}
 
 export class TaskRunController {
   constructor({ taskStore, taskLauncher, worktreeManager, acpService, runIDFactory = randomUUID, clock = () => new Date().toISOString() }) {
@@ -28,7 +48,8 @@ export class TaskRunController {
 
   async #adoptAcpTaskSession(task) {
     if (!task.run?.sessionId || task.run.transport !== "acp") return null
-    const service = this.acpService?.(task.agentId)
+    const agentID = task.run.agentId || task.agentId
+    const service = this.acpService?.(agentID)
     if (!service) return null
     const title = task.prompt?.trim().split("\n")[0].slice(0, 60)
     try {
@@ -36,6 +57,18 @@ export class TaskRunController {
     } catch {
       return null
     }
+  }
+
+  async #contextForTask(task) {
+    let workspace = { managed: task.workspace?.mode === "worktree", dirty: false, changeCount: 0, changedFiles: [] }
+    if (task.workspace?.mode === "worktree" && this.worktreeManager) {
+      try {
+        workspace = await this.worktreeManager.inspect(task.workspace)
+      } catch {
+        // Context remains useful even when the workspace cannot be inspected temporarily.
+      }
+    }
+    return buildTaskContext(task, { workspace })
   }
 
   async reconcileAll() {
@@ -57,11 +90,18 @@ export class TaskRunController {
     }
   }
 
+  async context(taskID) {
+    await this.#awaitReconciliation()
+    const task = await this.taskStore.get(taskID)
+    if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
+    return this.#contextForTask(task)
+  }
+
   async inspectWorkspace(taskID) {
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
-    if (task.workspace?.mode !== "worktree") return { managed: false, dirty: false, changeCount: 0 }
+    if (task.workspace?.mode !== "worktree") return { managed: false, dirty: false, changeCount: 0, changedFiles: [] }
     if (!this.worktreeManager) throw new Error("Worktree manager is not configured")
     return this.worktreeManager.inspect(task.workspace)
   }
@@ -88,24 +128,52 @@ export class TaskRunController {
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
 
     const requestedPrompt = typeof options.prompt === "string" ? options.prompt.trim() : ""
-    const runPrompt = requestedPrompt || task.prompt
-    if (!runPrompt) throw taskLaunchError("invalid_state", "A run prompt is required")
+    const userPrompt = requestedPrompt || task.prompt
+    if (!userPrompt) throw taskLaunchError("invalid_state", "A run prompt is required")
+
+    const previousRun = task.run ? structuredClone(task.run) : null
+    const agentID = requestedAgent(task, options)
+    if (!agentID) throw taskLaunchError("unknown_agent", "A target harness is required")
+    const model = requestedModel(task, agentID, options)
+    const role = requestedRole(task, options)
+    const reuseSession = options.reuseSession === true
+    const previousAgent = previousRun?.agentId || task.agentId
+    if (reuseSession && (!previousRun?.sessionId || agentID !== previousAgent)) {
+      throw taskLaunchError("session_unavailable", "The requested native Session cannot be reused for this Run")
+    }
+
+    const context = await this.#contextForTask(task)
+    const effectivePrompt = previousRun && !reuseSession
+      ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
+      : userPrompt
 
     const previousRunCount = Array.isArray(task.runs) ? task.runs.length : task.run ? 1 : 0
     const run = {
       id: this.runIDFactory(),
       sequence: previousRunCount + 1,
-      agentId: task.agentId,
+      agentId: agentID,
+      model,
+      role,
+      contextRevision: Number(context.revision) || 0,
+      ...(previousRun && !reuseSession ? { handoffFromRunId: previousRun.id ?? null } : {}),
       sessionId: null,
       transport: null,
       directory: task.workspace.path,
-      prompt: runPrompt,
+      prompt: userPrompt,
       startedAt: this.clock()
     }
     let current = await this.taskStore.setRunState(taskID, { status: "starting", run })
-    const currentForRun = () => ({ ...current, prompt: runPrompt })
+    const currentForRun = () => ({
+      ...current,
+      agentId: agentID,
+      model,
+      prompt: effectivePrompt,
+      run: current.run ? { ...current.run, agentId: agentID, model } : current.run
+    })
     try {
-      const session = await this.taskLauncher.createSession(currentForRun())
+      const session = reuseSession
+        ? await this.taskLauncher.resumeSession(currentForRun(), previousRun)
+        : await this.taskLauncher.createSession(currentForRun())
       const linkedRun = { ...run, sessionId: session.sessionId, transport: session.transport }
       current = await this.taskStore.setRunState(taskID, { status: "starting", run: linkedRun, expectedRunId: run.id })
       current = await this.taskStore.setRunState(taskID, { status: "running", run: linkedRun, expectedRunId: linkedRun.id })
@@ -120,14 +188,28 @@ export class TaskRunController {
     }
   }
 
-  async continue(taskID, prompt) {
-    const text = typeof prompt === "string" ? prompt.trim() : ""
+  async continue(taskID, input) {
+    const options = typeof input === "string" ? { prompt: input } : input && typeof input === "object" ? input : {}
+    const text = typeof options.prompt === "string" ? options.prompt.trim() : ""
     if (!text) throw taskLaunchError("invalid_state", "A continuation prompt is required")
+    await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
     if (!["completed", "failed", "cancelled"].includes(task.status)) {
       throw taskLaunchError("invalid_state", "Only a terminal task can start another run")
     }
-    return this.launch(taskID, { prompt: text })
+
+    const agentID = requestedAgent(task, options)
+    const previousAgent = task.run?.agentId || task.agentId
+    const explicitFresh = options.mode === "fresh" || options.fresh === true
+    let reuseSession = false
+    if (!explicitFresh && agentID === previousAgent) {
+      if (!task.run?.sessionId) {
+        throw taskLaunchError("session_unavailable", "The previous native Session cannot be resumed. Start a fresh Run explicitly instead.")
+      }
+      reuseSession = true
+    }
+
+    return this.launch(taskID, { ...options, prompt: text, agentId: agentID, reuseSession })
   }
 }
