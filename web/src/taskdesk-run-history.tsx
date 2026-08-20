@@ -6,6 +6,7 @@ import { discoverMachine, selectableMachineAgents } from "./machineClient"
 import { taskClient, type MachineTask, type MachineTaskRun } from "./taskClient"
 import type { MachineAgentHost, MessageEnvelope, ServerConfig } from "./types"
 import { loadWorkspaceMachines, type WorkspaceMachine } from "./workspaceMachines"
+import "./taskdesk-run-history.css"
 
 const REVIEW_BUTTON_CLASS = "td3-run-review-button"
 const ARCHIVE_ROOT_CLASS = "td3-run-archive-root"
@@ -19,6 +20,8 @@ type ResolvedRun = {
   config: ServerConfig
   index: number
 }
+
+type NumberedRun = MachineTaskRun & { sequence?: number }
 
 let archiveRoot: Root | null = null
 let archiveHost: HTMLElement | null = null
@@ -91,7 +94,7 @@ function closeArchive() {
 }
 
 function RunArchive({ resolved, messages }: { resolved: ResolvedRun; messages: MessageEnvelope[] }) {
-  const sequence = resolved.run.sequence ?? resolved.index + 1
+  const sequence = (resolved.run as NumberedRun).sequence ?? resolved.index + 1
   const sessionID = runSessionID(resolved.run)
   return (
     <div className="td3-run-archive-backdrop" role="presentation" onMouseDown={(event) => {
