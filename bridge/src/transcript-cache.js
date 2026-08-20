@@ -34,14 +34,18 @@ export class TranscriptCache {
   constructor({
     maxEntries = DEFAULT_MAX_ENTRIES,
     maxWeight = DEFAULT_MAX_WEIGHT,
-    isProtected = () => false
+    isProtected = () => false,
+    onEvict = () => {}
   } = {}) {
     this.#lru = new BoundedLru({
       maxEntries,
       maxWeight,
       weightOf: transcriptWeight,
       canEvict: (key) => !isProtected(key),
-      onEvict: () => { this.#evictions += 1 }
+      onEvict: (key, value, weight) => {
+        this.#evictions += 1
+        onEvict(key, value, weight)
+      }
     })
   }
 
