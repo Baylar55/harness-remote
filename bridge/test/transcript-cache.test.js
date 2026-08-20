@@ -40,15 +40,16 @@ test("transcript cache protects active sessions and evicts inactive history firs
 
 test("transcript weight reflects large text and refresh observes in-place growth", () => {
   const transcript = [message("m1", "short")]
-  const initialWeight = transcriptWeight(transcript)
-  const cache = new TranscriptCache({ maxEntries: 4, maxWeight: initialWeight + 500 })
+  const cache = new TranscriptCache({ maxEntries: 4, maxWeight: 2_300 })
   cache.set("first", transcript)
   cache.set("second", [message("m2", "small")])
+  assert.ok(cache.get("first"), "the transcript being viewed becomes most-recently used")
   transcript[0].parts[0].text += "x".repeat(2_000)
 
   cache.get("first")
   const stats = cache.stats()
   assert.equal(cache.has("second"), false)
   assert.equal(cache.has("first"), true)
-  assert.equal(stats.weight >= transcriptWeight(transcript), true)
+  assert.equal(stats.weight, transcriptWeight(transcript))
+  assert.equal(stats.weight <= stats.maxWeight, true)
 })
