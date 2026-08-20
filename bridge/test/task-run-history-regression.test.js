@@ -15,25 +15,31 @@ function completedTask() {
     run: {
       id: "run-1",
       sequence: 1,
+      agentId: "pi",
       sessionId: "session-1",
       transport: "acp",
       directory: "/repo",
-      prompt: "Initial task"
+      prompt: "Initial task",
+      status: "completed",
+      finishedAt: "2026-08-20T07:55:00.000Z"
     },
     runs: [{
       id: "run-1",
       sequence: 1,
+      agentId: "pi",
       sessionId: "session-1",
       transport: "acp",
       directory: "/repo",
-      prompt: "Initial task"
+      prompt: "Initial task",
+      status: "completed",
+      finishedAt: "2026-08-20T07:55:00.000Z"
     }]
   }
 }
 
-test("Continue creates a distinct numbered Run and a new Session", async () => {
+test("Continue creates a distinct numbered Run while preserving the native Session", async () => {
   let current = completedTask()
-  const created = []
+  const resumed = []
   const store = {
     async list() { return [] },
     async get() { return structuredClone(current) },
@@ -50,10 +56,11 @@ test("Continue creates a distinct numbered Run and a new Session", async () => {
   const controller = new TaskRunController({
     taskStore: store,
     taskLauncher: {
-      async createSession(task) {
-        created.push({ sequence: task.run.sequence, prompt: task.prompt })
-        return { sessionId: "session-2", transport: "acp", directory: task.workspace.path }
+      async resumeSession(task, previousRun) {
+        resumed.push({ sequence: task.run.sequence, prompt: task.prompt, previousSession: previousRun.sessionId })
+        return { sessionId: previousRun.sessionId, transport: "acp", directory: task.workspace.path }
       },
+      async createSession() { throw new Error("same-harness Continue must not create a new Session") },
       async startPrompt() {}
     },
     runIDFactory: () => "run-2",
@@ -63,12 +70,12 @@ test("Continue creates a distinct numbered Run and a new Session", async () => {
   const continued = await controller.continue("task-123456789", "Second request")
   assert.equal(continued.run.id, "run-2")
   assert.equal(continued.run.sequence, 2)
-  assert.equal(continued.run.sessionId, "session-2")
-  assert.deepEqual(created, [{ sequence: 2, prompt: "Second request" }])
-  assert.deepEqual(continued.runs.map((run) => run.sessionId), ["session-1", "session-2"])
+  assert.equal(continued.run.sessionId, "session-1")
+  assert.deepEqual(resumed, [{ sequence: 2, prompt: "Second request", previousSession: "session-1" }])
+  assert.deepEqual(continued.runs.map((run) => run.sessionId), ["session-1", "session-1"])
 })
 
-test("continuation Sessions are visibly distinguished by their Run number", async () => {
+test("a fresh Session created for a later Run is visibly distinguished by Run number", async () => {
   let receivedTitle = null
   const service = {
     async createSession(options) {
