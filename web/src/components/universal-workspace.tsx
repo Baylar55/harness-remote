@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { api, isValidServerConfig } from "../api"
@@ -392,7 +392,7 @@ function HarnessAvatar({ backend, label }: { backend: string; label: string }) {
   )
 }
 
-function MessageBubble({ message, agentLabel, agentBackend }: { message: MessageEnvelope; agentLabel: string; agentBackend: string }) {
+const MessageBubble = memo(function MessageBubble({ message, agentLabel, agentBackend }: { message: MessageEnvelope; agentLabel: string; agentBackend: string }) {
   const isUser = message.info.role === "user"
   const text = extractText(message)
   return (
@@ -416,7 +416,7 @@ function MessageBubble({ message, agentLabel, agentBackend }: { message: Message
       </div>
     </article>
   )
-}
+})
 
 function SessionCard({
   item,
