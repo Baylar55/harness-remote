@@ -4,22 +4,48 @@ import { taskLaunchError } from "./task-errors.js"
 import { normalizeTaskModel } from "./task-model.js"
 import { WorktreeManager } from "./worktree-manager.js"
 
+function taskRuns(task) {
+  if (Array.isArray(task?.runs) && task.runs.length) return task.runs
+  return task?.run ? [task.run] : []
+}
+
+function runAgent(task, run) {
+  return run?.agentId || task?.agentId || ""
+}
+
+function latestRunForAgent(task, agentID, { requireSession = false } = {}) {
+  const runs = taskRuns(task)
+  for (let index = runs.length - 1; index >= 0; index -= 1) {
+    const run = runs[index]
+    if (runAgent(task, run) !== agentID) continue
+    if (requireSession && !run?.sessionId) continue
+    return run
+  }
+  return null
+}
+
 function requestedAgent(task, options = {}) {
   const explicit = typeof options.agentId === "string" ? options.agentId.trim() : ""
-  return explicit || task.run?.agentId || task.agentId
+  return explicit || runAgent(task, task.run)
 }
 
 function requestedModel(task, targetAgent, options = {}) {
   if (Object.prototype.hasOwnProperty.call(options, "model")) return normalizeTaskModel(options.model)
-  const previousAgent = task.run?.agentId || task.agentId
-  if (task.run && targetAgent !== previousAgent) return null
-  return normalizeTaskModel(task.run?.model ?? task.model)
+  const priorTargetRun = latestRunForAgent(task, targetAgent)
+  if (priorTargetRun?.model) return normalizeTaskModel(priorTargetRun.model)
+  if (targetAgent === task.agentId) return normalizeTaskModel(task.model)
+  return null
 }
 
 function requestedRole(task, options = {}) {
   const explicit = typeof options.role === "string" ? options.role.trim() : ""
   if (explicit) return explicit
   return task.run ? "continue" : "implement"
+}
+
+function completedRun(run, result) {
+  const outcome = typeof result?.outcome === "string" ? result.outcome.trim() : ""
+  return outcome ? { ...run, outcome } : run
 }
 
 export class TaskRunController {
@@ -37,18 +63,17 @@ export class TaskRunController {
 
   async #awaitReconciliation() {
     await this.reconciliation
-    if (this.reconciliationError) {
-      throw taskLaunchError("agent_unavailable", "Task state is unavailable", { cause: this.reconciliationError })
-    }
+    if (this.reconciliationError) throw taskLaunchError("agent_unavailable", "Task state is unavailable", { cause: this.reconciliationError })
   }
 
-  async #terminal(taskID, run, status, error = null) {
-    try { await this.taskStore.setRunState(taskID, { status, run, error, expectedRunId: run?.id }) } catch {}
+  async #terminal(taskID, run, status, error = null, result = null) {
+    const terminalRun = status === "completed" ? completedRun(run, result) : run
+    try { await this.taskStore.setRunState(taskID, { status, run: terminalRun, error, expectedRunId: run?.id }) } catch {}
   }
 
   async #adoptAcpTaskSession(task) {
     if (!task.run?.sessionId || task.run.transport !== "acp") return null
-    const agentID = task.run.agentId || task.agentId
+    const agentID = runAgent(task, task.run)
     const service = this.acpService?.(agentID)
     if (!service) return null
     const title = task.prompt?.trim().split("\n")[0].slice(0, 60)
@@ -122,9 +147,7 @@ export class TaskRunController {
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
-    if (!["draft", "completed", "failed", "cancelled"].includes(task.status)) {
-      throw taskLaunchError("invalid_state", "Only draft or terminal tasks can start a run")
-    }
+    if (!["draft", "completed", "failed", "cancelled"].includes(task.status)) throw taskLaunchError("invalid_state", "Only draft or terminal tasks can start a run")
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
 
     const requestedPrompt = typeof options.prompt === "string" ? options.prompt.trim() : ""
@@ -137,17 +160,17 @@ export class TaskRunController {
     const model = requestedModel(task, agentID, options)
     const role = requestedRole(task, options)
     const reuseSession = options.reuseSession === true
-    const previousAgent = previousRun?.agentId || task.agentId
-    if (reuseSession && (!previousRun?.sessionId || agentID !== previousAgent)) {
-      throw taskLaunchError("session_unavailable", "The requested native Session cannot be reused for this Run")
-    }
+    const reusableRun = reuseSession ? latestRunForAgent(task, agentID, { requireSession: true }) : null
+    if (reuseSession && !reusableRun) throw taskLaunchError("session_unavailable", "The requested native Session cannot be reused for this Run")
 
     const context = await this.#contextForTask(task)
-    const effectivePrompt = previousRun && !reuseSession
+    const directNativeContinuation = Boolean(reusableRun && previousRun && reusableRun.id === previousRun.id)
+    const needsHandoffContext = Boolean(previousRun && (!reuseSession || !directNativeContinuation))
+    const effectivePrompt = needsHandoffContext
       ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
       : userPrompt
 
-    const previousRunCount = Array.isArray(task.runs) ? task.runs.length : task.run ? 1 : 0
+    const previousRunCount = taskRuns(task).length
     const run = {
       id: this.runIDFactory(),
       sequence: previousRunCount + 1,
@@ -155,7 +178,8 @@ export class TaskRunController {
       model,
       role,
       contextRevision: Number(context.revision) || 0,
-      ...(previousRun && !reuseSession ? { handoffFromRunId: previousRun.id ?? null } : {}),
+      ...(needsHandoffContext ? { handoffFromRunId: previousRun?.id ?? null } : {}),
+      ...(reusableRun ? { resumedFromRunId: reusableRun.id ?? null } : {}),
       sessionId: null,
       transport: null,
       directory: task.workspace.path,
@@ -172,14 +196,14 @@ export class TaskRunController {
     })
     try {
       const session = reuseSession
-        ? await this.taskLauncher.resumeSession(currentForRun(), previousRun)
+        ? await this.taskLauncher.resumeSession(currentForRun(), reusableRun)
         : await this.taskLauncher.createSession(currentForRun())
       const linkedRun = { ...run, sessionId: session.sessionId, transport: session.transport }
       current = await this.taskStore.setRunState(taskID, { status: "starting", run: linkedRun, expectedRunId: run.id })
       current = await this.taskStore.setRunState(taskID, { status: "running", run: linkedRun, expectedRunId: linkedRun.id })
       const onFailed = (error) => void this.#terminal(taskID, linkedRun, "failed", error)
       onFailed.onFailed = onFailed
-      onFailed.onCompleted = () => void this.#terminal(taskID, linkedRun, "completed")
+      onFailed.onCompleted = (result) => void this.#terminal(taskID, linkedRun, "completed", null, result)
       await this.taskLauncher.startPrompt(currentForRun(), session, onFailed)
       return current
     } catch (error) {
@@ -195,19 +219,14 @@ export class TaskRunController {
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
-    if (!["completed", "failed", "cancelled"].includes(task.status)) {
-      throw taskLaunchError("invalid_state", "Only a terminal task can start another run")
-    }
+    if (!["completed", "failed", "cancelled"].includes(task.status)) throw taskLaunchError("invalid_state", "Only a terminal task can start another run")
 
     const agentID = requestedAgent(task, options)
-    const previousAgent = task.run?.agentId || task.agentId
     const explicitFresh = options.mode === "fresh" || options.fresh === true
-    let reuseSession = false
-    if (!explicitFresh && agentID === previousAgent) {
-      if (!task.run?.sessionId) {
-        throw taskLaunchError("session_unavailable", "The previous native Session cannot be resumed. Start a fresh Run explicitly instead.")
-      }
-      reuseSession = true
+    const reusableRun = latestRunForAgent(task, agentID, { requireSession: true })
+    const reuseSession = !explicitFresh && Boolean(reusableRun)
+    if (!explicitFresh && agentID === runAgent(task, task.run) && !reusableRun) {
+      throw taskLaunchError("session_unavailable", "The previous native Session cannot be resumed. Start a fresh Run explicitly instead.")
     }
 
     return this.launch(taskID, { ...options, prompt: text, agentId: agentID, reuseSession })
