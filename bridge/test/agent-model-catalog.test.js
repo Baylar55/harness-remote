@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
-import { AcpAgentModelCatalog, HttpAgentModelCatalog } from "../src/agent-model-catalog.js"
+import { AcpAgentModelCatalog, HttpAgentModelCatalog, modelsFromProvidersResponse } from "../src/agent-model-catalog.js"
 
 class FakeAcp {
   starts = 0
@@ -102,4 +102,44 @@ test("HTTP model discovery refreshes managed harness each time", async () => {
   models = { two: { id: "two", name: "Two" } }
   assert.deepEqual((await catalog.list()).models.map((model) => model.modelID), ["two"])
   assert.equal(calls, 2)
+})
+
+test("provider catalog keeps one exact selection per model variant and skips disabled models", () => {
+  const result = modelsFromProvidersResponse({
+    providers: [{
+      id: "openai",
+      name: "OpenAI",
+      models: {
+        disabled: { id: "disabled", name: "Disabled", enabled: false },
+        reasoning: {
+          id: "reasoning",
+          name: "Reasoning Model",
+          variants: { low: {}, high: {} },
+          limit: { context: 200_000, output: 32_000 },
+          cost: { input: 2, output: 8 }
+        },
+        free: {
+          id: "free",
+          name: "Free Model",
+          variants: [{ id: "fast" }, { id: "fast" }],
+          cost: [{ input: 0, output: 0 }]
+        }
+      }
+    }],
+    default: { openai: "reasoning" }
+  })
+
+  assert.deepEqual(result.map((model) => `${model.modelID}:${model.variant || "base"}`), [
+    "reasoning:base",
+    "reasoning:low",
+    "reasoning:high",
+    "free:base",
+    "free:fast"
+  ])
+  assert.equal(result.some((model) => model.modelID === "disabled"), false)
+  assert.equal(result.find((model) => model.modelID === "reasoning" && !model.variant)?.isDefault, true)
+  assert.equal(result.find((model) => model.modelID === "reasoning")?.isFree, false)
+  assert.equal(result.find((model) => model.modelID === "reasoning")?.inputCost, 2)
+  assert.equal(result.find((model) => model.modelID === "free")?.isFree, true)
+  assert.equal(result.find((model) => model.modelID === "free")?.inputCost, 0)
 })
