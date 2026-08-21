@@ -26,6 +26,8 @@ export type MachineTaskRun = {
   id?: string
   sequence?: number
   agentId?: string
+  model?: ModelSelection | null
+  role?: string
   sessionId?: string | null
   sessionID?: string | null
   status?: string
@@ -34,8 +36,34 @@ export type MachineTaskRun = {
   prompt?: string
   outcome?: string
   outcomeVersion?: number
+  contextRevision?: number
+  handoffFromRunId?: string | null
+  resumedFromRunId?: string | null
   startedAt?: string
   finishedAt?: string
+}
+
+export type TaskCheckpoint = {
+  id: string
+  label: string
+  kind: string
+  runId?: string | null
+  createdAt: string
+  commit?: string
+  baseHead?: string
+  untrackedFiles?: string[]
+  partial?: boolean
+}
+
+export type TaskContext = {
+  version?: number
+  revision?: number
+  objective?: string
+  currentState?: string
+  latestOutcome?: { status?: string; agentId?: string; role?: string; text?: string; error?: string } | null
+  runSummaries?: Array<Record<string, unknown>>
+  changedFiles?: string[]
+  workspace?: { dirty?: boolean; changeCount?: number; listedChangeCount?: number; truncated?: boolean }
 }
 
 export type MachineTask = {
@@ -43,6 +71,7 @@ export type MachineTask = {
   machineId: string
   projectId: string
   project: { name: string; path: string; kind: string }
+  title?: string
   agentId: string
   prompt: string
   model?: ModelSelection | null
@@ -50,7 +79,11 @@ export type MachineTask = {
   workspace: TaskWorkspace
   run: null | MachineTaskRun
   runs?: MachineTaskRun[]
+  checkpoints?: TaskCheckpoint[]
+  restoredCheckpointId?: string
+  context?: TaskContext
   error?: { message?: string } | null
+  finishedAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -59,6 +92,7 @@ export type TaskWorkspaceInspection = {
   managed: boolean
   dirty: boolean
   changeCount: number
+  changedFiles?: string[]
   commitsAhead?: number
   commitsBehind?: number
   mergedIntoSource?: boolean
@@ -90,8 +124,21 @@ export type AgentModelCatalog = {
   error?: string
 }
 
+export type TaskContinueInput = {
+  prompt: string
+  agentId?: string
+  model?: ModelSelection | null
+  mode?: "fresh" | "resume"
+  fresh?: boolean
+}
+
+export type TaskCheckpointRestoreResponse = {
+  task: MachineTask
+  result: { restored: boolean; checkpointId: string; changeCount: number }
+}
+
 type TaskRequestOptions = {
-  method?: "GET" | "POST"
+  method?: "GET" | "POST" | "PATCH"
   body?: unknown
 }
 
@@ -223,6 +270,10 @@ function normalizeTaskOutcomes(task: MachineTask): MachineTask {
   }
 }
 
+function normalizeTaskList(value: unknown, key: string, path: string): MachineTask[] {
+  return requireArray<MachineTask>(value, key, path).map(normalizeTaskOutcomes)
+}
+
 export const taskClient = {
   async listProjects(config: ServerConfig): Promise<MachineProject[]> {
     const payload = await machineRequest<unknown>(config, "/v1/projects")
@@ -230,8 +281,21 @@ export const taskClient = {
   },
 
   async listTasks(config: ServerConfig): Promise<MachineTask[]> {
-    const payload = await machineRequest<unknown>(config, "/v1/tasks")
-    return requireArray<MachineTask>(payload, "tasks", "/v1/tasks").map(normalizeTaskOutcomes)
+    try {
+      return normalizeTaskList(await machineRequest<unknown>(config, "/v1/work-threads"), "workThreads", "/v1/work-threads")
+    } catch (error) {
+      // Compatibility with a daemon from before the Work Thread product endpoint existed.
+      if (!/404|not found|cannot reach/i.test(error instanceof Error ? error.message : String(error))) throw error
+      return normalizeTaskList(await machineRequest<unknown>(config, "/v1/tasks"), "tasks", "/v1/tasks")
+    }
+  },
+
+  async getWorkThread(config: ServerConfig, taskId: string): Promise<MachineTask> {
+    return normalizeTaskOutcomes(await machineRequest<MachineTask>(config, `/v1/work-threads/${encodeURIComponent(taskId)}`))
+  },
+
+  renameWorkThread(config: ServerConfig, taskId: string, title: string): Promise<MachineTask> {
+    return machineRequest<MachineTask>(config, `/v1/work-threads/${encodeURIComponent(taskId)}`, { method: "PATCH", body: { title } })
   },
 
   async listAgentModels(config: ServerConfig, agentId: string): Promise<AgentModelCatalog> {
@@ -251,8 +315,32 @@ export const taskClient = {
     return machineRequest<MachineTask>(config, `/v1/tasks/${encodeURIComponent(taskId)}/launch`, { method: "POST", body: {} })
   },
 
-  continueTask(config: ServerConfig, taskId: string, prompt: string): Promise<MachineTask> {
-    return machineRequest<MachineTask>(config, `/v1/tasks/${encodeURIComponent(taskId)}/continue`, { method: "POST", body: { prompt } })
+  continueTask(config: ServerConfig, taskId: string, input: string | TaskContinueInput): Promise<MachineTask> {
+    const body = typeof input === "string" ? { prompt: input } : input
+    return machineRequest<MachineTask>(config, `/v1/tasks/${encodeURIComponent(taskId)}/continue`, { method: "POST", body })
+  },
+
+  context(config: ServerConfig, taskId: string): Promise<TaskContext> {
+    return machineRequest<TaskContext>(config, `/v1/tasks/${encodeURIComponent(taskId)}/context`)
+  },
+
+  cancelWorkThread(config: ServerConfig, taskId: string): Promise<MachineTask> {
+    return machineRequest<MachineTask>(config, `/v1/work-threads/${encodeURIComponent(taskId)}/cancel`, { method: "POST", body: {} })
+  },
+
+  async listCheckpoints(config: ServerConfig, taskId: string): Promise<TaskCheckpoint[]> {
+    const path = `/v1/work-threads/${encodeURIComponent(taskId)}/checkpoints`
+    return requireArray<TaskCheckpoint>(await machineRequest<unknown>(config, path), "checkpoints", path)
+  },
+
+  async createCheckpoint(config: ServerConfig, taskId: string, input: { label?: string; kind?: string; runId?: string | null } = {}): Promise<TaskCheckpoint | null> {
+    const path = `/v1/work-threads/${encodeURIComponent(taskId)}/checkpoints`
+    const result = await machineRequest<{ checkpoint: TaskCheckpoint | null }>(config, path, { method: "POST", body: input })
+    return result.checkpoint ?? null
+  },
+
+  restoreCheckpoint(config: ServerConfig, taskId: string, checkpointId: string): Promise<TaskCheckpointRestoreResponse> {
+    return machineRequest<TaskCheckpointRestoreResponse>(config, `/v1/work-threads/${encodeURIComponent(taskId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST", body: {} })
   },
 
   inspectResult(config: ServerConfig, taskId: string): Promise<TaskWorkspaceInspection> {
