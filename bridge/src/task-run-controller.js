@@ -27,6 +27,13 @@ function latestRunForAgent(task, agentID, { requireSession = false } = {}) {
   return null
 }
 
+function happenedAfter(value, baseline) {
+  const timestamp = Date.parse(value || "")
+  if (!Number.isFinite(timestamp)) return false
+  const previous = Date.parse(baseline || "")
+  return !Number.isFinite(previous) || timestamp > previous
+}
+
 function validateRunOptions(options) {
   if (!options || typeof options !== "object" || Array.isArray(options)) {
     throw taskLaunchError("invalid_request", "Task Run options must be an object")
@@ -213,7 +220,10 @@ export class TaskRunController {
 
     const context = await this.#contextForTask(task)
     const directNativeContinuation = Boolean(reusableRun && previousRun && reusableRun.id === previousRun.id)
-    const needsHandoffContext = Boolean(previousRun && (!reuseSession || !directNativeContinuation))
+    const restoredAfterReusableRun = Boolean(
+      reusableRun && happenedAfter(task.restoredAt, reusableRun.finishedAt || reusableRun.startedAt)
+    )
+    const needsHandoffContext = Boolean(previousRun && (!reuseSession || !directNativeContinuation || restoredAfterReusableRun))
     const effectivePrompt = needsHandoffContext
       ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
       : userPrompt
@@ -228,6 +238,7 @@ export class TaskRunController {
       contextRevision: Number(context.revision) || 0,
       ...(needsHandoffContext ? { handoffFromRunId: previousRun?.id ?? null } : {}),
       ...(reusableRun ? { resumedFromRunId: reusableRun.id ?? null } : {}),
+      ...(restoredAfterReusableRun ? { handoffReason: "workspace_restore", workspaceRestoredAt: task.restoredAt } : {}),
       sessionId: null,
       transport: null,
       directory: task.workspace.path,
