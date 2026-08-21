@@ -1,11 +1,12 @@
 import assert from "node:assert/strict"
+import { EventEmitter } from "node:events"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { AcpAgentModelCatalog, HttpAgentModelCatalog, modelsFromProvidersResponse } from "../src/agent-model-catalog.js"
 
-class FakeAcp {
+class FakeAcp extends EventEmitter {
   starts = 0
   newCalls = 0
   loadCalls = 0
@@ -30,7 +31,7 @@ class FakeAcp {
   }
 }
 
-test("ACP model discovery creates one durable catalog session then refreshes it", async () => {
+test("ACP model discovery keeps one catalog load per adapter lifetime unless explicitly refreshed", async () => {
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-catalog-"))
   try {
     const agent = new FakeAcp()
@@ -38,12 +39,36 @@ test("ACP model discovery creates one durable catalog session then refreshes it"
     const first = await catalog.list({ allowStale: false })
     assert.deepEqual(first.models.map((model) => model.modelID), ["one", "two"])
     assert.equal(agent.newCalls, 1)
+
     agent.models = ["provider/two", "provider/three"]
-    const refreshed = await catalog.list({ allowStale: false })
-    assert.deepEqual(refreshed.models.map((model) => model.modelID), ["two", "three"])
+    const cached = await catalog.list({ allowStale: false })
+    assert.deepEqual(cached.models.map((model) => model.modelID), ["one", "two"])
     assert.equal(agent.newCalls, 1)
+    assert.equal(agent.loadCalls, 0, "opening model pickers must not reload the technical ACP session")
+
+    const refreshed = await catalog.list({ allowStale: false, refresh: true })
+    assert.deepEqual(refreshed.models.map((model) => model.modelID), ["two", "three"])
     assert.equal(agent.loadCalls, 1)
     await assert.rejects(() => catalog.validate({ providerID: "provider", modelID: "one" }), /no longer available/)
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
+test("ACP catalog invalidates its in-memory models when the dedicated adapter exits", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-catalog-exit-"))
+  try {
+    const agent = new FakeAcp()
+    const catalog = new AcpAgentModelCatalog({ agent, agentID: "omp", directory: "/repo", stateDirectory })
+    await catalog.list({ allowStale: false })
+    assert.equal(agent.newCalls, 1)
+    assert.equal(agent.loadCalls, 0)
+
+    agent.models = ["provider/three"]
+    agent.emit("exit", new Error("adapter restarted"))
+    const reloaded = await catalog.list({ allowStale: false })
+    assert.deepEqual(reloaded.models.map((model) => model.modelID), ["three"])
+    assert.equal(agent.loadCalls, 1, "a restarted adapter must load the persisted catalog session once")
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }
