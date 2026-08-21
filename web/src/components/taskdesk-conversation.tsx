@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from "react"
+import { memo, useEffect, useRef, type KeyboardEvent } from "react"
 import type { MessageEnvelope } from "../types"
 import { ChatIcon, LoadingIcon } from "../Icons"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
@@ -30,7 +30,11 @@ function formatClock(timestamp: number): string {
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp)
 }
 
-function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
+/**
+ * Composer keystrokes must not re-render a long transcript. Message-page reconciliation preserves
+ * unchanged message object identities, so memoized rows make typing cost independent of history size.
+ */
+const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
   const isUser = message.info.role === "user"
   return (
     <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
@@ -46,7 +50,7 @@ function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agen
       </div>
     </article>
   )
-}
+})
 
 /**
  * The conversation surface is deliberately product-agnostic. A Native Session and a Work Thread
