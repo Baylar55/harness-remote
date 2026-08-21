@@ -262,6 +262,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   const [revision, setRevision] = useState(0)
   const [selectedProjectKey, setSelectedProjectKey] = useState("all")
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [newThreadOpen, setNewThreadOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -346,6 +347,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     setSelectedProjectKey(key)
     const first = threads.find((record) => key === "all" || `${record.runtime.machine.id}:${record.task.projectId}` === key)
     setSelectedThreadKey(first?.key || null)
+    setMobileDetailOpen(false)
   }
 
   function updateTask(machineID: string, task: MachineTask) {
@@ -364,6 +366,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     updateTask(runtime.machine.id, task)
     setSelectedProjectKey(`${runtime.machine.id}:${task.projectId}`)
     setSelectedThreadKey(`${runtime.machine.id}:${task.id}`)
+    setMobileDetailOpen(true)
     onActiveMachineID(runtime.machine.id)
     setRevision((value) => value + 1)
   }
@@ -422,12 +425,13 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
             {!loaded && threads.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Loading your workspace...</strong></div> : visibleThreads.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No Work Threads here yet</strong><span>Start a conversation and keep refining it until the work is done.</span><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={14} /> New Work Thread</button></div> : visibleThreads.map((record) => {
               const state = threadState(record.task)
               const agent = agentForThread(record)
-              return <button type="button" className={`tdw-thread-card${selectedThreadKey === record.key ? " selected" : ""}`} onClick={() => setSelectedThreadKey(record.key)} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{threadTitle(record.task)}</strong><time>{formatRelative(record.task.updatedAt || record.task.createdAt)}</time></span><span className="tdw-thread-project">{record.task.project?.name || record.task.projectId}</span><span className="tdw-thread-meta">{agent?.label || threadAgentID(record.task)} · {modelLabel(record.task)}</span><span className={`tdw-thread-status ${state}`}>{threadStateLabel(record.task)}</span></span></button>
+              return <button type="button" className={`tdw-thread-card${selectedThreadKey === record.key ? " selected" : ""}`} onClick={() => { setSelectedThreadKey(record.key); setMobileDetailOpen(true) }} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{threadTitle(record.task)}</strong><time>{formatRelative(record.task.updatedAt || record.task.createdAt)}</time></span><span className="tdw-thread-project">{record.task.project?.name || record.task.projectId}</span><span className="tdw-thread-meta">{agent?.label || threadAgentID(record.task)} · {modelLabel(record.task)}</span><span className={`tdw-thread-status ${state}`}>{threadStateLabel(record.task)}</span></span></button>
             })}
           </div>
         </section>
 
-        <main className="tdw-main">
+        <main className={`tdw-main${mobileDetailOpen ? " mobile-open" : ""}`}>
+          {selected ? <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Work Threads">← Work Threads</button> : null}
           {selected ? (
             <WorkThreadDetail
               key={selected.key}
