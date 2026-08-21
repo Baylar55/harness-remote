@@ -13,6 +13,12 @@ test("shared conversation owns transcript ordering and the composer", () => {
   assert.match(component, /void onSend\(\)/)
 })
 
+test("composer keystrokes do not force long transcript rows to re-render", () => {
+  assert.match(component, /import \{ memo,/)
+  assert.match(component, /const MessageBubble = memo\(function MessageBubble/)
+  assert.match(component, /Message-page reconciliation preserves/)
+})
+
 test("shared conversation owns paging and scroll preservation", () => {
   assert.match(component, /hasMore/)
   assert.match(component, /onLoadOlder/)
