@@ -17,6 +17,8 @@ const INITIAL_RECONNECT_MS = 1_000
 const MAX_RECONNECT_MS = 30_000
 const STALL_TIMEOUT_MS = 30_000
 const MAX_DIRECTORY_LENGTH = 4096
+const MAX_AGENT_ID_LENGTH = 128
+const EVENT_BACKENDS = new Set<DesktopProfile["backend"]>(["opencode", "omp", "pi", "claude", "codex"])
 
 type ChannelNames = typeof IPC_CHANNELS
 
@@ -48,6 +50,27 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Event stream failed"
 }
 
+function validateRouteOptions(options: DesktopEventSubscriptionOptions): void {
+  if (options.backend !== undefined && !EVENT_BACKENDS.has(options.backend)) {
+    throw new Error("Event subscription backend is invalid")
+  }
+  if (options.agentId !== undefined) {
+    const agentID = typeof options.agentId === "string" ? options.agentId.trim() : ""
+    if (!agentID || agentID.length > MAX_AGENT_ID_LENGTH || !/^[A-Za-z0-9._-]+$/.test(agentID)) {
+      throw new Error("Event subscription agent is invalid")
+    }
+  }
+}
+
+/** Keep the approved host and credentials while allowing TaskDesk to select another daemon agent. */
+function eventProfile(profile: DesktopProfile, options: DesktopEventSubscriptionOptions): DesktopProfile {
+  return {
+    ...profile,
+    backend: options.backend ?? profile.backend,
+    agentId: options.agentId?.trim() || profile.agentId
+  }
+}
+
 export class DesktopEventTransport {
   private readonly subscriptions = new Map<string, ActiveSubscription>()
 
@@ -61,6 +84,7 @@ export class DesktopEventTransport {
       throw new Error("Event subscription directory is invalid")
     }
     if (options.scope === "project" && !options.directory?.trim()) throw new Error("Project event directory is required")
+    validateRouteOptions(options)
     const subscription: ActiveSubscription = {
       id: randomUUID(),
       profileId,
@@ -156,14 +180,15 @@ export class DesktopEventTransport {
       this.close(subscription)
       return
     }
+    const targetProfile = eventProfile(profile, subscription.options)
     const controller = new AbortController()
     subscription.controller = controller
     let response: Response
     try {
-      const headers: Record<string, string> = { Accept: "text/event-stream", ...routingHeaders(profile, { preflight: false }) }
+      const headers: Record<string, string> = { Accept: "text/event-stream", ...routingHeaders(targetProfile, { preflight: false }) }
       const authorization = authHeader(profile)
       if (authorization) headers.Authorization = authorization
-      response = await fetch(streamURL(profile, subscription.options), { headers, redirect: "manual", signal: controller.signal })
+      response = await fetch(streamURL(targetProfile, subscription.options), { headers, redirect: "manual", signal: controller.signal })
       if (response.status >= 300 && response.status < 400) throw new Error("Server redirect was rejected")
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
       const contentType = response.headers.get("content-type") ?? ""
