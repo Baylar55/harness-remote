@@ -211,26 +211,31 @@ function nativeForRun(
   })
   const nativeHasAssistant = messages.some((message) => message.info.role === "assistant")
   const windowHasAssistant = timestampWindow.some((message) => message.info.role === "assistant")
-  const selectedMessages = nativeHasAssistant && !windowHasAssistant
+  const usingReplayFallback = nativeHasAssistant && !windowHasAssistant
+  const selectedMessages = usingReplayFallback
     ? replayFallbackForRun(messages, sessionOrdinal, sessionRunCount)
     : timestampWindow
 
-  for (const rawMessage of selectedMessages) {
+  selectedMessages.forEach((rawMessage, selectedIndex) => {
     const message = compactAssistantMessage(rawMessage)
     const identity = `${message.info.sessionID || session}:${message.info.id}`
-    if (seen.has(identity)) continue
+    if (seen.has(identity)) return
     const nativeText = textParts(message.parts)
     if (message.info.role === "user" && (samePrompt(nativeText, prompt) || isTaskDeskTransfer(nativeText))) {
       seen.add(identity)
-      continue
+      return
     }
     seen.add(identity)
+    // Replayed ACP messages were stamped at replay time, not historical time. Once turn-order
+    // fallback selected the right Run, give those rows a stable synthetic position inside that Run
+    // so the final chronological sort cannot move an old answer beneath a newer Task turn.
+    const created = usingReplayFallback ? start + 1 + selectedIndex : message.info.time.created
     result.push({
       ...message,
-      info: { ...message.info, id: `work-thread:${task.id}:${identity}` },
+      info: { ...message.info, id: `work-thread:${task.id}:${identity}`, time: { ...message.info.time, created } },
       taskdesk: { kind: "native", runId: run.id, agentId: agentID, agentLabel: agent?.label, agentBackend: agent?.backend }
     })
-  }
+  })
 
   const hasAssistant = result.some((message) => message.info.role === "assistant")
   if (!hasAssistant && typeof run.outcome === "string" && run.outcome.trim()) {
