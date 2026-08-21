@@ -26,3 +26,16 @@ test("desktop event routing validates the renderer supplied route", () => {
   assert.match(transport, /\^\[A-Za-z0-9\._-\]\+\$/)
   assert.match(transport, /Event subscription agent is invalid/)
 })
+
+test("TaskDesk Session workspace uses live events as the primary refresh path", () => {
+  const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+
+  assert.match(workspace, /const REFRESH_INTERVAL_MS = 60_000/)
+  assert.match(workspace, /const DETAIL_REFRESH_INTERVAL_MS = 30_000/)
+  assert.match(workspace, /startTaskDeskSessionLiveRefresh\(\{/)
+  assert.match(workspace, /onMessage:[\s\S]*?refreshMessageTail\(item\)/)
+  assert.match(workspace, /onIndex:[\s\S]*?refreshAll\(true\)/)
+  assert.match(workspace, /onDetail:[\s\S]*?loadDetail\(item, true\)/)
+  assert.match(workspace, /if \(!pageIsVisible\(\)\) return/)
+  assert.match(workspace, /<TaskDeskMessageContent message=\{message\} \/>/)
+})
