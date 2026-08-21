@@ -209,13 +209,16 @@ test("TaskDesk v3 aggregates native questions and permissions into Needs You", (
   assert.equal(createTaskDeskTranslator("en")("nav.needs"), "Needs You")
 })
 
-test("Session waiting indicator stays in transcript flow and follows autoscroll", () => {
+test("Session waiting indicator stays in shared transcript flow and follows autoscroll", () => {
   const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+  const conversation = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
   const styles = readFileSync(new URL("./universal-workspace-readable-fixes.css", import.meta.url), "utf8")
 
   assert.match(source, /const sessionWaiting = Boolean\(/)
-  assert.match(source, /detailReady, sessionWaiting\]\)/)
-  assert.match(source, /className="uw-session-typing" role="status" aria-label="Waiting for agent response"/)
+  assert.match(source, /waiting=\{sessionWaiting\}/)
+  assert.match(conversation, /className="uw-session-typing" role="status"/)
+  assert.match(conversation, /aria-label=\{`Waiting for \$\{agentLabel\} response`\}/)
+  assert.match(conversation, /\[messages, loading, ready, waiting, sending\]/)
   assert.match(styles, /\.uw-session-typing \{/)
   assert.match(styles, /box-sizing: border-box/)
   assert.match(styles, /overflow: hidden/)
