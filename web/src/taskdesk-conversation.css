@@ -1,0 +1,7 @@
+.uw-conversation-core {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
