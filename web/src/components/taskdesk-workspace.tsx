@@ -4,8 +4,7 @@ import type { SavedServerProfile } from "../serverProfiles"
 import {
   taskClient,
   type MachineProject,
-  type MachineTask,
-  type MachineTaskRun
+  type MachineTask
 } from "../taskClient"
 import type { MachineAgentHost, MachineSnapshot, ModelOption } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
@@ -19,6 +18,7 @@ import {
   ServerIcon
 } from "../Icons"
 import { UniversalWorkspace } from "./universal-workspace"
+import { WorkThreadDetail } from "./work-thread-detail"
 import "../taskdesk-workthreads.css"
 
 type Props = {
@@ -59,28 +59,27 @@ function errorText(error: unknown): string {
 }
 
 function threadTitle(task: MachineTask): string {
-  const line = task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() || "Untitled work thread"
+  if (task.title?.trim()) return task.title.trim()
+  const line = task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() || "Untitled Work Thread"
   return line.length > 86 ? `${line.slice(0, 83)}...` : line
 }
 
-function latestSessionID(task: MachineTask): string | null {
-  const fromRun = (run?: MachineTaskRun | null) => run?.sessionId || run?.sessionID || null
-  if (fromRun(task.run)) return fromRun(task.run)
-  const runs = Array.isArray(task.runs) ? [...task.runs].reverse() : []
-  return runs.map(fromRun).find(Boolean) || null
+function threadAgentID(task: MachineTask): string {
+  return task.run?.agentId || task.agentId
 }
 
 function threadState(task: MachineTask): "working" | "ready" | "failed" | "idle" {
-  const status = task.status.toLowerCase()
-  if (["running", "preparing", "queued", "launching", "active"].includes(status)) return "working"
-  if (["failed", "error", "cancelled"].includes(status)) return "failed"
-  if (["completed", "finished", "done"].includes(status)) return "ready"
+  if (task.status === "starting" || task.status === "running") return "working"
+  if (task.status === "failed" || task.status === "cancelled") return "failed"
+  if (task.status === "completed" || task.finishedAt) return "ready"
   return "idle"
 }
 
 function threadStateLabel(task: MachineTask): string {
+  if (task.finishedAt) return "Done"
   const state = threadState(task)
   if (state === "working") return "Working"
+  if (task.status === "cancelled") return "Stopped"
   if (state === "ready") return "Ready"
   if (state === "failed") return "Needs attention"
   return "Idle"
@@ -97,9 +96,10 @@ function formatRelative(value: string): string {
 }
 
 function modelLabel(task: MachineTask): string {
-  if (!task.model) return "Default model"
-  const variant = task.model.variant ? ` · ${task.model.variant}` : ""
-  return `${task.model.modelID}${variant}`
+  const model = task.run?.model ?? task.model
+  if (!model) return "Default model"
+  const variant = model.variant ? ` · ${model.variant}` : ""
+  return `${model.modelID}${variant}`
 }
 
 function profileForMachine(machine: WorkspaceMachine): SavedServerProfile {
@@ -107,7 +107,7 @@ function profileForMachine(machine: WorkspaceMachine): SavedServerProfile {
 }
 
 function agentForThread(record: ThreadRecord): MachineAgentHost | undefined {
-  return record.runtime.agents.find((agent) => agent.id === record.task.agentId)
+  return record.runtime.agents.find((agent) => agent.id === threadAgentID(record.task))
 }
 
 function NewWorkThreadModal({
@@ -191,7 +191,19 @@ function NewWorkThreadModal({
           variant: selectedModel.variant
         } : undefined
       })
-      if (project.kind === "git") task = await taskClient.prepareWorktree(runtime.machine.config, task.id)
+      if (project.kind === "git") {
+        task = await taskClient.prepareWorktree(runtime.machine.config, task.id)
+        try {
+          await taskClient.createCheckpoint(runtime.machine.config, task.id, {
+            label: "Before work began",
+            kind: "baseline"
+          })
+          task = await taskClient.getWorkThread(runtime.machine.config, task.id)
+        } catch {
+          // A checkpoint must never prevent the user from starting work. Older daemons also do not
+          // expose the Work Thread checkpoint endpoint, so launch remains backward compatible.
+        }
+      }
       task = await taskClient.launch(runtime.machine.config, task.id)
       onCreated(runtime, task)
       onClose()
@@ -227,7 +239,7 @@ function NewWorkThreadModal({
           </div>
           <div className="tdw-form-row">
             <label><span>Coding agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{runtime.agents.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-            <label><span>Model</span><select value={modelKey} disabled={modelsLoading || models.length === 0} onChange={(event) => setModelKey(event.target.value)}>{models.length === 0 ? <option value="">{modelsLoading ? "Loading models..." : "Default model"}</option> : models.map((model) => <option value={`${model.providerID}|${model.modelID}|${model.variant || ""}`} key={`${model.providerID}|${model.modelID}|${model.variant || ""}`}>{model.modelID}{model.variant ? ` · ${model.variant}` : ""}</option>)}</select></label>
+            <label><span>Model</span><select value={modelKey} disabled={modelsLoading || models.length === 0} onChange={(event) => setModelKey(event.target.value)}>{models.length === 0 ? <option value="">{modelsLoading ? "Loading models..." : "Default model"}</option> : models.map((model) => <option value={`${model.providerID}|${model.modelID}|${model.variant || ""}`} key={`${model.providerID}|${model.modelID}|${model.variant || ""}`}>{model.modelName || model.modelID}{model.variant ? ` · ${model.variant}` : ""}</option>)}</select></label>
           </div>
           <label className="tdw-prompt-field"><span>Start the conversation</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} autoFocus placeholder="Describe the change you want. You can keep refining it in this same conversation after the agent responds." /></label>
           <p className="tdw-safety-note">TaskDesk prepares an isolated coding workspace automatically when the project supports it.</p>
@@ -253,10 +265,10 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   const [newThreadOpen, setNewThreadOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [search, setSearch] = useState("")
-  const [focusRequest, setFocusRequest] = useState<{ sessionID: string; requestID: number } | null>(null)
-  const requestID = useRef(0)
+  const refreshGeneration = useRef(0)
 
   useEffect(() => {
+    const generation = ++refreshGeneration.current
     let cancelled = false
     if (machines.length === 0) {
       setRuntimes([])
@@ -284,9 +296,9 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
         return { machine, snapshot: null, projects: [], tasks: [], agents: [], state: "offline", error: errorText(reason) }
       }
     })).then((next) => {
-      if (!cancelled) setRuntimes(next)
+      if (!cancelled && refreshGeneration.current === generation) setRuntimes(next)
     }).finally(() => {
-      if (!cancelled) {
+      if (!cancelled && refreshGeneration.current === generation) {
         setLoaded(true)
         setRefreshing(false)
       }
@@ -325,22 +337,6 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   }, [threads, visibleThreads, selectedThreadKey])
 
   const selected = threads.find((record) => record.key === selectedThreadKey) || null
-  const selectedAgent = selected ? agentForThread(selected) : undefined
-  const selectedSessionID = selected ? latestSessionID(selected.task) : null
-
-  useEffect(() => {
-    if (!selectedSessionID) {
-      setFocusRequest(null)
-      return
-    }
-    requestID.current += 1
-    setFocusRequest({ sessionID: selectedSessionID, requestID: requestID.current })
-  }, [selectedSessionID])
-
-  useEffect(() => {
-    if (selected) onActiveMachineID(selected.runtime.machine.id)
-  }, [selected?.runtime.machine.id])
-
   const profiles = useMemo(() => machines.map(profileForMachine), [machines])
   const activeProfileID = selected?.runtime.machine.id || activeMachineID || profiles[0]?.id || ""
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
@@ -349,18 +345,32 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   function selectProject(key: string) {
     setSelectedProjectKey(key)
     const first = threads.find((record) => key === "all" || `${record.runtime.machine.id}:${record.task.projectId}` === key)
-    if (first) setSelectedThreadKey(first.key)
+    setSelectedThreadKey(first?.key || null)
+  }
+
+  function updateTask(machineID: string, task: MachineTask) {
+    setRuntimes((current) => current.map((runtime) => runtime.machine.id === machineID
+      ? {
+          ...runtime,
+          tasks: [task, ...runtime.tasks.filter((candidate) => candidate.id !== task.id)].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+        }
+      : runtime))
   }
 
   function upsertCreated(runtime: Runtime, task: MachineTask) {
-    setRuntimes((current) => current.map((item) => item.machine.id === runtime.machine.id
-      ? { ...item, tasks: [task, ...item.tasks.filter((candidate) => candidate.id !== task.id)] }
-      : item))
+    // Invalidate any machine refresh that started before the mutation. Otherwise an old /v1/tasks
+    // response can overwrite the optimistic new thread and leave the previous conversation visible.
+    refreshGeneration.current += 1
+    updateTask(runtime.machine.id, task)
     setSelectedProjectKey(`${runtime.machine.id}:${task.projectId}`)
     setSelectedThreadKey(`${runtime.machine.id}:${task.id}`)
     onActiveMachineID(runtime.machine.id)
     setRevision((value) => value + 1)
   }
+
+  useEffect(() => {
+    if (selected) onActiveMachineID(selected.runtime.machine.id)
+  }, [selected?.runtime.machine.id])
 
   if (mode === "classic") {
     return <div className="tdw-classic-host"><button type="button" className="tdw-return" onClick={() => setMode("workspace")}>← Back to TaskDesk</button>{legacyView}</div>
@@ -412,33 +422,22 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
             {!loaded && threads.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Loading your workspace...</strong></div> : visibleThreads.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No Work Threads here yet</strong><span>Start a conversation and keep refining it until the work is done.</span><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={14} /> New Work Thread</button></div> : visibleThreads.map((record) => {
               const state = threadState(record.task)
               const agent = agentForThread(record)
-              return <button type="button" className={`tdw-thread-card${selectedThreadKey === record.key ? " selected" : ""}`} onClick={() => setSelectedThreadKey(record.key)} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{threadTitle(record.task)}</strong><time>{formatRelative(record.task.updatedAt || record.task.createdAt)}</time></span><span className="tdw-thread-project">{record.task.project?.name || record.task.projectId}</span><span className="tdw-thread-meta">{agent?.label || record.task.agentId} · {modelLabel(record.task)}</span><span className={`tdw-thread-status ${state}`}>{threadStateLabel(record.task)}</span></span></button>
+              return <button type="button" className={`tdw-thread-card${selectedThreadKey === record.key ? " selected" : ""}`} onClick={() => setSelectedThreadKey(record.key)} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{threadTitle(record.task)}</strong><time>{formatRelative(record.task.updatedAt || record.task.createdAt)}</time></span><span className="tdw-thread-project">{record.task.project?.name || record.task.projectId}</span><span className="tdw-thread-meta">{agent?.label || threadAgentID(record.task)} · {modelLabel(record.task)}</span><span className={`tdw-thread-status ${state}`}>{threadStateLabel(record.task)}</span></span></button>
             })}
           </div>
         </section>
 
         <main className="tdw-main">
           {selected ? (
-            <>
-              <header className="tdw-thread-header">
-                <div className="tdw-thread-heading"><span>{selected.task.project?.name || selected.task.projectId}</span><h1>{threadTitle(selected.task)}</h1><p>{selectedAgent?.label || selected.task.agentId} · {modelLabel(selected.task)} · {selected.runtime.snapshot?.machine.name || selected.runtime.machine.name}</p></div>
-                <div className="tdw-thread-header-actions"><span className={`tdw-live-state ${threadState(selected.task)}`}><i />{threadStateLabel(selected.task)}</span><button type="button" className="tdw-button secondary" disabled>History</button></div>
-              </header>
-              {selectedSessionID ? (
-                <div className="tdw-thread-conversation">
-                  <UniversalWorkspace
-                    profiles={profiles}
-                    activeProfileID={activeProfileID}
-                    focusSessionRequest={focusRequest}
-                    mobilePane="detail"
-                    onPersistProfiles={() => undefined}
-                    legacyView={legacyView}
-                  />
-                </div>
-              ) : (
-                <div className="tdw-conversation-pending"><LoadingIcon size={28} /><h2>Preparing this conversation</h2><p>TaskDesk is waiting for the coding agent to expose its native conversation. The Work Thread will open here automatically.</p><button type="button" className="tdw-button secondary" onClick={() => setRevision((value) => value + 1)}>Check again</button></div>
-              )}
-            </>
+            <WorkThreadDetail
+              key={selected.key}
+              task={selected.task}
+              baseConfig={selected.runtime.machine.config}
+              agents={selected.runtime.agents}
+              machineName={selected.runtime.snapshot?.machine.name || selected.runtime.machine.name}
+              onTaskUpdate={(task) => updateTask(selected.runtime.machine.id, task)}
+              onWorkspaceRefresh={() => setRevision((value) => value + 1)}
+            />
           ) : (
             <div className="tdw-welcome"><div className="tdw-welcome-mark"><ChatIcon size={30} /></div><span>TaskDesk 3.0</span><h1>Pick up a conversation, not a task.</h1><p>Open a Work Thread and keep talking to the coding agent until the result is right. TaskDesk keeps the technical session underneath out of your way.</p><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> Start a Work Thread</button></div>
           )}
