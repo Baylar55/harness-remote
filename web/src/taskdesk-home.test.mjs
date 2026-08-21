@@ -89,7 +89,7 @@ test("TaskDesk primary surface is Project -> Work Thread -> native conversation"
   assert.match(source, /Advanced: Native Sessions/)
   assert.doesNotMatch(source, />Tasks</)
   assert.doesNotMatch(source, />Runs</)
-  assert.match(styles, /\.tdw-thread-conversation \.uw-session-column/[\s\S]*?display: none !important/)
+  assert.match(styles, /\.tdw-thread-conversation \.uw-session-column,[\s\S]*?display: none !important/)
   assert.match(styles, /\.tdw-thread-conversation \.uw-session-header[\s\S]*?display: none !important/)
 })
 
