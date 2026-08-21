@@ -4,6 +4,7 @@ import { WorkThreadCheckpointManager } from "./work-thread-checkpoints.js"
 
 const ACTIVE = new Set(["starting", "running"])
 const TERMINAL = new Set(["completed", "failed", "cancelled"])
+const STARTUP_RECONCILE_GRACE_MS = 15_000
 
 function runAgent(task, run = task?.run) {
   return run?.agentId || task?.agentId || ""
@@ -18,6 +19,12 @@ function titleFromTask(task) {
   if (explicit) return explicit
   const line = typeof task?.prompt === "string" ? task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() : ""
   return line || "Untitled Work Thread"
+}
+
+function isInsideStartupGrace(task, now) {
+  const started = Date.parse(task?.run?.startedAt || "")
+  const current = Date.parse(now || "")
+  return Number.isFinite(started) && Number.isFinite(current) && current >= started && current - started < STARTUP_RECONCILE_GRACE_MS
 }
 
 export class WorkThreadController {
@@ -67,7 +74,7 @@ export class WorkThreadController {
       let task = await this.taskStore.get(taskID)
       if (!task || !ACTIVE.has(task.status)) return task
       const state = await this.#inspectActive(task)
-      if (state === "completed") {
+      if (state === "completed" && !isInsideStartupGrace(task, this.clock())) {
         try {
           task = await this.taskStore.setRunState(taskID, {
             status: "completed",
