@@ -57,8 +57,10 @@ type ProjectRecord = {
 type ProductMode = "workspace" | "sessions" | "classic"
 type ProductState = "working" | "ready" | "attention" | "stopped" | "done" | "idle"
 type TaskFilter = "all" | "working" | "attention" | "done"
+type WorkspaceSection = "machines" | "projects" | "harnesses" | "filters"
 
 const WORKSPACE_COLLAPSED_KEY = "harness-remote.taskdesk.workspace-collapsed"
+const WORKSPACE_SECTIONS_COLLAPSED_KEY = "harness-remote.taskdesk.workspace-sections-collapsed"
 const TASK_PANE_WIDTH_KEY = "harness-remote.taskdesk.task-pane-width"
 
 function errorText(error: unknown): string {
@@ -127,8 +129,26 @@ function agentForTask(record: ThreadRecord): MachineAgentHost | undefined {
   return record.runtime.agents.find((agent) => agent.id === taskAgentID(record.task))
 }
 
-function harnessAvailable(agent: MachineAgentHost): boolean {
-  return agent.state === "available"
+function harnessReady(agent: MachineAgentHost): boolean {
+  return agent.state === "available" || agent.state === "configured"
+}
+
+function harnessStateLabel(agent: MachineAgentHost): string {
+  if (agent.state === "available") return "Running"
+  if (agent.state === "configured") return "Ready"
+  if (agent.state === "unavailable") return "Unavailable"
+  return agent.state
+}
+
+function loadCollapsedWorkspaceSections(): Set<WorkspaceSection> {
+  try {
+    const value = JSON.parse(localStorage.getItem(WORKSPACE_SECTIONS_COLLAPSED_KEY) || "[]")
+    if (!Array.isArray(value)) return new Set()
+    const allowed = new Set<WorkspaceSection>(["machines", "projects", "harnesses", "filters"])
+    return new Set(value.filter((item): item is WorkspaceSection => allowed.has(item)))
+  } catch {
+    return new Set()
+  }
 }
 
 function NewTaskModal({
@@ -289,6 +309,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   const [moreOpen, setMoreOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => localStorage.getItem(WORKSPACE_COLLAPSED_KEY) !== "false")
+  const [collapsedSections, setCollapsedSections] = useState<Set<WorkspaceSection>>(loadCollapsedWorkspaceSections)
   const [taskPaneWidth, setTaskPaneWidth] = useState(() => {
     const saved = Number(localStorage.getItem(TASK_PANE_WIDTH_KEY))
     return Number.isFinite(saved) && saved >= 260 && saved <= 480 ? saved : 330
@@ -343,6 +364,10 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   useEffect(() => {
     localStorage.setItem(WORKSPACE_COLLAPSED_KEY, String(workspaceCollapsed))
   }, [workspaceCollapsed])
+
+  useEffect(() => {
+    localStorage.setItem(WORKSPACE_SECTIONS_COLLAPSED_KEY, JSON.stringify([...collapsedSections]))
+  }, [collapsedSections])
 
   const threads = useMemo<ThreadRecord[]>(() => runtimes.flatMap((runtime) => runtime.tasks.map((task) => ({ key: `${runtime.machine.id}:${task.id}`, runtime, task }))).sort((a, b) => Date.parse(b.task.updatedAt) - Date.parse(a.task.updatedAt)), [runtimes])
 
@@ -404,6 +429,15 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     }
     setTaskFilter("all")
     setMobileDetailOpen(false)
+  }
+
+  function toggleWorkspaceSection(section: WorkspaceSection) {
+    setCollapsedSections((current) => {
+      const next = new Set(current)
+      if (next.has(section)) next.delete(section)
+      else next.add(section)
+      return next
+    })
   }
 
   function beginTaskPaneResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -491,28 +525,44 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
         <aside className="tdw-project-column">
           <div className="tdw-column-heading tdw-workspace-heading"><div><span>Navigation</span><h2>Workspace</h2></div><button type="button" className="tdw-sidebar-collapse" onClick={() => setWorkspaceCollapsed((value) => !value)} title={workspaceCollapsed ? "Expand workspace" : "Collapse workspace"} aria-label={workspaceCollapsed ? "Expand workspace" : "Collapse workspace"}>{workspaceCollapsed ? "›" : "‹"}</button></div>
 
-          <div className="tdw-workspace-section tdw-machine-section">
-            <span className="tdw-workspace-label">Machines</span>
-            <button type="button" className={`tdw-side-row${selectedMachineID === "all" ? " active" : ""}`} onClick={() => selectMachine("all")} title="All machines"><span className="tdw-side-icon"><ServerIcon size={14} /></span><span><strong>All machines</strong><small>{onlineCount}/{runtimes.length} online</small></span></button>
-            {runtimes.map((runtime) => <button type="button" className={`tdw-side-row${selectedMachineID === runtime.machine.id ? " active" : ""}`} onClick={() => selectMachine(runtime.machine.id)} key={runtime.machine.id} title={runtime.snapshot?.machine.name || runtime.machine.name}><span className={`tdw-presence-dot ${runtime.state}`} /><span><strong>{runtime.snapshot?.machine.name || runtime.machine.name}</strong><small>{runtime.snapshot?.agents.filter(harnessAvailable).length || 0}/{runtime.snapshot?.agents.length || 0} harnesses available</small></span></button>)}
-          </div>
-
-          <div className="tdw-workspace-section tdw-harness-section">
-            <span className="tdw-workspace-label">Harnesses</span>
-            {shownHarnesses.length ? shownHarnesses.map(({ runtime, agent }) => <div className="tdw-harness-row" key={`${runtime.machine.id}:${agent.id}`} title={`${agent.label} · ${agent.state}`}><span className={`tdw-presence-dot ${agent.state}`} /><span><strong>{agent.label}</strong><small>{agent.state}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span></div>) : <div className="tdw-side-empty">No harnesses detected</div>}
-          </div>
-
-          <div className="tdw-workspace-section tdw-project-section">
-            <span className="tdw-workspace-label">Projects</span>
-            <button type="button" className={`tdw-project-row${selectedProjectKey === "all" ? " active" : ""}`} onClick={() => selectProject("all")} title="All projects"><span className="tdw-project-icon"><ChatIcon size={15} /></span><span><strong>All projects</strong><small>Across the selected machine scope</small></span><b>{projectScopedThreads.length}</b></button>
-            <div className="tdw-project-list">
-              {visibleProjects.map((record) => <button type="button" className={`tdw-project-row${selectedProjectKey === record.key ? " active" : ""}`} onClick={() => selectProject(record.key)} key={record.key} title={record.project.name}><span className="tdw-project-icon"><FolderIcon size={15} /></span><span><strong>{record.project.name}</strong><small>{record.runtime.snapshot?.machine.name || record.runtime.machine.name}</small></span><b>{record.count}</b></button>)}
+          <div className={`tdw-workspace-section tdw-machine-section${collapsedSections.has("machines") ? " section-collapsed" : ""}`}>
+            <button type="button" className="tdw-workspace-section-header" onClick={() => toggleWorkspaceSection("machines")} aria-expanded={!collapsedSections.has("machines")}>
+              <span className="tdw-workspace-label">Machines</span><span className="tdw-section-chevron">⌄</span>
+            </button>
+            <div className="tdw-workspace-section-body">
+              <button type="button" className={`tdw-side-row${selectedMachineID === "all" ? " active" : ""}`} onClick={() => selectMachine("all")} title="All machines"><span className="tdw-side-icon"><ServerIcon size={14} /></span><span><strong>All machines</strong><small>{onlineCount}/{runtimes.length} online</small></span></button>
+              {runtimes.map((runtime) => <button type="button" className={`tdw-side-row${selectedMachineID === runtime.machine.id ? " active" : ""}`} onClick={() => selectMachine(runtime.machine.id)} key={runtime.machine.id} title={runtime.snapshot?.machine.name || runtime.machine.name}><span className={`tdw-presence-dot ${runtime.state}`} /><span><strong>{runtime.snapshot?.machine.name || runtime.machine.name}</strong><small>{runtime.snapshot?.agents.filter(harnessReady).length || 0}/{runtime.snapshot?.agents.length || 0} harnesses ready</small></span></button>)}
             </div>
           </div>
 
-          <div className="tdw-workspace-section tdw-filter-section">
-            <span className="tdw-workspace-label">Task filters</span>
-            {(["all", "working", "attention", "done"] as TaskFilter[]).map((filter) => <button type="button" className={`tdw-filter-row${taskFilter === filter ? " active" : ""}`} key={filter} onClick={() => setTaskFilter(filter)}><span className={`tdw-filter-dot ${filter}`} /><span>{filter === "all" ? "All" : filter === "working" ? "Working" : filter === "attention" ? "Needs attention" : "Done"}</span><b>{statusCounts[filter]}</b></button>)}
+          <div className={`tdw-workspace-section tdw-project-section${collapsedSections.has("projects") ? " section-collapsed" : ""}`}>
+            <button type="button" className="tdw-workspace-section-header" onClick={() => toggleWorkspaceSection("projects")} aria-expanded={!collapsedSections.has("projects")}>
+              <span className="tdw-workspace-label">Projects</span><span className="tdw-section-chevron">⌄</span>
+            </button>
+            <div className="tdw-workspace-section-body">
+              <button type="button" className={`tdw-project-row${selectedProjectKey === "all" ? " active" : ""}`} onClick={() => selectProject("all")} title="All projects"><span className="tdw-project-icon"><ChatIcon size={15} /></span><span><strong>All projects</strong><small>Across the selected machine scope</small></span><b>{projectScopedThreads.length}</b></button>
+              <div className="tdw-project-list">
+                {visibleProjects.map((record) => <button type="button" className={`tdw-project-row${selectedProjectKey === record.key ? " active" : ""}`} onClick={() => selectProject(record.key)} key={record.key} title={record.project.name}><span className="tdw-project-icon"><FolderIcon size={15} /></span><span><strong>{record.project.name}</strong><small>{record.runtime.snapshot?.machine.name || record.runtime.machine.name}</small></span><b>{record.count}</b></button>)}
+              </div>
+            </div>
+          </div>
+
+          <div className={`tdw-workspace-section tdw-harness-section${collapsedSections.has("harnesses") ? " section-collapsed" : ""}`}>
+            <button type="button" className="tdw-workspace-section-header" onClick={() => toggleWorkspaceSection("harnesses")} aria-expanded={!collapsedSections.has("harnesses")}>
+              <span className="tdw-workspace-label">Harnesses</span><span className="tdw-section-chevron">⌄</span>
+            </button>
+            <div className="tdw-workspace-section-body">
+              {shownHarnesses.length ? shownHarnesses.map(({ runtime, agent }) => <div className="tdw-harness-row" key={`${runtime.machine.id}:${agent.id}`} title={`${agent.label} · ${harnessStateLabel(agent)}`}><span className={`tdw-presence-dot ${agent.state}`} /><span><strong>{agent.label}</strong><small>{harnessStateLabel(agent)}{agent.state === "configured" ? " · starts on use" : ""}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span></div>) : <div className="tdw-side-empty">No harnesses detected</div>}
+            </div>
+          </div>
+
+          <div className={`tdw-workspace-section tdw-filter-section${collapsedSections.has("filters") ? " section-collapsed" : ""}`}>
+            <button type="button" className="tdw-workspace-section-header" onClick={() => toggleWorkspaceSection("filters")} aria-expanded={!collapsedSections.has("filters")}>
+              <span className="tdw-workspace-label">Task filters</span><span className="tdw-section-chevron">⌄</span>
+            </button>
+            <div className="tdw-workspace-section-body">
+              {(["all", "working", "attention", "done"] as TaskFilter[]).map((filter) => <button type="button" className={`tdw-filter-row${taskFilter === filter ? " active" : ""}`} key={filter} onClick={() => setTaskFilter(filter)}><span className={`tdw-filter-dot ${filter}`} /><span>{filter === "all" ? "All" : filter === "working" ? "Working" : filter === "attention" ? "Needs attention" : "Done"}</span><b>{statusCounts[filter]}</b></button>)}
+            </div>
           </div>
         </aside>
 
