@@ -178,3 +178,20 @@ test("persisted outcome fills old Work Thread history when a native Session can 
   ])
   assert.equal(timeline[1].taskdesk.kind, "fallback-result")
 })
+
+test("duplicate native assistant envelopes for one Run collapse to one visible reply", () => {
+  const first = run()
+  const started = Date.parse(first.startedAt)
+  const value = task({ run: first, runs: [first] })
+  const timeline = buildWorkThreadTimeline(value, {
+    "session-codex": [
+      message("session-codex", "a-first", "assistant", started + 15_000, "Same completed answer"),
+      message("session-codex", "a-journal-copy", "assistant", started + 15_050, "Same   completed\nanswer")
+    ]
+  }, agents)
+
+  assert.deepEqual(timeline.map((entry) => [entry.info.role, textOf(entry)]), [
+    ["user", "Initial request"],
+    ["assistant", "Same completed answer"]
+  ])
+})
