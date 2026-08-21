@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-test("TaskDesk pauses hidden work and avoids duplicate Tasks and Sessions polling", () => {
+test("TaskDesk pauses hidden work and uses live events with slow Sessions reconciliation", () => {
   const taskDesk = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
   const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
 
@@ -12,8 +12,9 @@ test("TaskDesk pauses hidden work and avoids duplicate Tasks and Sessions pollin
   assert.match(taskDesk, /if \(view !== "tasks" \|\| !selected \|\| !detailOpen\)/)
   assert.match(taskDesk, /if \(pageIsVisible\(\)\) void refresh\(\)/)
 
-  assert.match(workspace, /const REFRESH_INTERVAL_MS = 10_000/)
-  assert.match(workspace, /const DETAIL_REFRESH_INTERVAL_MS = 5_000/)
+  assert.match(workspace, /const REFRESH_INTERVAL_MS = 60_000/)
+  assert.match(workspace, /const DETAIL_REFRESH_INTERVAL_MS = 30_000/)
+  assert.match(workspace, /startTaskDeskSessionLiveRefresh\(\{/)
   assert.match(workspace, /const detailInFlight = useRef\(false\)/)
   assert.match(workspace, /if \(detailInFlight\.current && silent\) return/)
   assert.match(workspace, /if \(pageIsVisible\(\)\) void refreshAll\(true\)/)

@@ -165,8 +165,8 @@ export function subscribeDesktopMenuCommands(callback: (command: DesktopMenuComm
   return bridge()?.onMenuCommand(callback) ?? (() => undefined)
 }
 
-/** True only where the platform draws the menu itself, which today means macOS. Everywhere else —
- *  the browser, Windows, Linux — the app draws its own menu bar and binds its own accelerators. */
+/** True only where the platform draws the menu itself, which today means macOS. Everywhere else,
+ *  the browser, Windows and Linux, the app draws its own menu bar and binds its own accelerators. */
 export function desktopUsesNativeMenu(): boolean {
   return desktopPlatform()?.usesNativeMenu === true
 }
@@ -198,6 +198,8 @@ export function createDesktopOpenCodeEventSubscription(options: {
   profileId: string
   scope: "global" | "project"
   directory?: string
+  backend?: ServerConfig["backend"]
+  agentId?: string
   onEvent: (event: DesktopEvent) => void
   onStatus?: (status: DesktopEventStatus) => void
 }): DesktopSubscription {
@@ -216,7 +218,12 @@ export function createDesktopOpenCodeEventSubscription(options: {
       }
       const id = await api.subscribeEvents(
         options.profileId,
-        { scope: options.scope, directory: options.directory },
+        {
+          scope: options.scope,
+          directory: options.directory,
+          backend: options.backend,
+          agentId: options.agentId
+        },
         options.onEvent,
         options.onStatus
       )
