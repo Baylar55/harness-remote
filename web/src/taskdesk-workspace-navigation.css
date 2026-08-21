@@ -52,6 +52,11 @@
 .tdw-presence-dot.online, .tdw-presence-dot.available, .tdw-presence-dot.configured { background: var(--td3-green); }
 .tdw-presence-dot.loading { background: var(--td3-yellow); }
 .tdw-presence-dot.offline, .tdw-presence-dot.unavailable { background: var(--td3-red); }
+/* A row exists only after the daemon has detected that harness. Detection is the useful binary
+   signal here, so every detected harness is green regardless of lazy/running/transitional process
+   state. Text carries Ready/Running detail; only a real unavailable state is red. */
+.tdw-harness-row .tdw-presence-dot { background: var(--td3-green); }
+.tdw-harness-row .tdw-presence-dot.unavailable { background: var(--td3-red); }
 .tdw-harness-row { grid-template-columns: 18px minmax(0, 1fr); }
 .tdw-side-empty { padding: 6px 7px; color: var(--td3-muted); font-size: 9px; }
 .tdw-project-section .tdw-project-row { width: 100%; margin: 2px 0; min-height: 40px; }
@@ -110,7 +115,8 @@
 
 /* Machines exposes the live harness inventory returned by the daemon. A configured ACP host is
    ready to use but intentionally starts lazily, so both configured (Ready) and available
-   (Running) use the healthy green affordance. Yellow is reserved for genuinely transitional state. */
+   (Running) use the healthy green affordance. Yellow is reserved for machine/task transitions,
+   not harness detection. */
 .uw-machine-config-main { flex: 1; }
 .uw-machine-harness-list {
   min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px;
@@ -120,9 +126,9 @@
   padding: 4px 7px; border: 1px solid var(--td3-border); border-radius: 999px;
   color: var(--td3-text-3); background: var(--td3-raise-1);
 }
-.uw-machine-harness > i { width: 7px; height: 7px; border-radius: 999px; background: var(--td3-muted); }
+.uw-machine-harness > i { width: 7px; height: 7px; border-radius: 999px; background: var(--td3-green); }
 .uw-machine-harness > i.available, .uw-machine-harness > i.configured { background: var(--td3-green); }
-.uw-machine-harness > i.loading { background: var(--td3-yellow); }
+.uw-machine-harness > i.loading { background: var(--td3-green); }
 .uw-machine-harness > i.unavailable { background: var(--td3-red); }
 .uw-machine-harness > strong { font-size: 10px; }
 .uw-machine-harness > small { color: var(--td3-muted); font-size: 8.5px; }
