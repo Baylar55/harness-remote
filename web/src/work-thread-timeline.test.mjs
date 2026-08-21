@@ -197,7 +197,33 @@ test("duplicate native assistant envelopes for one Run collapse to one visible r
   ])
 })
 
-test("PI-style partial text around fragmented reasoning becomes one Activity and one final answer", () => {
+test("replayed ACP timestamps after old Runs still recover the complete Task before another prompt", () => {
+  const first = run({ sessionId: "replayed-session" })
+  const second = run({
+    id: "run-2",
+    sequence: 2,
+    prompt: "Please refine that",
+    sessionId: "replayed-session",
+    startedAt: "2026-08-21T10:02:00.000Z",
+    finishedAt: "2026-08-21T10:03:00.000Z"
+  })
+  const value = task({ run: second, runs: [first, second], updatedAt: second.finishedAt })
+  // ACP replay chunks have no historical timestamp, so the bridge has to stamp them when replay
+  // happens. Before this regression fix, every native message below was outside both old Run windows
+  // and the Task looked empty until sending the next prompt created a new window around 12:00.
+  const replayedAt = Date.parse("2026-08-21T12:00:00.000Z")
+  const native = [
+    message("replayed-session", "u1", "user", replayedAt, first.prompt),
+    message("replayed-session", "a1", "assistant", replayedAt + 1, "First answer"),
+    message("replayed-session", "u2", "user", replayedAt + 2, second.prompt),
+    message("replayed-session", "a2", "assistant", replayedAt + 3, "Second answer")
+  ]
+
+  const timeline = buildWorkThreadTimeline(value, { "replayed-session": native }, agents)
+  assert.deepEqual(timeline.map(textOf), ["Initial request", "First answer", "Please refine that", "Second answer"])
+})
+
+test("PI-style partial text keeps fragmented reasoning ordered and one final answer", () => {
   const first = run({ agentId: "pi", sessionId: "session-pi" })
   const started = Date.parse(first.startedAt)
   const value = task({ agentId: "pi", run: first, runs: [first] })
@@ -214,9 +240,8 @@ test("PI-style partial text around fragmented reasoning becomes one Activity and
   const assistant = timeline.find((entry) => entry.info.role === "assistant")
 
   assert.ok(assistant)
-  assert.equal(assistant.parts.filter((part) => part.type === "reasoning").length, 1)
+  assert.equal(assistant.parts.filter((part) => part.type === "reasoning").length, 2)
   assert.equal(assistant.parts.filter((part) => part.type === "text").length, 1)
   assert.equal(textOf(assistant), "The bug comes from the stale session. I fixed the fallback and added a regression test.")
-  assert.equal(assistant.parts[0].type, "reasoning")
-  assert.equal(assistant.parts.at(-1).type, "text")
+  assert.deepEqual(assistant.parts.map((part) => part.type), ["reasoning", "reasoning", "text"])
 })
