@@ -15,3 +15,7 @@ test("daemon registers managed OpenCode for first-use startup instead of boot st
   assert.match(registration[0], /id: "opencode"/)
   assert.match(registration[0], /eager: false/)
 })
+
+test("managed OpenCode stderr is visibly attributed by the daemon", () => {
+  assert.match(source, /managedOpenCode\.on\("stderr", \(line\) => process\.stderr\.write\(`\[opencode\] \$\{line\}\\n`\)\)/)
+})
