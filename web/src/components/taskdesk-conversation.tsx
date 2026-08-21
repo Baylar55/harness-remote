@@ -1,10 +1,11 @@
 import { memo, useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
 import type { MessageEnvelope } from "../types"
-import { ChatIcon, LoadingIcon } from "../Icons"
+import { ChatIcon, LoadingIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
 const NEAR_BOTTOM_PX = 96
+const COMPOSER_MAX_HEIGHT_PX = 180
 
 type Props = {
   messages: MessageEnvelope[]
@@ -20,6 +21,10 @@ type Props = {
   onDraftChange: (value: string) => void
   onSend: () => Promise<void> | void
   sending?: boolean
+  sendDisabled?: boolean
+  onStop?: () => Promise<void> | void
+  stopping?: boolean
+  workingLabel?: string
   placeholder?: string
   emptyText?: string
   directory?: string
@@ -30,6 +35,10 @@ type Props = {
 function formatClock(timestamp: number): string {
   if (!timestamp) return ""
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp)
+}
+
+function hasTouchFirstPointer(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true
 }
 
 /**
@@ -72,15 +81,23 @@ export function TaskDeskConversation({
   onDraftChange,
   onSend,
   sending = false,
+  sendDisabled = false,
+  onStop,
+  stopping = false,
+  workingLabel,
   placeholder,
   emptyText = "This conversation has no messages yet.",
   directory,
-  footerHint = "Shift+Enter for newline",
+  footerHint,
   renderMessage
 }: Props) {
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const nearBottomRef = useRef(true)
   const preservingOlderRef = useRef(false)
+  const touchFirst = hasTouchFirstPointer()
+  const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
+  const hint = footerHint ?? (touchFirst ? "Ctrl/Cmd+Enter to send" : "Shift+Enter for newline")
 
   useEffect(() => {
     const transcript = transcriptRef.current
@@ -88,6 +105,13 @@ export function TaskDeskConversation({
     if (!nearBottomRef.current && !waiting && !sending) return
     transcript.scrollTop = transcript.scrollHeight
   }, [messages, loading, ready, waiting, sending])
+
+  useEffect(() => {
+    const composer = composerRef.current
+    if (!composer) return
+    composer.style.height = "auto"
+    composer.style.height = `${Math.min(COMPOSER_MAX_HEIGHT_PX, Math.max(66, composer.scrollHeight))}px`
+  }, [draft])
 
   async function loadOlder() {
     if (!onLoadOlder || !hasMore || loadingOlder) return
@@ -109,9 +133,14 @@ export function TaskDeskConversation({
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== "Enter" || event.shiftKey) return
+    if (event.key !== "Enter") return
+    if (touchFirst) {
+      if (!event.ctrlKey && !event.metaKey) return
+    } else if (event.shiftKey) {
+      return
+    }
     event.preventDefault()
-    if (draft.trim() && !sending && ready) void onSend()
+    if (canSend) void onSend()
   }
 
   return (
@@ -150,31 +179,46 @@ export function TaskDeskConversation({
             <span />
             <span />
             <span />
+            {workingLabel ? <b className="uw-session-typing-label">{workingLabel}</b> : null}
           </div>
         ) : null}
       </div>
 
       <div className="uw-composer-shell">
         <textarea
+          ref={composerRef}
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={onComposerKeyDown}
-          placeholder={placeholder || `Continue with ${agentLabel}…`}
+          placeholder={waiting ? `${agentLabel} is working…` : placeholder || `Continue with ${agentLabel}…`}
           rows={3}
+          disabled={!ready}
         />
         <div className="uw-composer-footer">
           <span className="uw-composer-directory">{directory || ""}</span>
           <div>
-            <small>{footerHint}</small>
-            <button
-              type="button"
-              className="uw-button uw-button-primary"
-              disabled={!draft.trim() || sending || !ready}
-              onClick={() => void onSend()}
-            >
-              {sending ? <LoadingIcon size={15} /> : "↑"}
-              {sending ? "Sending" : "Send"}
-            </button>
+            <small>{hint}</small>
+            {waiting && onStop ? (
+              <button
+                type="button"
+                className="uw-button uw-button-danger"
+                disabled={stopping}
+                onClick={() => void onStop()}
+              >
+                {stopping ? <LoadingIcon size={15} /> : <StopCircleIcon size={15} />}
+                {stopping ? "Stopping" : "Stop"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="uw-button uw-button-primary"
+                disabled={!canSend}
+                onClick={() => void onSend()}
+              >
+                {sending ? <LoadingIcon size={15} /> : "↑"}
+                {sending ? "Sending" : "Send"}
+              </button>
+            )}
           </div>
         </div>
       </div>
