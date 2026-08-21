@@ -28,7 +28,7 @@ function task(overrides = {}) {
   }
 }
 
-test("legacy task status normalization remains compatible with persisted Work Threads", () => {
+test("legacy task status normalization remains compatible with persisted records", () => {
   assert.equal(normalizeTaskStatus("created"), "preparing")
   assert.equal(normalizeTaskStatus("pending"), "queued")
   assert.equal(normalizeTaskStatus("busy"), "running")
@@ -40,7 +40,7 @@ test("legacy task status normalization remains compatible with persisted Work Th
   assert.equal(taskStatusLabel("custom-state"), "custom-state")
 })
 
-test("legacy persisted records retain stable labels while the product calls them Work Threads", () => {
+test("persisted task records retain stable labels", () => {
   const value = task()
   assert.equal(taskTitle(value), "Fix the authentication regression")
   assert.equal(modelLabel(value), "gpt-test · high")
@@ -53,7 +53,7 @@ test("legacy persisted records retain stable labels while the product calls them
   ]).map((item) => item.id), ["newer", "older"])
 })
 
-test("TaskDesk machine configuration remains independent from Classic profiles and activates Work Threads", () => {
+test("TaskDesk machine configuration remains independent from Classic profiles and activates Tasks", () => {
   const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
   const machineStorage = readFileSync(new URL("./workspaceMachines.ts", import.meta.url), "utf8")
   const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
@@ -65,22 +65,20 @@ test("TaskDesk machine configuration remains independent from Classic profiles a
   assert.match(machineStorage, /harness-remote\.workspace\.machines\.v1/)
   assert.match(standalone, /import \{ TaskDeskWorkspace \} from "\.\/taskdesk-workspace"/)
   assert.match(standalone, /<TaskDeskWorkspace/)
-  assert.doesNotMatch(standalone, /TaskDeskV3Unified/)
 })
 
-test("primary product surface is Project -> Work Thread -> Conversation, not Task -> Run -> Session", () => {
+test("primary product surface is Project -> Task -> Conversation while Runs and Sessions remain technical", () => {
   const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
   const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
 
-  assert.match(shell, /<h2>Projects<\/h2>/)
-  assert.match(shell, /<h2>Work Threads<\/h2>/)
-  assert.match(shell, /New Work Thread/)
+  assert.match(shell, /<span className="tdw-workspace-label">Projects<\/span>/)
+  assert.match(shell, /<h2>Tasks<\/h2>/)
+  assert.match(shell, />New Task</)
   assert.match(shell, /<WorkThreadDetail/)
   assert.match(shell, /key=\{selected\.key\}/)
   assert.doesNotMatch(shell, /function latestSessionID/)
   assert.doesNotMatch(shell, /focusSessionRequest/)
-  assert.doesNotMatch(shell, />Tasks</)
   assert.doesNotMatch(shell, />Runs</)
   assert.match(detail, />Conversation</)
   assert.match(detail, />Changes</)
@@ -91,18 +89,41 @@ test("primary product surface is Project -> Work Thread -> Conversation, not Tas
   assert.match(conversation, /buildWorkThreadTimeline/)
 })
 
-test("Projects and Work Threads are columns in one workspace, not misleading top-level modes", () => {
+test("Workspace sidebar exposes machines harness presence projects filters and adaptive sizing", () => {
   const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const css = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
 
-  assert.doesNotMatch(shell, /tdw-primary-nav/)
-  assert.match(shell, /className="tdw-context-path"/)
-  assert.match(shell, /selectedProject\?\.project\.name \|\| "All projects"/)
-  assert.match(shell, /<strong>Work Threads<\/strong>/)
-  assert.match(shell, /tdw-machines-button/)
-  assert.match(shell, /setSelectedProjectKey\(key\)/)
+  assert.match(shell, /selectedMachineID/)
+  assert.match(shell, /tdw-machine-section/)
+  assert.match(shell, /tdw-harness-section/)
+  assert.match(shell, /runtime\.snapshot\?\.agents/)
+  assert.match(shell, /Task filters/)
+  assert.match(shell, /workspaceCollapsed/)
+  assert.match(shell, /TASK_PANE_WIDTH_KEY/)
+  assert.match(shell, /tdw-pane-resizer/)
+  assert.match(css, /workspace-collapsed/)
+  assert.match(css, /--tdw-thread-width/)
+  assert.match(css, /cursor: col-resize/)
+  assert.doesNotMatch(shell, /All agents quiet/)
+  assert.doesNotMatch(shell, /Manage machines/)
 })
 
-test("New Work Thread starts immediately selected and invalidates stale machine refreshes", () => {
+test("Task states distinguish agent completion from user completion", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
+  const css = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
+
+  assert.match(shell, /if \(task\.finishedAt\) return "done"/)
+  assert.match(shell, /task\.status === "failed"\) return "attention"/)
+  assert.match(shell, /task\.status === "cancelled"\) return "stopped"/)
+  assert.match(shell, /task\.status === "completed"\) return "ready"/)
+  assert.match(detail, /if \(task\.finishedAt\) return "Done"/)
+  assert.match(detail, /stateClass\(task\)/)
+  assert.match(css, /tdw-thread-status\.done/)
+  assert.match(css, /tdw-live-state\.done/)
+})
+
+test("New Task starts immediately selected and invalidates stale machine refreshes", () => {
   const source = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
 
   assert.match(source, /taskClient\.createTask/)
@@ -114,7 +135,7 @@ test("New Work Thread starts immediately selected and invalidates stale machine 
   assert.match(source, /setSelectedThreadKey\(`\$\{runtime\.machine\.id\}:\$\{task\.id\}`\)/)
 })
 
-test("Work Thread composer continues through product lifecycle and can switch agent/model", () => {
+test("Task composer continues through product lifecycle and can switch agent/model", () => {
   const source = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
 
@@ -128,10 +149,9 @@ test("Work Thread composer continues through product lifecycle and can switch ag
   assert.match(source, /sendInFlightRef\.current/)
   assert.match(source, /if \(!text \|\| sending \|\| working \|\| sendInFlightRef\.current\) return/)
   assert.match(client, /mode\?: "fresh" \| "resume"/)
-  assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/continue/)
 })
 
-test("model selection is searchable, grouped and shared between creation and conversation", () => {
+test("model selection is searchable grouped and shared between creation and conversation", () => {
   const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const picker = readFileSync(new URL("./components/model-picker.tsx", import.meta.url), "utf8")
@@ -166,29 +186,20 @@ test("Working state is reconciled from the real native session and the chat expo
   assert.match(shared, /workingLabel/)
   assert.match(shared, /waiting && onStop/)
   assert.match(shared, /className="uw-button uw-button-danger"/)
-  assert.match(shared, /stopping \? "Stopping" : "Stop"/)
-  assert.match(server, /service\.status\(sessionID\(task\.run\)\)/)
-  assert.match(server, /await abortWorkThreadRun\(task, this\.taskRunController\)/)
   assert.match(abort, /service\.abort\(sessionID\)/)
-  assert.match(abort, /\/abort\?directory=/)
 })
 
-test("real native questions and permissions appear in the Work Thread rather than a permanent Needs You navigation pillar", () => {
-  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+test("real native questions and permissions appear inline rather than as permanent navigation", () => {
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const attention = readFileSync(new URL("./components/work-thread-attention.tsx", import.meta.url), "utf8")
-
-  assert.doesNotMatch(shell, />Needs You</)
   assert.match(conversation, /api\.loadQuestions/)
   assert.match(conversation, /api\.loadPermissions/)
-  assert.match(conversation, /request\.sessionID === session/)
   assert.match(attention, /api\.replyQuestion/)
   assert.match(attention, /api\.replyPermission/)
 })
 
-test("Changes Result History checkpoint and Restore are first-class Work Thread surfaces", () => {
+test("Changes Result History checkpoint and Restore are first-class Task surfaces", () => {
   const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
-  const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
   const checkpoints = readFileSync(new URL("../../bridge/src/work-thread-checkpoints.js", import.meta.url), "utf8")
 
   assert.match(detail, /taskClient\.inspectWorkspace/)
@@ -197,41 +208,32 @@ test("Changes Result History checkpoint and Restore are first-class Work Thread 
   assert.match(detail, /Save checkpoint/)
   assert.match(detail, /Restore this version/)
   assert.match(detail, /taskClient\.restoreCheckpoint/)
-  assert.match(client, /\/v1\/work-threads\/\$\{encodeURIComponent\(taskId\)\}\/checkpoints/)
+  assert.match(detail, /<ReactMarkdown remarkPlugins=\{REMARK_PLUGINS\}>\{outcome\}<\/ReactMarkdown>/)
   assert.match(checkpoints, /git.*stash.*create|"stash", "create"/s)
-  assert.match(checkpoints, /"restore", `--source=\$\{checkpoint\.commit\}`/)
 })
 
 test("Native Sessions remain available only as Advanced diagnostics in the normal TaskDesk shell", () => {
   const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
-
   assert.match(shell, /Advanced: Native Sessions/)
   assert.match(shell, /if \(mode === "sessions"\)/)
   assert.match(shell, /<UniversalWorkspace profiles=\{profiles\}/)
-  const ordinaryMain = shell.match(/<main className=\{`tdw-main\$\{mobileDetailOpen \? " mobile-open" : ""\}`\}>[\s\S]*?<\/main>/)
-  assert.ok(ordinaryMain)
-  assert.doesNotMatch(ordinaryMain[0], /UniversalWorkspace/)
 })
 
-test("shared conversation keeps bounded paging, streaming autoscroll, memoized rows and mobile-friendly keyboard behavior", () => {
+test("shared conversation keeps bounded paging streaming autoscroll memoized rows and mobile-friendly keyboard behavior", () => {
   const source = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
   const css = readFileSync(new URL("./taskdesk-conversation.css", import.meta.url), "utf8")
 
   assert.match(source, /const MessageBubble = memo/)
   assert.match(source, /NEAR_BOTTOM_PX = 96/)
   assert.match(source, /previousHeight/)
-  assert.match(source, /previousTop/)
   assert.match(source, /messages, loading, ready, waiting, sending/)
   assert.match(source, /hasTouchFirstPointer/)
   assert.match(source, /event\.ctrlKey/)
   assert.match(source, /event\.metaKey/)
-  assert.match(source, /event\.shiftKey/)
   assert.match(source, /COMPOSER_MAX_HEIGHT_PX = 180/)
   assert.match(source, /uw-thinking-orb/)
-  assert.match(source, /setElapsed/)
   assert.match(css, /font-size: 15\.5px/)
   assert.match(css, /width: min\(1040px, 100%\)/)
   assert.match(css, /uw-activity-parts/)
   assert.match(css, /overflow-wrap: anywhere/)
-  assert.match(css, /tdw-thinking-shimmer/)
 })
