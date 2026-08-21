@@ -1,6 +1,7 @@
-import { memo, useEffect, useRef, type KeyboardEvent } from "react"
+import { memo, useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
 import type { MessageEnvelope } from "../types"
 import { ChatIcon, LoadingIcon } from "../Icons"
+import "../taskdesk-conversation.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
 const NEAR_BOTTOM_PX = 96
@@ -23,6 +24,7 @@ type Props = {
   emptyText?: string
   directory?: string
   footerHint?: string
+  renderMessage?: (message: MessageEnvelope) => ReactNode
 }
 
 function formatClock(timestamp: number): string {
@@ -73,7 +75,8 @@ export function TaskDeskConversation({
   placeholder,
   emptyText = "This conversation has no messages yet.",
   directory,
-  footerHint = "Shift+Enter for newline"
+  footerHint = "Shift+Enter for newline",
+  renderMessage
 }: Props) {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
@@ -135,9 +138,11 @@ export function TaskDeskConversation({
             ) : null}
             {messages.length === 0 && !waiting ? (
               <div className="uw-empty-panel"><ChatIcon size={24} /><strong>{emptyText}</strong></div>
-            ) : messages.map((message) => (
-              <MessageBubble key={message.info.id} message={message} agentLabel={agentLabel} />
-            ))}
+            ) : renderMessage
+              ? messages.map((message) => renderMessage(message))
+              : messages.map((message) => (
+                  <MessageBubble key={message.info.id} message={message} agentLabel={agentLabel} />
+                ))}
           </>
         )}
         {waiting ? (
