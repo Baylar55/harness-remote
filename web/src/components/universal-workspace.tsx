@@ -820,7 +820,7 @@ function QuestionPanel({
           {question.custom ? (
             <input
               value={custom[index] || ""}
-              onChange={(event) => setCustom((current) => ({ ...current, [index]: event.target.value }))
+              onChange={(event) => setCustom((current) => ({ ...current, [index]: event.target.value }))}
               placeholder="Custom answer…"
             />
           ) : null}
