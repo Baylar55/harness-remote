@@ -169,6 +169,7 @@ async function main() {
       password: config.password,
       startTimeoutMs: openCodeTimeout
     })
+    managedOpenCode.on("stderr", (line) => process.stderr.write(`[opencode] ${line}\n`))
     const openCodeModels = new HttpAgentModelCatalog({ host: managedOpenCode, agentID: "opencode" })
     // OpenCode is intentionally lazy like the ACP harnesses. Starting its Bun server during daemon
     // boot used resources before the user selected it and also surfaced upstream GlobalBus listener
