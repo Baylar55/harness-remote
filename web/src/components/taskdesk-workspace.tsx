@@ -17,6 +17,7 @@ import {
   RefreshIcon,
   ServerIcon
 } from "../Icons"
+import { ModelPicker, modelOptionKey } from "./model-picker"
 import { UniversalWorkspace } from "./universal-workspace"
 import { WorkThreadDetail } from "./work-thread-detail"
 import "../taskdesk-workthreads.css"
@@ -160,7 +161,7 @@ function NewWorkThreadModal({
       if (generation.current !== current) return
       setModels(catalog.models)
       const selected = catalog.models.find((model) => model.isDefault) || catalog.models[0]
-      setModelKey(selected ? `${selected.providerID}|${selected.modelID}|${selected.variant || ""}` : "")
+      setModelKey(selected ? modelOptionKey(selected) : "")
     }).catch((reason) => {
       if (generation.current === current) {
         setModels([])
@@ -174,7 +175,7 @@ function NewWorkThreadModal({
 
   const project = runtime?.projects.find((candidate) => candidate.id === projectID)
   const agent = runtime?.agents.find((candidate) => candidate.id === agentID)
-  const selectedModel = models.find((model) => `${model.providerID}|${model.modelID}|${model.variant || ""}` === modelKey)
+  const selectedModel = models.find((model) => modelOptionKey(model) === modelKey)
   const canStart = Boolean(runtime && project && agent && prompt.trim()) && !starting && !modelsLoading
 
   async function start() {
@@ -240,7 +241,7 @@ function NewWorkThreadModal({
           </div>
           <div className="tdw-form-row">
             <label><span>Coding agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{runtime.agents.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-            <label><span>Model</span><select value={modelKey} disabled={modelsLoading || models.length === 0} onChange={(event) => setModelKey(event.target.value)}>{models.length === 0 ? <option value="">{modelsLoading ? "Loading models..." : "Default model"}</option> : models.map((model) => <option value={`${model.providerID}|${model.modelID}|${model.variant || ""}`} key={`${model.providerID}|${model.modelID}|${model.variant || ""}`}>{model.modelName || model.modelID}{model.variant ? ` · ${model.variant}` : ""}</option>)}</select></label>
+            <label><span>Model</span><ModelPicker models={models} value={modelKey} onChange={setModelKey} disabled={starting} loading={modelsLoading} /></label>
           </div>
           <label className="tdw-prompt-field"><span>Start the conversation</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} autoFocus placeholder="Describe the change you want. You can keep refining it in this same conversation after the agent responds." /></label>
           <p className="tdw-safety-note">TaskDesk prepares an isolated coding workspace automatically when the project supports it.</p>
@@ -339,6 +340,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   }, [threads, visibleThreads, selectedThreadKey])
 
   const selected = threads.find((record) => record.key === selectedThreadKey) || null
+  const selectedProject = selectedProjectKey === "all" ? null : projects.find((record) => record.key === selectedProjectKey) || null
   const profiles = useMemo(() => machines.map(profileForMachine), [machines])
   const activeProfileID = selected?.runtime.machine.id || activeMachineID || profiles[0]?.id || ""
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
@@ -393,18 +395,18 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     <div className="tdw-shell">
       <header className="tdw-topbar">
         <div className="tdw-brand"><span className="tdw-logo">T</span><div><strong>TaskDesk</strong><small>One project. One conversation. Any coding agent.</small></div></div>
-        <nav className="tdw-primary-nav" aria-label="Primary">
-          <button type="button" className={selectedProjectKey !== "all" ? "active" : ""} onClick={() => projects[0] ? selectProject(projects[0].key) : undefined}><FolderIcon size={16} /> Projects</button>
-          <button type="button" className={selectedProjectKey === "all" ? "active" : ""} onClick={() => selectProject("all")}><ChatIcon size={16} /> Work Threads</button>
-          <button type="button" onClick={onManageMachines}><ServerIcon size={16} /> Machines</button>
-        </nav>
+        <div className="tdw-context-path" aria-label="Current workspace context">
+          <span>{selectedProject?.project.name || "All projects"}</span><b>/</b><strong>Work Threads</strong>
+          {selected ? <><b>/</b><em>{threadTitle(selected.task)}</em></> : null}
+        </div>
         <div className="tdw-top-actions">
           <span className="tdw-machine-health"><i className={onlineCount > 0 ? "online" : "offline"} />{onlineCount}/{machines.length} machines</span>
+          <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
           <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label="Refresh" disabled={refreshing}><RefreshIcon size={16} /></button>
           <button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> New Work Thread</button>
           <div className="tdw-more-wrap">
             <button type="button" className="tdw-icon-button" onClick={() => setMoreOpen((value) => !value)} aria-label="More" title="More"><MoreVerticalIcon size={18} /></button>
-            {moreOpen ? <div className="tdw-more-menu"><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
+            {moreOpen ? <div className="tdw-more-menu"><button type="button" onClick={() => { setMoreOpen(false); onManageMachines() }}>Machines</button><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
           </div>
         </div>
       </header>
@@ -420,7 +422,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
         </aside>
 
         <section className="tdw-thread-column">
-          <div className="tdw-column-heading"><div><span>{selectedProjectKey === "all" ? "All projects" : "Project"}</span><h2>Work Threads</h2></div><strong>{visibleThreads.length}</strong></div>
+          <div className="tdw-column-heading"><div><span>{selectedProjectKey === "all" ? "All projects" : selectedProject?.project.name || "Project"}</span><h2>Work Threads</h2></div><strong>{visibleThreads.length}</strong></div>
           <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations..." /></div>
           <div className="tdw-thread-list">
             {!loaded && threads.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Loading your workspace...</strong></div> : visibleThreads.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No Work Threads here yet</strong><span>Start a conversation and keep refining it until the work is done.</span><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={14} /> New Work Thread</button></div> : visibleThreads.map((record) => {
