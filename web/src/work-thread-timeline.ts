@@ -36,6 +36,10 @@ function textParts(parts: MessagePart[] | undefined): string {
   return (parts ?? []).filter((part) => part.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n").trim()
 }
 
+function normalizedVisibleText(message: MessageEnvelope): string {
+  return textParts(message.parts).replace(/\s+/g, " ").trim()
+}
+
 function isTaskDeskTransfer(text: string): boolean {
   return text.startsWith("You are taking over an existing TaskDesk task.")
     || (text.includes("The context below was transferred by TaskDesk") && text.includes("USER INSTRUCTION"))
@@ -168,6 +172,27 @@ function nativeForRun(
   return result
 }
 
+function collapseDuplicateAssistantReplies(messages: WorkThreadMessage[]): WorkThreadMessage[] {
+  const collapsed: WorkThreadMessage[] = []
+  for (const message of messages) {
+    const previous = collapsed.at(-1)
+    const currentText = message.info.role === "assistant" ? normalizedVisibleText(message) : ""
+    const previousText = previous?.info.role === "assistant" ? normalizedVisibleText(previous) : ""
+    const sameRun = Boolean(message.taskdesk?.runId && previous?.taskdesk?.runId && message.taskdesk.runId === previous.taskdesk.runId)
+    const closeInTime = previous
+      ? Math.abs((Number(message.info.time.created) || 0) - (Number(previous.info.time.created) || 0)) <= 60_000
+      : false
+
+    // Some harness transports can journal the same completed assistant turn twice with different
+    // native message ids during tail reconciliation. Message-id deduplication cannot catch that.
+    // Collapse only consecutive assistant replies from the same persisted Run with identical visible
+    // text so intentional repeated replies in later turns remain untouched.
+    if (sameRun && closeInTime && currentText && currentText === previousText) continue
+    collapsed.push(message)
+  }
+  return collapsed
+}
+
 export function buildWorkThreadTimeline(
   task: MachineTask,
   messagesBySession: Record<string, MessageEnvelope[]>,
@@ -206,8 +231,10 @@ export function buildWorkThreadTimeline(
     timeline.push(...nativeForRun(task, run, index, runs[index + 1], session ? messagesBySession[session] ?? [] : [], agents, seen))
   })
 
-  return timeline
+  const ordered = timeline
     .map((message, index) => ({ message, index }))
     .sort((left, right) => left.message.info.time.created - right.message.info.time.created || left.index - right.index)
     .map(({ message }) => message)
+
+  return collapseDuplicateAssistantReplies(ordered)
 }
