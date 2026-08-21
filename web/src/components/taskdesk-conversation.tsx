@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactNode }
 import type { MessageEnvelope } from "../types"
 import { ChatIcon, LoadingIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
+import "../taskdesk-conversation-fixes.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
 const NEAR_BOTTOM_PX = 96
@@ -124,13 +125,34 @@ const ConversationTranscript = memo(function ConversationTranscript({
   const nearBottomRef = useRef(true)
   const preservingOlderRef = useRef(false)
   const loadOlderRef = useRef(onLoadOlder)
+  const followFrameRef = useRef<number | undefined>(undefined)
+  const scrollFrameRef = useRef<number | undefined>(undefined)
+  const previousSendingRef = useRef(false)
   loadOlderRef.current = onLoadOlder
+
+  useEffect(() => () => {
+    if (followFrameRef.current !== undefined) window.cancelAnimationFrame(followFrameRef.current)
+    if (scrollFrameRef.current !== undefined) window.cancelAnimationFrame(scrollFrameRef.current)
+  }, [])
 
   useEffect(() => {
     const transcript = transcriptRef.current
+    const startedSend = sending && !previousSendingRef.current
+    previousSendingRef.current = sending
     if (!transcript || loading || !ready || preservingOlderRef.current) return
-    if (!nearBottomRef.current && !waiting && !sending) return
-    transcript.scrollTop = transcript.scrollHeight
+
+    // Starting a new user turn deliberately returns to live-follow mode. During the agent turn,
+    // however, manual scrolling always wins: once the person moves away from the bottom, streamed
+    // updates must not drag the viewport back down until they return near the bottom themselves.
+    if (startedSend) nearBottomRef.current = true
+    if (!nearBottomRef.current) return
+    if (followFrameRef.current !== undefined) return
+    followFrameRef.current = window.requestAnimationFrame(() => {
+      followFrameRef.current = undefined
+      const current = transcriptRef.current
+      if (!current || preservingOlderRef.current || !nearBottomRef.current) return
+      current.scrollTop = current.scrollHeight
+    })
   }, [messages, loading, ready, waiting, sending])
 
   async function loadOlder() {
@@ -157,9 +179,16 @@ const ConversationTranscript = memo(function ConversationTranscript({
     <div
       className="uw-transcript"
       ref={transcriptRef}
+      onWheel={(event) => {
+        if (event.deltaY < 0) nearBottomRef.current = false
+      }}
       onScroll={(event) => {
         const element = event.currentTarget
-        nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
+        if (scrollFrameRef.current !== undefined) return
+        scrollFrameRef.current = window.requestAnimationFrame(() => {
+          scrollFrameRef.current = undefined
+          nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
+        })
       }}
     >
       {loading || !ready ? (
@@ -189,9 +218,9 @@ const ConversationTranscript = memo(function ConversationTranscript({
 }, transcriptPropsEqual)
 
 /**
- * The conversation surface is deliberately product-agnostic. A Native Session and a Work Thread
- * provide the same ordered native transcript and callbacks; this component owns how that transcript
- * is displayed, paged, scrolled and continued so those two products cannot slowly diverge.
+ * The conversation surface is deliberately product-agnostic. A Native Session and a Task provide
+ * the same ordered native transcript and callbacks; this component owns how that transcript is
+ * displayed, paged, scrolled and continued so those two products cannot slowly diverge.
  */
 export function TaskDeskConversation({
   messages,
