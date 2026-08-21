@@ -108,6 +108,12 @@ export function buildTaskContext(task, { workspace } = {}) {
       listedChangeCount: changedFiles.length,
       truncated: allChangedFiles.length > changedFiles.length
     },
+    restore: task?.restoredAt
+      ? {
+          at: task.restoredAt,
+          checkpointId: cleanText(task?.restoredCheckpointId) || null
+        }
+      : null,
     verification: null,
     unresolved: []
   }
@@ -129,6 +135,14 @@ export function formatTaskHandoff(context, { targetAgentId, role, instruction })
   if (latest) lines.push("", "PREVIOUS STEP", `${latest.agentId || "unknown harness"} / ${latest.role || "continue"} / ${latest.status || "unknown"}`)
   if (context.latestOutcome?.text) lines.push("", "PREVIOUS RESULT", boundedText(context.latestOutcome.text, HANDOFF_OUTCOME_CHARS))
   if (context.latestOutcome?.error) lines.push("", "LATEST ERROR", boundedText(context.latestOutcome.error, MAX_ERROR_CHARS))
+  if (context.restore?.at) {
+    lines.push(
+      "",
+      "WORKSPACE RESTORE",
+      `TaskDesk restored the shared workspace${context.restore.checkpointId ? ` to checkpoint ${context.restore.checkpointId}` : " to an earlier checkpoint"} at ${context.restore.at}.`,
+      "The current files are authoritative. Native session memory may describe code from after the restored point, so inspect the workspace again before relying on remembered file state."
+    )
+  }
   if (context.changedFiles?.length) {
     lines.push("", "CHANGED FILES", ...context.changedFiles.map((file) => `- ${boundedText(file, MAX_CHANGED_FILE_CHARS)}`))
     if (context.workspace?.truncated) lines.push(`- …and ${Math.max(0, Number(context.workspace.changeCount) - context.changedFiles.length)} more changed file(s)`)
