@@ -7,3 +7,23 @@
   display: flex;
   flex-direction: column;
 }
+
+.uw-message-turn-error {
+  margin-top: 8px;
+  padding: 9px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--td3-red-border);
+  border-radius: 9px;
+  background: var(--td3-red-soft);
+  color: var(--td3-red-text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.uw-message-turn-error strong {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
