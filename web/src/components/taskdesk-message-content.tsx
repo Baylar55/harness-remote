@@ -1,9 +1,11 @@
+import { useEffect, useState } from "react"
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
-import { activityLabel, groupConversationParts } from "../conversation-parts"
+import { activityLabel, groupConversationParts, type ConversationPartGroup } from "../conversation-parts"
 import type { MessageEnvelope, MessagePart } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
+type ActivityGroupValue = Extract<ConversationPartGroup, { kind: "activity" }>
 
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
@@ -17,17 +19,26 @@ function ToolPartCard({ part }: { part: MessagePart }) {
         ? input.path
         : ""
   const output = state?.error || state?.output || ""
+  const [open, setOpen] = useState(status === "error")
+
+  useEffect(() => {
+    if (status === "error") setOpen(true)
+  }, [status])
 
   return (
     <div className="uw-tool-stack">
-      <details className={`uw-tool-card uw-tool-${status}`} open={status === "error"}>
+      <details
+        className={`uw-tool-card uw-tool-${status}`}
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
         <summary>
           <span className="uw-tool-icon">{status === "completed" ? "✓" : status === "error" ? "!" : "⋯"}</span>
           <span className="uw-tool-title">{state?.title || part.tool || "Tool"}</span>
           {command ? <code>{command.length > 90 ? `${command.slice(0, 90)}…` : command}</code> : null}
           <span className="uw-tool-status">{status}</span>
         </summary>
-        {output ? <pre>{output.length > 4_000 ? `${output.slice(0, 4_000)}\n…` : output}</pre> : null}
+        {open && output ? <pre>{output.length > 4_000 ? `${output.slice(0, 4_000)}\n…` : output}</pre> : null}
       </details>
     </div>
   )
@@ -55,6 +66,33 @@ function ActivityPart({ part }: { part: MessagePart }) {
   }
   if (part.type === "tool") return <ToolPartCard part={part} />
   return null
+}
+
+function ActivityGroup({ group }: { group: ActivityGroupValue }) {
+  const [open, setOpen] = useState(group.status === "error")
+
+  useEffect(() => {
+    if (group.status === "error") setOpen(true)
+  }, [group.status])
+
+  return (
+    <details
+      className={`uw-tool-card uw-activity-group uw-tool-${group.status}`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span className="uw-tool-icon">{group.status === "completed" ? "✓" : group.status === "error" ? "!" : "⋯"}</span>
+        <span className="uw-tool-title">{activityLabel(group)}</span>
+        <span className="uw-tool-status">{group.status}</span>
+      </summary>
+      {open ? (
+        <div className="uw-activity-parts">
+          {group.parts.map((part) => <ActivityPart key={part.id} part={part} />)}
+        </div>
+      ) : null}
+    </details>
+  )
 }
 
 function readableErrorValue(value: unknown, depth = 0): string {
@@ -90,8 +128,10 @@ function messageErrorText(message: MessageEnvelope): string {
 /**
  * Render the harness payload in native wire order while keeping the normal conversation readable.
  * Reasoning and tool chatter is preserved exactly where it occurred, but contiguous technical parts
- * are collapsed into one Activity disclosure by default. Native turn failures are rendered with the
- * message itself so the reason remains visible after refresh or reopening the Work Thread.
+ * are collapsed into one Activity disclosure by default. Collapsed Activity and tool bodies are not
+ * mounted at all: large reasoning/tool transcripts must not make scrolling expensive while hidden.
+ * Native turn failures are rendered with the message itself so the reason remains visible after
+ * refresh or reopening the Task.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const groups = groupConversationParts(message.parts)
@@ -109,18 +149,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
           )
         }
 
-        return (
-          <details className={`uw-tool-card uw-activity-group uw-tool-${group.status}`} key={key}>
-            <summary>
-              <span className="uw-tool-icon">{group.status === "completed" ? "✓" : group.status === "error" ? "!" : "⋯"}</span>
-              <span className="uw-tool-title">{activityLabel(group)}</span>
-              <span className="uw-tool-status">{group.status}</span>
-            </summary>
-            <div className="uw-activity-parts">
-              {group.parts.map((part) => <ActivityPart key={part.id} part={part} />)}
-            </div>
-          </details>
-        )
+        return <ActivityGroup group={group} key={key} />
       })}
       {turnError ? <div className="uw-message-turn-error" role="alert"><strong>Turn failed</strong><span>{turnError}</span></div> : null}
     </div>
