@@ -4,7 +4,7 @@ import {
   createWorkspaceMachine,
   type WorkspaceMachine
 } from "../workspaceMachines"
-import { TaskDeskV3Unified } from "./taskdesk-v3-unified"
+import { TaskDeskWorkspace } from "./taskdesk-workspace"
 
 type Props = {
   machines: WorkspaceMachine[]
@@ -119,11 +119,10 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
 
   return (
     <div className="uw-standalone-host">
-      <TaskDeskV3Unified
+      <TaskDeskWorkspace
         machines={machines}
         activeMachineID={activeID}
         onActiveMachineID={setActiveMachineID}
-        onPersistMachines={onPersistMachines}
         onManageMachines={() => setManagerOpen(true)}
         legacyView={legacyView}
       />
