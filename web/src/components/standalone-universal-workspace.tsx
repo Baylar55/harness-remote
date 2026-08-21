@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import { Capacitor } from "@capacitor/core"
 import { discoverMachine } from "../machineClient"
+import type { MachineSnapshot } from "../types"
 import {
   createWorkspaceMachine,
   type WorkspaceMachine
@@ -88,7 +89,21 @@ function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps)
 
 function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceMachine[]; onClose: () => void; onPersist: (machines: WorkspaceMachine[]) => void }) {
   const [editingID, setEditingID] = useState<string | null>(machines.length === 0 ? "new" : null)
+  const [snapshots, setSnapshots] = useState<Record<string, MachineSnapshot | null | undefined>>({})
   const draft = useMemo(() => editingID === "new" ? createWorkspaceMachine() : machines.find((machine) => machine.id === editingID) || null, [editingID, machines])
+
+  useEffect(() => {
+    let cancelled = false
+    setSnapshots({})
+    void Promise.all(machines.map(async (machine) => {
+      try { return [machine.id, await discoverMachine(machine.config)] as const }
+      catch { return [machine.id, null] as const }
+    })).then((entries) => {
+      if (!cancelled) setSnapshots(Object.fromEntries(entries))
+    })
+    return () => { cancelled = true }
+  }, [machines])
+
   const save = (machine: WorkspaceMachine) => {
     if (editingID === "new") onPersist([...machines, machine])
     else onPersist(machines.map((candidate) => candidate.id === machine.id ? machine : candidate))
@@ -99,16 +114,31 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
     onPersist(machines.filter((candidate) => candidate.id !== machine.id))
     if (editingID === machine.id) setEditingID(null)
   }
+  const availableCount = Object.values(snapshots).reduce((count, snapshot) => count + (snapshot?.agents.filter((agent) => agent.state === "available").length || 0), 0)
+
   return (
     <div className="uw-manager-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="uw-machine-manager" role="dialog" aria-modal="true" aria-label="Machines" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="uw-machine-manager-header"><div><h2>Machines</h2><p>Configure machine daemons used by TaskDesk. Classic connections remain separate.</p></div><button type="button" className="uw-manager-close" onClick={onClose} aria-label="Close">×</button></header>
+        <header className="uw-machine-manager-header"><div><h2>Machines</h2><p>Configure TaskDesk machines and see the harnesses each daemon currently detects.</p></div><button type="button" className="uw-manager-close" onClick={onClose} aria-label="Close">×</button></header>
         <div className="uw-machine-manager-body">
           {machines.length === 0 && editingID !== "new" ? <div className="uw-machine-manager-empty"><strong>No machines configured</strong><span>Add a Harness machine daemon to use TaskDesk.</span></div> : null}
-          {machines.map((machine) => <div className="uw-machine-config-card" key={machine.id}><div className="uw-machine-config-main"><strong>{machine.name}</strong><span>{machine.config.host}:{machine.config.port}</span><small>{machine.config.username || "No username"}</small></div><div className="uw-machine-config-actions"><button type="button" className="uw-manager-button" onClick={() => setEditingID(machine.id)}>Edit</button><button type="button" className="uw-manager-button danger" onClick={() => remove(machine)}>Remove</button></div></div>)}
+          {machines.map((machine) => {
+            const snapshot = snapshots[machine.id]
+            return (
+              <div className="uw-machine-config-card" key={machine.id}>
+                <div className="uw-machine-config-main">
+                  <strong>{snapshot?.machine.name || machine.name}</strong>
+                  <span>{machine.config.host}:{machine.config.port}</span>
+                  <small>{snapshot === undefined ? "Checking harnesses..." : snapshot ? `${snapshot.agents.length} harness${snapshot.agents.length === 1 ? "" : "es"} detected` : "Machine unavailable"}</small>
+                  {snapshot?.agents.length ? <div className="uw-machine-harness-list">{snapshot.agents.map((agent) => <span className="uw-machine-harness" key={agent.id}><i className={agent.state} /><strong>{agent.label}</strong><small>{agent.state}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span>)}</div> : null}
+                </div>
+                <div className="uw-machine-config-actions"><button type="button" className="uw-manager-button" onClick={() => setEditingID(machine.id)}>Edit</button><button type="button" className="uw-manager-button danger" onClick={() => remove(machine)}>Remove</button></div>
+              </div>
+            )
+          })}
           {draft ? <MachineEditor key={draft.id} machine={draft} isNew={editingID === "new"} onCancel={() => setEditingID(null)} onSave={save} /> : null}
         </div>
-        <footer className="uw-machine-manager-footer"><span>{machines.length} machine{machines.length === 1 ? "" : "s"} configured</span><button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ Add machine</button></footer>
+        <footer className="uw-machine-manager-footer"><span>{machines.length} machine{machines.length === 1 ? "" : "s"} configured · {availableCount} harness{availableCount === 1 ? "" : "es"} available</span><button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ Add machine</button></footer>
       </section>
     </div>
   )
@@ -129,12 +159,8 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
         return
       }
 
-      // Classic mounts its own established Android-back handler. Do not compete with it when that
-      // diagnostic surface is intentionally open.
       if (document.querySelector(".tdw-classic-host")) return
 
-      // A model catalog is a transient overlay. Android Back must close it before unwinding the
-      // New Work Thread sheet or the Work Thread detail underneath it.
       const modelPickerTrigger = document.querySelector<HTMLButtonElement>(".tdw-model-picker.open .tdw-model-trigger")
       if (modelPickerTrigger) {
         modelPickerTrigger.click()
