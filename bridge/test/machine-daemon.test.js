@@ -91,6 +91,22 @@ test("eager managed hosts start concurrently rather than serially", async () => 
   assert.deepEqual(result.map(({ id, status }) => [id, status]), [["first", "available"], ["second", "available"]])
 })
 
+test("lazy managed hosts stay configured until a real consumer starts them", async () => {
+  const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
+  let starts = 0
+  const openCode = new FakeHttpHost({ startImpl: async () => { starts += 1 } })
+  daemon.registerManagedHttpHost({ id: "opencode", host: openCode, eager: false })
+
+  const result = await daemon.startManagedHosts()
+  assert.deepEqual(result, [])
+  assert.equal(starts, 0)
+  assert.equal(daemon.snapshot().agents.find((host) => host.id === "opencode").state, "configured")
+
+  await openCode.start()
+  assert.equal(starts, 1)
+  assert.equal(daemon.snapshot().agents.find((host) => host.id === "opencode").state, "available")
+})
+
 test("one host failure does not erase or stop the other host", async () => {
   const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
   const acp = new FakeAcp()
