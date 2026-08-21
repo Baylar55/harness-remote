@@ -25,6 +25,7 @@ import {
   type WorkThreadMessage,
   type WorkThreadAgentMeta
 } from "../work-thread-timeline"
+import { ModelPicker, modelOptionKey } from "./model-picker"
 import { TaskDeskConversation } from "./taskdesk-conversation"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 import { WorkThreadAttention } from "./work-thread-attention"
@@ -103,7 +104,7 @@ function isActive(task: MachineTask): boolean {
 }
 
 function modelKey(model?: ModelSelection | null): string {
-  return model ? `${model.providerID}|${model.modelID}|${model.variant || ""}` : ""
+  return model ? modelOptionKey(model as ModelOption) : ""
 }
 
 function lastModelForAgent(task: MachineTask, agentID: string): ModelSelection | null {
@@ -179,6 +180,8 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
   const loadGeneration = useRef(0)
   const modelGeneration = useRef(0)
   const targetAgentIDRef = useRef(targetAgentID)
+  const sendInFlightRef = useRef(false)
+  const stopInFlightRef = useRef(false)
 
   const targets = useMemo(() => sessionTargets(task, baseConfig, agents), [task.id, task.runs, task.run, task.workspace.path, baseConfig, agents])
   const targetSignature = targets.map((target) => `${target.sessionID}:${target.agentID}:${target.directory}`).join("|")
@@ -205,6 +208,8 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
     setPermissions([])
     setTargetAgentID(currentAgentID)
     setTargetModelKey(modelKey(lastModelForAgent(task, currentAgentID)))
+    sendInFlightRef.current = false
+    stopInFlightRef.current = false
   }, [task.id])
 
   useEffect(() => {
@@ -419,7 +424,10 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
 
   async function send() {
     const text = draft.trim()
-    if (!text || sending || working) return
+    if (!text || sending || working || sendInFlightRef.current) return
+    // State updates are asynchronous. The ref closes the tiny window in which Enter and a click (or
+    // two key events) could both reach this function before React re-rendered `sending=true`.
+    sendInFlightRef.current = true
     setSending(true)
     setError(null)
     setDraft("")
@@ -442,12 +450,14 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
       setDraft((current) => current ? `${text}\n${current}` : text)
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
+      sendInFlightRef.current = false
       setSending(false)
     }
   }
 
   async function stop() {
-    if (stopping || !working) return
+    if (stopping || !working || stopInFlightRef.current) return
+    stopInFlightRef.current = true
     setStopping(true)
     setError(null)
     try {
@@ -457,6 +467,7 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
+      stopInFlightRef.current = false
       setStopping(false)
     }
   }
@@ -474,13 +485,9 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
               {agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label}</option>)}
             </select>
           </label>
-          <label>
+          <label className="tdw-model-control">
             <span>Model</span>
-            <select value={targetModelKey} disabled={working || sending || modelsLoading || models.length === 0} onChange={(event) => setTargetModelKey(event.target.value)}>
-              {models.length === 0 ? <option value={targetModelKey}>{modelsLoading ? "Loading models..." : "Default model"}</option> : models.map((model) => (
-                <option value={modelKey(model)} key={modelKey(model)}>{model.modelName || model.modelID}{model.variant ? ` · ${model.variant}` : ""}</option>
-              ))}
-            </select>
+            <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} />
           </label>
         </div>
         <span className={`tdw-conversation-state ${working ? "working" : questions.length || permissions.length ? "attention" : "ready"}`}>
