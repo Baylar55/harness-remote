@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { api } from "../api"
 import {
   taskClient,
@@ -11,6 +13,8 @@ import type { BackendKind, DiffFile, MachineAgentHost, ServerConfig } from "../t
 import { runSessionID, workThreadRuns } from "../work-thread-timeline"
 import { LoadingIcon } from "../Icons"
 import { WorkThreadConversation } from "./work-thread-conversation"
+
+const REMARK_PLUGINS = [remarkGfm]
 
 type DetailTab = "conversation" | "changes" | "result" | "history"
 
@@ -51,7 +55,7 @@ function modelLabel(run?: MachineTaskRun | null, task?: MachineTask): string {
 
 function titleFor(task: MachineTask): string {
   if (task.title?.trim()) return task.title.trim()
-  const line = task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() || "Untitled Work Thread"
+  const line = task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() || "Untitled Task"
   return line.length > 100 ? `${line.slice(0, 97)}...` : line
 }
 
@@ -60,11 +64,19 @@ function isActive(task: MachineTask): boolean {
 }
 
 function stateLabel(task: MachineTask): string {
+  if (task.finishedAt) return "Done"
   if (isActive(task)) return "Working"
   if (task.status === "failed") return "Needs attention"
   if (task.status === "cancelled") return "Stopped"
-  if (task.finishedAt) return "Done"
   return "Ready"
+}
+
+function stateClass(task: MachineTask): string {
+  if (task.finishedAt) return "done"
+  if (isActive(task)) return "working"
+  if (task.status === "failed") return "failed"
+  if (task.status === "cancelled") return "stopped"
+  return "ready"
 }
 
 function formatDate(value?: string | null): string {
@@ -109,7 +121,7 @@ function ChangesPanel({ task, baseConfig, agents, revision }: { task: MachineTas
   if (loading) return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading changes...</div>
   if (error) return <div className="tdw-inline-error" role="alert">{error}</div>
   const changedFiles = inspection?.changedFiles ?? diff.map((file) => file.file)
-  if (!inspection?.changeCount && diff.length === 0) return <div className="tdw-detail-empty"><strong>No workspace changes</strong><span>The Work Thread has not changed files from its current baseline.</span></div>
+  if (!inspection?.changeCount && diff.length === 0) return <div className="tdw-detail-empty"><strong>No workspace changes</strong><span>The Task has not changed files from its current baseline.</span></div>
 
   return (
     <div className="tdw-changes-panel">
@@ -145,8 +157,8 @@ function ResultPanel({ task, agents, inspection, onDone, finishing }: {
     <div className="tdw-result-panel">
       <div className="tdw-result-hero">
         <span>Latest result</span>
-        <h2>{task.finishedAt ? "Work Thread marked done" : isActive(task) ? "Coding agent is still working" : task.status === "failed" ? "This step needs attention" : "Ready for your next instruction"}</h2>
-        {outcome ? <p>{outcome}</p> : error ? <p className="error">{error}</p> : <p>No natural-language result was recorded for the latest step. The conversation and workspace remain authoritative.</p>}
+        <h2>{task.finishedAt ? "Task marked done" : isActive(task) ? "Coding agent is still working" : task.status === "failed" ? "This step needs attention" : "Ready for your next instruction"}</h2>
+        {outcome ? <div className="tdw-result-markdown td3-markdown"><ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{outcome}</ReactMarkdown></div> : error ? <p className="error">{error}</p> : <p>No natural-language result was recorded for the latest step. The conversation and workspace remain authoritative.</p>}
       </div>
       <div className="tdw-result-grid">
         <span><small>Status</small><strong>{stateLabel(task)}</strong></span>
@@ -157,7 +169,7 @@ function ResultPanel({ task, agents, inspection, onDone, finishing }: {
       {!task.finishedAt ? (
         <div className="tdw-result-actions">
           <button type="button" className="tdw-button primary" disabled={isActive(task) || finishing} onClick={onDone}>{finishing ? "Marking done..." : "Mark done"}</button>
-          <span>Marking done closes the product workflow only. It does not delete the workspace or its history.</span>
+          <span>Marking done closes the Task workflow only. It does not delete the workspace or its history.</span>
         </div>
       ) : <div className="tdw-result-complete">Done {formatDate(task.finishedAt)}</div>}
     </div>
@@ -213,7 +225,7 @@ function HistoryPanel({
           <button type="button" className="tdw-button secondary" disabled={Boolean(restoring) || isActive(task)} onClick={() => onRestore(checkpoint)}>{restoring === checkpoint.id ? "Restoring..." : "Restore"}</button>
         </div>
       ))}
-      {task.workspace.mode !== "worktree" ? <div className="tdw-detail-note">Restore points are available for TaskDesk-managed Git workspaces. This Work Thread uses its project directory directly.</div> : null}
+      {task.workspace.mode !== "worktree" ? <div className="tdw-detail-note">Restore points are available for TaskDesk-managed Git workspaces. This Task uses its project directory directly.</div> : null}
     </div>
   )
 }
@@ -245,7 +257,7 @@ export function WorkThreadDetail({ task, baseConfig, agents, machineName, onTask
   }, [tab, task.id, task.updatedAt, revision])
 
   async function rename() {
-    const next = window.prompt("Work Thread title", titleFor(task))
+    const next = window.prompt("Task title", titleFor(task))
     if (!next?.trim() || next.trim() === titleFor(task)) return
     setError(null)
     try { onTaskUpdate(await taskClient.renameWorkThread(baseConfig, task.id, next.trim())) }
@@ -297,13 +309,13 @@ export function WorkThreadDetail({ task, baseConfig, agents, machineName, onTask
       <header className="tdw-thread-header">
         <div className="tdw-thread-heading">
           <span>{task.project?.name || task.projectId}</span>
-          <div className="tdw-thread-title-edit"><h1>{titleFor(task)}</h1><button type="button" onClick={() => void rename()} title="Rename Work Thread">Rename</button></div>
+          <div className="tdw-thread-title-edit"><h1>{titleFor(task)}</h1><button type="button" onClick={() => void rename()} title="Rename Task">Rename</button></div>
           <p>{agentLabel(agents, runAgent(task, current))} · {modelLabel(current, task)} · {machineName}</p>
         </div>
-        <span className={`tdw-live-state ${isActive(task) ? "working" : task.status === "failed" ? "failed" : "ready"}`}><i />{stateLabel(task)}</span>
+        <span className={`tdw-live-state ${stateClass(task)}`}><i />{stateLabel(task)}</span>
       </header>
 
-      <nav className="tdw-detail-tabs" aria-label="Work Thread detail">
+      <nav className="tdw-detail-tabs" aria-label="Task detail">
         <button type="button" className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}>Conversation</button>
         <button type="button" className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>Changes</button>
         <button type="button" className={tab === "result" ? "active" : ""} onClick={() => setTab("result")}>Result</button>
