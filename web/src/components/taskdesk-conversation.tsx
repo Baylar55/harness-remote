@@ -87,7 +87,7 @@ export function TaskDeskConversation({
     if (!transcript || loading || !ready || preservingOlderRef.current) return
     if (!nearBottomRef.current && !waiting && !sending) return
     transcript.scrollTop = transcript.scrollHeight
-  }, [messages.length, loading, ready, waiting, sending])
+  }, [messages, loading, ready, waiting, sending])
 
   async function loadOlder() {
     if (!onLoadOlder || !hasMore || loadingOlder) return
