@@ -89,23 +89,46 @@ test("primary product surface is Project -> Task -> Conversation while Runs and 
   assert.match(conversation, /buildWorkThreadTimeline/)
 })
 
-test("Workspace sidebar exposes machines harness presence projects filters and adaptive sizing", () => {
+test("Workspace sidebar exposes collapsible machines projects harnesses filters and adaptive sizing", () => {
   const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
   const css = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
 
   assert.match(shell, /selectedMachineID/)
   assert.match(shell, /tdw-machine-section/)
+  assert.match(shell, /tdw-project-section/)
   assert.match(shell, /tdw-harness-section/)
+  assert.match(shell, /tdw-filter-section/)
   assert.match(shell, /runtime\.snapshot\?\.agents/)
   assert.match(shell, /Task filters/)
   assert.match(shell, /workspaceCollapsed/)
+  assert.match(shell, /WORKSPACE_SECTIONS_COLLAPSED_KEY/)
+  assert.match(shell, /toggleWorkspaceSection\("machines"\)/)
+  assert.match(shell, /toggleWorkspaceSection\("projects"\)/)
+  assert.match(shell, /toggleWorkspaceSection\("harnesses"\)/)
+  assert.match(shell, /toggleWorkspaceSection\("filters"\)/)
+  assert.match(shell, /aria-expanded=/)
+  assert.ok(shell.indexOf("tdw-project-section") < shell.indexOf("tdw-harness-section"), "Projects must precede Harnesses")
   assert.match(shell, /TASK_PANE_WIDTH_KEY/)
   assert.match(shell, /tdw-pane-resizer/)
   assert.match(css, /workspace-collapsed/)
+  assert.match(css, /section-collapsed/)
+  assert.match(css, /tdw-workspace-section-header/)
   assert.match(css, /--tdw-thread-width/)
   assert.match(css, /cursor: col-resize/)
   assert.doesNotMatch(shell, /All agents quiet/)
   assert.doesNotMatch(shell, /Manage machines/)
+})
+
+test("lazy detected harnesses are healthy Ready while started harnesses are Running", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const css = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
+
+  assert.match(shell, /agent\.state === "available" \|\| agent\.state === "configured"/)
+  assert.match(shell, /if \(agent\.state === "available"\) return "Running"/)
+  assert.match(shell, /if \(agent\.state === "configured"\) return "Ready"/)
+  assert.match(shell, /starts on use/)
+  assert.match(css, /tdw-presence-dot\.online, \.tdw-presence-dot\.available, \.tdw-presence-dot\.configured/)
+  assert.match(css, /uw-machine-harness > i\.available, \.uw-machine-harness > i\.configured/)
 })
 
 test("Task states distinguish agent completion from user completion", () => {
