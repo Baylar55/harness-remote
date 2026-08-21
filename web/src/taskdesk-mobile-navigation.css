@@ -1,10 +1,12 @@
+@import "./taskdesk-workspace-navigation.css";
+
 .tdw-mobile-back {
   display: none;
 }
 
 @media (max-width: 780px) {
   /* Mobile is an app-style two-screen flow. Keep a compact project rail on the list screen,
-     then let the selected Work Thread take over the full dynamic viewport. */
+     then let the selected Task take over the full dynamic viewport. */
   .tdw-shell {
     height: 100dvh;
     min-height: 100dvh;
@@ -176,8 +178,8 @@
     font-size: 11px;
   }
 
-  /* A selected thread owns the phone screen. The global topbar would otherwise waste 56px above
-     Back + thread header + tabs. The explicit .mobile-open state keeps this independent of selection. */
+  /* A selected Task owns the phone screen. The global topbar would otherwise waste 56px above
+     Back + task header + tabs. The explicit .mobile-open state keeps this independent of selection. */
   .tdw-main {
     display: none !important;
   }
@@ -267,8 +269,6 @@
     touch-action: manipulation;
   }
 
-  /* Agent and model are useful, but the separate conversation status chip duplicates the thread
-     header on phone. Two compact controls preserve switching without turning the toolbar into a wall. */
   .tdw-conversation-toolbar {
     min-height: 0;
     padding: 7px 10px;
@@ -397,7 +397,7 @@
     touch-action: manipulation;
   }
 
-  /* New Work Thread behaves like a keyboard-safe bottom sheet. Only the body scrolls, keeping
+  /* New Task behaves like a keyboard-safe bottom sheet. Only the body scrolls, keeping
      primary actions reachable when the software keyboard reduces the dynamic viewport. */
   .tdw-modal-backdrop {
     padding: 0;
@@ -448,8 +448,6 @@
     touch-action: manipulation;
   }
 
-  /* Model selection becomes a viewport-aware sheet on phone. Anchoring it at the bottom works both
-     from the Work Thread toolbar and from the New Work Thread sheet, including with the keyboard up. */
   .tdw-model-popover {
     position: fixed !important;
     left: 10px !important;
