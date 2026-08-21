@@ -3,9 +3,11 @@ import { api, isValidServerConfig } from "../api"
 import { backendDisplayName } from "../backendSetup"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
 import { messageText } from "../message-content"
+import { mergeLatestMessagePage, prependOlderMessagePage } from "../message-pages"
 import { taskClient, type MachineProject } from "../taskClient"
 import type { SavedServerProfile } from "../serverProfiles"
 import { createTaskDeskTranslator, type TaskDeskTranslator } from "../taskdesk-i18n"
+import { startTaskDeskSessionLiveRefresh, type SessionLiveTarget } from "../taskdesk-session-live-refresh"
 import type {
   BackendKind,
   DiffFile,
@@ -39,8 +41,8 @@ import {
 } from "../Icons"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
-const REFRESH_INTERVAL_MS = 10_000
-const DETAIL_REFRESH_INTERVAL_MS = 5_000
+const REFRESH_INTERVAL_MS = 60_000
+const DETAIL_REFRESH_INTERVAL_MS = 30_000
 const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000
 const PINNED_STORAGE_KEY = "harness-remote.universal-workspace.pinned"
 const HARNESS_ICON_FILES: Record<string, string> = {
@@ -684,8 +686,6 @@ function HandoffModal({
   const sameMachine = selected?.machine.key === current.machineKey
   const discoveredTargetProject = selected?.machine.projects.find((project) => project.path === current.session.directory)
     || selected?.machine.projects.find((project) => project.name === current.projectName)
-  // Another harness on the same machine can safely use the exact workspace the current
-  // native Session already owns. Project discovery is only needed when crossing machines.
   const targetDirectory = sameMachine ? current.session.directory : discoveredTargetProject?.path
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -820,7 +820,7 @@ function QuestionPanel({
           {question.custom ? (
             <input
               value={custom[index] || ""}
-              onChange={(event) => setCustom((current) => ({ ...current, [index]: event.target.value }))}
+              onChange={(event) => setCustom((current) => ({ ...current, [index]: event.target.value }))
               placeholder="Custom answer…"
             />
           ) : null}
@@ -868,6 +868,9 @@ export function UniversalWorkspace({
   const [detail, setDetail] = useState<SelectedDetail>(EMPTY_DETAIL)
   const [detailSessionKey, setDetailSessionKey] = useState<string | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [messageCursor, setMessageCursor] = useState<string | undefined>(undefined)
+  const [messageHasMore, setMessageHasMore] = useState(false)
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [detailTab, setDetailTab] = useState<DetailTab>("conversation")
   const [composer, setComposer] = useState("")
   const [sessionModels, setSessionModels] = useState<ModelOption[]>([])
@@ -884,12 +887,16 @@ export function UniversalWorkspace({
   const refreshGeneration = useRef(0)
   const refreshInFlight = useRef(false)
   const detailInFlight = useRef(false)
+  const messageRefreshInFlight = useRef(false)
   const selectedKeyRef = useRef<string | null>(null)
+  const selectedSessionRef = useRef<UniversalSession | null>(null)
   const appliedFocusRequest = useRef<number | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
+  const preserveTranscriptPosition = useRef(false)
 
   const selected = sessions.find((item) => item.key === selectedKey) || null
   selectedKeyRef.current = selectedKey
+  selectedSessionRef.current = selected
   const selectedSessionModel = sessionModels.find((model) => modelOptionKey(model) === sessionModelKey)
   const detailReady = Boolean(selected && detailSessionKey === selected.key)
   const sessionWaiting = Boolean(
@@ -1042,8 +1049,8 @@ export function UniversalWorkspace({
     detailInFlight.current = true
     if (!silent) setDetailLoading(true)
     try {
-      const [messages, diff, todos, vcs, questions, permissions] = await Promise.all([
-        api.loadMessages(item.config, item.session.id, item.session.directory),
+      const [messagePage, diff, todos, vcs, questions, permissions] = await Promise.all([
+        api.loadMessagePage(item.config, item.session.id, item.session.directory),
         api.loadDiff(item.config, item.session.id, item.session.directory).catch(() => []),
         api.loadTodo(item.config, item.session.id, item.session.directory).catch(() => []),
         api.loadVcs(item.config, item.session.directory).catch(() => null),
@@ -1051,14 +1058,18 @@ export function UniversalWorkspace({
         api.loadPermissions(item.config, item.session.directory).catch(() => [])
       ])
       if (selectedKeyRef.current !== item.key) return
-      setDetail({
-        messages,
+      if (!silent) {
+        setMessageCursor(messagePage.before)
+        setMessageHasMore(messagePage.hasMore)
+      }
+      setDetail((current) => ({
+        messages: silent ? mergeLatestMessagePage(current.messages, messagePage.messages) : messagePage.messages,
         diff,
         todos,
         vcs,
         questions: questions.filter((request) => request.sessionID === item.session.id),
         permissions: permissions.filter((request) => request.sessionID === item.session.id)
-      })
+      }))
       setDetailSessionKey(item.key)
     } catch (reason) {
       if (!silent && selectedKeyRef.current === item.key) {
@@ -1070,17 +1081,82 @@ export function UniversalWorkspace({
     }
   }, [])
 
+  const refreshMessageTail = useCallback(async (item: UniversalSession) => {
+    if (messageRefreshInFlight.current) return
+    messageRefreshInFlight.current = true
+    try {
+      const page = await api.loadMessagePage(item.config, item.session.id, item.session.directory)
+      if (selectedKeyRef.current !== item.key) return
+      setDetail((current) => ({ ...current, messages: mergeLatestMessagePage(current.messages, page.messages) }))
+      setDetailSessionKey(item.key)
+    } catch {
+      // Slow reconciliation polling remains the fallback when a live tail refresh fails.
+    } finally {
+      messageRefreshInFlight.current = false
+    }
+  }, [])
+
+  const liveTargets = useMemo<SessionLiveTarget[]>(() => machines.flatMap((machine) =>
+    machine.state === "online"
+      ? machine.agents.map((agent) => ({
+          key: `${machine.key}|${agent.id}`,
+          profile: machine.profile,
+          config: configForAgent(machine, agent)
+        }))
+      : []
+  ), [machines])
+  const liveTargetSignature = useMemo(() => liveTargets.map((target) => [
+    target.key,
+    target.config.backend,
+    target.config.agentId || "",
+    target.config.host,
+    target.config.port,
+    target.config.username
+  ].join(":" )).join("|"), [liveTargets])
+
+  useEffect(() => {
+    if (!liveTargets.length) return
+    const subscription = startTaskDeskSessionLiveRefresh({
+      targets: liveTargets,
+      getSelected: () => {
+        const item = selectedSessionRef.current
+        return item ? { targetKey: `${item.machineKey}|${item.agent.id}`, sessionID: item.session.id } : null
+      },
+      onMessage: () => {
+        if (!pageIsVisible()) return
+        const item = selectedSessionRef.current
+        if (item) void refreshMessageTail(item)
+      },
+      onIndex: () => {
+        if (pageIsVisible()) void refreshAll(true)
+      },
+      onDetail: () => {
+        if (!pageIsVisible()) return
+        const item = selectedSessionRef.current
+        if (item) void loadDetail(item, true)
+      }
+    })
+    return () => subscription.close()
+  }, [liveTargetSignature, refreshAll, loadDetail, refreshMessageTail])
+
   useEffect(() => {
     detailInFlight.current = false
+    messageRefreshInFlight.current = false
     if (!selected) {
       setDetail(EMPTY_DETAIL)
       setDetailSessionKey(null)
       setDetailLoading(false)
+      setMessageCursor(undefined)
+      setMessageHasMore(false)
+      setLoadingOlderMessages(false)
       return
     }
     setDetail(EMPTY_DETAIL)
     setDetailSessionKey(null)
     setDetailLoading(true)
+    setMessageCursor(undefined)
+    setMessageHasMore(false)
+    setLoadingOlderMessages(false)
     void loadDetail(selected, false)
     const timer = window.setInterval(() => {
       if (pageIsVisible()) void loadDetail(selected, true)
@@ -1123,6 +1199,10 @@ export function UniversalWorkspace({
 
   useEffect(() => {
     if (!transcriptRef.current || detailTab !== "conversation" || !detailReady) return
+    if (preserveTranscriptPosition.current) {
+      preserveTranscriptPosition.current = false
+      return
+    }
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
   }, [selected?.key, detail.messages.length, detailTab, detailReady, sessionWaiting])
 
@@ -1173,6 +1253,43 @@ export function UniversalWorkspace({
     return true
   }), [scopedSessions, filter, pinned])
 
+  async function loadOlderMessages() {
+    if (!selected || !detailReady || !messageHasMore || !messageCursor || loadingOlderMessages) return
+    const transcript = transcriptRef.current
+    const previousHeight = transcript?.scrollHeight ?? 0
+    const previousTop = transcript?.scrollTop ?? 0
+    setLoadingOlderMessages(true)
+    setGlobalError(null)
+    try {
+      const page = await api.loadMessagePage(
+        selected.config,
+        selected.session.id,
+        selected.session.directory,
+        messageCursor
+      )
+      if (selectedKeyRef.current !== selected.key) return
+      if (page.messages.length) preserveTranscriptPosition.current = true
+      setDetail((current) => ({
+        ...current,
+        messages: prependOlderMessagePage(current.messages, page.messages)
+      }))
+      setMessageCursor(page.before)
+      setMessageHasMore(page.hasMore)
+      if (page.messages.length && transcript) {
+        window.requestAnimationFrame(() => {
+          if (!transcriptRef.current || selectedKeyRef.current !== selected.key) return
+          transcriptRef.current.scrollTop = previousTop + (transcriptRef.current.scrollHeight - previousHeight)
+        })
+      }
+    } catch (reason) {
+      if (selectedKeyRef.current === selected.key) {
+        setGlobalError(reason instanceof Error ? reason.message : String(reason))
+      }
+    } finally {
+      if (selectedKeyRef.current === selected.key) setLoadingOlderMessages(false)
+    }
+  }
+
   async function sendPrompt() {
     if (!selected || !composer.trim() || sending) return
     const text = composer.trim()
@@ -1186,7 +1303,7 @@ export function UniversalWorkspace({
           ? { providerID: selected.session.model.providerID, modelID: selected.session.model.id, variant: selected.session.model.variant }
           : undefined
       await api.sendPrompt(selected.config, selected.session.id, text, selected.session.directory, model)
-      await loadDetail(selected, true)
+      await refreshMessageTail(selected)
       await refreshAll(true)
     } catch (reason) {
       setComposer((current) => current || text)
@@ -1516,16 +1633,28 @@ export function UniversalWorkspace({
                   <div className="uw-transcript" ref={transcriptRef}>
                     {detailLoading || !detailReady ? (
                       <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading session…</strong></div>
-                    ) : detail.messages.length === 0 && !sessionWaiting ? (
-                      <div className="uw-empty-panel"><ChatIcon size={24} /><strong>This session has no messages yet.</strong></div>
-                    ) : detail.messages.map((message) => (
-                      <MessageBubble
-                        key={message.info.id}
-                        message={message}
-                        agentLabel={selected.agent.label}
-                        agentBackend={selected.agent.backend}
-                      />
-                    ))}
+                    ) : (
+                      <>
+                        {messageHasMore ? (
+                          <div className="uw-history-loader">
+                            <BeautifulButton disabled={loadingOlderMessages} onClick={() => void loadOlderMessages()}>
+                              {loadingOlderMessages ? <LoadingIcon size={15} /> : null}
+                              {loadingOlderMessages ? "Loading older messages…" : "Load older messages"}
+                            </BeautifulButton>
+                          </div>
+                        ) : null}
+                        {detail.messages.length === 0 && !sessionWaiting ? (
+                          <div className="uw-empty-panel"><ChatIcon size={24} /><strong>This session has no messages yet.</strong></div>
+                        ) : detail.messages.map((message) => (
+                          <MessageBubble
+                            key={message.info.id}
+                            message={message}
+                            agentLabel={selected.agent.label}
+                            agentBackend={selected.agent.backend}
+                          />
+                        ))}
+                      </>
+                    )}
                     {sessionWaiting ? (
                       <div className="uw-session-typing" role="status" aria-label="Waiting for agent response">
                         <span />
