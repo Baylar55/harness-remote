@@ -155,7 +155,8 @@
   }
   .tdw-project-section .tdw-workspace-section-header { display: none; }
   .tdw-project-section .tdw-workspace-section-body,
-  .tdw-project-section.section-collapsed .tdw-workspace-section-body {
+  .tdw-project-section.section-collapsed .tdw-workspace-section-body,
+  .tdw-shell.workspace-collapsed .tdw-project-section.section-collapsed .tdw-workspace-section-body {
     width: max-content; min-width: 100%; display: flex; align-items: center; gap: 6px;
   }
   .tdw-project-section .tdw-project-list { display: flex; align-items: center; gap: 6px; }
