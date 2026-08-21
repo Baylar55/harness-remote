@@ -1,4 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { App as CapacitorApp } from "@capacitor/app"
+import { Capacitor } from "@capacitor/core"
 import { discoverMachine } from "../machineClient"
 import {
   createWorkspaceMachine,
@@ -116,6 +118,55 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
   const [managerOpen, setManagerOpen] = useState(machines.length === 0)
   const [activeMachineID, setActiveMachineID] = useState(machines[0]?.id || "")
   const activeID = machines.some((machine) => machine.id === activeMachineID) ? activeMachineID : machines[0]?.id || ""
+
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== "android") return
+    let disposed = false
+    let handle: { remove: () => Promise<void> } | undefined
+    void CapacitorApp.addListener("backButton", () => {
+      if (managerOpen) {
+        setManagerOpen(false)
+        return
+      }
+
+      // Classic mounts its own established Android-back handler. Do not compete with it when that
+      // diagnostic surface is intentionally open.
+      if (document.querySelector(".tdw-classic-host")) return
+
+      const modalClose = document.querySelector<HTMLButtonElement>(".tdw-modal-backdrop .tdw-modal header button")
+      if (modalClose) {
+        modalClose.click()
+        return
+      }
+
+      const moreMenu = document.querySelector(".tdw-more-menu")
+      if (moreMenu) {
+        document.querySelector<HTMLButtonElement>('.tdw-more-wrap > button[aria-label="More"]')?.click()
+        return
+      }
+
+      const advancedBack = document.querySelector<HTMLButtonElement>(".tdw-advanced-host .tdw-advanced-bar > button")
+      if (advancedBack) {
+        advancedBack.click()
+        return
+      }
+
+      const mobileBack = document.querySelector<HTMLButtonElement>(".tdw-mobile-back")
+      if (mobileBack && mobileBack.getClientRects().length > 0) {
+        mobileBack.click()
+        return
+      }
+
+      void CapacitorApp.exitApp()
+    }).then((listener) => {
+      if (disposed) void listener.remove()
+      else handle = listener
+    })
+    return () => {
+      disposed = true
+      if (handle) void handle.remove()
+    }
+  }, [managerOpen])
 
   return (
     <div className="uw-standalone-host">
