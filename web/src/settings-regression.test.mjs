@@ -93,7 +93,9 @@ assert.equal(/function routingHeaders/.test(api), false, 'api.ts should reuse th
 assert.ok(api.includes('...routingHeaders(config)'), 'ordinary API requests should carry the selected harness routing hint')
 assert.match(api, /eventStream\(config: ServerConfig\)[\s\S]*?routingHeaders\(config\)/, 'browser SSE should preserve the selected harness routing hint too')
 assert.ok(desktopRequestTransport.includes('...routingHeaders(profile, { preflight: false })'), 'desktop requests never preflight, so they always carry the routing hint')
-assert.ok(desktopEventTransport.includes('...routingHeaders(profile, { preflight: false })'), 'desktop SSE never preflights, so it always carries the routing hint')
+assert.ok(desktopEventTransport.includes('...routingHeaders(targetProfile, { preflight: false })'), 'desktop SSE should carry the selected agent routing hint')
+assert.ok(desktopEventTransport.includes('const authorization = authHeader(profile)'), 'desktop SSE authorization must still come from the approved saved profile')
+assert.ok(desktopEventTransport.includes('fetch(streamURL(targetProfile, subscription.options)'), 'desktop SSE URL should follow only the validated target routing')
 
 // The server picker used to caption itself with a visually-hidden span, but no rule ever hid it: the
 // caption rendered as stray text above the header. Every class the picker and its actions rely on has
