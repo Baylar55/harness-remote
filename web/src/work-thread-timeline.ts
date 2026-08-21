@@ -175,7 +175,7 @@ function nativeForRun(
 function collapseDuplicateAssistantReplies(messages: WorkThreadMessage[]): WorkThreadMessage[] {
   const collapsed: WorkThreadMessage[] = []
   for (const message of messages) {
-    const previous = collapsed.at(-1)
+    const previous = collapsed.length ? collapsed[collapsed.length - 1] : undefined
     const currentText = message.info.role === "assistant" ? normalizedVisibleText(message) : ""
     const previousText = previous?.info.role === "assistant" ? normalizedVisibleText(previous) : ""
     const sameRun = Boolean(message.taskdesk?.runId && previous?.taskdesk?.runId && message.taskdesk.runId === previous.taskdesk.runId)
