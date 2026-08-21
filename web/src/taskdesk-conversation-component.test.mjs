@@ -10,7 +10,9 @@ test("shared conversation owns transcript ordering and the composer", () => {
   assert.match(component, /<TaskDeskMessageContent message=\{message\}/)
   assert.match(component, /value=\{draft\}/)
   assert.match(component, /onDraftChange\(event\.target\.value\)/)
-  assert.match(component, /event\.key !== "Enter" \|\| event\.shiftKey/)
+  assert.match(component, /if \(event\.key !== "Enter"\) return/)
+  assert.match(component, /if \(!event\.ctrlKey && !event\.metaKey\) return/)
+  assert.match(component, /else if \(event\.shiftKey\)/)
   assert.match(component, /void onSend\(\)/)
 })
 
@@ -25,10 +27,13 @@ test("native Sessions consume the shared conversation surface", () => {
   assert.match(nativeSessions, /renderMessage=\{\(message\) =>/)
 })
 
-test("composer keystrokes do not force long transcript rows to re-render", () => {
-  assert.match(component, /import \{ memo,/)
+test("composer keystrokes do not walk or rerender the long transcript", () => {
   assert.match(component, /const MessageBubble = memo\(function MessageBubble/)
-  assert.match(component, /Message-page reconciliation preserves/)
+  assert.match(component, /const ConversationTranscript = memo\(function ConversationTranscript/)
+  assert.match(component, /function transcriptPropsEqual/)
+  assert.match(component, /previous\.messages === next\.messages/)
+  assert.doesNotMatch(component.match(/function transcriptPropsEqual[\s\S]*?\n\}/)?.[0] || "", /draft/)
+  assert.match(component, /<ConversationTranscript[\s\S]*?messages=\{messages\}/)
   assert.match(nativeSessions, /const MessageBubble = memo\(function MessageBubble/)
 })
 
