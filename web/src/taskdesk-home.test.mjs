@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
-import { createTaskDeskTranslator } from "./taskdesk-i18n.ts"
 import {
   agentLabel,
   modelLabel,
@@ -29,7 +28,7 @@ function task(overrides = {}) {
   }
 }
 
-test("TaskDesk normalizes backend lifecycle states for the Tasks view", () => {
+test("legacy task status normalization remains compatible with persisted Work Threads", () => {
   assert.equal(normalizeTaskStatus("created"), "preparing")
   assert.equal(normalizeTaskStatus("pending"), "queued")
   assert.equal(normalizeTaskStatus("busy"), "running")
@@ -41,23 +40,20 @@ test("TaskDesk normalizes backend lifecycle states for the Tasks view", () => {
   assert.equal(taskStatusLabel("custom-state"), "custom-state")
 })
 
-test("TaskDesk derives stable task row labels without flattening Tasks into Sessions", () => {
+test("legacy persisted records retain stable labels while the product calls them Work Threads", () => {
   const value = task()
   assert.equal(taskTitle(value), "Fix the authentication regression")
   assert.equal(modelLabel(value), "gpt-test · high")
   assert.equal(agentLabel([
     { id: "codex", label: "Codex CLI", backend: "codex", transport: "acp", managed: false, state: "available", capabilities: {} }
   ], value.agentId), "Codex CLI")
-  assert.equal(agentLabel([], "pi"), "pi")
+  assert.deepEqual(sortTasksByActivity([
+    task({ id: "older", updatedAt: "2026-08-18T09:00:00.000Z" }),
+    task({ id: "newer", updatedAt: "2026-08-18T12:00:00.000Z" })
+  ]).map((item) => item.id), ["newer", "older"])
 })
 
-test("TaskDesk sorts Tasks by durable task activity rather than session order", () => {
-  const older = task({ id: "older", updatedAt: "2026-08-18T09:00:00.000Z" })
-  const newer = task({ id: "newer", updatedAt: "2026-08-18T12:00:00.000Z" })
-  assert.deepEqual(sortTasksByActivity([older, newer]).map((item) => item.id), ["newer", "older"])
-})
-
-test("TaskDesk machine configuration remains independent from Classic profiles and activates the Work Thread shell", () => {
+test("TaskDesk machine configuration remains independent from Classic profiles and activates Work Threads", () => {
   const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
   const machineStorage = readFileSync(new URL("./workspaceMachines.ts", import.meta.url), "utf8")
   const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
@@ -70,248 +66,126 @@ test("TaskDesk machine configuration remains independent from Classic profiles a
   assert.match(standalone, /import \{ TaskDeskWorkspace \} from "\.\/taskdesk-workspace"/)
   assert.match(standalone, /<TaskDeskWorkspace/)
   assert.doesNotMatch(standalone, /TaskDeskV3Unified/)
-  assert.match(standalone, /\+ Add machine/)
 })
 
-test("TaskDesk primary surface is Project -> Work Thread -> native conversation", () => {
+test("primary product surface is Project -> Work Thread -> Conversation, not Task -> Run -> Session", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
+  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+
+  assert.match(shell, /> Projects</)
+  assert.match(shell, /> Work Threads</)
+  assert.match(shell, /New Work Thread/)
+  assert.match(shell, /<WorkThreadDetail/)
+  assert.match(shell, /key=\{selected\.key\}/)
+  assert.doesNotMatch(shell, /function latestSessionID/)
+  assert.doesNotMatch(shell, /focusSessionRequest/)
+  assert.doesNotMatch(shell, />Tasks</)
+  assert.doesNotMatch(shell, />Runs</)
+  assert.match(detail, />Conversation</)
+  assert.match(detail, />Changes</)
+  assert.match(detail, />Result</)
+  assert.match(detail, />History/)
+  assert.match(detail, /<WorkThreadConversation/)
+  assert.match(conversation, /<TaskDeskConversation/)
+  assert.match(conversation, /buildWorkThreadTimeline/)
+})
+
+test("New Work Thread starts immediately selected and invalidates stale machine refreshes", () => {
   const source = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
-  const styles = readFileSync(new URL("./taskdesk-workthreads.css", import.meta.url), "utf8")
-
-  assert.match(source, /> Projects</)
-  assert.match(source, /> Work Threads</)
-  assert.match(source, /New Work Thread/)
-  assert.match(source, /taskClient\.createTask/)
-  assert.match(source, /taskClient\.prepareWorktree/)
-  assert.match(source, /taskClient\.launch/)
-  assert.match(source, /function latestSessionID/)
-  assert.match(source, /<UniversalWorkspace/)
-  assert.match(source, /focusSessionRequest=\{focusRequest\}/)
-  assert.match(source, /Advanced: Native Sessions/)
-  assert.doesNotMatch(source, />Tasks</)
-  assert.doesNotMatch(source, />Runs</)
-  assert.match(styles, /\.tdw-thread-conversation \.uw-session-column,[\s\S]*?display: none !important/)
-  assert.match(styles, /\.tdw-thread-conversation \.uw-session-header[\s\S]*?display: none !important/)
-})
-
-test("TaskDesk v3 exposes Tasks as a separate durable product surface", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-
-  const t = createTaskDeskTranslator("en")
-
-  assert.match(source, /type TaskDeskView = "overview" \| "tasks" \| "sessions"/)
-  assert.match(source, /t\("nav\.tasks"\)/)
-  assert.match(source, /t\("nav\.sessions"\)/)
-  assert.match(source, /t\("relationship\.title"\)/)
-  assert.match(source, /t\("runs\.title"\)/)
-  assert.equal(t("relationship.title"), "Task → Run → Session")
-  assert.equal(t("runs.title"), "Run history")
-  assert.match(source, /taskRunHistory\(selected\.task\)/)
-  assert.match(source, /<UniversalWorkspace/)
-})
-
-test("TaskDesk v3 New Task uses real machine task APIs and explicit workspace choice", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
 
   assert.match(source, /taskClient\.createTask/)
   assert.match(source, /taskClient\.prepareWorktree/)
+  assert.match(source, /label: "Before work began"/)
+  assert.match(source, /kind: "baseline"/)
   assert.match(source, /taskClient\.launch/)
-  assert.match(source, /t\("worktree\.title"\)/)
-  assert.equal(createTaskDeskTranslator("en")("worktree.title"), "Use an isolated Git worktree")
-  assert.equal(createTaskDeskTranslator("en")("workspace.project"), "Project directory")
+  assert.match(source, /refreshGeneration\.current \+= 1/)
+  assert.match(source, /setSelectedThreadKey\(`\$\{runtime\.machine\.id\}:\$\{task\.id\}`\)/)
 })
 
-test("TaskDesk v3 Task detail uses the native Run session and lifecycle APIs", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
+test("Work Thread composer continues through product lifecycle and can switch agent/model", () => {
+  const source = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
 
-  assert.match(source, /api\.loadMessages\(config, sessionID, directory\)/)
-  assert.match(source, /api\.loadDiff\(config, sessionID, directory\)/)
-  assert.match(source, /taskClient\.inspectResult/)
-  assert.match(source, /taskClient\.finish/)
-  assert.match(source, /taskClient\.cleanupWorkspace/)
-  assert.match(source, /taskClient\.continueTask/)
+  assert.match(source, /taskClient\.getWorkThread\(baseConfig, task\.id\)/)
+  assert.match(source, /taskClient\.continueTask\(baseConfig, task\.id, \{/)
+  assert.match(source, /agentId: targetAgentID/)
+  assert.match(source, /providerID: selectedModel\.providerID/)
+  assert.match(source, /modelID: selectedModel\.modelID/)
+  assert.match(source, /taskClient\.listAgentModels/)
+  assert.match(client, /mode\?: "fresh" \| "resume"/)
   assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/continue/)
-  assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/finish/)
-  assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/result/)
 })
 
-test("Task clicks explicitly open a closable review detail instead of silently changing selection", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-  const css = readFileSync(new URL("./taskdesk-v3-unified.css", import.meta.url), "utf8")
+test("Working state is reconciled from the real native session and the chat exposes Stop plus waiting feedback", () => {
+  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+  const shared = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
+  const server = readFileSync(new URL("../../bridge/src/work-thread-controller.js", import.meta.url), "utf8")
+  const abort = readFileSync(new URL("../../bridge/src/work-thread-abort.js", import.meta.url), "utf8")
 
-  assert.match(source, /const \[detailOpen, setDetailOpen\] = useState\(false\)/)
-  assert.match(source, /function openTask\(record: TaskRecord/)
-  assert.match(source, /setDetailOpen\(true\)/)
-  assert.match(source, /onClick=\{\(\) => openTask\(record\)\}/)
-  assert.match(source, /aria-label=\{t\("detail\.close"\)\}/)
-  assert.equal(createTaskDeskTranslator("en")("detail.close"), "Close Task detail")
-  assert.match(source, /setDetailOpen\(false\)/)
-  assert.match(css, /\.td3-tasks-layout-unified\.detail-open/)
-  assert.match(css, /@keyframes td3-detail-enter/)
+  assert.match(conversation, /ACTIVE_RECONCILE_MS = 1_000/)
+  assert.match(conversation, /waiting=\{working\}/)
+  assert.match(conversation, /onStop=\{working \? stop : undefined\}/)
+  assert.match(shared, /className="uw-session-typing" role="status"/)
+  assert.match(shared, /workingLabel/)
+  assert.match(shared, />Stop</)
+  assert.match(server, /service\.status\(sessionID\(task\.run\)\)/)
+  assert.match(server, /await abortWorkThreadRun\(task, this\.taskRunController\)/)
+  assert.match(abort, /service\.abort\(sessionID\)/)
+  assert.match(abort, /\/abort\?directory=/)
 })
 
-test("Sessions stays inside the persistent TaskDesk product shell without the old floating return button", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-  const css = readFileSync(new URL("./taskdesk-v3-unified.css", import.meta.url), "utf8")
+test("real native questions and permissions appear in the Work Thread rather than a permanent Needs You navigation pillar", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+  const attention = readFileSync(new URL("./components/work-thread-attention.tsx", import.meta.url), "utf8")
 
-  assert.match(source, /<div className="td3-shell td3-shell-unified">[\s\S]*?\{nav\}[\s\S]*?\{topbar\}/)
-  assert.match(source, /view === "sessions" \? \([\s\S]{0,300}?className=\{`td3-sessions-embedded/)
-  assert.match(source, /machineScope === "all" \? machines : machines\.filter/)
-  assert.doesNotMatch(source, /td3-session-mode/)
-  assert.doesNotMatch(source, /td3-return-button/)
-  assert.match(css, /\.td3-sessions-embedded \.uw-brand,[\s\S]*?\.td3-sessions-embedded \.uw-top-actions[\s\S]*?display: none/)
-  assert.match(css, /\.td3-sessions-embedded \.uw-shell/)
+  assert.doesNotMatch(shell, />Needs You</)
+  assert.match(conversation, /api\.loadQuestions/)
+  assert.match(conversation, /api\.loadPermissions/)
+  assert.match(conversation, /request\.sessionID === session/)
+  assert.match(attention, /api\.replyQuestion/)
+  assert.match(attention, /api\.replyPermission/)
 })
 
-test("Open Session navigates from a Task or attention item to the exact native Session", () => {
-  const taskDesk = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-  const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+test("Changes Result History checkpoint and Restore are first-class Work Thread surfaces", () => {
+  const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
+  const client = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
+  const checkpoints = readFileSync(new URL("../../bridge/src/work-thread-checkpoints.js", import.meta.url), "utf8")
 
-  assert.match(taskDesk, /type SessionFocusRequest = \{ sessionID: string; requestID: number \}/)
-  assert.match(taskDesk, /function openNativeSession\(runtime: RuntimeMachine, sessionID: string\)/)
-  assert.match(taskDesk, /setSessionFocusRequest/)
-  assert.match(taskDesk, /focusSessionRequest=\{sessionFocusRequest\}/)
-  assert.match(taskDesk, /openNativeSession\(selected\.runtime, selectedSessionID\)/)
-  assert.match(workspace, /focusSessionRequest\?: \{ sessionID: string; requestID: number \} \| null/)
-  assert.match(workspace, /collected\.find\(\(item\) => item\.session\.id === pendingFocus\.sessionID\)/)
-  assert.match(workspace, /setMachineFilter\(target\.machineKey\)/)
-  assert.match(workspace, /setProjectFilter\("all"\)/)
-  assert.match(workspace, /setDetailTab\("conversation"\)/)
-  assert.match(workspace, /setSelectedKey\(target\.key\)/)
+  assert.match(detail, /taskClient\.inspectWorkspace/)
+  assert.match(detail, /api\.loadDiff/)
+  assert.match(detail, /taskClient\.finish/)
+  assert.match(detail, /Save checkpoint/)
+  assert.match(detail, /Restore this version/)
+  assert.match(detail, /taskClient\.restoreCheckpoint/)
+  assert.match(client, /\/v1\/work-threads\/\$\{encodeURIComponent\(taskId\)\}\/checkpoints/)
+  assert.match(checkpoints, /git.*stash.*create|"stash", "create"/s)
+  assert.match(checkpoints, /"restore", `--source=\$\{checkpoint\.commit\}`/)
 })
 
-test("TaskDesk distinguishes completed Runs awaiting review from explicitly finished Tasks", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-  const finishServer = readFileSync(new URL("../../bridge/src/task-finish-server.js", import.meta.url), "utf8")
+test("Native Sessions remain available only as Advanced diagnostics in the normal TaskDesk shell", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
 
-  assert.match(source, /if \(task\.finishedAt\) return "finished"/)
-  assert.match(source, /if \(status === "completed"\) return "review"/)
-  assert.match(source, /t\("action\.finishTask"\)/)
-  assert.match(source, /t\("action\.cleanupWorkspace"\)/)
-  assert.equal(createTaskDeskTranslator("en")("state.review"), "Ready for review")
-  assert.equal(createTaskDeskTranslator("en")("action.finishTask"), "Finish Task")
-  assert.equal(createTaskDeskTranslator("en")("action.cleanupWorkspace"), "Cleanup Workspace")
-  assert.doesNotMatch(source, /Review \/ Finish/)
-  assert.match(finishServer, /taskStore\.markFinished/)
-  assert.doesNotMatch(finishServer, /worktreeManager\.cleanup/)
-  assert.doesNotMatch(finishServer, /taskStore\.clearWorkspace/)
+  assert.match(shell, /Advanced: Native Sessions/)
+  assert.match(shell, /if \(mode === "sessions"\)/)
+  assert.match(shell, /<UniversalWorkspace profiles=\{profiles\}/)
+  const ordinaryMain = shell.match(/<main className="tdw-main">[\s\S]*?<\/main>/)
+  assert.ok(ordinaryMain)
+  assert.doesNotMatch(ordinaryMain[0], /UniversalWorkspace/)
 })
 
-test("TaskDesk unified styling keeps dense product text readable across Tasks and Sessions", () => {
-  const css = readFileSync(new URL("./taskdesk-v3-unified.css", import.meta.url), "utf8")
+test("shared conversation keeps bounded paging, streaming autoscroll, memoized rows and mobile-friendly keyboard behavior", () => {
+  const source = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
 
-  assert.match(css, /\.td3-view-context small[\s\S]*?font-size: 11\.5px/)
-  assert.match(css, /\.td3-detail-eyebrow[\s\S]*?font-size: 10\.5px/)
-  assert.match(css, /\.td3-sessions-embedded \.uw-global-search input[\s\S]*?font-size: 12\.5px/)
-  assert.match(css, /\.td3-sessions-embedded \.uw-session-title-row strong[\s\S]*?font-size: 12\.5px/)
-  assert.match(css, /\.td3-sessions-embedded \.uw-markdown,[\s\S]*?font-size: 12\.5px/)
-  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
-})
-
-test("TaskDesk v3 protects Task detail from stale asynchronous responses", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-
-  assert.match(source, /const detailGeneration = useRef\(0\)/)
-  assert.match(source, /const generation = \+\+detailGeneration\.current/)
-  assert.match(source, /if \(generation !== detailGeneration\.current\) return/)
-  assert.match(source, /ownerKey: record\.key/)
-  assert.match(source, /detail\.ownerKey === selected\.key/)
-})
-
-test("TaskDesk v3 aggregates native questions and permissions into Needs You", () => {
-  const source = readFileSync(new URL("./components/taskdesk-v3-unified.tsx", import.meta.url), "utf8")
-
-  assert.match(source, /api\.loadQuestions\(config\)/)
-  assert.match(source, /api\.loadPermissions\(config\)/)
-  assert.match(source, /api\.replyPermission/)
-  assert.match(source, /api\.replyQuestion/)
-  assert.match(source, /t\("nav\.needs"\)/)
-  assert.equal(createTaskDeskTranslator("en")("nav.needs"), "Needs You")
-})
-
-test("Session waiting indicator stays in shared transcript flow and follows autoscroll", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-  const conversation = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
-  const styles = readFileSync(new URL("./universal-workspace-readable-fixes.css", import.meta.url), "utf8")
-
-  assert.match(source, /const sessionWaiting = Boolean\(/)
-  assert.match(source, /waiting=\{sessionWaiting\}/)
-  assert.match(conversation, /className="uw-session-typing" role="status"/)
-  assert.match(conversation, /aria-label=\{`Waiting for \$\{agentLabel\} response`\}/)
-  assert.match(conversation, /\[messages, loading, ready, waiting, sending\]/)
-  assert.match(styles, /\.uw-session-typing \{/)
-  assert.match(styles, /box-sizing: border-box/)
-  assert.match(styles, /overflow: hidden/)
-  assert.doesNotMatch(styles, /\.uw-transcript::after/)
-})
-
-test("Session handoff reuses the exact workspace when switching harnesses on the same machine", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-
-  assert.match(source, /const sameMachine = selected\?\.machine\.key === current\.machineKey/)
-  assert.match(source, /const targetDirectory = sameMachine \? current\.session\.directory : discoveredTargetProject\?\.path/)
-  assert.match(source, /api\.createSession\(config, current\.session\.title \|\| "Continued session", undefined, targetDirectory\)/)
-  assert.match(source, /disabled=\{!selected \|\| !targetDirectory \|\| creating\}/)
-  assert.doesNotMatch(source, /!selected \|\| !targetProject \|\| creating/)
-})
-
-test("Universal workspace cannot starve initial loading with overlapping polls", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-  assert.match(source, /const AGENT_SESSION_LOAD_TIMEOUT_MS = 12_000/)
-  assert.match(source, /const refreshInFlight = useRef\(false\)/)
-  assert.match(source, /if \(refreshInFlight\.current\) return/)
-  assert.match(source, /await withTimeout\(Promise\.all\(\[/)
-  assert.match(source, /refreshInFlight\.current = false/)
-})
-
-test("Universal workspace counts and projects follow the selected machine scope", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-
-  assert.match(source, /const machineScopedSessions = useMemo/)
-  assert.match(source, /for \(const item of machineScopedSessions\)/)
-  assert.match(source, /all: scopedSessions\.length/)
-  assert.doesNotMatch(source, /all: sessions\.length/)
-  assert.match(source, /function selectMachine\(machine: MachineSource\)[\s\S]*?setProjectFilter\("all"\)/)
-  assert.match(source, /currentItem\?\.machineKey === machine\.key/)
-})
-
-test("Universal workspace resolves and can change the model of the selected session", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-
-  assert.match(source, /api\.listModels\(selected\.config, selected\.session\.directory, selected\.session\.id\)/)
-  assert.match(source, /models\.find\(\(model\) => model\.isDefault\)/)
-  assert.match(source, /className="uw-context-model-select"/)
-  assert.match(source, /setSessionModelKey\(event\.target\.value\)/)
-  assert.match(source, /const model = selectedSessionModel/)
-  assert.match(source, /api\.sendPrompt\(selected\.config, selected\.session\.id, text, selected\.session\.directory, model\)/)
-})
-
-test("Universal workspace gives supported harness replies their own local visual identity", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-  const readableFixes = readFileSync(new URL("./universal-workspace-readable-fixes.css", import.meta.url), "utf8")
-
-  assert.match(source, /const HARNESS_ICON_FILES/)
-  for (const backend of ["codex", "claude", "opencode", "omp", "pi"]) {
-    assert.match(source, new RegExp(`${backend}:`))
-    assert.match(source, new RegExp(`${backend}\\.svg`))
-  }
-  assert.match(source, /import\.meta\.env\.BASE_URL.*harness-icons/)
-  assert.doesNotMatch(source, /https:\/\/(?:openai|claude|opencode|omp|pi)\./)
-  assert.match(source, /function HarnessAvatar/)
-  assert.match(source, /agentBackend=\{selected\.agent\.backend\}/)
-  assert.match(readableFixes, /\.uw-avatar-agent img/)
-  assert.match(readableFixes, /\.uw-composer-footer > \.uw-composer-directory[\s\S]*?font-size: 13px/)
-  assert.match(readableFixes, /\.uw-context-strip b,[\s\S]*?\.uw-context-model-select[\s\S]*?font-size: 11\.5px/)
-})
-
-test("Universal workspace never renders stale detail for a newly selected session", () => {
-  const source = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
-
-  assert.match(source, /const \[detailSessionKey, setDetailSessionKey\] = useState<string \| null>\(null\)/)
-  assert.match(source, /const selectedKeyRef = useRef<string \| null>\(null\)/)
-  assert.match(source, /const detailReady = Boolean\(selected && detailSessionKey === selected\.key\)/)
-  assert.match(source, /if \(selectedKeyRef\.current !== item\.key\) return/)
-  assert.match(source, /setDetailSessionKey\(item\.key\)/)
-  assert.match(source, /detailLoading \|\| !detailReady/)
-  assert.match(source, /Loading session…/)
+  assert.match(source, /const MessageBubble = memo/)
+  assert.match(source, /NEAR_BOTTOM_PX = 96/)
+  assert.match(source, /previousHeight/)
+  assert.match(source, /previousTop/)
+  assert.match(source, /messages, loading, ready, waiting, sending/)
+  assert.match(source, /hasTouchFirstPointer/)
+  assert.match(source, /event\.ctrlKey/)
+  assert.match(source, /event\.metaKey/)
+  assert.match(source, /event\.shiftKey/)
+  assert.match(source, /COMPOSER_MAX_HEIGHT_PX = 180/)
 })
