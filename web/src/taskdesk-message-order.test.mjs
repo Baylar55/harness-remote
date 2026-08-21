@@ -71,12 +71,13 @@ test("Task summary stays attached to its Run prompt after the Session is continu
   )
 })
 
-test("TaskDesk renderer preserves native part order instead of regrouping text and tools", () => {
+test("TaskDesk renderer preserves native order while collapsing technical activity by default", () => {
   const renderer = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
-  assert.match(renderer, /message\.parts\.map\(\(part\) => \{/)
-  assert.match(renderer, /part\.type === "text"/)
-  assert.match(renderer, /part\.type === "reasoning"/)
-  assert.match(renderer, /part\.type === "tool"/)
+  assert.match(renderer, /groupConversationParts\(message\.parts\)/)
+  assert.match(renderer, /group\.kind === "content"/)
+  assert.match(renderer, /uw-activity-group/)
+  assert.match(renderer, /ActivityPart/)
+  assert.doesNotMatch(renderer, /uw-activity-group[^>]*open=/)
 })
 
 test("legacy unversioned persisted outcomes fall back to transcript reconstruction", () => {
