@@ -34,6 +34,7 @@ const OLDER_PAGE_SIZE = 500
 const BACKGROUND_HISTORY_PAGES = 10
 const ACTIVE_RECONCILE_MS = 1_000
 const IDLE_RECONCILE_MS = 5_000
+const DRAFT_STORAGE_PREFIX = "harness-remote.taskdesk.draft."
 
 const HARNESS_ICON_FILES: Record<string, string> = {
   codex: "codex.svg",
@@ -160,11 +161,12 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: 
 })
 
 export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate, onWorkspaceRefresh }: Props) {
+  const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${task.id}`
   const [feeds, setFeeds] = useState<Record<string, SessionFeed>>({})
   const feedsRef = useRef<Record<string, SessionFeed>>({})
   const [loading, setLoading] = useState(true)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  const [draft, setDraft] = useState("")
+  const [draft, setDraft] = useState(() => localStorage.getItem(draftStorageKey) || "")
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -189,12 +191,15 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
 
   useEffect(() => { feedsRef.current = feeds }, [feeds])
   useEffect(() => { targetAgentIDRef.current = targetAgentID }, [targetAgentID])
+  useEffect(() => {
+    if (draft) localStorage.setItem(draftStorageKey, draft)
+    else localStorage.removeItem(draftStorageKey)
+  }, [draft, draftStorageKey])
 
   useEffect(() => {
     setFeeds({})
     feedsRef.current = {}
     setLoading(true)
-    setDraft("")
     setError(null)
     setQuestions([])
     setPermissions([])
@@ -309,16 +314,19 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
       let next = await taskClient.getWorkThread(baseConfig, task.id)
       onTaskUpdate(next)
       await Promise.all([refreshCurrentTail(next), refreshAttention(next)])
-      if (!isActive(next) && next.run?.id && next.run.finishedAt) {
+      const hasRunCheckpoint = Boolean(next.run?.id && next.checkpoints?.some((checkpoint) => checkpoint.kind === "after-run" && checkpoint.runId === next.run?.id))
+      if (next.workspace.mode === "worktree" && !isActive(next) && next.run?.id && next.run.finishedAt && !hasRunCheckpoint) {
         try {
-          await taskClient.createCheckpoint(baseConfig, next.id, {
+          const created = await taskClient.createCheckpoint(baseConfig, next.id, {
             label: `After ${agentLabel(agents, agentForRun(next, next.run))}`,
             kind: "after-run",
             runId: next.run.id
           })
-          next = await taskClient.getWorkThread(baseConfig, task.id)
-          onTaskUpdate(next)
-          onWorkspaceRefresh?.()
+          if (created) {
+            next = await taskClient.getWorkThread(baseConfig, task.id)
+            onTaskUpdate(next)
+            onWorkspaceRefresh?.()
+          }
         } catch {
           // Checkpoints are a product bonus for managed Git workspaces, never a chat blocker.
         }
@@ -426,6 +434,7 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
         agentId: targetAgentID,
         ...(selectedModel ? { model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant } } : {})
       })
+      localStorage.removeItem(draftStorageKey)
       onTaskUpdate(next)
       await refreshCurrentTail(next)
       void refreshAttention(next)
