@@ -57,13 +57,45 @@ function ActivityPart({ part }: { part: MessagePart }) {
   return null
 }
 
+function readableErrorValue(value: unknown, depth = 0): string {
+  if (depth > 4 || value == null) return ""
+  if (typeof value === "string") {
+    const text = value.trim()
+    if (!text) return ""
+    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+      try {
+        const nested = readableErrorValue(JSON.parse(text), depth + 1)
+        if (nested) return nested
+      } catch {
+        // A provider error is often plain text that happens to begin with punctuation.
+      }
+    }
+    return text
+  }
+  if (typeof value !== "object") return ""
+  const record = value as Record<string, unknown>
+  for (const key of ["message", "error", "detail", "data"]) {
+    const text = readableErrorValue(record[key], depth + 1)
+    if (text) return text
+  }
+  return ""
+}
+
+function messageErrorText(message: MessageEnvelope): string {
+  const error = message.info.error
+  if (!error) return ""
+  return readableErrorValue(error.data?.message) || readableErrorValue(error.message) || error.name || "The coding agent failed to complete this turn."
+}
+
 /**
  * Render the harness payload in native wire order while keeping the normal conversation readable.
  * Reasoning and tool chatter is preserved exactly where it occurred, but contiguous technical parts
- * are collapsed into one Activity disclosure by default.
+ * are collapsed into one Activity disclosure by default. Native turn failures are rendered with the
+ * message itself so the reason remains visible after refresh or reopening the Work Thread.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const groups = groupConversationParts(message.parts)
+  const turnError = messageErrorText(message)
 
   return (
     <div className="uw-message-parts">
@@ -90,6 +122,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
           </details>
         )
       })}
+      {turnError ? <div className="uw-message-turn-error" role="alert"><strong>Turn failed</strong><span>{turnError}</span></div> : null}
     </div>
   )
 }
