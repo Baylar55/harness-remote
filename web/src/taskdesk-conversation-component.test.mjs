@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 
 const component = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
+const nativeSessions = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
 
 test("shared conversation owns transcript ordering and the composer", () => {
   assert.match(component, /messages\.map\(\(message\) =>/)
@@ -13,10 +14,22 @@ test("shared conversation owns transcript ordering and the composer", () => {
   assert.match(component, /void onSend\(\)/)
 })
 
+test("native Sessions consume the shared conversation surface", () => {
+  assert.match(nativeSessions, /import \{ TaskDeskConversation \} from "\.\/taskdesk-conversation"/)
+  assert.match(nativeSessions, /<TaskDeskConversation/)
+  assert.match(nativeSessions, /messages=\{detail\.messages\}/)
+  assert.match(nativeSessions, /onLoadOlder=\{loadOlderMessages\}/)
+  assert.match(nativeSessions, /draft=\{composer\}/)
+  assert.match(nativeSessions, /onSend=\{sendPrompt\}/)
+  assert.match(nativeSessions, /waiting=\{sessionWaiting\}/)
+  assert.match(nativeSessions, /renderMessage=\{\(message\) =>/)
+})
+
 test("composer keystrokes do not force long transcript rows to re-render", () => {
   assert.match(component, /import \{ memo,/)
   assert.match(component, /const MessageBubble = memo\(function MessageBubble/)
   assert.match(component, /Message-page reconciliation preserves/)
+  assert.match(nativeSessions, /const MessageBubble = memo\(function MessageBubble/)
 })
 
 test("shared conversation owns paging and scroll preservation", () => {
