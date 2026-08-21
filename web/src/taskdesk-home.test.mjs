@@ -172,7 +172,7 @@ test("Native Sessions remain available only as Advanced diagnostics in the norma
   assert.match(shell, /Advanced: Native Sessions/)
   assert.match(shell, /if \(mode === "sessions"\)/)
   assert.match(shell, /<UniversalWorkspace profiles=\{profiles\}/)
-  const ordinaryMain = shell.match(/<main className="tdw-main">[\s\S]*?<\/main>/)
+  const ordinaryMain = shell.match(/<main className=\{`tdw-main\$\{mobileDetailOpen \? " mobile-open" : ""\}`\}>[\s\S]*?<\/main>/)
   assert.ok(ordinaryMain)
   assert.doesNotMatch(ordinaryMain[0], /UniversalWorkspace/)
 })
