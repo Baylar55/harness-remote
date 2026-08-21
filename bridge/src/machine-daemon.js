@@ -26,10 +26,10 @@ export class MachineDaemon {
     return tracked
   }
 
-  registerManagedHttpHost({ id, label, backend = id, capabilities = {}, host, modelCatalog, managed = true }) {
+  registerManagedHttpHost({ id, label, backend = id, capabilities = {}, host, modelCatalog, managed = true, eager = true }) {
     this.registry.registerHost({ id, label, backend, transport: "http", managed, state: "configured", capabilities })
     const tracked = trackManagedHostLifecycle(host, this.registry, id)
-    this.hosts.set(id, { id, kind: "http", host: tracked, modelCatalog, eager: true })
+    this.hosts.set(id, { id, kind: "http", host: tracked, modelCatalog, eager })
     return tracked
   }
 
