@@ -20,6 +20,7 @@ import {
 import { UniversalWorkspace } from "./universal-workspace"
 import { WorkThreadDetail } from "./work-thread-detail"
 import "../taskdesk-workthreads.css"
+import "../taskdesk-mobile-navigation.css"
 
 type Props = {
   machines: WorkspaceMachine[]
