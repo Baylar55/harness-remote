@@ -36,8 +36,12 @@ function textParts(parts: MessagePart[] | undefined): string {
   return (parts ?? []).filter((part) => part.type === "text" && typeof part.text === "string").map((part) => part.text).join("\n").trim()
 }
 
+function normalizedText(value: string): string {
+  return value.replace(/\s+/g, " ").trim()
+}
+
 function normalizedVisibleText(message: MessageEnvelope): string {
-  return textParts(message.parts).replace(/\s+/g, " ").trim()
+  return normalizedText(textParts(message.parts))
 }
 
 function isTaskDeskTransfer(text: string): boolean {
@@ -46,8 +50,57 @@ function isTaskDeskTransfer(text: string): boolean {
 }
 
 function samePrompt(left: string, right: string): boolean {
-  const normalize = (value: string) => value.trim().replace(/\s+/g, " ")
-  return Boolean(right.trim()) && normalize(left) === normalize(right)
+  return Boolean(right.trim()) && normalizedText(left) === normalizedText(right)
+}
+
+function compactTextParts(parts: MessagePart[]): MessagePart[] {
+  const compacted: MessagePart[] = []
+  for (const part of parts) {
+    const text = typeof part.text === "string" ? part.text.trim() : ""
+    if (!text) continue
+    const previous = compacted.length ? compacted[compacted.length - 1] : undefined
+    const previousText = typeof previous?.text === "string" ? previous.text.trim() : ""
+    const currentNormalized = normalizedText(text)
+    const previousNormalized = normalizedText(previousText)
+
+    // PI and some ACP adapters can journal a partial text chunk and later repeat the whole answer
+    // after thinking. Keep the complete later form instead of showing the same answer twice.
+    if (previous && previousNormalized && currentNormalized.startsWith(previousNormalized) && currentNormalized.length > previousNormalized.length) {
+      compacted[compacted.length - 1] = part
+      continue
+    }
+    if (previous && currentNormalized && previousNormalized.startsWith(currentNormalized)) continue
+    if (previous && currentNormalized === previousNormalized) continue
+    compacted.push(part)
+  }
+  return compacted
+}
+
+function compactAssistantParts(parts: MessagePart[]): MessagePart[] {
+  const reasoning = parts.filter((part) => part.type === "reasoning" && typeof part.text === "string" && part.text.trim())
+  const tools = parts.filter((part) => part.type === "tool")
+  const text = compactTextParts(parts.filter((part) => part.type === "text"))
+  const other = parts.filter((part) => part.type !== "reasoning" && part.type !== "tool" && part.type !== "text")
+  const activity: MessagePart[] = []
+
+  if (reasoning.length) {
+    activity.push({
+      ...reasoning[0],
+      id: `${reasoning[0].id}:taskdesk-merged`,
+      text: reasoning.map((part) => part.text?.trim()).filter(Boolean).join("\n\n")
+    })
+  }
+  activity.push(...tools)
+
+  // Work Threads intentionally prioritize the user-visible answer over exact native wire order.
+  // All technical chatter becomes one collapsed Activity section before the final answer. Advanced
+  // Native Sessions still renders the untouched native sequence for diagnostics.
+  return [...activity, ...other, ...text]
+}
+
+function compactAssistantMessage(message: MessageEnvelope): MessageEnvelope {
+  if (message.info.role !== "assistant") return message
+  return { ...message, parts: compactAssistantParts(message.parts) }
 }
 
 function syntheticMessage({
@@ -126,7 +179,8 @@ function nativeForRun(
     }))
   }
 
-  for (const message of messages) {
+  for (const rawMessage of messages) {
+    const message = compactAssistantMessage(rawMessage)
     const created = Number(message.info?.time?.created) || 0
     if (created && (created < start - 5_000 || created >= end)) continue
     const identity = `${message.info.sessionID || session}:${message.info.id}`
@@ -183,10 +237,6 @@ function collapseDuplicateAssistantReplies(messages: WorkThreadMessage[]): WorkT
       ? Math.abs((Number(message.info.time.created) || 0) - (Number(previous.info.time.created) || 0)) <= 60_000
       : false
 
-    // Some harness transports can journal the same completed assistant turn twice with different
-    // native message ids during tail reconciliation. Message-id deduplication cannot catch that.
-    // Collapse only consecutive assistant replies from the same persisted Run with identical visible
-    // text so intentional repeated replies in later turns remain untouched.
     if (sameRun && closeInTime && currentText && currentText === previousText) continue
     collapsed.push(message)
   }
