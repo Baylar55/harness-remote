@@ -48,8 +48,8 @@ export function taskDeskLiveEvent(name: string | undefined, data: unknown): Task
 }
 
 /**
- * Use the transport already proven by Classic on each platform. Browser/Electron fetch streams can
- * carry auth headers, Android uses the native SSE plugin, and Electron main owns desktop sockets.
+ * Use the transport already proven by Classic on each platform. Browser and Electron fetch streams
+ * can carry auth headers, Android uses the native SSE plugin, and Electron main owns desktop sockets.
  */
 export function subscribeTaskDeskLiveEvents({
   profile,
@@ -71,6 +71,8 @@ export function subscribeTaskDeskLiveEvents({
     return createDesktopOpenCodeEventSubscription({
       profileId: profile.id,
       scope: "global",
+      backend: config.backend,
+      agentId: config.agentId,
       onEvent: (event) => emit(event.name, event.data),
       onStatus
     })
