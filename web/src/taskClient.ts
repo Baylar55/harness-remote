@@ -39,6 +39,8 @@ export type MachineTaskRun = {
   contextRevision?: number
   handoffFromRunId?: string | null
   resumedFromRunId?: string | null
+  handoffReason?: string
+  workspaceRestoredAt?: string
   startedAt?: string
   finishedAt?: string
 }
@@ -64,6 +66,7 @@ export type TaskContext = {
   runSummaries?: Array<Record<string, unknown>>
   changedFiles?: string[]
   workspace?: { dirty?: boolean; changeCount?: number; listedChangeCount?: number; truncated?: boolean }
+  restore?: { at?: string; checkpointId?: string | null } | null
 }
 
 export type MachineTask = {
@@ -81,6 +84,7 @@ export type MachineTask = {
   runs?: MachineTaskRun[]
   checkpoints?: TaskCheckpoint[]
   restoredCheckpointId?: string
+  restoredAt?: string
   context?: TaskContext
   error?: { message?: string } | null
   finishedAt?: string | null
