@@ -133,6 +133,14 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
       // diagnostic surface is intentionally open.
       if (document.querySelector(".tdw-classic-host")) return
 
+      // A model catalog is a transient overlay. Android Back must close it before unwinding the
+      // New Work Thread sheet or the Work Thread detail underneath it.
+      const modelPickerTrigger = document.querySelector<HTMLButtonElement>(".tdw-model-picker.open .tdw-model-trigger")
+      if (modelPickerTrigger) {
+        modelPickerTrigger.click()
+        return
+      }
+
       const modalClose = document.querySelector<HTMLButtonElement>(".tdw-modal-backdrop .tdw-modal header button")
       if (modalClose) {
         modalClose.click()
