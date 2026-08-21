@@ -1,5 +1,6 @@
 import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { activityLabel, groupConversationParts } from "../conversation-parts"
 import type { MessageEnvelope, MessagePart } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -32,33 +33,62 @@ function ToolPartCard({ part }: { part: MessagePart }) {
   )
 }
 
-/** Render the harness payload in wire order instead of regrouping it by part type. */
+function TextPart({ part }: { part: MessagePart }) {
+  if (part.type !== "text" || !part.text) return null
+  return (
+    <div className="uw-markdown td3-markdown">
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
+    </div>
+  )
+}
+
+function ActivityPart({ part }: { part: MessagePart }) {
+  if (part.type === "reasoning" && part.text) {
+    return (
+      <div className="uw-reasoning">
+        <strong>Reasoning</strong>
+        <div className="uw-markdown td3-markdown">
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
+        </div>
+      </div>
+    )
+  }
+  if (part.type === "tool") return <ToolPartCard part={part} />
+  return null
+}
+
+/**
+ * Render the harness payload in native wire order while keeping the normal conversation readable.
+ * Reasoning and tool chatter is preserved exactly where it occurred, but contiguous technical parts
+ * are collapsed into one Activity disclosure by default.
+ */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
+  const groups = groupConversationParts(message.parts)
+
   return (
     <div className="uw-message-parts">
-      {message.parts.map((part) => {
-        if (part.type === "text" && part.text) {
+      {groups.map((group, groupIndex) => {
+        const key = group.parts[0]?.id || `${message.info.id}:${groupIndex}`
+        if (group.kind === "content") {
           return (
-            <div className="uw-markdown td3-markdown" key={part.id}>
-              <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
+            <div className="uw-message-content-group" key={key}>
+              {group.parts.map((part) => <TextPart key={part.id} part={part} />)}
             </div>
           )
         }
-        if (part.type === "reasoning" && part.text) {
-          return (
-            <details className="uw-tool-card uw-reasoning" key={part.id} open>
-              <summary>
-                <span className="uw-tool-icon">…</span>
-                <span className="uw-tool-title">Reasoning</span>
-              </summary>
-              <div className="uw-markdown td3-markdown">
-                <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
-              </div>
-            </details>
-          )
-        }
-        if (part.type === "tool") return <ToolPartCard key={part.id} part={part} />
-        return null
+
+        return (
+          <details className={`uw-tool-card uw-activity-group uw-tool-${group.status}`} key={key}>
+            <summary>
+              <span className="uw-tool-icon">{group.status === "completed" ? "✓" : group.status === "error" ? "!" : "⋯"}</span>
+              <span className="uw-tool-title">{activityLabel(group)}</span>
+              <span className="uw-tool-status">{group.status}</span>
+            </summary>
+            <div className="uw-activity-parts">
+              {group.parts.map((part) => <ActivityPart key={part.id} part={part} />)}
+            </div>
+          </details>
+        )
       })}
     </div>
   )
