@@ -57,7 +57,7 @@ test("TaskDesk sorts Tasks by durable task activity rather than session order", 
   assert.deepEqual(sortTasksByActivity([older, newer]).map((item) => item.id), ["newer", "older"])
 })
 
-test("TaskDesk machine configuration remains independent from Classic profiles and activates the unified shell", () => {
+test("TaskDesk machine configuration remains independent from Classic profiles and activates the Work Thread shell", () => {
   const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
   const machineStorage = readFileSync(new URL("./workspaceMachines.ts", import.meta.url), "utf8")
   const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
@@ -67,10 +67,30 @@ test("TaskDesk machine configuration remains independent from Classic profiles a
   assert.match(taskDeskBoundary[0], /loadWorkspaceMachines/)
   assert.doesNotMatch(taskDeskBoundary[0], /loadServerProfiles/)
   assert.match(machineStorage, /harness-remote\.workspace\.machines\.v1/)
-  assert.match(standalone, /import \{ TaskDeskV3Unified \} from "\.\/taskdesk-v3-unified"/)
-  assert.match(standalone, /<TaskDeskV3Unified/)
-  assert.doesNotMatch(standalone, /<TaskDeskV3\n/)
+  assert.match(standalone, /import \{ TaskDeskWorkspace \} from "\.\/taskdesk-workspace"/)
+  assert.match(standalone, /<TaskDeskWorkspace/)
+  assert.doesNotMatch(standalone, /TaskDeskV3Unified/)
   assert.match(standalone, /\+ Add machine/)
+})
+
+test("TaskDesk primary surface is Project -> Work Thread -> native conversation", () => {
+  const source = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const styles = readFileSync(new URL("./taskdesk-workthreads.css", import.meta.url), "utf8")
+
+  assert.match(source, /> Projects</)
+  assert.match(source, /> Work Threads</)
+  assert.match(source, /New Work Thread/)
+  assert.match(source, /taskClient\.createTask/)
+  assert.match(source, /taskClient\.prepareWorktree/)
+  assert.match(source, /taskClient\.launch/)
+  assert.match(source, /function latestSessionID/)
+  assert.match(source, /<UniversalWorkspace/)
+  assert.match(source, /focusSessionRequest=\{focusRequest\}/)
+  assert.match(source, /Advanced: Native Sessions/)
+  assert.doesNotMatch(source, />Tasks</)
+  assert.doesNotMatch(source, />Runs</)
+  assert.match(styles, /\.tdw-thread-conversation \.uw-session-column/[\s\S]*?display: none !important/)
+  assert.match(styles, /\.tdw-thread-conversation \.uw-session-header[\s\S]*?display: none !important/)
 })
 
 test("TaskDesk v3 exposes Tasks as a separate durable product surface", () => {
