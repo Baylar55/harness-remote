@@ -1,0 +1,130 @@
+/* Focused RC hardening for the Task conversation surface.
+   Keep these overrides separate while the TaskDesk shell is still being validated. */
+
+/* The conversation should actually consume space returned by collapsing the workspace rail.
+   A ceiling still keeps very wide monitors readable instead of stretching prose edge-to-edge. */
+.tdw-work-thread-conversation .uw-message,
+.tdw-work-thread-conversation .uw-session-typing {
+  width: min(1280px, 100%);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell {
+  width: min(1280px, calc(100% - 32px));
+}
+
+/* Long conversations can contain hundreds of Markdown/tool nodes. Let Chromium skip layout/paint
+   for rows that are far outside the viewport; `auto` remembers the measured height once visited so
+   scrolling back does not jump. */
+.tdw-work-thread-conversation .uw-message,
+.tdw-work-thread-conversation .tdw-conversation-event {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+/* Reasoning and tool payloads are untrusted layout-wise. Tables, long links, generated code and
+   nested Markdown must stay inside the Activity surface instead of painting over later content. */
+.tdw-work-thread-conversation .uw-message-parts,
+.tdw-work-thread-conversation .uw-activity-group,
+.tdw-work-thread-conversation .uw-activity-parts,
+.tdw-work-thread-conversation .uw-reasoning,
+.tdw-work-thread-conversation .uw-reasoning .td3-markdown,
+.tdw-work-thread-conversation .uw-tool-stack,
+.tdw-work-thread-conversation .uw-tool-card {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tdw-work-thread-conversation .uw-activity-group,
+.tdw-work-thread-conversation .uw-activity-parts,
+.tdw-work-thread-conversation .uw-reasoning {
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts > *,
+.tdw-work-thread-conversation .uw-reasoning .td3-markdown > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tdw-work-thread-conversation .uw-reasoning a,
+.tdw-work-thread-conversation .uw-activity-parts a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.tdw-work-thread-conversation .uw-reasoning img,
+.tdw-work-thread-conversation .uw-activity-parts img {
+  max-width: 100%;
+  height: auto;
+}
+
+.tdw-work-thread-conversation .uw-reasoning table,
+.tdw-work-thread-conversation .uw-activity-parts table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tdw-work-thread-conversation .uw-reasoning pre,
+.tdw-work-thread-conversation .uw-activity-parts pre {
+  width: 100%;
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* The compact model picker used to position its 620px popover relative to the tiny trigger. Opening
+   to the left crossed the Task-list boundary and the detail pane clipped it. Anchor the popover to
+   the whole conversation toolbar instead, so it always stays inside the chat pane. */
+.tdw-conversation-toolbar {
+  position: relative;
+  overflow: visible;
+  z-index: 30;
+}
+
+.tdw-conversation-toolbar .tdw-model-control,
+.tdw-conversation-toolbar .tdw-model-picker {
+  position: static;
+}
+
+.tdw-conversation-toolbar .tdw-model-popover {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 12px;
+  right: 12px;
+  width: auto;
+  max-height: min(660px, calc(100dvh - 190px));
+  z-index: 500;
+}
+
+@media (max-width: 780px) {
+  .tdw-work-thread-conversation .uw-message,
+  .tdw-work-thread-conversation .uw-session-typing {
+    width: 100%;
+  }
+
+  .tdw-work-thread-conversation .uw-composer-shell {
+    width: calc(100% - 20px);
+  }
+
+  /* Mobile keeps the bottom-sheet/fixed overlay behavior rather than inheriting the desktop
+     toolbar anchor. */
+  .tdw-conversation-toolbar .tdw-model-picker {
+    position: relative;
+  }
+
+  .tdw-conversation-toolbar .tdw-model-popover {
+    position: fixed;
+    left: 10px;
+    right: 10px;
+    top: 72px;
+    width: auto;
+    max-height: calc(100dvh - 92px);
+  }
+}
