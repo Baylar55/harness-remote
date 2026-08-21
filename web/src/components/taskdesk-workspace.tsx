@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
 import type { SavedServerProfile } from "../serverProfiles"
 import {
@@ -55,36 +55,51 @@ type ProjectRecord = {
 }
 
 type ProductMode = "workspace" | "sessions" | "classic"
+type ProductState = "working" | "ready" | "attention" | "stopped" | "done" | "idle"
+type TaskFilter = "all" | "working" | "attention" | "done"
+
+const WORKSPACE_COLLAPSED_KEY = "harness-remote.taskdesk.workspace-collapsed"
+const TASK_PANE_WIDTH_KEY = "harness-remote.taskdesk.task-pane-width"
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function threadTitle(task: MachineTask): string {
+function taskTitle(task: MachineTask): string {
   if (task.title?.trim()) return task.title.trim()
-  const line = task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() || "Untitled Work Thread"
+  const line = task.prompt.trim().split(/\r?\n/).find(Boolean)?.trim() || "Untitled Task"
   return line.length > 86 ? `${line.slice(0, 83)}...` : line
 }
 
-function threadAgentID(task: MachineTask): string {
+function taskAgentID(task: MachineTask): string {
   return task.run?.agentId || task.agentId
 }
 
-function threadState(task: MachineTask): "working" | "ready" | "failed" | "idle" {
+function taskState(task: MachineTask): ProductState {
+  if (task.finishedAt) return "done"
   if (task.status === "starting" || task.status === "running") return "working"
-  if (task.status === "failed" || task.status === "cancelled") return "failed"
-  if (task.status === "completed" || task.finishedAt) return "ready"
+  if (task.status === "failed") return "attention"
+  if (task.status === "cancelled") return "stopped"
+  if (task.status === "completed") return "ready"
   return "idle"
 }
 
-function threadStateLabel(task: MachineTask): string {
-  if (task.finishedAt) return "Done"
-  const state = threadState(task)
+function taskStateLabel(task: MachineTask): string {
+  const state = taskState(task)
   if (state === "working") return "Working"
-  if (task.status === "cancelled") return "Stopped"
+  if (state === "attention") return "Needs attention"
+  if (state === "stopped") return "Stopped"
+  if (state === "done") return "Done"
   if (state === "ready") return "Ready"
-  if (state === "failed") return "Needs attention"
   return "Idle"
+}
+
+function filterMatches(task: MachineTask, filter: TaskFilter): boolean {
+  const state = taskState(task)
+  if (filter === "all") return true
+  if (filter === "working") return state === "working"
+  if (filter === "attention") return state === "attention" || state === "stopped"
+  return state === "done"
 }
 
 function formatRelative(value: string): string {
@@ -108,11 +123,15 @@ function profileForMachine(machine: WorkspaceMachine): SavedServerProfile {
   return { id: machine.id, name: machine.name, config: machine.config }
 }
 
-function agentForThread(record: ThreadRecord): MachineAgentHost | undefined {
-  return record.runtime.agents.find((agent) => agent.id === threadAgentID(record.task))
+function agentForTask(record: ThreadRecord): MachineAgentHost | undefined {
+  return record.runtime.agents.find((agent) => agent.id === taskAgentID(record.task))
 }
 
-function NewWorkThreadModal({
+function harnessAvailable(agent: MachineAgentHost): boolean {
+  return agent.state === "available"
+}
+
+function NewTaskModal({
   runtimes,
   initialMachineID,
   initialProjectKey,
@@ -202,8 +221,7 @@ function NewWorkThreadModal({
           })
           task = await taskClient.getWorkThread(runtime.machine.config, task.id)
         } catch {
-          // A checkpoint must never prevent the user from starting work. Older daemons also do not
-          // expose the Work Thread checkpoint endpoint, so launch remains backward compatible.
+          // Restore points are useful but must never prevent a Task from starting.
         }
       }
       task = await taskClient.launch(runtime.machine.config, task.id)
@@ -219,8 +237,8 @@ function NewWorkThreadModal({
   if (!runtime) {
     return (
       <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
-        <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New Work Thread" onMouseDown={(event) => event.stopPropagation()}>
-          <header><div><span>New Work Thread</span><h2>No coding machine is ready</h2></div><button type="button" onClick={onClose}>×</button></header>
+        <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New Task" onMouseDown={(event) => event.stopPropagation()}>
+          <header><div><span>New Task</span><h2>No coding machine is ready</h2></div><button type="button" onClick={onClose}>×</button></header>
           <div className="tdw-modal-body"><p>Connect a machine with at least one project and one available coding agent.</p></div>
         </section>
       </div>
@@ -229,9 +247,9 @@ function NewWorkThreadModal({
 
   return (
     <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New Work Thread" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New Task" onMouseDown={(event) => event.stopPropagation()}>
         <header>
-          <div><span>New Work Thread</span><h2>What do you want to build or change?</h2></div>
+          <div><span>New Task</span><h2>What do you want to build or change?</h2></div>
           <button type="button" onClick={onClose} aria-label="Close">×</button>
         </header>
         <div className="tdw-modal-body">
@@ -243,13 +261,13 @@ function NewWorkThreadModal({
             <label><span>Coding agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{runtime.agents.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
             <label><span>Model</span><ModelPicker models={models} value={modelKey} onChange={setModelKey} disabled={starting} loading={modelsLoading} /></label>
           </div>
-          <label className="tdw-prompt-field"><span>Start the conversation</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} autoFocus placeholder="Describe the change you want. You can keep refining it in this same conversation after the agent responds." /></label>
+          <label className="tdw-prompt-field"><span>Start the conversation</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} autoFocus placeholder="Describe the work you want. Keep refining it in this same Task after the agent responds." /></label>
           <p className="tdw-safety-note">TaskDesk prepares an isolated coding workspace automatically when the project supports it.</p>
           {error ? <div className="tdw-inline-error" role="alert">{error}</div> : null}
         </div>
         <footer>
           <button type="button" className="tdw-button secondary" onClick={onClose}>Cancel</button>
-          <button type="button" className="tdw-button primary" disabled={!canStart} onClick={() => void start()}>{starting ? <><LoadingIcon size={15} /> Starting...</> : <><PlusIcon size={15} /> Start Work Thread</>}</button>
+          <button type="button" className="tdw-button primary" disabled={!canStart} onClick={() => void start()}>{starting ? <><LoadingIcon size={15} /> Starting...</> : <><PlusIcon size={15} /> Start Task</>}</button>
         </footer>
       </section>
     </div>
@@ -262,12 +280,19 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   const [loaded, setLoaded] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [selectedMachineID, setSelectedMachineID] = useState("all")
   const [selectedProjectKey, setSelectedProjectKey] = useState("all")
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all")
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [newThreadOpen, setNewThreadOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [search, setSearch] = useState("")
+  const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => localStorage.getItem(WORKSPACE_COLLAPSED_KEY) !== "false")
+  const [taskPaneWidth, setTaskPaneWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(TASK_PANE_WIDTH_KEY))
+    return Number.isFinite(saved) && saved >= 260 && saved <= 480 ? saved : 330
+  })
   const refreshGeneration = useRef(0)
 
   useEffect(() => {
@@ -315,6 +340,10 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     return () => window.clearInterval(timer)
   }, [loaded])
 
+  useEffect(() => {
+    localStorage.setItem(WORKSPACE_COLLAPSED_KEY, String(workspaceCollapsed))
+  }, [workspaceCollapsed])
+
   const threads = useMemo<ThreadRecord[]>(() => runtimes.flatMap((runtime) => runtime.tasks.map((task) => ({ key: `${runtime.machine.id}:${task.id}`, runtime, task }))).sort((a, b) => Date.parse(b.task.updatedAt) - Date.parse(a.task.updatedAt)), [runtimes])
 
   const projects = useMemo<ProjectRecord[]>(() => runtimes.flatMap((runtime) => runtime.projects.map((project) => ({
@@ -324,33 +353,78 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     count: runtime.tasks.filter((task) => task.projectId === project.id).length
   }))).sort((a, b) => a.project.name.localeCompare(b.project.name)), [runtimes])
 
+  const visibleProjects = useMemo(() => selectedMachineID === "all" ? projects : projects.filter((record) => record.runtime.machine.id === selectedMachineID), [projects, selectedMachineID])
+
+  const projectScopedThreads = useMemo(() => threads.filter((record) => {
+    const inMachine = selectedMachineID === "all" || record.runtime.machine.id === selectedMachineID
+    const inProject = selectedProjectKey === "all" || `${record.runtime.machine.id}:${record.task.projectId}` === selectedProjectKey
+    return inMachine && inProject
+  }), [threads, selectedMachineID, selectedProjectKey])
+
   const visibleThreads = useMemo(() => {
     const query = search.trim().toLowerCase()
-    return threads.filter((record) => {
-      const inProject = selectedProjectKey === "all" || `${record.runtime.machine.id}:${record.task.projectId}` === selectedProjectKey
-      if (!inProject) return false
+    return projectScopedThreads.filter((record) => {
+      if (!filterMatches(record.task, taskFilter)) return false
       if (!query) return true
-      return `${threadTitle(record.task)} ${record.task.project?.name || ""} ${record.task.prompt}`.toLowerCase().includes(query)
+      return `${taskTitle(record.task)} ${record.task.project?.name || ""} ${record.task.prompt}`.toLowerCase().includes(query)
     })
-  }, [threads, selectedProjectKey, search])
+  }, [projectScopedThreads, taskFilter, search])
 
   useEffect(() => {
-    if (selectedThreadKey && threads.some((record) => record.key === selectedThreadKey)) return
-    setSelectedThreadKey(visibleThreads[0]?.key || threads[0]?.key || null)
-  }, [threads, visibleThreads, selectedThreadKey])
+    if (selectedThreadKey && visibleThreads.some((record) => record.key === selectedThreadKey)) return
+    setSelectedThreadKey(visibleThreads[0]?.key || null)
+  }, [visibleThreads, selectedThreadKey])
 
   const selected = threads.find((record) => record.key === selectedThreadKey) || null
   const selectedProject = selectedProjectKey === "all" ? null : projects.find((record) => record.key === selectedProjectKey) || null
   const profiles = useMemo(() => machines.map(profileForMachine), [machines])
-  const activeProfileID = selected?.runtime.machine.id || activeMachineID || profiles[0]?.id || ""
+  const activeProfileID = selected?.runtime.machine.id || (selectedMachineID !== "all" ? selectedMachineID : activeMachineID) || profiles[0]?.id || ""
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
-  const workingCount = threads.filter((record) => threadState(record.task) === "working").length
+  const shownRuntimes = selectedMachineID === "all" ? runtimes : runtimes.filter((runtime) => runtime.machine.id === selectedMachineID)
+  const shownHarnesses = shownRuntimes.flatMap((runtime) => (runtime.snapshot?.agents ?? []).map((agent) => ({ runtime, agent })))
+  const statusCounts = {
+    all: projectScopedThreads.length,
+    working: projectScopedThreads.filter((record) => taskState(record.task) === "working").length,
+    attention: projectScopedThreads.filter((record) => ["attention", "stopped"].includes(taskState(record.task))).length,
+    done: projectScopedThreads.filter((record) => taskState(record.task) === "done").length
+  }
+
+  function selectMachine(id: string) {
+    setSelectedMachineID(id)
+    setSelectedProjectKey("all")
+    setTaskFilter("all")
+    setMobileDetailOpen(false)
+  }
 
   function selectProject(key: string) {
     setSelectedProjectKey(key)
-    const first = threads.find((record) => key === "all" || `${record.runtime.machine.id}:${record.task.projectId}` === key)
-    setSelectedThreadKey(first?.key || null)
+    if (key !== "all") {
+      const record = projects.find((candidate) => candidate.key === key)
+      if (record) setSelectedMachineID(record.runtime.machine.id)
+    }
+    setTaskFilter("all")
     setMobileDetailOpen(false)
+  }
+
+  function beginTaskPaneResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 900) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = taskPaneWidth
+    const move = (pointer: PointerEvent) => {
+      const next = Math.max(260, Math.min(480, startWidth + pointer.clientX - startX))
+      setTaskPaneWidth(next)
+    }
+    const up = () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", up)
+      setTaskPaneWidth((value) => {
+        localStorage.setItem(TASK_PANE_WIDTH_KEY, String(value))
+        return value
+      })
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", up, { once: true })
   }
 
   function updateTask(machineID: string, task: MachineTask) {
@@ -363,11 +437,11 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   }
 
   function upsertCreated(runtime: Runtime, task: MachineTask) {
-    // Invalidate any machine refresh that started before the mutation. Otherwise an old /v1/tasks
-    // response can overwrite the optimistic new thread and leave the previous conversation visible.
     refreshGeneration.current += 1
     updateTask(runtime.machine.id, task)
+    setSelectedMachineID(runtime.machine.id)
     setSelectedProjectKey(`${runtime.machine.id}:${task.projectId}`)
+    setTaskFilter("all")
     setSelectedThreadKey(`${runtime.machine.id}:${task.id}`)
     setMobileDetailOpen(true)
     onActiveMachineID(runtime.machine.id)
@@ -385,56 +459,78 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   if (mode === "sessions") {
     return (
       <div className="tdw-advanced-host">
-        <div className="tdw-advanced-bar"><button type="button" className="tdw-button secondary" onClick={() => setMode("workspace")}>← Work Threads</button><div><strong>Advanced: Native Sessions</strong><span>Exact harness sessions for diagnostics and recovery.</span></div></div>
+        <div className="tdw-advanced-bar"><button type="button" className="tdw-button secondary" onClick={() => setMode("workspace")}>← Tasks</button><div><strong>Advanced: Native Sessions</strong><span>Exact harness sessions for diagnostics and recovery.</span></div></div>
         <UniversalWorkspace profiles={profiles} activeProfileID={activeProfileID} onPersistProfiles={() => undefined} legacyView={legacyView} />
       </div>
     )
   }
 
+  const shellStyle = { "--tdw-thread-width": `${taskPaneWidth}px` } as CSSProperties
+
   return (
-    <div className="tdw-shell">
+    <div className={`tdw-shell${workspaceCollapsed ? " workspace-collapsed" : ""}`} style={shellStyle}>
       <header className="tdw-topbar">
         <div className="tdw-brand"><span className="tdw-logo">T</span><div><strong>TaskDesk</strong><small>One project. One conversation. Any coding agent.</small></div></div>
         <div className="tdw-context-path" aria-label="Current workspace context">
-          <span>{selectedProject?.project.name || "All projects"}</span><b>/</b><strong>Work Threads</strong>
-          {selected ? <><b>/</b><em>{threadTitle(selected.task)}</em></> : null}
+          <span>{selectedProject?.project.name || (selectedMachineID === "all" ? "All projects" : runtimes.find((runtime) => runtime.machine.id === selectedMachineID)?.machine.name || "Machine")}</span><b>/</b><strong>Tasks</strong>
+          {selected ? <><b>/</b><em>{taskTitle(selected.task)}</em></> : null}
         </div>
         <div className="tdw-top-actions">
           <span className="tdw-machine-health"><i className={onlineCount > 0 ? "online" : "offline"} />{onlineCount}/{machines.length} machines</span>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
           <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label="Refresh" disabled={refreshing}><RefreshIcon size={16} /></button>
-          <button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> New Work Thread</button>
+          <button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> New Task</button>
           <div className="tdw-more-wrap">
             <button type="button" className="tdw-icon-button" onClick={() => setMoreOpen((value) => !value)} aria-label="More" title="More"><MoreVerticalIcon size={18} /></button>
-            {moreOpen ? <div className="tdw-more-menu"><button type="button" onClick={() => { setMoreOpen(false); onManageMachines() }}>Machines</button><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
+            {moreOpen ? <div className="tdw-more-menu"><button type="button" className="tdw-mobile-only-menu" onClick={() => { setMoreOpen(false); onManageMachines() }}>Machines</button><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
           </div>
         </div>
       </header>
 
       <div className="tdw-layout">
         <aside className="tdw-project-column">
-          <div className="tdw-column-heading"><div><span>Workspace</span><h2>Projects</h2></div><strong>{projects.length}</strong></div>
-          <button type="button" className={`tdw-project-row${selectedProjectKey === "all" ? " active" : ""}`} onClick={() => selectProject("all")}><span className="tdw-project-icon"><ChatIcon size={15} /></span><span><strong>All work</strong><small>Across every project</small></span><b>{threads.length}</b></button>
-          <div className="tdw-project-list">
-            {projects.map((record) => <button type="button" className={`tdw-project-row${selectedProjectKey === record.key ? " active" : ""}`} onClick={() => selectProject(record.key)} key={record.key}><span className="tdw-project-icon"><FolderIcon size={15} /></span><span><strong>{record.project.name}</strong><small>{record.runtime.snapshot?.machine.name || record.runtime.machine.name}</small></span><b>{record.count}</b></button>)}
+          <div className="tdw-column-heading tdw-workspace-heading"><div><span>Navigation</span><h2>Workspace</h2></div><button type="button" className="tdw-sidebar-collapse" onClick={() => setWorkspaceCollapsed((value) => !value)} title={workspaceCollapsed ? "Expand workspace" : "Collapse workspace"} aria-label={workspaceCollapsed ? "Expand workspace" : "Collapse workspace"}>{workspaceCollapsed ? "›" : "‹"}</button></div>
+
+          <div className="tdw-workspace-section tdw-machine-section">
+            <span className="tdw-workspace-label">Machines</span>
+            <button type="button" className={`tdw-side-row${selectedMachineID === "all" ? " active" : ""}`} onClick={() => selectMachine("all")} title="All machines"><span className="tdw-side-icon"><ServerIcon size={14} /></span><span><strong>All machines</strong><small>{onlineCount}/{runtimes.length} online</small></span></button>
+            {runtimes.map((runtime) => <button type="button" className={`tdw-side-row${selectedMachineID === runtime.machine.id ? " active" : ""}`} onClick={() => selectMachine(runtime.machine.id)} key={runtime.machine.id} title={runtime.snapshot?.machine.name || runtime.machine.name}><span className={`tdw-presence-dot ${runtime.state}`} /><span><strong>{runtime.snapshot?.machine.name || runtime.machine.name}</strong><small>{runtime.snapshot?.agents.filter(harnessAvailable).length || 0}/{runtime.snapshot?.agents.length || 0} harnesses available</small></span></button>)}
           </div>
-          <div className="tdw-project-footer"><span>{workingCount > 0 ? `${workingCount} agent${workingCount === 1 ? "" : "s"} working` : "All agents quiet"}</span><button type="button" onClick={onManageMachines}>Manage machines</button></div>
+
+          <div className="tdw-workspace-section tdw-harness-section">
+            <span className="tdw-workspace-label">Harnesses</span>
+            {shownHarnesses.length ? shownHarnesses.map(({ runtime, agent }) => <div className="tdw-harness-row" key={`${runtime.machine.id}:${agent.id}`} title={`${agent.label} · ${agent.state}`}><span className={`tdw-presence-dot ${agent.state}`} /><span><strong>{agent.label}</strong><small>{agent.state}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span></div>) : <div className="tdw-side-empty">No harnesses detected</div>}
+          </div>
+
+          <div className="tdw-workspace-section tdw-project-section">
+            <span className="tdw-workspace-label">Projects</span>
+            <button type="button" className={`tdw-project-row${selectedProjectKey === "all" ? " active" : ""}`} onClick={() => selectProject("all")} title="All projects"><span className="tdw-project-icon"><ChatIcon size={15} /></span><span><strong>All projects</strong><small>Across the selected machine scope</small></span><b>{projectScopedThreads.length}</b></button>
+            <div className="tdw-project-list">
+              {visibleProjects.map((record) => <button type="button" className={`tdw-project-row${selectedProjectKey === record.key ? " active" : ""}`} onClick={() => selectProject(record.key)} key={record.key} title={record.project.name}><span className="tdw-project-icon"><FolderIcon size={15} /></span><span><strong>{record.project.name}</strong><small>{record.runtime.snapshot?.machine.name || record.runtime.machine.name}</small></span><b>{record.count}</b></button>)}
+            </div>
+          </div>
+
+          <div className="tdw-workspace-section tdw-filter-section">
+            <span className="tdw-workspace-label">Task filters</span>
+            {(["all", "working", "attention", "done"] as TaskFilter[]).map((filter) => <button type="button" className={`tdw-filter-row${taskFilter === filter ? " active" : ""}`} key={filter} onClick={() => setTaskFilter(filter)}><span className={`tdw-filter-dot ${filter}`} /><span>{filter === "all" ? "All" : filter === "working" ? "Working" : filter === "attention" ? "Needs attention" : "Done"}</span><b>{statusCounts[filter]}</b></button>)}
+          </div>
         </aside>
 
         <section className="tdw-thread-column">
-          <div className="tdw-column-heading"><div><span>{selectedProjectKey === "all" ? "All projects" : selectedProject?.project.name || "Project"}</span><h2>Work Threads</h2></div><strong>{visibleThreads.length}</strong></div>
-          <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations..." /></div>
+          <div className="tdw-column-heading"><div><span>{selectedProjectKey === "all" ? "Current scope" : selectedProject?.project.name || "Project"}</span><h2>Tasks</h2></div><strong>{visibleThreads.length}</strong></div>
+          <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks and conversations..." /></div>
           <div className="tdw-thread-list">
-            {!loaded && threads.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Loading your workspace...</strong></div> : visibleThreads.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No Work Threads here yet</strong><span>Start a conversation and keep refining it until the work is done.</span><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={14} /> New Work Thread</button></div> : visibleThreads.map((record) => {
-              const state = threadState(record.task)
-              const agent = agentForThread(record)
-              return <button type="button" className={`tdw-thread-card${selectedThreadKey === record.key ? " selected" : ""}`} onClick={() => { setSelectedThreadKey(record.key); setMobileDetailOpen(true) }} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{threadTitle(record.task)}</strong><time>{formatRelative(record.task.updatedAt || record.task.createdAt)}</time></span><span className="tdw-thread-project">{record.task.project?.name || record.task.projectId}</span><span className="tdw-thread-meta">{agent?.label || threadAgentID(record.task)} · {modelLabel(record.task)}</span><span className={`tdw-thread-status ${state}`}>{threadStateLabel(record.task)}</span></span></button>
+            {!loaded && threads.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Loading your workspace...</strong></div> : visibleThreads.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No Tasks in this view</strong><span>Change the filters or start a new Task.</span><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={14} /> New Task</button></div> : visibleThreads.map((record) => {
+              const state = taskState(record.task)
+              const agent = agentForTask(record)
+              return <button type="button" className={`tdw-thread-card${selectedThreadKey === record.key ? " selected" : ""}`} onClick={() => { setSelectedThreadKey(record.key); setMobileDetailOpen(true) }} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{taskTitle(record.task)}</strong><time>{formatRelative(record.task.updatedAt || record.task.createdAt)}</time></span><span className="tdw-thread-project">{record.task.project?.name || record.task.projectId}</span><span className="tdw-thread-meta">{agent?.label || taskAgentID(record.task)} · {modelLabel(record.task)}</span><span className={`tdw-thread-status ${state}`}>{taskStateLabel(record.task)}</span></span></button>
             })}
           </div>
+          <div className="tdw-pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Task list" onPointerDown={beginTaskPaneResize} />
         </section>
 
         <main className={`tdw-main${mobileDetailOpen ? " mobile-open" : ""}`}>
-          {selected ? <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Work Threads">← Work Threads</button> : null}
+          {selected ? <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Tasks">← Tasks</button> : null}
           {selected ? (
             <WorkThreadDetail
               key={selected.key}
@@ -446,12 +542,12 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
               onWorkspaceRefresh={() => setRevision((value) => value + 1)}
             />
           ) : (
-            <div className="tdw-welcome"><div className="tdw-welcome-mark"><ChatIcon size={30} /></div><span>TaskDesk 3.0</span><h1>Pick up a conversation, not a task.</h1><p>Open a Work Thread and keep talking to the coding agent until the result is right. TaskDesk keeps the technical session underneath out of your way.</p><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> Start a Work Thread</button></div>
+            <div className="tdw-welcome"><div className="tdw-welcome-mark"><ChatIcon size={30} /></div><span>TaskDesk 3.0</span><h1>One task. One continuing conversation.</h1><p>Open a Task and keep talking to the coding agent until the result is right. Native Sessions and Runs stay underneath unless you need diagnostics.</p><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> Start a Task</button></div>
           )}
         </main>
       </div>
 
-      {newThreadOpen ? <NewWorkThreadModal runtimes={runtimes} initialMachineID={selected?.runtime.machine.id || activeMachineID} initialProjectKey={selectedProjectKey} onClose={() => setNewThreadOpen(false)} onCreated={upsertCreated} /> : null}
+      {newThreadOpen ? <NewTaskModal runtimes={runtimes} initialMachineID={selected?.runtime.machine.id || (selectedMachineID !== "all" ? selectedMachineID : activeMachineID)} initialProjectKey={selectedProjectKey} onClose={() => setNewThreadOpen(false)} onCreated={upsertCreated} /> : null}
     </div>
   )
 }
