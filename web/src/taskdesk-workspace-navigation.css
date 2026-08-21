@@ -16,11 +16,23 @@
   background: var(--td3-raise-1); cursor: pointer; font-size: 18px; line-height: 1;
 }
 .tdw-sidebar-collapse:hover { color: var(--td3-text); border-color: var(--td3-border-strong); background: var(--td3-raise-2); }
-.tdw-workspace-section { flex: none; padding: 9px 8px; border-bottom: 1px solid var(--td3-border-soft); }
+.tdw-workspace-section { flex: none; padding: 5px 8px 8px; border-bottom: 1px solid var(--td3-border-soft); }
+.tdw-workspace-section-header {
+  width: 100%; min-height: 29px; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 5px; border: 0; border-radius: 7px; color: inherit; background: transparent; cursor: pointer;
+}
+.tdw-workspace-section-header:hover { background: var(--td3-raise-1); }
 .tdw-workspace-label {
-  display: block; padding: 0 5px 6px; color: var(--td3-muted); font-size: 8.5px;
+  display: block; padding: 0; color: var(--td3-muted); font-size: 8.5px;
   font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
 }
+.tdw-section-chevron {
+  flex: none; color: var(--td3-muted); font-size: 13px; line-height: 1; transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+.tdw-workspace-section.section-collapsed .tdw-section-chevron { transform: rotate(-90deg); }
+.tdw-workspace-section.section-collapsed .tdw-workspace-section-body { display: none; }
+.tdw-workspace-section-body { min-width: 0; }
 .tdw-side-row, .tdw-harness-row, .tdw-filter-row {
   width: 100%; min-width: 0; min-height: 38px; display: grid; align-items: center; gap: 8px;
   margin: 2px 0; padding: 6px 7px; border: 1px solid transparent; border-radius: 9px;
@@ -37,8 +49,8 @@
   width: 8px; height: 8px; justify-self: center; border-radius: 999px; background: var(--td3-muted);
   box-shadow: 0 0 0 3px var(--td3-raise-2);
 }
-.tdw-presence-dot.online, .tdw-presence-dot.available { background: var(--td3-green); }
-.tdw-presence-dot.configured { background: var(--td3-yellow); }
+.tdw-presence-dot.online, .tdw-presence-dot.available, .tdw-presence-dot.configured { background: var(--td3-green); }
+.tdw-presence-dot.loading { background: var(--td3-yellow); }
 .tdw-presence-dot.offline, .tdw-presence-dot.unavailable { background: var(--td3-red); }
 .tdw-harness-row { grid-template-columns: 18px minmax(0, 1fr); }
 .tdw-side-empty { padding: 6px 7px; color: var(--td3-muted); font-size: 9px; }
@@ -53,10 +65,11 @@
 
 .tdw-shell.workspace-collapsed .tdw-workspace-heading { min-height: 52px; justify-content: center; padding-inline: 0; }
 .tdw-shell.workspace-collapsed .tdw-workspace-heading > div,
-.tdw-shell.workspace-collapsed .tdw-workspace-label,
+.tdw-shell.workspace-collapsed .tdw-workspace-section-header,
 .tdw-shell.workspace-collapsed .tdw-harness-section,
 .tdw-shell.workspace-collapsed .tdw-filter-section { display: none; }
 .tdw-shell.workspace-collapsed .tdw-workspace-section { padding: 5px; }
+.tdw-shell.workspace-collapsed .tdw-workspace-section.section-collapsed .tdw-workspace-section-body { display: block; }
 .tdw-shell.workspace-collapsed .tdw-side-row,
 .tdw-shell.workspace-collapsed .tdw-project-row {
   width: 44px; min-height: 42px; margin: 3px auto; display: grid; grid-template-columns: 1fr;
@@ -95,7 +108,9 @@
   outline: none; border-color: var(--td3-focus) !important; box-shadow: 0 0 0 3px var(--td3-blue-soft) !important;
 }
 
-/* Machines now exposes the live harness inventory returned by the daemon. */
+/* Machines exposes the live harness inventory returned by the daemon. A configured ACP host is
+   ready to use but intentionally starts lazily, so both configured (Ready) and available
+   (Running) use the healthy green affordance. Yellow is reserved for genuinely transitional state. */
 .uw-machine-config-main { flex: 1; }
 .uw-machine-harness-list {
   min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px;
@@ -106,8 +121,8 @@
   color: var(--td3-text-3); background: var(--td3-raise-1);
 }
 .uw-machine-harness > i { width: 7px; height: 7px; border-radius: 999px; background: var(--td3-muted); }
-.uw-machine-harness > i.available { background: var(--td3-green); }
-.uw-machine-harness > i.configured { background: var(--td3-yellow); }
+.uw-machine-harness > i.available, .uw-machine-harness > i.configured { background: var(--td3-green); }
+.uw-machine-harness > i.loading { background: var(--td3-yellow); }
 .uw-machine-harness > i.unavailable { background: var(--td3-red); }
 .uw-machine-harness > strong { font-size: 10px; }
 .uw-machine-harness > small { color: var(--td3-muted); font-size: 8.5px; }
@@ -136,13 +151,16 @@
   .tdw-shell.workspace-collapsed { --tdw-workspace-width: auto; }
   .tdw-machine-section, .tdw-harness-section, .tdw-filter-section, .tdw-workspace-heading { display: none !important; }
   .tdw-project-section {
-    width: max-content; min-width: 100%; flex: none; display: flex; align-items: center; gap: 6px;
-    padding: 0 !important; border: 0;
+    width: max-content; min-width: 100%; flex: none; padding: 0 !important; border: 0;
   }
-  .tdw-project-section > .tdw-workspace-label { display: none; }
-  .tdw-project-section > .tdw-project-row,
+  .tdw-project-section .tdw-workspace-section-header { display: none; }
+  .tdw-project-section .tdw-workspace-section-body,
+  .tdw-project-section.section-collapsed .tdw-workspace-section-body {
+    width: max-content; min-width: 100%; display: flex; align-items: center; gap: 6px;
+  }
+  .tdw-project-section .tdw-project-list { display: flex; align-items: center; gap: 6px; }
+  .tdw-project-section .tdw-project-row,
   .tdw-project-section .tdw-project-list .tdw-project-row,
-  .tdw-shell.workspace-collapsed .tdw-project-section > .tdw-project-row,
   .tdw-shell.workspace-collapsed .tdw-project-section .tdw-project-row {
     width: auto; min-width: max-content; min-height: 42px; margin: 0; display: grid;
     grid-template-columns: 24px minmax(0, auto) auto; gap: 6px; padding: 5px 9px;
