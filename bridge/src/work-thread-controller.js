@@ -190,6 +190,7 @@ export class WorkThreadController {
       const next = {
         ...current,
         restoredCheckpointId: checkpoint.id,
+        restoredAt: timestamp,
         updatedAt: timestamp
       }
       next.context = buildPersistedTaskContext(next, (Number(current.context?.revision) || 0) + 1)
