@@ -95,9 +95,36 @@
   outline: none; border-color: var(--td3-focus) !important; box-shadow: 0 0 0 3px var(--td3-blue-soft) !important;
 }
 
+/* Machines now exposes the live harness inventory returned by the daemon. */
+.uw-machine-config-main { flex: 1; }
+.uw-machine-harness-list {
+  min-width: 0; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px;
+}
+.uw-machine-harness {
+  min-width: 0; display: grid; grid-template-columns: 7px auto auto; align-items: center; gap: 5px;
+  padding: 4px 7px; border: 1px solid var(--td3-border); border-radius: 999px;
+  color: var(--td3-text-3); background: var(--td3-raise-1);
+}
+.uw-machine-harness > i { width: 7px; height: 7px; border-radius: 999px; background: var(--td3-muted); }
+.uw-machine-harness > i.available { background: var(--td3-green); }
+.uw-machine-harness > i.configured { background: var(--td3-yellow); }
+.uw-machine-harness > i.unavailable { background: var(--td3-red); }
+.uw-machine-harness > strong { font-size: 10px; }
+.uw-machine-harness > small { color: var(--td3-muted); font-size: 8.5px; }
+
+/* Classic must remain usable even when an old harness supplies a pathological session title. */
 .tdw-classic-host { position: relative; height: 100vh; min-height: 0; padding-top: 52px; overflow: hidden; }
 .tdw-classic-host > :not(.tdw-return) { height: 100%; min-height: 0; }
 .tdw-return { top: 8px; left: 10px; }
+.tdw-classic-host .appbar-titles,
+.tdw-classic-host .session-title-button,
+.tdw-classic-host .session-title-text { min-width: 0; max-width: 100%; }
+.tdw-classic-host .appbar-titles h1,
+.tdw-classic-host .session-title-text {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tdw-classic-host .appbar-titles h1 { max-width: min(62vw, 720px); }
+.tdw-classic-host .session-title-text { max-width: min(58vw, 680px); }
 
 @media (max-width: 1180px) and (min-width: 781px) {
   .tdw-layout { grid-template-columns: min(var(--tdw-workspace-width), 200px) minmax(260px, min(var(--tdw-thread-width, 320px), 38vw)) minmax(0, 1fr); }
@@ -123,4 +150,8 @@
   .tdw-shell.workspace-collapsed .tdw-project-section .tdw-project-row > span:nth-child(2),
   .tdw-shell.workspace-collapsed .tdw-project-section .tdw-project-row > b { display: flex; }
   .tdw-result-markdown { font-size: 13px; }
+  .uw-machine-harness { grid-template-columns: 7px minmax(0, 1fr); border-radius: 9px; }
+  .uw-machine-harness > small { grid-column: 2; }
+  .tdw-classic-host .appbar-titles h1,
+  .tdw-classic-host .session-title-text { max-width: 62vw; }
 }
