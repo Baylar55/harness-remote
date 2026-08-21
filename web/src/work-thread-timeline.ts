@@ -77,25 +77,14 @@ function compactTextParts(parts: MessagePart[]): MessagePart[] {
 }
 
 function compactAssistantParts(parts: MessagePart[]): MessagePart[] {
-  const reasoning = parts.filter((part) => part.type === "reasoning" && typeof part.text === "string" && part.text.trim())
-  const tools = parts.filter((part) => part.type === "tool")
   const text = compactTextParts(parts.filter((part) => part.type === "text"))
-  const other = parts.filter((part) => part.type !== "reasoning" && part.type !== "tool" && part.type !== "text")
-  const activity: MessagePart[] = []
+  const nonText = parts.filter((part) => part.type !== "text")
 
-  if (reasoning.length) {
-    activity.push({
-      ...reasoning[0],
-      id: `${reasoning[0].id}:taskdesk-merged`,
-      text: reasoning.map((part) => part.text?.trim()).filter(Boolean).join("\n\n")
-    })
-  }
-  activity.push(...tools)
-
-  // Work Threads intentionally prioritize the user-visible answer over exact native wire order.
-  // All technical chatter becomes one collapsed Activity section before the final answer. Advanced
-  // Native Sessions still renders the untouched native sequence for diagnostics.
-  return [...activity, ...other, ...text]
+  // Product chat keeps the answer after Activity, but the Activity itself stays in native order.
+  // In particular, do not merge every reasoning fragment into the first one: OMP can interleave
+  // reasoning and completed tools, and moving later reasoning above those tools made the expanded
+  // disclosure look corrupted. Separate reasoning fragments are cheap because Activity is lazy.
+  return [...nonText, ...text]
 }
 
 function compactAssistantMessage(message: MessageEnvelope): MessageEnvelope {
@@ -151,6 +140,41 @@ function eventText(runs: MachineTaskRun[], index: number, agents: WorkThreadAgen
   return `${appearedBefore ? "Resumed" : "Switched to"} ${label} · context transferred`
 }
 
+function transcriptTurns(messages: MessageEnvelope[]): MessageEnvelope[][] {
+  const turns: MessageEnvelope[][] = []
+  let current: MessageEnvelope[] = []
+  for (const message of messages) {
+    if (message.info.role === "user") {
+      if (current.length) turns.push(current)
+      current = [message]
+      continue
+    }
+    if (current.length) current.push(message)
+    else if (turns.length) turns[turns.length - 1].push(message)
+    else current = [message]
+  }
+  if (current.length) turns.push(current)
+  return turns
+}
+
+/**
+ * ACP replay notifications do not carry historical timestamps. The bridge therefore has to stamp
+ * them when replay happens; after a daemon restart those timestamps can be hours or days after the
+ * Task Run that actually produced the messages. Time-window slicing then returns an empty old Task
+ * until the user sends another prompt and creates a new window around the replay time.
+ *
+ * A Task-owned native Session has one user turn per Run. When timestamps select no assistant reply,
+ * recover by turn order instead. Taking the last N turns also tolerates a Session that contained
+ * unrelated history before TaskDesk adopted it.
+ */
+function replayFallbackForRun(messages: MessageEnvelope[], ordinal: number, sessionRunCount: number): MessageEnvelope[] {
+  if (!messages.length) return []
+  const turns = transcriptTurns(messages)
+  if (!turns.length) return sessionRunCount === 1 ? messages : []
+  const firstTaskTurn = Math.max(0, turns.length - sessionRunCount)
+  return turns[firstTaskTurn + ordinal] ?? (sessionRunCount === 1 ? turns[turns.length - 1] : [])
+}
+
 function nativeForRun(
   task: MachineTask,
   run: MachineTaskRun,
@@ -158,7 +182,9 @@ function nativeForRun(
   next: MachineTaskRun | undefined,
   messages: MessageEnvelope[],
   agents: WorkThreadAgentMeta,
-  seen: Set<string>
+  seen: Set<string>,
+  sessionOrdinal: number,
+  sessionRunCount: number
 ): WorkThreadMessage[] {
   const start = runStart(task, run, index)
   const end = runEnd(run, next)
@@ -179,10 +205,18 @@ function nativeForRun(
     }))
   }
 
-  for (const rawMessage of messages) {
-    const message = compactAssistantMessage(rawMessage)
+  const timestampWindow = messages.filter((message) => {
     const created = Number(message.info?.time?.created) || 0
-    if (created && (created < start - 5_000 || created >= end)) continue
+    return !created || created >= start - 5_000 && created < end
+  })
+  const nativeHasAssistant = messages.some((message) => message.info.role === "assistant")
+  const windowHasAssistant = timestampWindow.some((message) => message.info.role === "assistant")
+  const selectedMessages = nativeHasAssistant && !windowHasAssistant
+    ? replayFallbackForRun(messages, sessionOrdinal, sessionRunCount)
+    : timestampWindow
+
+  for (const rawMessage of selectedMessages) {
+    const message = compactAssistantMessage(rawMessage)
     const identity = `${message.info.sessionID || session}:${message.info.id}`
     if (seen.has(identity)) continue
     const nativeText = textParts(message.parts)
@@ -261,6 +295,12 @@ export function buildWorkThreadTimeline(
     })] : []
   }
 
+  const sessionCounts = new Map<string, number>()
+  for (const run of runs) {
+    const session = runSessionID(run)
+    if (session) sessionCounts.set(session, (sessionCounts.get(session) ?? 0) + 1)
+  }
+  const sessionOrdinals = new Map<string, number>()
   const seen = new Set<string>()
   const timeline: WorkThreadMessage[] = []
   runs.forEach((run, index) => {
@@ -278,7 +318,19 @@ export function buildWorkThreadTimeline(
       }))
     }
     const session = runSessionID(run)
-    timeline.push(...nativeForRun(task, run, index, runs[index + 1], session ? messagesBySession[session] ?? [] : [], agents, seen))
+    const ordinal = session ? sessionOrdinals.get(session) ?? 0 : 0
+    if (session) sessionOrdinals.set(session, ordinal + 1)
+    timeline.push(...nativeForRun(
+      task,
+      run,
+      index,
+      runs[index + 1],
+      session ? messagesBySession[session] ?? [] : [],
+      agents,
+      seen,
+      ordinal,
+      session ? sessionCounts.get(session) ?? 1 : 1
+    ))
   })
 
   const ordered = timeline
