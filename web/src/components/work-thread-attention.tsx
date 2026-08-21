@@ -45,7 +45,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
   }
 
   async function respondQuestion(request: QuestionRequest) {
-    const result = request.questions.map((question, index) => {
+    const result = request.questions.map((_question, index) => {
       const key = answerKey(request.id, index)
       const selected = answers[key] ?? []
       const typed = (custom[key] || "").trim()
