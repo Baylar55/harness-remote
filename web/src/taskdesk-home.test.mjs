@@ -73,8 +73,8 @@ test("primary product surface is Project -> Work Thread -> Conversation, not Tas
   const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
 
-  assert.match(shell, /> Projects</)
-  assert.match(shell, /> Work Threads</)
+  assert.match(shell, /<h2>Projects<\/h2>/)
+  assert.match(shell, /<h2>Work Threads<\/h2>/)
   assert.match(shell, /New Work Thread/)
   assert.match(shell, /<WorkThreadDetail/)
   assert.match(shell, /key=\{selected\.key\}/)
@@ -89,6 +89,17 @@ test("primary product surface is Project -> Work Thread -> Conversation, not Tas
   assert.match(detail, /<WorkThreadConversation/)
   assert.match(conversation, /<TaskDeskConversation/)
   assert.match(conversation, /buildWorkThreadTimeline/)
+})
+
+test("Projects and Work Threads are columns in one workspace, not misleading top-level modes", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+
+  assert.doesNotMatch(shell, /tdw-primary-nav/)
+  assert.match(shell, /className="tdw-context-path"/)
+  assert.match(shell, /selectedProject\?\.project\.name \|\| "All projects"/)
+  assert.match(shell, /<strong>Work Threads<\/strong>/)
+  assert.match(shell, /tdw-machines-button/)
+  assert.match(shell, /setSelectedProjectKey\(key\)/)
 })
 
 test("New Work Thread starts immediately selected and invalidates stale machine refreshes", () => {
@@ -113,8 +124,32 @@ test("Work Thread composer continues through product lifecycle and can switch ag
   assert.match(source, /providerID: selectedModel\.providerID/)
   assert.match(source, /modelID: selectedModel\.modelID/)
   assert.match(source, /taskClient\.listAgentModels/)
+  assert.match(source, /<ModelPicker compact/)
+  assert.match(source, /sendInFlightRef\.current/)
+  assert.match(source, /if \(!text \|\| sending \|\| working \|\| sendInFlightRef\.current\) return/)
   assert.match(client, /mode\?: "fresh" \| "resume"/)
   assert.match(client, /\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}\/continue/)
+})
+
+test("model selection is searchable, grouped and shared between creation and conversation", () => {
+  const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+  const picker = readFileSync(new URL("./components/model-picker.tsx", import.meta.url), "utf8")
+  const pickerCss = readFileSync(new URL("./model-picker.css", import.meta.url), "utf8")
+  const shellCss = readFileSync(new URL("./taskdesk-workthreads.css", import.meta.url), "utf8")
+
+  assert.match(shell, /<ModelPicker models=\{models\}/)
+  assert.match(conversation, /<ModelPicker compact models=\{models\}/)
+  assert.match(picker, /Search model, provider, variant/)
+  assert.match(picker, /providerName/)
+  assert.match(picker, /tdw-model-variants/)
+  assert.match(picker, />Free</)
+  assert.match(picker, />Default</)
+  assert.match(picker, /inputCost/)
+  assert.match(pickerCss, /\.tdw-model-popover/)
+  assert.match(pickerCss, /\.tdw-model-provider/)
+  assert.match(shellCss, /select option/)
+  assert.match(shellCss, /color-scheme: dark/)
 })
 
 test("Working state is reconciled from the real native session and the chat exposes Stop plus waiting feedback", () => {
@@ -127,6 +162,7 @@ test("Working state is reconciled from the real native session and the chat expo
   assert.match(conversation, /waiting=\{working\}/)
   assert.match(conversation, /onStop=\{working \? stop : undefined\}/)
   assert.match(shared, /className="uw-session-typing" role="status"/)
+  assert.match(shared, /ThinkingIndicator/)
   assert.match(shared, /workingLabel/)
   assert.match(shared, /waiting && onStop/)
   assert.match(shared, /className="uw-button uw-button-danger"/)
@@ -179,6 +215,7 @@ test("Native Sessions remain available only as Advanced diagnostics in the norma
 
 test("shared conversation keeps bounded paging, streaming autoscroll, memoized rows and mobile-friendly keyboard behavior", () => {
   const source = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
+  const css = readFileSync(new URL("./taskdesk-conversation.css", import.meta.url), "utf8")
 
   assert.match(source, /const MessageBubble = memo/)
   assert.match(source, /NEAR_BOTTOM_PX = 96/)
@@ -190,4 +227,11 @@ test("shared conversation keeps bounded paging, streaming autoscroll, memoized r
   assert.match(source, /event\.metaKey/)
   assert.match(source, /event\.shiftKey/)
   assert.match(source, /COMPOSER_MAX_HEIGHT_PX = 180/)
+  assert.match(source, /uw-thinking-orb/)
+  assert.match(source, /setElapsed/)
+  assert.match(css, /font-size: 15\.5px/)
+  assert.match(css, /width: min\(1040px, 100%\)/)
+  assert.match(css, /uw-activity-parts/)
+  assert.match(css, /overflow-wrap: anywhere/)
+  assert.match(css, /tdw-thinking-shimmer/)
 })
