@@ -43,9 +43,12 @@ test("mobile controls are touch and keyboard friendly", () => {
   assert.match(mobile, /touch-action: manipulation/)
 })
 
-test("Android back unwinds TaskDesk overlays and mobile detail before exiting the app", () => {
+test("Android back unwinds transient overlays before mobile detail and app exit", () => {
   assert.match(standalone, /CapacitorApp\.addListener\("backButton"/)
   assert.match(standalone, /if \(managerOpen\)[\s\S]*?setManagerOpen\(false\)/)
+  assert.match(standalone, /\.tdw-model-picker\.open \.tdw-model-trigger/)
+  assert.match(standalone, /modelPickerTrigger\.click\(\)/)
+  assert.ok(standalone.indexOf("modelPickerTrigger") < standalone.indexOf("modalClose"), "model picker must close before its parent modal")
   assert.match(standalone, /\.tdw-modal-backdrop \.tdw-modal header button/)
   assert.match(standalone, /\.tdw-more-menu/)
   assert.match(standalone, /\.tdw-advanced-host \.tdw-advanced-bar > button/)
