@@ -142,6 +142,11 @@ class CachedCatalog {
     return this.result(models, false)
   }
 
+  clear() {
+    this.cache = []
+    this.refreshedAt = null
+  }
+
   stale(error) {
     if (!this.cache.length) throw error
     return this.result(this.cache, true, error instanceof Error ? error.message : String(error))
@@ -170,6 +175,8 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     this.sessionID = undefined
     this.stateLoaded = false
     this.hiddenSessionIDs = new Set()
+    this.onAgentExit = () => this.clear()
+    this.agent.on?.("exit", this.onAgentExit)
   }
 
   async #loadState() {
@@ -220,7 +227,13 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     return this.#newCatalogSession()
   }
 
-  async list({ allowStale = true } = {}) {
+  async list({ allowStale = true, refresh = false } = {}) {
+    // ACP adapters commonly attach live listeners when a session is loaded. Re-loading the same
+    // prompt-less catalog session every time a model picker opens can therefore accumulate adapter
+    // listeners even though the advertised model set has not changed. Keep one in-memory catalog
+    // for the lifetime of this dedicated adapter process. Its `exit` event invalidates the cache,
+    // so a restarted adapter still performs one real load before serving models again.
+    if (!refresh && this.cache.length) return this.result(this.cache, false)
     try {
       const options = await withTimeout(this.#refreshOptions(), this.timeoutMs, `${this.agentID} model catalog`)
       const models = modelsFromConfigOptions(options, this.agentID)
@@ -233,7 +246,10 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   }
 
   async validate(model) { return this.validateResult(await this.list({ allowStale: false }), model) }
-  close() { this.agent.close?.() }
+  close() {
+    this.agent.off?.("exit", this.onAgentExit)
+    this.agent.close?.()
+  }
 }
 
 export class HttpAgentModelCatalog extends CachedCatalog {
