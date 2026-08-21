@@ -1,0 +1,35 @@
+.tdw-mobile-back {
+  display: none;
+}
+
+@media (max-width: 780px) {
+  /* Mobile is a two-screen flow: Work Thread list, then the selected conversation. Do not infer
+     navigation state from CSS selection alone because a thread stays selected while the user goes
+     back to the list. */
+  .tdw-main {
+    display: none !important;
+  }
+
+  .tdw-main.mobile-open {
+    display: flex !important;
+    position: absolute;
+    inset: 56px 0 0;
+    z-index: 20;
+  }
+
+  .tdw-mobile-back {
+    flex: none;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    border: 0;
+    border-bottom: 1px solid var(--tdw-border);
+    background: var(--td3-panel-2);
+    color: var(--td3-blue-text);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 750;
+    text-align: left;
+  }
+}
