@@ -48,7 +48,8 @@ function task(overrides = {}) {
 
 const agents = {
   codex: { label: "Codex", backend: "codex" },
-  claude: { label: "Claude", backend: "claude" }
+  claude: { label: "Claude", backend: "claude" },
+  pi: { label: "PI", backend: "pi" }
 }
 
 function textOf(entry) {
@@ -194,4 +195,28 @@ test("duplicate native assistant envelopes for one Run collapse to one visible r
     ["user", "Initial request"],
     ["assistant", "Same completed answer"]
   ])
+})
+
+test("PI-style partial text around fragmented reasoning becomes one Activity and one final answer", () => {
+  const first = run({ agentId: "pi", sessionId: "session-pi" })
+  const started = Date.parse(first.startedAt)
+  const value = task({ agentId: "pi", run: first, runs: [first] })
+  const native = {
+    info: { id: "pi-a1", sessionID: "session-pi", role: "assistant", time: { created: started + 15_000 } },
+    parts: [
+      { id: "partial", messageID: "pi-a1", type: "text", text: "The bug comes from the stale session" },
+      { id: "think-1", messageID: "pi-a1", type: "reasoning", text: "Inspect session ownership." },
+      { id: "think-2", messageID: "pi-a1", type: "reasoning", text: "Compare the persisted run." },
+      { id: "final", messageID: "pi-a1", type: "text", text: "The bug comes from the stale session. I fixed the fallback and added a regression test." }
+    ]
+  }
+  const timeline = buildWorkThreadTimeline(value, { "session-pi": [native] }, agents)
+  const assistant = timeline.find((entry) => entry.info.role === "assistant")
+
+  assert.ok(assistant)
+  assert.equal(assistant.parts.filter((part) => part.type === "reasoning").length, 1)
+  assert.equal(assistant.parts.filter((part) => part.type === "text").length, 1)
+  assert.equal(textOf(assistant), "The bug comes from the stale session. I fixed the fallback and added a regression test.")
+  assert.equal(assistant.parts[0].type, "reasoning")
+  assert.equal(assistant.parts.at(-1).type, "text")
 })
