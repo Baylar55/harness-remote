@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
+import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import type { MessageEnvelope } from "../types"
 import { ChatIcon, LoadingIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
@@ -61,6 +61,27 @@ const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { mes
         <TaskDeskMessageContent message={message} />
       </div>
     </article>
+  )
+})
+
+const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, workingLabel }: { agentLabel: string; workingLabel?: string }) {
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    const started = Date.now()
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1_000)), 1_000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  return (
+    <div className="uw-session-typing" role="status" aria-live="polite" aria-label={`Waiting for ${agentLabel} response`}>
+      <span className="uw-thinking-orb" aria-hidden="true"><i /><i /><i /></span>
+      <span className="uw-thinking-copy">
+        <strong>{workingLabel || `${agentLabel} is thinking`}</strong>
+        <small>{elapsed < 2 ? "Starting…" : `${elapsed}s`}</small>
+      </span>
+      <span className="uw-thinking-shimmer" aria-hidden="true" />
+    </div>
   )
 })
 
@@ -162,14 +183,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
               ))}
         </>
       )}
-      {waiting ? (
-        <div className="uw-session-typing" role="status" aria-label={`Waiting for ${agentLabel} response`}>
-          <span />
-          <span />
-          <span />
-          {workingLabel ? <b className="uw-session-typing-label">{workingLabel}</b> : null}
-        </div>
-      ) : null}
+      {waiting ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
     </div>
   )
 }, transcriptPropsEqual)
