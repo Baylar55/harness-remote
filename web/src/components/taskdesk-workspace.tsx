@@ -1,4 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import {
+  isThemePreference,
+  loadLanguage,
+  loadThemePreference,
+  persistLanguage,
+  persistThemePreference,
+  type ThemePreference
+} from "../appPreferences"
+import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine, selectableMachineAgents } from "../machineClient"
 import type { SavedServerProfile } from "../serverProfiles"
 import {
@@ -15,7 +24,8 @@ import {
   MoreVerticalIcon,
   PlusIcon,
   RefreshIcon,
-  ServerIcon
+  ServerIcon,
+  SettingsIcon
 } from "../Icons"
 import { ModelPicker, modelOptionKey } from "./model-picker"
 import { UniversalWorkspace } from "./universal-workspace"
@@ -149,6 +159,56 @@ function loadCollapsedWorkspaceSections(): Set<WorkspaceSection> {
   } catch {
     return new Set()
   }
+}
+
+function TaskDeskSettingsModal({ onClose }: { onClose: () => void }) {
+  const [language, setLanguage] = useState<LanguageCode>(loadLanguage)
+  const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
+  const t = useMemo(() => createTranslator(language), [language])
+
+  function changeLanguage(value: string) {
+    const next = languageOptions.find((option) => option.code === value)?.code
+    if (!next) return
+    setLanguage(next)
+    persistLanguage(next)
+  }
+
+  function changeTheme(value: string) {
+    if (!isThemePreference(value)) return
+    setTheme(value)
+    persistThemePreference(value)
+  }
+
+  return (
+    <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="tdw-modal tdw-settings-modal" role="dialog" aria-modal="true" aria-label={t("nav.settings")} onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div><span>TaskDesk</span><h2>{t("nav.settings")}</h2></div>
+          <button type="button" onClick={onClose} aria-label={t("action.close")}>×</button>
+        </header>
+        <div className="tdw-modal-body">
+          <div className="tdw-form-row">
+            <label>
+              <span>{t("settings.theme")}</span>
+              <select value={theme} onChange={(event) => changeTheme(event.target.value)}>
+                <option value="system">{t("settings.themeSystem")}</option>
+                <option value="light">{t("settings.themeLight")}</option>
+                <option value="dark">{t("settings.themeDark")}</option>
+              </select>
+            </label>
+            <label>
+              <span>{t("settings.language")}</span>
+              <select value={language} onChange={(event) => changeLanguage(event.target.value)}>
+                {languageOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <p className="tdw-safety-note">Appearance and language are app-wide preferences shared by TaskDesk, Advanced Sessions and Classic Harness Remote.</p>
+        </div>
+        <footer><button type="button" className="tdw-button primary" onClick={onClose}>{t("action.close")}</button></footer>
+      </section>
+    </div>
+  )
 }
 
 function NewTaskModal({
@@ -306,6 +366,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   const [newThreadOpen, setNewThreadOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [workspaceCollapsed, setWorkspaceCollapsed] = useState(() => localStorage.getItem(WORKSPACE_COLLAPSED_KEY) !== "false")
@@ -512,11 +573,12 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
         <div className="tdw-top-actions">
           <span className="tdw-machine-health"><i className={onlineCount > 0 ? "online" : "offline"} />{onlineCount}/{machines.length} machines</span>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
+          <button type="button" className="tdw-icon-button" onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings"><SettingsIcon size={16} /></button>
           <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label="Refresh" disabled={refreshing}><RefreshIcon size={16} /></button>
           <button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> New Task</button>
           <div className="tdw-more-wrap">
             <button type="button" className="tdw-icon-button" onClick={() => setMoreOpen((value) => !value)} aria-label="More" title="More"><MoreVerticalIcon size={18} /></button>
-            {moreOpen ? <div className="tdw-more-menu"><button type="button" className="tdw-mobile-only-menu" onClick={() => { setMoreOpen(false); onManageMachines() }}>Machines</button><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
+            {moreOpen ? <div className="tdw-more-menu"><button type="button" className="tdw-mobile-only-menu" onClick={() => { setMoreOpen(false); onManageMachines() }}>Machines</button><button type="button" onClick={() => { setMoreOpen(false); setSettingsOpen(true) }}>Settings</button><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
           </div>
         </div>
       </header>
@@ -598,6 +660,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
       </div>
 
       {newThreadOpen ? <NewTaskModal runtimes={runtimes} initialMachineID={selected?.runtime.machine.id || (selectedMachineID !== "all" ? selectedMachineID : activeMachineID)} initialProjectKey={selectedProjectKey} onClose={() => setNewThreadOpen(false)} onCreated={upsertCreated} /> : null}
+      {settingsOpen ? <TaskDeskSettingsModal onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   )
 }
