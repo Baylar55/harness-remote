@@ -1,9 +1,9 @@
-/* Focus Chat is the default TaskDesk desktop layout.
+/* Focus Chat is the default TaskDesk desktop/tablet layout.
    Workspace navigation stays narrow and stable; the task list becomes a contextual drawer that
    overlays the left edge of chat instead of consuming a permanent third column. Mobile keeps its
-   existing list/detail navigation and ignores these desktop-only rules. */
+   existing list/detail navigation and ignores these rules. */
 
-@media (min-width: 901px) {
+@media (min-width: 781px) {
   .tdw-shell {
     --tdw-workspace-width: 268px;
   }
@@ -117,7 +117,7 @@
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 780px) {
   .tdw-task-drawer-scrim,
   .tdw-task-drawer-close,
   .tdw-tasks-toggle {
