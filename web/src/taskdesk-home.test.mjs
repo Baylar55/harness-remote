@@ -181,12 +181,12 @@ test("Changes stay grounded in the project workspace and current native Session"
 
 test("conversation UI preserves stable autoscroll memoized rows and mobile keyboard behavior", () => {
   const source = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
-  const css = readFileSync(new URL("./taskdesk-conversation.css", import.meta.url), "utf8")
+  const mobileCss = readFileSync(new URL("./taskdesk-mobile-navigation.css", import.meta.url), "utf8")
 
   assert.match(source, /const MessageBubble = memo/)
   assert.match(source, /NEAR_BOTTOM_PX = 96/)
   assert.match(source, /previousHeight/)
   assert.match(source, /\[messages, loading, ready, sending\]/)
   assert.match(source, /window\.requestAnimationFrame/)
-  assert.match(css, /env\(safe-area-inset-bottom/)
+  assert.match(mobileCss, /env\(safe-area-inset-bottom/)
 })
