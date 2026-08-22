@@ -83,10 +83,14 @@ test("primary product surface is Project -> Conversation -> native Sessions", ()
   assert.match(detail, />Changes</)
   assert.doesNotMatch(detail, />Result</)
   assert.doesNotMatch(detail, />History/)
+  assert.doesNotMatch(detail, /hr-header-state/)
   assert.match(detail, /nativeSessions\(conversation\)/)
   assert.match(detail, /runSessionID/)
   assert.match(conversation, /buildWorkThreadTimeline/)
   assert.match(conversation, /<TaskDeskConversation/)
+  assert.match(conversation, /<span>Continue with<\/span>/)
+  assert.doesNotMatch(conversation, /TaskDesk event/)
+  assert.doesNotMatch(conversation, /This Task keeps/)
 })
 
 test("Workspace keeps machines projects coding agents filters models and settings", () => {
@@ -155,6 +159,8 @@ test("native Sessions are linked, inspectable and not replaced by a second Sessi
 test("conversation chat keeps bounded paging live events attention Stop and startup feedback", () => {
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const shared = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
+  const shell = readFileSync(new URL("./components/conversation-workspace.tsx", import.meta.url), "utf8")
+  const controlPlaneCss = readFileSync(new URL("./conversation-control-plane.css", import.meta.url), "utf8")
   const abort = readFileSync(new URL("../../bridge/src/work-thread-abort.js", import.meta.url), "utf8")
 
   assert.match(conversation, /INITIAL_PAGE_SIZE = 200/)
@@ -168,6 +174,9 @@ test("conversation chat keeps bounded paging live events attention Stop and star
   assert.match(conversation, /onStop=\{working \? stop : undefined\}/)
   assert.match(shared, /ThinkingIndicator/)
   assert.match(shared, /sending \|\| \(waiting && showWaitingIndicator\)/)
+  assert.match(shell, /tdw-presence-dot \$\{runtime\.state\}/)
+  assert.match(controlPlaneCss, /:has\(\.tdw-presence-dot\.loading\)/)
+  assert.match(controlPlaneCss, /Preparing your workspace/)
   assert.match(abort, /service\.abort\(sessionID\)/)
 })
 
