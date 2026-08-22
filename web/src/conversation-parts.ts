@@ -27,7 +27,7 @@ export function groupConversationParts(parts: MessagePart[]): ConversationPartGr
   const groups: ConversationPartGroup[] = []
   const activityIndexes = parts.flatMap((part, index) => isConversationActivityPart(part) ? [index] : [])
   const firstActivity = activityIndexes[0] ?? -1
-  const lastActivity = activityIndexes.at(-1) ?? -1
+  const lastActivity = activityIndexes.length ? activityIndexes[activityIndexes.length - 1] : -1
 
   for (let index = 0; index < parts.length; index += 1) {
     const part = parts[index]
