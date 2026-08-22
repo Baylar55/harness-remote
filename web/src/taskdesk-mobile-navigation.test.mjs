@@ -5,7 +5,10 @@ import test from "node:test"
 const workspace = readFileSync(new URL("./components/conversation-workspace.tsx", import.meta.url), "utf8")
 const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
 const mobile = readFileSync(new URL("./taskdesk-mobile-navigation.css", import.meta.url), "utf8")
+const controlPlane = readFileSync(new URL("./conversation-control-plane-overrides.css", import.meta.url), "utf8")
 const workspaceNavigation = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
+const machineClient = readFileSync(new URL("./machineClient.ts", import.meta.url), "utf8")
+const taskClient = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
 
 test("mobile opens a Conversation explicitly and can return to the list without clearing selection", () => {
   assert.match(workspace, /const \[mobileDetailOpen, setMobileDetailOpen\] = useState\(false\)/)
@@ -28,12 +31,39 @@ test("mobile keeps Projects as a swipeable filter rail", () => {
   assert.doesNotMatch(mobile, /\.tdw-project-column \{\s*display: none !important/)
 })
 
+test("mobile has explicit Conversations Machines and Settings destinations", () => {
+  assert.match(standalone, /<nav className="hr-mobile-nav" aria-label="Main navigation">/)
+  assert.match(standalone, />Conversations<\/span>/)
+  assert.match(standalone, />Machines<\/span>/)
+  assert.match(standalone, />Settings<\/span>/)
+  assert.match(standalone, /function MobileSettingsPage/)
+  assert.match(standalone, /const mobileSection = managerOpen \? "machines" : mobileSettingsOpen \? "settings" : "conversations"/)
+  assert.match(controlPlane, /\.hr-mobile-nav \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/)
+  assert.match(controlPlane, /:has\(\.tdw-main\.mobile-open\) \.hr-mobile-nav[\s\S]*?display: none/)
+})
+
+test("mobile Machines is a phone page and detected agents cannot overflow horizontally", () => {
+  assert.match(controlPlane, /\.uw-manager-backdrop \{[\s\S]*?inset: 0 0 var\(--hr-mobile-nav-height\) 0 !important/)
+  assert.match(controlPlane, /\.uw-machine-manager \{[\s\S]*?width: 100% !important[\s\S]*?max-width: 100% !important/)
+  assert.match(controlPlane, /\.uw-machine-manager-body \{[\s\S]*?overflow-x: hidden !important/)
+  assert.match(controlPlane, /\.uw-machine-harness-list \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\) !important/)
+  assert.match(controlPlane, /\.uw-machine-harness \{[\s\S]*?max-width: 100%/)
+  assert.match(controlPlane, /\.uw-machine-editor-grid input \{[\s\S]*?font-size: 16px/)
+})
+
 test("mobile Conversation detail uses the full dynamic viewport and avoids duplicated chrome", () => {
   assert.match(mobile, /height: 100dvh/)
   assert.match(mobile, /:has\(\.tdw-main\.mobile-open\) \.tdw-topbar \{[\s\S]*?display: none/)
   assert.match(mobile, /:has\(\.tdw-main\.mobile-open\) \.tdw-main\.mobile-open \{[\s\S]*?inset: 0/)
   assert.match(mobile, /\.tdw-thread-heading p \{[\s\S]*?display: none/)
   assert.match(mobile, /\.tdw-conversation-state \{[\s\S]*?display: none !important/)
+})
+
+test("mobile composer keeps Send or Stop inside the text field on the right", () => {
+  assert.match(controlPlane, /\.tdw-work-thread-conversation \.uw-composer-shell \{[\s\S]*?position: relative/)
+  assert.match(controlPlane, /\.tdw-work-thread-conversation \.uw-composer-shell textarea \{[\s\S]*?padding: 12px 58px 12px 13px !important/)
+  assert.match(controlPlane, /\.tdw-work-thread-conversation \.uw-composer-footer \{[\s\S]*?position: absolute[\s\S]*?right: 8px[\s\S]*?bottom: 8px/)
+  assert.match(controlPlane, /\.tdw-work-thread-conversation \.uw-composer-footer \.uw-button \{[\s\S]*?width: 42px/)
 })
 
 test("mobile controls are touch and keyboard friendly", () => {
@@ -46,9 +76,21 @@ test("mobile controls are touch and keyboard friendly", () => {
   assert.match(mobile, /touch-action: manipulation/)
 })
 
-test("Android back unwinds the conversation UI before app exit", () => {
+test("short mobile transport drops keep last-known machine projects and conversations", () => {
+  assert.match(machineClient, /DISCOVERY_STALE_GRACE_MS = 45_000/)
+  assert.match(machineClient, /recentCachedSnapshot\(config\)/)
+  assert.match(taskClient, /LIST_STALE_GRACE_MS = 45_000/)
+  assert.match(taskClient, /projectListCache/)
+  assert.match(taskClient, /taskListCache/)
+  assert.match(taskClient, /const cached = readRecent\(projectListCache, key\)/)
+  assert.match(taskClient, /const cached = readRecent\(taskListCache, key\)/)
+})
+
+test("Android back unwinds mobile pages and conversation UI before app exit", () => {
   assert.match(standalone, /CapacitorApp\.addListener\("backButton"/)
+  assert.match(standalone, /if \(mobileSettingsOpen\)[\s\S]*?setMobileSettingsOpen\(false\)/)
   assert.match(standalone, /if \(managerOpen\)[\s\S]*?setManagerOpen\(false\)/)
+  assert.ok(standalone.indexOf("if (mobileSettingsOpen)") < standalone.indexOf("if (managerOpen)"), "Settings should unwind before Machines")
   assert.match(standalone, /\.tdw-model-picker\.open \.tdw-model-trigger/)
   assert.match(standalone, /modelPickerTrigger\.click\(\)/)
   assert.ok(standalone.indexOf("modelPickerTrigger") < standalone.indexOf("modalClose"), "model picker must close before its parent modal")
