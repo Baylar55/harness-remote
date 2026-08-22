@@ -6,6 +6,7 @@ import { WorktreeManager } from "./worktree-manager.js"
 
 const MAX_AGENT_ID_CHARS = 160
 const MAX_ROLE_CHARS = 80
+const MAX_CLIENT_REQUEST_ID_CHARS = 200
 
 function taskRuns(task) {
   if (Array.isArray(task?.runs) && task.runs.length) return task.runs
@@ -55,6 +56,14 @@ function validateRunOptions(options) {
     }
     if (options.role.trim().length > MAX_ROLE_CHARS) {
       throw taskLaunchError("invalid_request", "Task Run role is too long")
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(options, "clientRequestId")) {
+    if (typeof options.clientRequestId !== "string" || !options.clientRequestId.trim()) {
+      throw taskLaunchError("invalid_request", "Client request id must be a non-empty string")
+    }
+    if (options.clientRequestId.trim().length > MAX_CLIENT_REQUEST_ID_CHARS) {
+      throw taskLaunchError("invalid_request", "Client request id is too long")
     }
   }
   if (Object.prototype.hasOwnProperty.call(options, "model") && options.model !== null && !normalizeTaskModel(options.model)) {
@@ -217,6 +226,7 @@ export class TaskRunController {
     if (!agentID) throw taskLaunchError("unknown_agent", "A target harness is required")
     const model = requestedModel(task, agentID, options)
     const role = requestedRole(task, options)
+    const clientRequestId = typeof options.clientRequestId === "string" ? options.clientRequestId.trim() : ""
     const requestedReuseSession = options.reuseSession === true
     const reusableRun = requestedReuseSession ? latestRunForAgent(task, agentID, { requireSession: true }) : null
     if (requestedReuseSession && !reusableRun) throw taskLaunchError("session_unavailable", "The requested native Session cannot be reused for this Run")
@@ -236,6 +246,7 @@ export class TaskRunController {
       agentId: agentID,
       model,
       role,
+      ...(clientRequestId ? { clientRequestId } : {}),
       // Persist acceptance before model discovery or Git/context inspection. The real revision is
       // kept in local run state until the native Session is linked, while the same run id remains authoritative.
       contextRevision: 0,
@@ -256,6 +267,9 @@ export class TaskRunController {
     // This write is the transport acceptance boundary. Once it succeeds, a client that loses the
     // HTTP response can reconnect and observe the new run instead of resending an ambiguous prompt.
     let current = await this.taskStore.setRunState(taskID, { status: "starting", run })
+    // A concurrent/retried mutation with the same clientRequestId is returned by the store as the
+    // already-accepted Run. Never continue native Session creation for the losing duplicate call.
+    if (current.run?.id !== baseRun.id) return current
     const currentForRun = () => ({
       ...current,
       agentId: agentID,
@@ -321,6 +335,10 @@ export class TaskRunController {
     await this.#awaitReconciliation()
     const task = await this.taskStore.get(taskID)
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
+    const clientRequestId = typeof options.clientRequestId === "string" ? options.clientRequestId.trim() : ""
+    if (clientRequestId && taskRuns(task).some((run) => run?.clientRequestId === clientRequestId)) {
+      return task
+    }
     if (!["completed", "failed", "cancelled"].includes(task.status)) throw taskLaunchError("invalid_state", "Only a terminal task can start another run")
 
     const agentID = requestedAgent(task, options)
