@@ -87,11 +87,11 @@ test("TaskDesk renderer keeps Activity collapsed by default while retaining tech
   assert.match(renderer, /group\.parts\.map\(\(part\) => <ActivityPart/)
 })
 
-test("Work Thread owns its live turn indicator instead of rendering the detached waiting row", () => {
+test("Work Thread keeps live state in compact chat chrome and forbids detached waiting rows", () => {
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
-  assert.match(conversation, /tdw-turn-working/)
+  assert.doesNotMatch(conversation, /tdw-turn-working/)
+  assert.doesNotMatch(conversation, /workingMessageID/)
   assert.match(conversation, /showWaitingIndicator=\{false\}/)
-  assert.match(conversation, /workingMessageID/)
   assert.match(conversation, /ConversationStatePill/)
 })
 
