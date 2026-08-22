@@ -105,16 +105,38 @@ function runStart(task: MachineTask, run: MachineTaskRun, index: number): number
   return (Number.isFinite(taskCreated) ? taskCreated : Date.now()) + index * 10
 }
 
+function modelLabel(run?: MachineTaskRun | null): string {
+  const model = run?.model
+  if (!model?.modelID) return ""
+  return `${model.modelID}${model.variant ? ` · ${model.variant}` : ""}`
+}
+
+function sameModel(left?: MachineTaskRun | null, right?: MachineTaskRun | null): boolean {
+  const a = left?.model
+  const b = right?.model
+  if (!a && !b) return true
+  if (!a || !b) return false
+  return a.providerID === b.providerID && a.modelID === b.modelID && (a.variant || "") === (b.variant || "")
+}
+
 function eventText(runs: MachineTaskRun[], index: number, agents: WorkThreadAgentMeta): string | null {
   if (index === 0) return null
   const run = runs[index]
   const previous = runs[index - 1]
   const currentAgent = run.agentId || ""
   const previousAgent = previous.agentId || ""
-  if (!currentAgent || currentAgent === previousAgent) return null
-  const label = agents[currentAgent]?.label || currentAgent
-  const appearedBefore = runs.slice(0, index - 1).some((candidate) => candidate.agentId === currentAgent)
-  return `${appearedBefore ? "Resumed" : "Switched to"} ${label} · context transferred`
+  const label = agents[currentAgent]?.label || currentAgent || "coding agent"
+  const model = modelLabel(run)
+
+  if (currentAgent && currentAgent !== previousAgent) {
+    return `Continued with ${label}${model ? ` · ${model}` : ""} · context transferred`
+  }
+
+  if (!sameModel(previous, run) && model) {
+    return `Model changed to ${model} · continuing with ${label}`
+  }
+
+  return null
 }
 
 /**
