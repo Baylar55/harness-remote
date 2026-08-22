@@ -14,9 +14,12 @@ export function isConversationActivityPart(part: MessagePart): boolean {
 }
 
 function activityStatus(parts: MessagePart[], forceRunning = false): "running" | "completed" | "error" {
-  if (parts.some((part) => part.type === "tool" && part.state?.status === "error")) return "error"
+  // A failed tool call is local technical activity, not the state of the whole assistant turn.
+  // While the native Run is alive the Activity stays visibly Working; once the Run ends, the
+  // individual tool card retains its error while the Activity itself can complete normally.
+  // A real turn failure is rendered separately from message.info.error by TaskDeskMessageContent.
   if (forceRunning) return "running"
-  if (parts.some((part) => part.type === "tool" && part.state?.status && part.state.status !== "completed")) return "running"
+  if (parts.some((part) => part.type === "tool" && part.state?.status && part.state.status !== "completed" && part.state.status !== "error")) return "running"
   if (parts.some((part) => part.type === "reasoning" && part.time?.start && !part.time.end)) return "running"
   return "completed"
 }
