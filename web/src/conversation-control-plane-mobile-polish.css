@@ -1,0 +1,51 @@
+/* Final mobile control geometry. Keep this file loaded after the larger conversation-control-plane
+   overrides so selection and icon alignment cannot be accidentally neutralized by responsive rules. */
+@media (max-width: 780px) {
+  /* A concrete project must read as selected exactly as clearly as All projects. */
+  .hr-control-plane .tdw-project-column > .tdw-project-row.active,
+  .hr-control-plane .tdw-project-list .tdw-project-row.active {
+    border-color: var(--td3-blue-border) !important;
+    background: var(--td3-blue-soft) !important;
+    color: var(--td3-text) !important;
+    box-shadow: inset 0 0 0 1px var(--td3-blue-border-soft);
+  }
+
+  .hr-control-plane .tdw-project-column > .tdw-project-row.active .tdw-project-icon,
+  .hr-control-plane .tdw-project-list .tdw-project-row.active .tdw-project-icon {
+    color: var(--td3-blue-text);
+    background: var(--td3-blue-soft-2);
+  }
+
+  /* Square controls use real geometric centering. Zero the inherited flex gap because icon-only
+     buttons may still contain visually hidden text nodes, which otherwise shift the icon sideways. */
+  .hr-control-plane .hr-new-conversation,
+  .hr-control-plane .tdw-icon-button,
+  .hr-control-plane .tdw-work-thread-conversation .uw-composer-footer .uw-button,
+  .hr-mobile-settings-page > header button,
+  .uw-machine-manager .uw-manager-close,
+  .tdw-modal > header > button {
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    text-align: center;
+  }
+
+  .hr-control-plane .hr-new-conversation,
+  .hr-control-plane .tdw-work-thread-conversation .uw-composer-footer .uw-button {
+    line-height: 0 !important;
+  }
+
+  .hr-control-plane .hr-new-conversation svg,
+  .hr-control-plane .tdw-icon-button svg,
+  .hr-control-plane .tdw-work-thread-conversation .uw-composer-footer .uw-button svg,
+  .uw-machine-manager .uw-manager-close svg,
+  .tdw-modal > header > button svg {
+    display: block;
+    flex: none;
+    margin: 0;
+  }
+
+  .hr-control-plane .tdw-work-thread-conversation .uw-composer-footer .uw-button .uw-button-label {
+    display: none !important;
+  }
+}
