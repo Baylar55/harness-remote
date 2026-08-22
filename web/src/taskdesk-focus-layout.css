@@ -59,37 +59,52 @@
     cursor: default;
   }
 
-  /* The count is title metadata, not a detached status badge. Keep the existing semantic DOM but
-     lay the count on the Tasks baseline and render it as subtle parenthesised text. */
+  /* Standard drawer header hierarchy: eyebrow + title/count on the left, close action pinned right. */
   .tdw-thread-column > .tdw-column-heading {
     display: grid;
-    grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto;
-    align-items: end;
-    justify-content: initial;
+    grid-template-columns: max-content max-content minmax(0, 1fr) 32px;
+    grid-template-rows: auto auto;
+    align-content: center;
+    align-items: center;
     column-gap: 5px;
+    row-gap: 2px;
+    padding: 10px 11px 10px 13px;
   }
 
-  .tdw-thread-column > .tdw-column-heading > div:first-child {
-    grid-column: 1;
-  }
-
+  .tdw-thread-column > .tdw-column-heading > div:first-child,
   .tdw-task-drawer-heading-actions {
     display: contents;
   }
 
+  .tdw-thread-column > .tdw-column-heading > div:first-child > span {
+    grid-column: 1 / 4;
+    grid-row: 1;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .tdw-thread-column > .tdw-column-heading > div:first-child > h2 {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: baseline;
+    white-space: nowrap;
+  }
+
   .tdw-task-drawer-heading-actions > strong {
     grid-column: 2;
-    align-self: end;
+    grid-row: 2;
+    align-self: baseline;
     min-width: 0;
-    margin: 0 0 1px;
+    margin: 0;
     padding: 0;
     border-radius: 0;
     background: transparent;
     color: var(--td3-text-3);
-    font-size: 12px;
-    font-weight: 650;
+    font-size: 11px;
+    font-weight: 600;
     line-height: 1.2;
     text-align: left;
+    font-variant-numeric: tabular-nums;
   }
 
   .tdw-task-drawer-heading-actions > strong::before { content: "("; }
@@ -97,9 +112,11 @@
 
   .tdw-task-drawer-close {
     grid-column: 4;
+    grid-row: 1 / 3;
+    justify-self: end;
     align-self: center;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     display: grid;
     place-items: center;
     padding: 0;
@@ -108,7 +125,8 @@
     color: var(--td3-text-3);
     background: transparent;
     cursor: pointer;
-    font-size: 18px;
+    font-size: 20px;
+    font-weight: 400;
     line-height: 1;
   }
 
@@ -116,6 +134,11 @@
     border-color: var(--td3-border);
     color: var(--td3-text);
     background: var(--td3-raise-2);
+  }
+
+  .tdw-task-drawer-close:focus-visible {
+    outline: 2px solid var(--td3-blue-border);
+    outline-offset: 1px;
   }
 
   .tdw-tasks-toggle.active {
