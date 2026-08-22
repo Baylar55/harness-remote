@@ -54,10 +54,10 @@ function TextPart({ part }: { part: MessagePart }) {
 }
 
 function ActivityPart({ part }: { part: MessagePart }) {
-  if (part.type === "reasoning" && part.text) {
+  if ((part.type === "reasoning" || part.type === "text") && part.text) {
     return (
-      <div className="uw-reasoning">
-        <strong>Reasoning</strong>
+      <div className={`uw-reasoning${part.type === "text" ? " uw-working-note" : ""}`}>
+        <strong>{part.type === "reasoning" ? "Reasoning" : "Working note"}</strong>
         <div className="uw-markdown td3-markdown">
           <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
         </div>
@@ -127,11 +127,10 @@ function messageErrorText(message: MessageEnvelope): string {
 
 /**
  * Render the harness payload in native wire order while keeping the normal conversation readable.
- * Reasoning and tool chatter is preserved exactly where it occurred, but contiguous technical parts
- * are collapsed into one Activity disclosure by default. Collapsed Activity and tool bodies are not
- * mounted at all: large reasoning/tool transcripts must not make scrolling expensive while hidden.
- * Native turn failures are rendered with the message itself so the reason remains visible after
- * refresh or reopening the Task.
+ * Reasoning, tools and interstitial working narration stay inside Activity; only terminal assistant
+ * text is normal dialogue. Collapsed Activity and tool bodies are not mounted at all, so long
+ * reasoning/tool transcripts do not make scrolling expensive while hidden. Native turn failures
+ * are rendered with the message itself so the reason remains visible after refresh or reopening.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const groups = groupConversationParts(message.parts)
