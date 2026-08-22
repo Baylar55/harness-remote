@@ -5,9 +5,27 @@ import { activityLabel, groupConversationParts, type ConversationPartGroup } fro
 import type { MessageEnvelope, MessagePart } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
+const INTERNAL_PROTOCOL_PARTS = new Set(["step-start", "step-finish", "snapshot", "patch"])
 type ActivityGroupValue = Extract<ConversationPartGroup, { kind: "activity" }>
 type ContentGroupValue = Extract<ConversationPartGroup, { kind: "content" }>
 type TaskDeskEnvelope = MessageEnvelope & { taskdesk?: { active?: boolean } }
+
+function isInternalProtocolPart(part: MessagePart): boolean {
+  return INTERNAL_PROTOCOL_PARTS.has(part.type)
+}
+
+function hasTerminalAssistantText(parts: MessagePart[]): boolean {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]
+    if (isInternalProtocolPart(part)) continue
+    if (part.type === "text") {
+      if (typeof part.text === "string" && part.text.trim()) return true
+      continue
+    }
+    if (part.type === "reasoning" || part.type === "tool") return false
+  }
+  return false
+}
 
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
@@ -56,7 +74,7 @@ function ContentGroup({ group }: { group: ContentGroupValue }) {
     .filter((part) => part.type === "text" && typeof part.text === "string" && part.text.trim())
     .map((part) => part.text!.trim())
     .join("\n\n")
-  const other = group.parts.filter((part) => part.type !== "text")
+  const other = group.parts.filter((part) => part.type !== "text" && !isInternalProtocolPart(part))
 
   return (
     <div className="uw-message-content-group">
@@ -71,6 +89,7 @@ function ContentGroup({ group }: { group: ContentGroupValue }) {
 }
 
 function ActivityPart({ part }: { part: MessagePart }) {
+  if (isInternalProtocolPart(part)) return null
   if ((part.type === "reasoning" || part.type === "text") && part.text) {
     return (
       <div className={`uw-reasoning${part.type === "text" ? " uw-working-note" : ""}`}>
@@ -150,17 +169,25 @@ function messageErrorText(message: MessageEnvelope): string {
 
 /**
  * Render one logical conversation turn. Transport-level text chunks are joined into one Markdown
- * body, while reasoning, tools and working narration remain inside Activity. While a Task Run is
- * live, the whole assistant payload stays inside Activity so streamed chunks never jump between
- * working state and final dialogue. Unknown part types stay visible instead of disappearing.
+ * body, while reasoning, tools and working narration remain inside Activity. Internal OpenCode
+ * step/snapshot/patch markers stay protocol data and never leak into the chat. While a Run is live,
+ * the whole assistant payload stays inside Activity so streamed chunks never jump between working
+ * state and final dialogue.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const liveAssistant = message.info.role === "assistant" && Boolean((message as TaskDeskEnvelope).taskdesk?.active)
-  const groups = groupConversationParts(message.parts, {
+  const visibleParts = message.parts.filter((part) => !isInternalProtocolPart(part))
+  const groups = groupConversationParts(visibleParts, {
     forceActivity: liveAssistant,
     forceRunning: liveAssistant
   })
-  const turnError = messageErrorText(message)
+  const turnError = liveAssistant ? "" : messageErrorText(message)
+  const hasActivity = visibleParts.some((part) => part.type === "reasoning" || part.type === "tool")
+  const interruptedWithoutFinal = message.info.role === "assistant"
+    && !liveAssistant
+    && !turnError
+    && hasActivity
+    && !hasTerminalAssistantText(message.parts)
 
   return (
     <div className="uw-message-parts">
@@ -170,6 +197,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
         return <ActivityGroup group={group} key={key} />
       })}
       {turnError ? <div className="uw-message-turn-error" role="alert"><strong>Turn failed</strong><span>{turnError}</span></div> : null}
+      {interruptedWithoutFinal ? <div className="uw-message-turn-error" role="alert"><strong>Response interrupted</strong><span>The coding agent stopped before producing a final answer.</span></div> : null}
     </div>
   )
 }
