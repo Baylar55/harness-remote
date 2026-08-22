@@ -7,6 +7,7 @@ export type WorkThreadMessageMeta = {
   agentLabel?: string
   agentBackend?: string
   runId?: string
+  active?: boolean
 }
 
 export type WorkThreadMessage = MessageEnvelope & {
@@ -113,8 +114,6 @@ function transcriptTurns(messages: MessageEnvelope[]): MessageEnvelope[][] {
   let current: MessageEnvelope[] = []
   for (const message of messages) {
     if (message.info.role === "user") {
-      // Empty transport-level user envelopes are not product turns. Treating them as boundaries can
-      // split one assistant response in two and strand the final chunks outside the matched Run.
       if (!textParts(message.parts)) {
         if (current.length) current.push(message)
         continue
@@ -174,8 +173,6 @@ function compactTextPartIDs(parts: MessagePart[]): Set<string> {
       continue
     }
     if (previous && currentNormalized && previousNormalized.startsWith(currentNormalized)) continue
-    // Exact journal copies are duplicates. Keep the first form so a later replay with odd spacing
-    // cannot replace already clean visible text.
     if (previous && currentNormalized === previousNormalized) continue
     compacted.push(part)
   }
@@ -209,8 +206,6 @@ function normalizeAssistantParts(messages: MessageEnvelope[], aggregateID: strin
         const signature = normalizedText(partText(part))
         const prior = reasoningIndex.get(signature)
         if (signature && prior !== undefined) {
-          // Replay/update can repeat the same reasoning text with a later completion timestamp.
-          // Replace state in place so the Activity status advances without duplicating the text.
           flattened[prior] = { ...part, id: flattened[prior].id }
           continue
         }
@@ -284,6 +279,7 @@ function assistantForRun({
   const nativeCreated = Number(assistants[0]?.info?.time?.created) || 0
   const needsSyntheticTiming = usingReplayFallback || !nativeCreated || nativeCreated < start - 5_000 || nativeCreated >= end
   const nativeError = assistants.find((message) => message.info.error)?.info.error
+  const active = Boolean(run.id && run.id === task.run?.id && (task.status === "starting" || task.status === "running"))
 
   return {
     info: {
@@ -294,7 +290,7 @@ function assistantForRun({
       ...(nativeError ? { error: nativeError } : {})
     },
     parts,
-    taskdesk: { kind: "native", runId: run.id, agentId: agentID, agentLabel, agentBackend }
+    taskdesk: { kind: "native", runId: run.id, agentId: agentID, agentLabel, agentBackend, active }
   }
 }
 
