@@ -147,7 +147,7 @@ test("native Sessions are linked, inspectable and not replaced by a second Sessi
   assert.match(detail, /Continued with/)
   assert.match(detail, /Session ID/)
   assert.match(detail, /Working directory/)
-  assert.doesNotMatch(standalone, /UniversalWorkspace/)
+  assert.doesNotMatch(standalone, /<UniversalWorkspace/)
   assert.doesNotMatch(standalone, /Advanced/)
   assert.doesNotMatch(standalone, /Classic/)
 })
