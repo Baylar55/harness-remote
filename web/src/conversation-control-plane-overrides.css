@@ -30,7 +30,7 @@
   line-height: 1.45;
 }
 
-.hr-control-plane:has(.tdw-machine-health i.offline) .hr-welcome > p::after {
+.hr-control-plane:not(:has(.tdw-presence-dot.online)):not(:has(.tdw-presence-dot.loading)) .hr-welcome > p::after {
   content: "No coding machine is connected. Open Machines to add one or reconnect an existing computer.";
 }
 
