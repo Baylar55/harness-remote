@@ -323,10 +323,10 @@ export class TaskRunController {
       throw taskLaunchError("session_unavailable", "No native Session for the selected harness can be resumed. Start a fresh Run instead.")
     }
     const reuseSession = !explicitFresh && Boolean(reusableRun)
-    if (!explicitFresh && agentID === runAgent(task, task.run) && !reusableRun) {
-      throw taskLaunchError("session_unavailable", "The previous native Session cannot be resumed. Start a fresh Run explicitly instead.")
-    }
 
+    // Ordinary TaskDesk continuation is best-effort continuity. If the harness no longer has a
+    // resumable native Session, launch() creates a fresh Session and transfers persisted Task context.
+    // Only explicit Advanced mode=resume is strict about requiring the old native Session.
     return this.launch(taskID, { ...options, prompt: text, agentId: agentID, reuseSession })
   }
 }
