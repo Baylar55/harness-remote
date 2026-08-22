@@ -1,0 +1,126 @@
+/* Focus Chat is the default TaskDesk desktop layout.
+   Workspace navigation stays narrow and stable; the task list becomes a contextual drawer that
+   overlays the left edge of chat instead of consuming a permanent third column. Mobile keeps its
+   existing list/detail navigation and ignores these desktop-only rules. */
+
+@media (min-width: 901px) {
+  .tdw-shell {
+    --tdw-workspace-width: 268px;
+  }
+
+  .tdw-shell.workspace-collapsed {
+    --tdw-workspace-width: 56px;
+  }
+
+  .tdw-layout {
+    position: relative;
+    grid-template-columns: var(--tdw-workspace-width) minmax(0, 1fr);
+  }
+
+  .tdw-project-column {
+    grid-column: 1;
+    z-index: 3;
+  }
+
+  .tdw-main {
+    grid-column: 2;
+  }
+
+  .tdw-thread-column {
+    position: absolute;
+    z-index: 46;
+    top: 0;
+    bottom: 0;
+    left: var(--tdw-workspace-width);
+    width: min(var(--tdw-thread-width, 330px), calc(100% - var(--tdw-workspace-width) - 24px));
+    min-width: 280px;
+    border-right: 1px solid var(--td3-border);
+    background: var(--td3-panel-2);
+    box-shadow: 18px 0 46px rgba(0, 0, 0, .22);
+    transform: translateX(calc(-100% - 14px));
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 160ms ease, opacity 120ms ease;
+  }
+
+  .tdw-shell.task-drawer-open .tdw-thread-column {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .tdw-task-drawer-scrim {
+    position: absolute;
+    z-index: 45;
+    inset: 0 0 0 var(--tdw-workspace-width);
+    padding: 0;
+    border: 0;
+    background: rgba(0, 0, 0, .12);
+    cursor: default;
+  }
+
+  .tdw-task-drawer-heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .tdw-task-drawer-heading-actions > strong {
+    min-width: 24px;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: var(--td3-raise-2);
+    color: var(--td3-text-2);
+    font-size: 10px;
+    text-align: center;
+  }
+
+  .tdw-task-drawer-close {
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--td3-text-3);
+    background: transparent;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .tdw-task-drawer-close:hover {
+    border-color: var(--td3-border);
+    color: var(--td3-text);
+    background: var(--td3-raise-2);
+  }
+
+  .tdw-tasks-toggle.active {
+    border-color: var(--td3-blue-border);
+    color: var(--td3-blue-text);
+    background: var(--td3-blue-soft);
+  }
+
+  .tdw-tasks-toggle > span {
+    min-width: 19px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    color: var(--td3-text-3);
+    background: var(--td3-raise-2);
+    font-size: 9px;
+    text-align: center;
+  }
+
+  .tdw-thread-column .tdw-pane-resizer {
+    right: -4px;
+  }
+}
+
+@media (max-width: 900px) {
+  .tdw-task-drawer-scrim,
+  .tdw-task-drawer-close,
+  .tdw-tasks-toggle {
+    display: none !important;
+  }
+}
