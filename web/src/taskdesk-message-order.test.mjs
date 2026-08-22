@@ -71,16 +71,26 @@ test("Task summary stays attached to its Run prompt after the Session is continu
   )
 })
 
-test("TaskDesk renderer preserves native order while lazily mounting collapsed technical activity", () => {
+test("TaskDesk renderer keeps live technical activity inside its disclosure", () => {
   const renderer = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
   assert.match(renderer, /groupConversationParts\(message\.parts\)/)
   assert.match(renderer, /group\.kind === "content"/)
   assert.match(renderer, /uw-activity-group/)
   assert.match(renderer, /ActivityPart/)
-  assert.match(renderer, /useState\(group\.status === "error"\)/)
+  assert.match(renderer, /part\.type === "reasoning" \|\| part\.type === "text"/)
+  assert.match(renderer, /useState\(group\.status !== "completed"\)/)
+  assert.match(renderer, /if \(group\.status !== "completed"\) setOpen\(true\)/)
   assert.match(renderer, /open=\{open\}/)
   assert.match(renderer, /\{open \? \(/)
   assert.match(renderer, /group\.parts\.map\(\(part\) => <ActivityPart/)
+})
+
+test("Work Thread owns its live turn indicator instead of rendering the detached waiting row", () => {
+  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+  assert.match(conversation, /tdw-turn-working/)
+  assert.match(conversation, /showWaitingIndicator=\{false\}/)
+  assert.match(conversation, /workingMessageID/)
+  assert.match(conversation, /ConversationStatePill/)
 })
 
 test("legacy unversioned persisted outcomes fall back to transcript reconstruction", () => {
