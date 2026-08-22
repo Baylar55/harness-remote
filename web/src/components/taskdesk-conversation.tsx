@@ -26,6 +26,7 @@ type Props = {
   onStop?: () => Promise<void> | void
   stopping?: boolean
   workingLabel?: string
+  showWaitingIndicator?: boolean
   placeholder?: string
   emptyText?: string
   directory?: string
@@ -35,7 +36,7 @@ type Props = {
 
 type TranscriptProps = Pick<Props,
   "messages" | "agentLabel" | "agentBackend" | "loading" | "waiting" | "ready" | "hasMore" |
-  "loadingOlder" | "onLoadOlder" | "sending" | "workingLabel" | "emptyText" | "renderMessage"
+  "loadingOlder" | "onLoadOlder" | "sending" | "workingLabel" | "showWaitingIndicator" | "emptyText" | "renderMessage"
 >
 
 function formatClock(timestamp: number): string {
@@ -97,6 +98,7 @@ function transcriptPropsEqual(previous: TranscriptProps, next: TranscriptProps):
     && previous.loadingOlder === next.loadingOlder
     && previous.sending === next.sending
     && previous.workingLabel === next.workingLabel
+    && previous.showWaitingIndicator === next.showWaitingIndicator
     && previous.emptyText === next.emptyText
 }
 
@@ -118,6 +120,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
   onLoadOlder,
   sending = false,
   workingLabel,
+  showWaitingIndicator = true,
   emptyText = "This conversation has no messages yet.",
   renderMessage
 }: TranscriptProps) {
@@ -212,7 +215,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
               ))}
         </>
       )}
-      {waiting ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
+      {waiting && showWaitingIndicator ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
     </div>
   )
 }, transcriptPropsEqual)
@@ -240,6 +243,7 @@ export function TaskDeskConversation({
   onStop,
   stopping = false,
   workingLabel,
+  showWaitingIndicator = true,
   placeholder,
   emptyText = "This conversation has no messages yet.",
   directory,
@@ -283,6 +287,7 @@ export function TaskDeskConversation({
         onLoadOlder={onLoadOlder}
         sending={sending}
         workingLabel={workingLabel}
+        showWaitingIndicator={showWaitingIndicator}
         emptyText={emptyText}
         renderMessage={renderMessage}
       />
