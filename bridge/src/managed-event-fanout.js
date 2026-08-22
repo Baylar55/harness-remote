@@ -68,11 +68,12 @@ export class ManagedEventFanout {
       removed = true
       this.clients.delete(client)
       request.off("aborted", remove)
-      request.off("close", remove)
       response.off("close", remove)
     }
+    // IncomingMessage `close` can describe completion of the request body rather than the lifetime
+    // of the streaming response. The downstream SSE is owned until the client aborts or the response
+    // itself closes.
     request.once("aborted", remove)
-    request.once("close", remove)
     response.once("close", remove)
 
     this.#ensureUpstream()
@@ -83,7 +84,7 @@ export class ManagedEventFanout {
     return {
       path: this.path,
       downstreamClients: this.clients.size,
-      upstreamStreams: this.upstreamResponse ? 1 : 0,
+      upstreamStreams: this.upstreamRequest ? 1 : 0,
       connecting: this.connecting,
       reconnectScheduled: Boolean(this.reconnectTimer),
       reconnects: this.reconnects,
