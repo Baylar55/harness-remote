@@ -237,7 +237,7 @@ export class TaskRunController {
       model,
       role,
       // Persist acceptance before model discovery or Git/context inspection. The real revision is
-      // filled in below while the same run id remains authoritative.
+      // kept in local run state until the native Session is linked, while the same run id remains authoritative.
       contextRevision: 0,
       sessionId: null,
       transport: null,
@@ -261,7 +261,7 @@ export class TaskRunController {
       agentId: agentID,
       model,
       prompt: effectivePrompt,
-      run: current.run ? { ...current.run, agentId: agentID, model } : current.run
+      run: { ...run, agentId: agentID, model }
     })
 
     try {
@@ -271,7 +271,6 @@ export class TaskRunController {
         ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
         : userPrompt
       run = { ...run, contextRevision: Number(context.revision) || 0 }
-      current = await this.taskStore.setRunState(taskID, { status: "starting", run, expectedRunId: baseRun.id })
 
       let session
       if (reuseSession) {
@@ -293,7 +292,6 @@ export class TaskRunController {
             contextRevision: Number(context.revision) || 0,
             ...(previousRun ? { handoffReason: "session_unavailable" } : {})
           }
-          current = await this.taskStore.setRunState(taskID, { status: "starting", run, expectedRunId: baseRun.id })
           session = await this.taskLauncher.createSession(currentForRun())
         }
       } else {
@@ -301,6 +299,7 @@ export class TaskRunController {
       }
 
       const linkedRun = { ...run, sessionId: session.sessionId, transport: session.transport }
+      run = linkedRun
       current = await this.taskStore.setRunState(taskID, { status: "starting", run: linkedRun, expectedRunId: baseRun.id })
       current = await this.taskStore.setRunState(taskID, { status: "running", run: linkedRun, expectedRunId: linkedRun.id })
       const onFailed = (error) => void this.#terminal(taskID, linkedRun, "failed", error)
@@ -309,7 +308,7 @@ export class TaskRunController {
       await this.taskLauncher.startPrompt(currentForRun(), session, onFailed)
       return current
     } catch (error) {
-      await this.#terminal(taskID, current.run ?? run, "failed", error)
+      await this.#terminal(taskID, run, "failed", error)
       throw error
     }
   }
