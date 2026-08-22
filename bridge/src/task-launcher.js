@@ -49,6 +49,16 @@ function sameModel(left, right) {
   return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
 }
 
+function missingNativeSession(error) {
+  if (error?.code === "session_unavailable") return true
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  return /\bsession\b.{0,180}\b(not found|unknown|unavailable|does not exist|no longer exists)\b/i.test(message)
+}
+
+function sessionUnavailableError(error) {
+  return taskLaunchError("session_unavailable", "The previous native Session can no longer be resumed", { cause: error })
+}
+
 function runAgentID(task, run = task?.run) {
   return run?.agentId || task?.agentId
 }
@@ -187,12 +197,35 @@ export class TaskLauncher {
       if (service) {
         const adopted = await service.adoptTaskSession(previousRun.sessionId, { title: taskSessionTitle(task) })
         if (adopted === false) throw taskLaunchError("session_unavailable", "The previous native Session can no longer be resumed")
+        // Adoption can succeed from persisted history even when the restarted harness process no
+        // longer owns that native Session. Asking for models forces the service to perform a real
+        // session/load when its live config is absent, so a dead Session is detected before the new
+        // user prompt is accepted rather than failing asynchronously afterwards.
+        try {
+          await service.models(previousRun.sessionId)
+        } catch (error) {
+          if (missingNativeSession(error)) throw sessionUnavailableError(error)
+          throw error
+        }
         if (modelChanged && model) await service.setModel(previousRun.sessionId, acpModelWireName(model))
         return { sessionId: previousRun.sessionId, transport: "acp", directory: task.workspace.path }
       }
       await entry.host.start()
+      let configOptions
+      try {
+        const loaded = await entry.host.request("session/load", {
+          sessionId: previousRun.sessionId,
+          cwd: task.workspace.path,
+          mcpServers: []
+        }, 300_000)
+        configOptions = loaded?.configOptions
+      } catch (error) {
+        if (missingNativeSession(error)) throw sessionUnavailableError(error)
+        throw error
+      }
       if (modelChanged && model) {
-        await entry.host.request("session/set_config_option", { sessionId: previousRun.sessionId, configId: "model", value: acpModelWireName(model) })
+        const value = acpModelValue(configOptions, model) || acpModelWireName(model)
+        await entry.host.request("session/set_config_option", { sessionId: previousRun.sessionId, configId: "model", value })
       }
       return { sessionId: previousRun.sessionId, transport: "acp", directory: task.workspace.path }
     }
