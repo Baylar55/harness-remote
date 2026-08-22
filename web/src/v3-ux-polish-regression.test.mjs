@@ -55,6 +55,6 @@ assert.match(readme, /normally on loopback port \*\*4096\*\*/)
 assert.match(readme, /one launcher per machine/)
 assert.match(readme, /Project[\s\S]*Conversations[\s\S]*Native Session: OpenCode/)
 assert.match(readme, /does \*\*not\*\* create a hidden Git worktree/)
-assert.match(readme, /Start with any agent\. Continue with any other\. From anywhere\./)
+assert.match(readme, /one Conversation that can continue through several native Sessions/)
 
 console.log("v3 UX polish regressions passed")
