@@ -5,7 +5,7 @@ import test from "node:test"
 const workspace = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
 const css = readFileSync(new URL("./taskdesk-focus-layout.css", import.meta.url), "utf8")
 
-test("desktop and tablet default to chat focus with a contextual task drawer", () => {
+test("desktop defaults to chat focus with a contextual task drawer", () => {
   assert.match(workspace, /taskDrawerOpen/)
   assert.match(workspace, /tdw-tasks-toggle/)
   assert.match(workspace, /tdw-task-drawer-scrim/)
@@ -16,6 +16,14 @@ test("desktop and tablet default to chat focus with a contextual task drawer", (
   assert.match(css, /grid-template-columns: var\(--tdw-workspace-width\) minmax\(0, 1fr\)/)
   assert.match(css, /\.tdw-thread-column \{[\s\S]*position: absolute/)
   assert.match(css, /\.tdw-shell\.task-drawer-open \.tdw-thread-column/)
+})
+
+test("task drawer count reads as part of the Tasks title instead of a detached badge", () => {
+  assert.match(workspace, /tdw-task-drawer-heading-actions[\s\S]*?<strong>\{visibleThreads\.length\}<\/strong>/)
+  assert.match(css, /\.tdw-task-drawer-heading-actions \{\s*display: contents;/)
+  assert.match(css, /\.tdw-task-drawer-heading-actions > strong \{[\s\S]*?background: transparent;/)
+  assert.match(css, /\.tdw-task-drawer-heading-actions > strong::before \{ content: "\("; \}/)
+  assert.match(css, /\.tdw-task-drawer-heading-actions > strong::after \{ content: "\)"; \}/)
 })
 
 test("focus layout does not replace the existing mobile list detail navigation", () => {
