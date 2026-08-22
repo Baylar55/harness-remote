@@ -6,6 +6,8 @@ import type { ModelOption, ModelSelection, ServerConfig } from "./types"
 
 const BROWSER_MACHINE_REQUEST_TIMEOUT_MS = 12_000
 const LIST_STALE_GRACE_MS = 45_000
+const MODEL_CATALOG_POLL_MS = 750
+const MODEL_CATALOG_LOAD_TIMEOUT_MS = 120_000
 
 export type MachineProject = {
   id: string
@@ -127,6 +129,8 @@ export type AgentModelCatalog = {
   stale: boolean
   refreshedAt: string | null
   error?: string
+  loading?: boolean
+  source?: string
 }
 
 export type TaskContinueInput = {
@@ -150,6 +154,7 @@ type TaskRequestOptions = {
 type TimedCache<T> = { value: T; at: number }
 const projectListCache = new Map<string, TimedCache<MachineProject[]>>()
 const taskListCache = new Map<string, TimedCache<MachineTask[]>>()
+const modelCatalogRequests = new Map<string, Promise<AgentModelCatalog>>()
 
 function cacheKey(config: ServerConfig): string {
   return `${machineBaseUrl(config)}|${config.username || ""}`
@@ -271,12 +276,31 @@ function requireModelCatalog(value: unknown, path: string): AgentModelCatalog {
   if (!value || typeof value !== "object" || !Array.isArray((value as AgentModelCatalog).models)) {
     throw new Error(`${path} returned an incompatible response.`)
   }
-  const catalog = value as AgentModelCatalog
+  const catalog = value as AgentModelCatalog & { lastError?: string }
   return {
     models: catalog.models,
     stale: Boolean(catalog.stale),
     refreshedAt: typeof catalog.refreshedAt === "string" ? catalog.refreshedAt : null,
-    ...(typeof catalog.error === "string" ? { error: catalog.error } : {})
+    ...(catalog.loading === true ? { loading: true } : {}),
+    ...(typeof catalog.source === "string" ? { source: catalog.source } : {}),
+    ...(typeof catalog.error === "string" ? { error: catalog.error } : typeof catalog.lastError === "string" ? { error: catalog.lastError } : {})
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+}
+
+async function loadAgentModelCatalog(config: ServerConfig, agentId: string): Promise<AgentModelCatalog> {
+  const path = `/v1/agents/${encodeURIComponent(agentId)}/models?waitMs=4000`
+  const started = Date.now()
+  while (true) {
+    const catalog = requireModelCatalog(await machineRequest<unknown>(config, path), path)
+    if (!catalog.loading) return catalog
+    if (Date.now() - started >= MODEL_CATALOG_LOAD_TIMEOUT_MS) {
+      throw new Error(`${agentId} model discovery is still starting after ${MODEL_CATALOG_LOAD_TIMEOUT_MS / 1000}s.`)
+    }
+    await sleep(MODEL_CATALOG_POLL_MS)
   }
 }
 
@@ -339,8 +363,16 @@ export const taskClient = {
   },
 
   async listAgentModels(config: ServerConfig, agentId: string): Promise<AgentModelCatalog> {
-    const path = `/v1/agents/${encodeURIComponent(agentId)}/models`
-    return requireModelCatalog(await machineRequest<unknown>(config, path), path)
+    const key = `${cacheKey(config)}|${agentId}`
+    const existing = modelCatalogRequests.get(key)
+    if (existing) return existing
+    const operation = loadAgentModelCatalog(config, agentId)
+    let wrapped: Promise<AgentModelCatalog>
+    wrapped = operation.finally(() => {
+      if (modelCatalogRequests.get(key) === wrapped) modelCatalogRequests.delete(key)
+    })
+    modelCatalogRequests.set(key, wrapped)
+    return wrapped
   },
 
   async createTask(config: ServerConfig, input: { projectId: string; agentId: string; prompt: string; model?: ModelSelection }): Promise<MachineTask> {
