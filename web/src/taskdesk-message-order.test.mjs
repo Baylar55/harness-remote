@@ -71,16 +71,15 @@ test("Task summary stays attached to its Run prompt after the Session is continu
   )
 })
 
-test("TaskDesk renderer keeps live technical activity inside its disclosure", () => {
+test("TaskDesk renderer keeps Activity collapsed by default while retaining technical content", () => {
   const renderer = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
   assert.match(renderer, /groupConversationParts\(message\.parts\)/)
   assert.match(renderer, /group\.kind === "content"/)
   assert.match(renderer, /uw-activity-group/)
   assert.match(renderer, /ActivityPart/)
   assert.match(renderer, /part\.type === "reasoning" \|\| part\.type === "text"/)
-  assert.match(renderer, /useState\(group\.status !== "completed"\)/)
-  assert.match(renderer, /if \(group\.status === "completed"\) setOpen\(false\)/)
-  assert.match(renderer, /else setOpen\(true\)/)
+  assert.match(renderer, /useState\(group\.status === "error"\)/)
+  assert.match(renderer, /if \(group\.status === "error"\) setOpen\(true\)/)
   assert.match(renderer, /open=\{open\}/)
   assert.match(renderer, /\{open \? \(/)
   assert.match(renderer, /group\.parts\.map\(\(part\) => <ActivityPart/)
