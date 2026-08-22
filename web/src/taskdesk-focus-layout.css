@@ -88,6 +88,12 @@
   .tdw-thread-column .tdw-pane-resizer { right: -4px; }
 }
 
+/* The conversation toolbar owns the useful status (including elapsed time and Needs attention).
+   Do not duplicate a less-informative status beside the Task title. */
+.tdw-thread-header > .tdw-live-state {
+  display: none;
+}
+
 /* Startup should feel alive without taking over the product. The welcome copy gets one calm,
    self-removing preparation row only while at least one machine is still in initial discovery. */
 .tdw-shell:has(.tdw-presence-dot.loading) .tdw-welcome p::after {
