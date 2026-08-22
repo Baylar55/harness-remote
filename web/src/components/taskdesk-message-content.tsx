@@ -69,10 +69,10 @@ function ActivityPart({ part }: { part: MessagePart }) {
 }
 
 function ActivityGroup({ group }: { group: ActivityGroupValue }) {
-  const [open, setOpen] = useState(group.status === "error")
+  const [open, setOpen] = useState(group.status !== "completed")
 
   useEffect(() => {
-    if (group.status === "error") setOpen(true)
+    if (group.status !== "completed") setOpen(true)
   }, [group.status])
 
   return (
@@ -128,9 +128,9 @@ function messageErrorText(message: MessageEnvelope): string {
 /**
  * Render the harness payload in native wire order while keeping the normal conversation readable.
  * Reasoning, tools and interstitial working narration stay inside Activity; only terminal assistant
- * text is normal dialogue. Collapsed Activity and tool bodies are not mounted at all, so long
- * reasoning/tool transcripts do not make scrolling expensive while hidden. Native turn failures
- * are rendered with the message itself so the reason remains visible after refresh or reopening.
+ * text is normal dialogue. Live Activity opens while the harness is working, then remains available
+ * as the same disclosure after completion. Native turn failures are rendered with the message itself
+ * so the reason remains visible after refresh or reopening the Task.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const groups = groupConversationParts(message.parts)
