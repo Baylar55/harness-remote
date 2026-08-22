@@ -48,7 +48,7 @@
 /* Agent/model transitions are part of the conversation history. Keep them quiet, but make them
    unmistakable enough that a user can see where continuity crossed a native Session boundary. */
 .hr-control-plane .tdw-conversation-event {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
   padding: 6px 10px 6px 8px;
