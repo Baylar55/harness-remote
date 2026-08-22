@@ -212,7 +212,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
               ))}
         </>
       )}
-      {waiting && showWaitingIndicator ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
+      {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
     </div>
   )
 }, transcriptPropsEqual)
