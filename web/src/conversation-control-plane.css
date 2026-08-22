@@ -24,23 +24,19 @@
   min-height: 96px;
 }
 
-.hr-control-plane .tdw-thread-status.ready,
-.hr-header-state.ready {
+.hr-control-plane .tdw-thread-status.ready {
   color: var(--td-text-secondary);
 }
 
-.hr-control-plane .tdw-filter-dot.attention,
-.hr-header-state.attention i {
-  background: var(--td-danger, #d95c5c);
+.hr-control-plane .tdw-filter-dot.attention {
+  background: var(--td-danger);
 }
 
-.hr-control-plane .tdw-filter-dot.working,
-.hr-header-state.working i {
-  background: var(--td-accent, #5f7df3);
+.hr-control-plane .tdw-filter-dot.working {
+  background: var(--td-accent);
 }
 
-.hr-control-plane .tdw-filter-dot.all,
-.hr-header-state.ready i {
+.hr-control-plane .tdw-filter-dot.all {
   background: var(--td-text-tertiary);
 }
 
@@ -52,6 +48,25 @@
 .hr-welcome > p {
   max-width: 650px;
   line-height: 1.6;
+}
+
+.hr-control-plane:has(.tdw-presence-dot.loading) .hr-welcome > p::after {
+  content: "●  Preparing your workspace · connecting machines and loading conversations";
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  min-height: 30px;
+  margin: 14px auto 0;
+  padding: 6px 11px;
+  border: 1px solid var(--td-border);
+  border-radius: 999px;
+  background: var(--td-surface-subtle);
+  color: var(--td-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+  text-align: center;
+  animation: hr-preparing-pulse 1.8s ease-in-out infinite;
 }
 
 .hr-welcome-mark {
@@ -110,30 +125,6 @@
 
 .hr-conversation-header {
   align-items: center;
-}
-
-.hr-header-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  padding: 6px 9px;
-  border: 1px solid var(--td-border);
-  border-radius: 999px;
-  background: var(--td-surface-subtle);
-  color: var(--td-text-secondary);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.hr-header-state i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.hr-header-state.working i {
-  animation: hr-status-pulse 1.7s ease-in-out infinite;
 }
 
 .hr-conversation-tabs button {
@@ -245,8 +236,8 @@
 }
 
 .hr-session-transition.switched::after {
-  border-color: var(--td-accent, #5f7df3);
-  background: var(--td-accent, #5f7df3);
+  border-color: var(--td-accent);
+  background: var(--td-accent);
 }
 
 .hr-session-card {
@@ -260,8 +251,8 @@
 }
 
 .hr-session-card.current {
-  border-color: color-mix(in srgb, var(--td-accent, #5f7df3) 48%, var(--td-border));
-  box-shadow: inset 3px 0 0 var(--td-accent, #5f7df3);
+  border-color: color-mix(in srgb, var(--td-accent) 48%, var(--td-border));
+  box-shadow: inset 3px 0 0 var(--td-accent);
 }
 
 .hr-session-agent {
@@ -378,13 +369,13 @@
   background: var(--td-surface-subtle);
 }
 
-@keyframes hr-status-pulse {
-  0%, 100% { opacity: .55; transform: scale(.88); }
-  50% { opacity: 1; transform: scale(1); }
+@keyframes hr-preparing-pulse {
+  0%, 100% { opacity: .72; }
+  50% { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hr-header-state.working i {
+  .hr-control-plane:has(.tdw-presence-dot.loading) .hr-welcome > p::after {
     animation: none;
   }
 }
@@ -416,10 +407,6 @@
   .hr-session-native-details > div {
     grid-template-columns: 1fr;
     gap: 3px;
-  }
-
-  .hr-header-state {
-    display: none;
   }
 
   .hr-conversation-tabs button {
