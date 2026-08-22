@@ -177,7 +177,7 @@ export class AcpClient extends EventEmitter {
 
   notify(method, params) {
     if (!this.#child || this.#child.killed || !this.#child.stdin.writable) {
-      throw new Error("ACP adapter is not running"))
+      throw new Error("ACP adapter is not running")
     }
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`)
   }
