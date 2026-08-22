@@ -16,23 +16,22 @@ function activityStatus(parts: MessagePart[]): "running" | "completed" | "error"
 }
 
 /**
- * Preserve native wire order while collapsing technical chatter into Activity.
+ * Preserve native wire order while keeping the visible conversation turn-based.
  *
- * Some ACP harnesses emit short assistant text while they are still reasoning and then continue
- * with more tools/reasoning. Such interstitial narration is not a terminal answer, so keep it inside
- * Activity when it sits between technical parts. Text before the first Activity can remain ordinary
- * narration and text after the last Activity is the final visible answer.
+ * If an assistant turn contains technical activity, every text fragment emitted before the final
+ * reasoning/tool part is working narration, not a separate answer. Keep those fragments inside the
+ * same Activity group. Only text after the final technical part becomes normal assistant dialogue.
+ * A turn with no reasoning/tools remains ordinary visible content.
  */
 export function groupConversationParts(parts: MessagePart[]): ConversationPartGroup[] {
   const groups: ConversationPartGroup[] = []
   const activityIndexes = parts.flatMap((part, index) => isConversationActivityPart(part) ? [index] : [])
-  const firstActivity = activityIndexes[0] ?? -1
   const lastActivity = activityIndexes.length ? activityIndexes[activityIndexes.length - 1] : -1
 
   for (let index = 0; index < parts.length; index += 1) {
     const part = parts[index]
-    const interstitialText = part.type === "text" && firstActivity >= 0 && index > firstActivity && index < lastActivity
-    const kind = isConversationActivityPart(part) || interstitialText ? "activity" : "content"
+    const workingText = part.type === "text" && lastActivity >= 0 && index < lastActivity
+    const kind = isConversationActivityPart(part) || workingText ? "activity" : "content"
     const previous = groups[groups.length - 1]
 
     if (previous?.kind === kind) {
@@ -41,11 +40,8 @@ export function groupConversationParts(parts: MessagePart[]): ConversationPartGr
       continue
     }
 
-    if (kind === "activity") {
-      groups.push({ kind, parts: [part], status: activityStatus([part]) })
-    } else {
-      groups.push({ kind, parts: [part] })
-    }
+    if (kind === "activity") groups.push({ kind, parts: [part], status: activityStatus([part]) })
+    else groups.push({ kind, parts: [part] })
   }
 
   return groups
