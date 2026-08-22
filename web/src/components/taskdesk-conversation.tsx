@@ -79,10 +79,9 @@ const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, workingL
     <div className="uw-session-typing" role="status" aria-live="polite" aria-label={`Waiting for ${agentLabel} response`}>
       <span className="uw-thinking-orb" aria-hidden="true"><i /><i /><i /></span>
       <span className="uw-thinking-copy">
-        <strong>{workingLabel || `${agentLabel} is thinking`}</strong>
+        <strong>{workingLabel || `${agentLabel} is working`}</strong>
         <small>{elapsed < 2 ? "Starting…" : `${elapsed}s`}</small>
       </span>
-      <span className="uw-thinking-shimmer" aria-hidden="true" />
     </div>
   )
 })
@@ -144,19 +143,17 @@ const ConversationTranscript = memo(function ConversationTranscript({
     previousSendingRef.current = sending
     if (!transcript || loading || !ready || preservingOlderRef.current) return
 
-    // Starting a new user turn deliberately returns to live-follow mode. During the agent turn,
-    // however, manual scrolling always wins: once the person moves away from the bottom, streamed
-    // updates must not drag the viewport back down until they return near the bottom themselves.
+    // A deliberate send re-enters follow mode. After that, the user's scroll position wins. Status
+    // changes such as Working -> Needs attention never move the transcript by themselves.
     if (startedSend) nearBottomRef.current = true
-    if (!nearBottomRef.current) return
-    if (followFrameRef.current !== undefined) return
+    if (!nearBottomRef.current || followFrameRef.current !== undefined) return
     followFrameRef.current = window.requestAnimationFrame(() => {
       followFrameRef.current = undefined
       const current = transcriptRef.current
       if (!current || preservingOlderRef.current || !nearBottomRef.current) return
       current.scrollTop = current.scrollHeight
     })
-  }, [messages, loading, ready, waiting, sending])
+  }, [messages, loading, ready, sending])
 
   async function loadOlder() {
     const requestOlder = loadOlderRef.current
@@ -251,15 +248,26 @@ export function TaskDeskConversation({
   renderMessage
 }: Props) {
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const composerFrameRef = useRef<number | undefined>(undefined)
   const touchFirst = hasTouchFirstPointer()
   const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
   const hint = footerHint ?? (touchFirst ? "Ctrl/Cmd+Enter to send" : "Shift+Enter for newline")
 
   useEffect(() => {
-    const composer = composerRef.current
-    if (!composer) return
-    composer.style.height = "auto"
-    composer.style.height = `${Math.min(COMPOSER_MAX_HEIGHT_PX, Math.max(66, composer.scrollHeight))}px`
+    if (composerFrameRef.current !== undefined) window.cancelAnimationFrame(composerFrameRef.current)
+    composerFrameRef.current = window.requestAnimationFrame(() => {
+      composerFrameRef.current = undefined
+      const composer = composerRef.current
+      if (!composer) return
+      composer.style.height = "auto"
+      composer.style.height = `${Math.min(COMPOSER_MAX_HEIGHT_PX, Math.max(66, composer.scrollHeight))}px`
+    })
+    return () => {
+      if (composerFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(composerFrameRef.current)
+        composerFrameRef.current = undefined
+      }
+    }
   }, [draft])
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
