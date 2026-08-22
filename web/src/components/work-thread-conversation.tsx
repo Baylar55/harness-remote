@@ -133,7 +133,66 @@ function sessionTargets(task: MachineTask, baseConfig: ServerConfig, agents: Mac
   return [...bySession.values()]
 }
 
-const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: WorkThreadMessage }) {
+function useElapsedSeconds(startedAt?: string): number {
+  const start = Date.parse(startedAt || "")
+  const [elapsed, setElapsed] = useState(() => Number.isFinite(start) ? Math.max(0, Math.floor((Date.now() - start) / 1_000)) : 0)
+
+  useEffect(() => {
+    const tick = () => setElapsed(Number.isFinite(start) ? Math.max(0, Math.floor((Date.now() - start) / 1_000)) : 0)
+    tick()
+    const timer = window.setInterval(tick, 1_000)
+    return () => window.clearInterval(timer)
+  }, [startedAt])
+
+  return elapsed
+}
+
+function WorkingTurnStatus({ label, startedAt }: { label: string; startedAt?: string }) {
+  const elapsed = useElapsedSeconds(startedAt)
+  return (
+    <div className="tdw-turn-working" role="status" aria-live="polite">
+      <span className="uw-thinking-orb" aria-hidden="true"><i /><i /><i /></span>
+      <span className="uw-thinking-copy">
+        <strong>{label}</strong>
+        <small>{elapsed < 2 ? "Starting…" : `${elapsed}s`}</small>
+      </span>
+      <span className="uw-thinking-shimmer" aria-hidden="true" />
+    </div>
+  )
+}
+
+function ConversationStatePill({
+  working,
+  attention,
+  workingLabel,
+  startedAt
+}: {
+  working: boolean
+  attention: boolean
+  workingLabel: string
+  startedAt?: string
+}) {
+  const elapsed = useElapsedSeconds(working ? startedAt : undefined)
+  const state = working ? "working" : attention ? "attention" : "ready"
+  const text = working
+    ? `${workingLabel}${elapsed >= 2 ? ` · ${elapsed}s` : ""}`
+    : attention
+      ? "Needs your input"
+      : "Ready"
+  return <span className={`tdw-conversation-state ${state}`}><i aria-hidden="true" /><span>{text}</span></span>
+}
+
+const WorkThreadBubble = memo(function WorkThreadBubble({
+  message,
+  working = false,
+  workingLabel,
+  workingStartedAt
+}: {
+  message: WorkThreadMessage
+  working?: boolean
+  workingLabel?: string
+  workingStartedAt?: string
+}) {
   const meta = message.taskdesk
   if (message.info.role === "taskdesk") {
     return (
@@ -146,7 +205,7 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: 
   const label = isUser ? "You" : meta?.agentLabel || "Coding agent"
   const icon = !isUser ? harnessIconUrl(meta?.agentBackend) : undefined
   return (
-    <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
+    <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}${working ? " uw-message-working" : ""}`}>
       <div className={`uw-avatar ${isUser ? "uw-avatar-user" : "uw-avatar-agent"}`} aria-hidden="true">
         {isUser ? "You" : icon ? <img src={icon} alt="" /> : label.slice(0, 2).toUpperCase()}
       </div>
@@ -155,6 +214,7 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: 
           <strong>{label}</strong>
           <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>
         </header>
+        {working ? <WorkingTurnStatus label={workingLabel || `${label} is working`} startedAt={workingStartedAt} /> : null}
         <TaskDeskMessageContent message={message} />
       </div>
     </article>
@@ -267,6 +327,39 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
   const messagesBySession = useMemo(() => Object.fromEntries(Object.entries(feeds).map(([session, feed]) => [session, feed.messages])), [feeds])
   const timeline = useMemo(() => buildWorkThreadTimeline(task, messagesBySession, agentsByID), [task, messagesBySession, agentsByID])
   const hasMore = Object.values(feeds).some((feed) => feed.hasMore && feed.before)
+  const activeRunID = task.run?.id
+  const activeAssistant = useMemo(() => {
+    if (!working || !activeRunID) return undefined
+    for (let index = timeline.length - 1; index >= 0; index -= 1) {
+      const message = timeline[index]
+      if (message.info.role === "assistant" && message.taskdesk?.runId === activeRunID) return message
+    }
+    return undefined
+  }, [timeline, working, activeRunID])
+  const workingMessageID = working
+    ? activeAssistant?.info.id || `work-thread:${task.id}:run:${activeRunID || "current"}:working`
+    : undefined
+  const displayTimeline = useMemo<WorkThreadMessage[]>(() => {
+    if (!working || activeAssistant) return timeline
+    const created = Date.parse(task.run?.startedAt || "")
+    const agent = agentsByID[currentAgentID]
+    return [...timeline, {
+      info: {
+        id: workingMessageID || `work-thread:${task.id}:working`,
+        role: "assistant",
+        sessionID: currentSessionID || `work-thread:${task.id}`,
+        time: { created: Number.isFinite(created) ? created + 1 : Date.now() }
+      },
+      parts: [],
+      taskdesk: {
+        kind: "native",
+        runId: activeRunID,
+        agentId: currentAgentID,
+        agentLabel: agent?.label || currentAgentID,
+        agentBackend: agent?.backend
+      }
+    }]
+  }, [timeline, working, activeAssistant, task.run?.startedAt, task.id, currentSessionID, currentAgentID, activeRunID, workingMessageID, agentsByID])
 
   const refreshCurrentTail = useCallback(async (sourceTask: MachineTask = task) => {
     const run = sourceTask.run
@@ -474,6 +567,7 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
 
   const currentLabel = agentLabel(agents, currentAgentID)
   const waitingLabel = questions.length || permissions.length ? "Waiting for your input" : `${currentLabel} is working`
+  const hasAttention = questions.length > 0 || permissions.length > 0
 
   return (
     <div className="tdw-work-thread-conversation">
@@ -490,9 +584,7 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
             <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} />
           </label>
         </div>
-        <span className={`tdw-conversation-state ${working ? "working" : questions.length || permissions.length ? "attention" : "ready"}`}>
-          <i />{working ? waitingLabel : questions.length || permissions.length ? "Needs your input" : "Ready"}
-        </span>
+        <ConversationStatePill working={working} attention={hasAttention} workingLabel={waitingLabel} startedAt={task.run?.startedAt} />
       </div>
 
       <WorkThreadAttention
@@ -506,13 +598,14 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
       {error ? <div className="tdw-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
 
       <TaskDeskConversation
-        messages={timeline}
+        messages={displayTimeline}
         agentLabel={currentLabel}
         agentBackend={currentAgent?.backend}
         loading={loading}
         ready={!loading}
         waiting={working}
         workingLabel={waitingLabel}
+        showWaitingIndicator={false}
         hasMore={hasMore}
         loadingOlder={loadingOlder}
         onLoadOlder={loadOlder}
@@ -520,13 +613,21 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
         onDraftChange={setDraft}
         onSend={send}
         sending={sending}
-        sendDisabled={working || questions.length > 0 || permissions.length > 0}
+        sendDisabled={working || hasAttention}
         onStop={working ? stop : undefined}
         stopping={stopping}
         placeholder={`Message ${agentLabel(agents, targetAgentID)}…`}
         emptyText="Start talking to the coding agent. This Work Thread keeps the whole conversation together."
         footerHint={working ? "The agent is working on your last message" : undefined}
-        renderMessage={(message) => <WorkThreadBubble key={message.info.id} message={message as WorkThreadMessage} />}
+        renderMessage={(message) => (
+          <WorkThreadBubble
+            key={message.info.id}
+            message={message as WorkThreadMessage}
+            working={Boolean(workingMessageID && message.info.id === workingMessageID)}
+            workingLabel={waitingLabel}
+            workingStartedAt={task.run?.startedAt}
+          />
+        )}
       />
     </div>
   )
