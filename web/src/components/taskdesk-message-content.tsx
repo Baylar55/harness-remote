@@ -181,13 +181,14 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
     forceActivity: liveAssistant,
     forceRunning: liveAssistant
   })
-  const turnError = liveAssistant ? "" : messageErrorText(message)
+  const hasFinalText = hasTerminalAssistantText(message.parts)
+  const turnError = liveAssistant || hasFinalText ? "" : messageErrorText(message)
   const hasActivity = visibleParts.some((part) => part.type === "reasoning" || part.type === "tool")
   const interruptedWithoutFinal = message.info.role === "assistant"
     && !liveAssistant
     && !turnError
     && hasActivity
-    && !hasTerminalAssistantText(message.parts)
+    && !hasFinalText
 
   return (
     <div className="uw-message-parts">
