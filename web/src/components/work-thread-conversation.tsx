@@ -345,6 +345,17 @@ export function WorkThreadConversation({
     () => buildWorkThreadTimeline(task, messagesBySession, agentsByID),
     [conversationSignature, messagesBySession, agentsByID]
   )
+  const currentRunHasAssistantSignal = useMemo(() => {
+    const runID = task.run?.id
+    if (!runID) return false
+    return timeline.some((message) => message.info.role === "assistant"
+      && message.taskdesk?.runId === runID
+      && message.parts.some((part) => {
+        if (part.type === "tool") return true
+        if (part.type === "reasoning") return Boolean(part.text?.trim() || part.time?.start)
+        return part.type === "text" && Boolean(part.text?.trim())
+      }))
+  }, [timeline, task.run?.id])
   const hasMore = Object.values(feeds).some((feed) => feed.hasMore && feed.before)
 
   const refreshCurrentTail = useCallback(async (sourceTask?: MachineTask) => {
@@ -586,7 +597,13 @@ export function WorkThreadConversation({
 
   const currentLabel = agentLabel(agents, currentAgentID)
   const hasAttention = questions.length > 0 || permissions.length > 0
-  const waitingLabel = hasAttention ? "Waiting for your input" : `${currentLabel} is working`
+  const preparingReply = sending || (working && !currentRunHasAssistantSignal)
+  const pendingAgentLabel = sending ? agentLabel(agents, targetAgentID) : currentLabel
+  const waitingLabel = hasAttention
+    ? "Waiting for your input"
+    : preparingReply
+      ? `${pendingAgentLabel} is getting started`
+      : `${currentLabel} is working`
 
   useEffect(() => {
     onAttentionChangeRef.current?.(hasAttention)
@@ -607,7 +624,7 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} />
           </label>
         </div>
-        <ConversationStatePill working={working} attention={hasAttention} workingLabel={waitingLabel} startedAt={task.run?.startedAt} />
+        <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : task.run?.startedAt} />
       </div>
 
       <WorkThreadAttention
@@ -635,7 +652,7 @@ export function WorkThreadConversation({
         draft={draft}
         onDraftChange={setDraft}
         onSend={send}
-        sending={sending}
+        sending={preparingReply}
         sendDisabled={working || hasAttention}
         onStop={working ? stop : undefined}
         stopping={stopping}
