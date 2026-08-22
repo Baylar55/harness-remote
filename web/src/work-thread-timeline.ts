@@ -18,6 +18,11 @@ export type WorkThreadAgentMeta = Record<string, { label: string; backend: strin
 
 type RunWithError = MachineTaskRun & { error?: { message?: string } | string | null }
 
+type NativeTurn = {
+  user: MessageEnvelope | null
+  messages: MessageEnvelope[]
+}
+
 function runsFor(task: MachineTask): MachineTaskRun[] {
   const runs = Array.isArray(task.runs) && task.runs.length ? task.runs : task.run ? [task.run] : []
   return [...runs].sort((left, right) => {
@@ -43,22 +48,24 @@ function textParts(parts: MessagePart[] | undefined): string {
     .trim()
 }
 
-function normalizedText(value: string): string {
-  return value.replace(/\s+/g, " ").trim()
+function canonicalText(value: string): string {
+  return value.replace(/\r\n/g, "\n").trim()
 }
 
-function isTaskDeskTransfer(text: string): boolean {
-  return text.startsWith("You are taking over an existing TaskDesk task.")
-    || (text.includes("The context below was transferred by TaskDesk") && text.includes("USER INSTRUCTION"))
-}
-
-function transferContainsPrompt(text: string, prompt: string): boolean {
-  if (!isTaskDeskTransfer(text) || !prompt.trim()) return false
-  return normalizedText(text).includes(normalizedText(prompt))
-}
-
-function samePrompt(left: string, right: string): boolean {
-  return Boolean(right.trim()) && normalizedText(left) === normalizedText(right)
+/**
+ * TaskDesk handoff/context packets are transport, not user dialogue. The native Session remains the
+ * source of turn boundaries, but the visible user instruction is the persisted Run prompt.
+ */
+function userInstructionFromNative(text: string): string {
+  const value = canonicalText(text)
+  if (!value.startsWith("You are taking over an existing TaskDesk task.")) return value
+  const marker = "\nUSER INSTRUCTION\n"
+  const start = value.indexOf(marker)
+  if (start < 0) return value
+  const instructionStart = start + marker.length
+  const footer = "\n\nContinue from the shared workspace and the transferred Task Context."
+  const end = value.indexOf(footer, instructionStart)
+  return canonicalText(value.slice(instructionStart, end >= 0 ? end : undefined))
 }
 
 function syntheticMessage({
@@ -67,18 +74,26 @@ function syntheticMessage({
   sessionID,
   created,
   text,
-  meta
+  meta,
+  error
 }: {
   id: string
   role: string
   sessionID: string
   created: number
-  text: string
+  text?: string
   meta: WorkThreadMessageMeta
+  error?: { name?: string; message?: string; data?: Record<string, unknown> }
 }): WorkThreadMessage {
   return {
-    info: { id, role, sessionID, time: { created } },
-    parts: [{ id: `${id}:text`, messageID: id, type: "text", text }],
+    info: {
+      id,
+      role,
+      sessionID,
+      time: { created },
+      ...(error ? { error } : {})
+    },
+    parts: text ? [{ id: `${id}:text`, messageID: id, type: "text", text }] : [],
     taskdesk: meta
   }
 }
@@ -88,13 +103,6 @@ function runStart(task: MachineTask, run: MachineTaskRun, index: number): number
   if (Number.isFinite(parsed)) return parsed
   const taskCreated = Date.parse(task.createdAt || "")
   return (Number.isFinite(taskCreated) ? taskCreated : Date.now()) + index * 10
-}
-
-function runEnd(run: MachineTaskRun, next: MachineTaskRun | undefined): number {
-  const nextStart = Date.parse(next?.startedAt || "")
-  if (Number.isFinite(nextStart)) return nextStart
-  const finished = Date.parse(run.finishedAt || "")
-  return Number.isFinite(finished) ? finished + 5_000 : Number.POSITIVE_INFINITY
 }
 
 function eventText(runs: MachineTaskRun[], index: number, agents: WorkThreadAgentMeta): string | null {
@@ -109,82 +117,62 @@ function eventText(runs: MachineTaskRun[], index: number, agents: WorkThreadAgen
   return `${appearedBefore ? "Resumed" : "Switched to"} ${label} · context transferred`
 }
 
-function transcriptTurns(messages: MessageEnvelope[]): MessageEnvelope[][] {
-  const turns: MessageEnvelope[][] = []
-  let current: MessageEnvelope[] = []
+/**
+ * Native user messages are the only conversation boundary. We deliberately do not use timestamps,
+ * replay timing, assistant text prefixes or "latest N turns" to guess ownership.
+ */
+function nativeTurns(messages: MessageEnvelope[]): NativeTurn[] {
+  const turns: NativeTurn[] = []
+  let current: NativeTurn | null = null
+
   for (const message of messages) {
     if (message.info.role === "user") {
-      if (!textParts(message.parts)) {
-        if (current.length) current.push(message)
-        continue
-      }
-      if (current.length) turns.push(current)
-      current = [message]
+      if (current) turns.push(current)
+      current = { user: message, messages: [message] }
       continue
     }
-    if (current.length) current.push(message)
-    else if (turns.length) turns[turns.length - 1].push(message)
-    else current = [message]
+    if (!current) current = { user: null, messages: [] }
+    current.messages.push(message)
   }
-  if (current.length) turns.push(current)
+  if (current) turns.push(current)
   return turns
 }
 
-function userTextForTurn(turn: MessageEnvelope[]): string {
-  const user = turn.find((message) => message.info.role === "user" && Boolean(textParts(message.parts)))
-  return user ? textParts(user.parts) : ""
-}
+function turnsForRunPrompts(messages: MessageEnvelope[], prompts: string[]): Array<NativeTurn | null> {
+  const turns = nativeTurns(messages)
+  const matchesByPrompt = new Map<string, NativeTurn[]>()
 
-function promptTurnForRun(messages: MessageEnvelope[], prompt: string, ordinal: number, sessionRunCount: number): MessageEnvelope[] {
-  if (!messages.length || !prompt.trim()) return []
-  const matches = transcriptTurns(messages).filter((turn) => {
-    const userText = userTextForTurn(turn)
-    return samePrompt(userText, prompt) || transferContainsPrompt(userText, prompt)
-  })
-  if (!matches.length) return []
-  if (matches.length === 1) return matches[0]
-  const firstRelevant = Math.max(0, matches.length - sessionRunCount)
-  return matches[firstRelevant + ordinal] ?? []
-}
-
-function replayFallbackForRun(messages: MessageEnvelope[], ordinal: number, sessionRunCount: number): MessageEnvelope[] {
-  if (!messages.length) return []
-  const turns = transcriptTurns(messages)
-  if (!turns.length) return sessionRunCount === 1 ? messages : []
-  const firstTaskTurn = Math.max(0, turns.length - sessionRunCount)
-  return turns[firstTaskTurn + ordinal] ?? (sessionRunCount === 1 ? turns[turns.length - 1] : [])
-}
-
-function partText(part: MessagePart): string {
-  return typeof part.text === "string" ? part.text.trim() : ""
-}
-
-function compactTextPartIDs(parts: MessagePart[]): Set<string> {
-  const compacted: MessagePart[] = []
-  for (const part of parts.filter((candidate) => candidate.type === "text" && partText(candidate))) {
-    const text = partText(part)
-    const previous = compacted[compacted.length - 1]
-    const previousText = previous ? partText(previous) : ""
-    const currentNormalized = normalizedText(text)
-    const previousNormalized = normalizedText(previousText)
-
-    if (previous && previousNormalized && currentNormalized.startsWith(previousNormalized) && currentNormalized.length > previousNormalized.length) {
-      compacted[compacted.length - 1] = part
-      continue
-    }
-    if (previous && currentNormalized && previousNormalized.startsWith(currentNormalized)) continue
-    if (previous && currentNormalized === previousNormalized) continue
-    compacted.push(part)
+  for (const turn of turns) {
+    if (!turn.user) continue
+    const visible = userInstructionFromNative(textParts(turn.user.parts))
+    if (!visible) continue
+    const matches = matchesByPrompt.get(visible) ?? []
+    matches.push(turn)
+    matchesByPrompt.set(visible, matches)
   }
-  return new Set(compacted.map((part) => part.id))
+
+  const usedByPrompt = new Map<string, number>()
+  return prompts.map((prompt) => {
+    const key = canonicalText(prompt)
+    if (!key) return null
+    const candidates = matchesByPrompt.get(key) ?? []
+    const ordinal = usedByPrompt.get(key) ?? 0
+    usedByPrompt.set(key, ordinal + 1)
+    return candidates[ordinal] ?? null
+  })
 }
 
-function normalizeAssistantParts(messages: MessageEnvelope[], aggregateID: string): MessagePart[] {
-  const flattened: MessagePart[] = []
-  const toolIndex = new Map<string, number>()
-  const reasoningIndex = new Map<string, number>()
+function assistantParts(messages: MessageEnvelope[], aggregateID: string): MessagePart[] {
+  const parts: MessagePart[] = []
+  const seenMessages = new Set<string>()
+  const toolIndexes = new Map<string, number>()
 
   for (const message of messages) {
+    if (message.info.role !== "assistant") continue
+    const messageIdentity = `${message.info.sessionID}:${message.info.id}`
+    if (seenMessages.has(messageIdentity)) continue
+    seenMessages.add(messageIdentity)
+
     for (const raw of message.parts ?? []) {
       const part: MessagePart = {
         ...raw,
@@ -192,106 +180,20 @@ function normalizeAssistantParts(messages: MessageEnvelope[], aggregateID: strin
         messageID: aggregateID
       }
 
-      if (part.type === "tool") {
-        const identity = part.callID || `${message.info.id}:${raw.id}`
-        const prior = toolIndex.get(identity)
+      // A callID is protocol identity, not a content heuristic. Keep the newest state for the same
+      // native tool call while preserving the call's original position in the logical turn.
+      if (part.type === "tool" && part.callID) {
+        const prior = toolIndexes.get(part.callID)
         if (prior !== undefined) {
-          flattened[prior] = { ...part, id: flattened[prior].id }
+          parts[prior] = { ...part, id: parts[prior].id }
           continue
         }
-        toolIndex.set(identity, flattened.length)
+        toolIndexes.set(part.callID, parts.length)
       }
-
-      if (part.type === "reasoning" && partText(part)) {
-        const signature = normalizedText(partText(part))
-        const prior = reasoningIndex.get(signature)
-        if (signature && prior !== undefined) {
-          flattened[prior] = { ...part, id: flattened[prior].id }
-          continue
-        }
-        if (signature) reasoningIndex.set(signature, flattened.length)
-      }
-
-      flattened.push(part)
+      parts.push(part)
     }
   }
-
-  const keptText = compactTextPartIDs(flattened)
-  return flattened.filter((part) => part.type !== "text" || keptText.has(part.id))
-}
-
-function lastTechnicalIndex(parts: MessagePart[]): number {
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    if (parts[index].type === "reasoning" || parts[index].type === "tool") return index
-  }
-  return -1
-}
-
-function hasTerminalText(parts: MessagePart[]): boolean {
-  const technical = lastTechnicalIndex(parts)
-  return parts.some((part, index) => part.type === "text" && Boolean(partText(part)) && (technical < 0 || index > technical))
-}
-
-function assistantForRun({
-  task,
-  run,
-  index,
-  selected,
-  start,
-  end,
-  usingReplayFallback,
-  session,
-  agentID,
-  agentLabel,
-  agentBackend,
-  seenNative
-}: {
-  task: MachineTask
-  run: MachineTaskRun
-  index: number
-  selected: MessageEnvelope[]
-  start: number
-  end: number
-  usingReplayFallback: boolean
-  session: string
-  agentID: string
-  agentLabel?: string
-  agentBackend?: string
-  seenNative: Set<string>
-}): WorkThreadMessage | null {
-  const assistants: MessageEnvelope[] = []
-  for (const message of selected) {
-    if (message.info.role !== "assistant") continue
-    const identity = `${message.info.sessionID || session}:${message.info.id}`
-    if (seenNative.has(identity)) continue
-    seenNative.add(identity)
-    assistants.push(message)
-  }
-  if (!assistants.length) return null
-
-  const id = `work-thread:${task.id}:run:${run.id || index}:assistant`
-  let parts = normalizeAssistantParts(assistants, id)
-  const outcome = typeof run.outcome === "string" ? run.outcome.trim() : ""
-  if (outcome && !hasTerminalText(parts)) {
-    parts = [...parts, { id: `${id}:outcome`, messageID: id, type: "text", text: outcome }]
-  }
-
-  const nativeCreated = Number(assistants[0]?.info?.time?.created) || 0
-  const needsSyntheticTiming = usingReplayFallback || !nativeCreated || nativeCreated < start - 5_000 || nativeCreated >= end
-  const nativeError = assistants.find((message) => message.info.error)?.info.error
-  const active = Boolean(run.id && run.id === task.run?.id && (task.status === "starting" || task.status === "running"))
-
-  return {
-    info: {
-      id,
-      role: "assistant",
-      sessionID: session,
-      time: { created: needsSyntheticTiming ? start + 1 : nativeCreated },
-      ...(nativeError ? { error: nativeError } : {})
-    },
-    parts,
-    taskdesk: { kind: "native", runId: run.id, agentId: agentID, agentLabel, agentBackend, active }
-  }
+  return parts
 }
 
 function runErrorText(task: MachineTask, run: MachineTaskRun): string {
@@ -302,94 +204,59 @@ function runErrorText(task: MachineTask, run: MachineTaskRun): string {
   return ""
 }
 
-function nativeForRun(
-  task: MachineTask,
-  run: MachineTaskRun,
-  index: number,
-  next: MachineTaskRun | undefined,
-  messages: MessageEnvelope[],
-  agents: WorkThreadAgentMeta,
-  seenNative: Set<string>,
-  sessionOrdinal: number,
-  sessionRunCount: number
-): WorkThreadMessage[] {
-  const start = runStart(task, run, index)
-  const end = runEnd(run, next)
-  const prompt = (run.prompt || (index === 0 ? task.prompt : "")).trim()
-  const session = runSessionID(run) || `work-thread:${task.id}`
-  const agentID = run.agentId || task.agentId
-  const agent = agents[agentID]
-  const result: WorkThreadMessage[] = []
+function assistantForRun({
+  task,
+  run,
+  index,
+  turn,
+  session,
+  agentID,
+  agentLabel,
+  agentBackend
+}: {
+  task: MachineTask
+  run: MachineTaskRun
+  index: number
+  turn: NativeTurn | null
+  session: string
+  agentID: string
+  agentLabel?: string
+  agentBackend?: string
+}): WorkThreadMessage | null {
+  const assistants = (turn?.messages ?? []).filter((message) => message.info.role === "assistant")
+  const outcome = typeof run.outcome === "string" ? run.outcome.trim() : ""
+  const persistedError = run.status === "failed" ? runErrorText(task, run) : ""
+  const nativeError = assistants.find((message) => message.info.error)?.info.error
+  const active = Boolean(run.id && run.id === task.run?.id && (task.status === "starting" || task.status === "running"))
 
-  if (prompt) {
-    result.push(syntheticMessage({
-      id: `work-thread:${task.id}:run:${run.id || index}:user`,
-      role: "user",
-      sessionID: session,
-      created: start,
-      text: prompt,
-      meta: { kind: "synthetic-user", runId: run.id, agentId: agentID, agentLabel: agent?.label, agentBackend: agent?.backend }
-    }))
+  if (!assistants.length && !outcome && !persistedError) return null
+
+  const id = `work-thread:${task.id}:run:${run.id || index}:assistant`
+  const parts = assistantParts(assistants, id)
+  if (outcome && !parts.some((part) => part.type === "text" && typeof part.text === "string" && part.text.trim())) {
+    parts.push({ id: `${id}:outcome`, messageID: id, type: "text", text: outcome })
   }
 
-  const timestampWindow = messages.filter((message) => {
-    const created = Number(message.info?.time?.created) || 0
-    return !created || created >= start - 5_000 && created < end
-  })
-  const promptTurn = promptTurnForRun(messages, prompt, sessionOrdinal, sessionRunCount)
-  const promptTurnHasAssistant = promptTurn.some((message) => message.info.role === "assistant")
-  const nativeHasAssistant = messages.some((message) => message.info.role === "assistant")
-  const windowHasAssistant = timestampWindow.some((message) => message.info.role === "assistant")
-  const usingReplayFallback = !promptTurnHasAssistant && nativeHasAssistant && !windowHasAssistant
-  const selected = promptTurnHasAssistant
-    ? promptTurn
-    : usingReplayFallback
-      ? replayFallbackForRun(messages, sessionOrdinal, sessionRunCount)
-      : timestampWindow
-
-  const assistant = assistantForRun({
-    task,
-    run,
-    index,
-    selected,
-    start,
-    end,
-    usingReplayFallback,
-    session,
-    agentID,
-    agentLabel: agent?.label,
-    agentBackend: agent?.backend,
-    seenNative
-  })
-
-  if (assistant) result.push(assistant)
-  else if (typeof run.outcome === "string" && run.outcome.trim()) {
-    const finished = Date.parse(run.finishedAt || "")
-    result.push(syntheticMessage({
-      id: `work-thread:${task.id}:run:${run.id || index}:outcome`,
+  const created = Number(assistants[0]?.info?.time?.created) || runStart(task, run, index) + 1
+  const error = nativeError || (persistedError ? { name: "TaskRunError", message: persistedError } : undefined)
+  return {
+    info: {
+      id,
       role: "assistant",
       sessionID: session,
-      created: Number.isFinite(finished) ? finished : start + 1,
-      text: run.outcome.trim(),
-      meta: { kind: "fallback-result", runId: run.id, agentId: agentID, agentLabel: agent?.label, agentBackend: agent?.backend }
-    }))
+      time: { created },
+      ...(error ? { error } : {})
+    },
+    parts,
+    taskdesk: {
+      kind: assistants.length ? "native" : persistedError && !outcome ? "error" : "fallback-result",
+      runId: run.id,
+      agentId: agentID,
+      agentLabel,
+      agentBackend,
+      active
+    }
   }
-
-  const errorText = runErrorText(task, run)
-  if (run.status === "failed" && errorText && !assistant?.info.error) {
-    const finished = Date.parse(run.finishedAt || "")
-    const assistantCreated = assistant?.info.time.created || start + 1
-    result.push(syntheticMessage({
-      id: `work-thread:${task.id}:run:${run.id || index}:error`,
-      role: "taskdesk",
-      sessionID: session,
-      created: Number.isFinite(finished) ? Math.max(finished + 1, assistantCreated + 1) : assistantCreated + 1,
-      text: `Turn failed: ${errorText}`,
-      meta: { kind: "error", runId: run.id, agentId: agentID, agentLabel: agent?.label, agentBackend: agent?.backend }
-    }))
-  }
-
-  return result
 }
 
 export function buildWorkThreadTimeline(
@@ -410,49 +277,64 @@ export function buildWorkThreadTimeline(
     })] : []
   }
 
-  const sessionCounts = new Map<string, number>()
-  for (const run of runs) {
+  const runIndexesBySession = new Map<string, number[]>()
+  runs.forEach((run, index) => {
     const session = runSessionID(run)
-    if (session) sessionCounts.set(session, (sessionCounts.get(session) ?? 0) + 1)
+    if (!session) return
+    const indexes = runIndexesBySession.get(session) ?? []
+    indexes.push(index)
+    runIndexesBySession.set(session, indexes)
+  })
+
+  const turnByRunIndex = new Map<number, NativeTurn | null>()
+  for (const [session, indexes] of runIndexesBySession) {
+    const prompts = indexes.map((index) => (runs[index].prompt || (index === 0 ? task.prompt : "")).trim())
+    const matched = turnsForRunPrompts(messagesBySession[session] ?? [], prompts)
+    indexes.forEach((runIndex, ordinal) => turnByRunIndex.set(runIndex, matched[ordinal] ?? null))
   }
 
-  const sessionOrdinals = new Map<string, number>()
-  const seenNative = new Set<string>()
   const timeline: WorkThreadMessage[] = []
-
   runs.forEach((run, index) => {
     const start = runStart(task, run, index)
+    const session = runSessionID(run) || `work-thread:${task.id}`
+    const agentID = run.agentId || task.agentId
+    const agent = agents[agentID]
     const event = eventText(runs, index, agents)
     if (event) {
-      const agentID = run.agentId || task.agentId
       timeline.push(syntheticMessage({
         id: `work-thread:${task.id}:run:${run.id || index}:handoff`,
         role: "taskdesk",
-        sessionID: runSessionID(run) || `work-thread:${task.id}`,
+        sessionID: session,
         created: start - 1,
         text: event,
-        meta: { kind: "event", runId: run.id, agentId: agentID, agentLabel: agents[agentID]?.label, agentBackend: agents[agentID]?.backend }
+        meta: { kind: "event", runId: run.id, agentId: agentID, agentLabel: agent?.label, agentBackend: agent?.backend }
       }))
     }
 
-    const session = runSessionID(run)
-    const ordinal = session ? sessionOrdinals.get(session) ?? 0 : 0
-    if (session) sessionOrdinals.set(session, ordinal + 1)
-    timeline.push(...nativeForRun(
+    const prompt = (run.prompt || (index === 0 ? task.prompt : "")).trim()
+    if (prompt) {
+      timeline.push(syntheticMessage({
+        id: `work-thread:${task.id}:run:${run.id || index}:user`,
+        role: "user",
+        sessionID: session,
+        created: start,
+        text: prompt,
+        meta: { kind: "synthetic-user", runId: run.id, agentId: agentID, agentLabel: agent?.label, agentBackend: agent?.backend }
+      }))
+    }
+
+    const assistant = assistantForRun({
       task,
       run,
       index,
-      runs[index + 1],
-      session ? messagesBySession[session] ?? [] : [],
-      agents,
-      seenNative,
-      ordinal,
-      session ? sessionCounts.get(session) ?? 1 : 1
-    ))
+      turn: turnByRunIndex.get(index) ?? null,
+      session,
+      agentID,
+      agentLabel: agent?.label,
+      agentBackend: agent?.backend
+    })
+    if (assistant) timeline.push(assistant)
   })
 
   return timeline
-    .map((message, index) => ({ message, index }))
-    .sort((left, right) => left.message.info.time.created - right.message.info.time.created || left.index - right.index)
-    .map(({ message }) => message)
 }
