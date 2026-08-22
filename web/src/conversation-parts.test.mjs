@@ -62,15 +62,26 @@ test("a live assistant turn keeps every streamed part inside one running Activit
   assert.deepEqual(groups[0].parts.map((item) => item.id), parts.map((item) => item.id))
 })
 
-test("an activity group exposes error state without forcing it into normal dialogue", () => {
+test("a failed tool call stays local and does not mark successful Activity as failed", () => {
   const groups = groupConversationParts([
-    part("tool-1", "tool", { tool: "Shell", state: { status: "completed" } }),
-    part("tool-2", "tool", { tool: "Edit", state: { status: "error", error: "failed" } })
+    part("tool-1", "tool", { tool: "Shell", state: { status: "error", error: "command failed" } }),
+    part("tool-2", "tool", { tool: "Edit", state: { status: "completed" } })
   ])
 
   assert.equal(groups.length, 1)
   assert.equal(groups[0].kind, "activity")
-  assert.equal(groups[0].status, "error")
+  assert.equal(groups[0].status, "completed")
+  assert.equal(groups[0].parts[0].state.status, "error")
+})
+
+test("a live Activity remains working even when one tool has errored", () => {
+  const groups = groupConversationParts([
+    part("tool-1", "tool", { tool: "Shell", state: { status: "error", error: "command failed" } }),
+    part("reasoning", "reasoning", { text: "Trying another approach.", time: { start: 1 } })
+  ], { forceActivity: true, forceRunning: true })
+
+  assert.equal(groups[0].kind, "activity")
+  assert.equal(groups[0].status, "running")
 })
 
 test("running tool activity remains distinct from completed activity", () => {
