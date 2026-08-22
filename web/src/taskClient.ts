@@ -5,6 +5,7 @@ import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
 import type { ModelOption, ModelSelection, ServerConfig } from "./types"
 
 const BROWSER_MACHINE_REQUEST_TIMEOUT_MS = 12_000
+const LIST_STALE_GRACE_MS = 45_000
 
 export type MachineProject = {
   id: string
@@ -146,6 +147,25 @@ type TaskRequestOptions = {
   body?: unknown
 }
 
+type TimedCache<T> = { value: T; at: number }
+const projectListCache = new Map<string, TimedCache<MachineProject[]>>()
+const taskListCache = new Map<string, TimedCache<MachineTask[]>>()
+
+function cacheKey(config: ServerConfig): string {
+  return `${machineBaseUrl(config)}|${config.username || ""}`
+}
+
+function readRecent<T>(cache: Map<string, TimedCache<T>>, key: string): T | null {
+  const cached = cache.get(key)
+  if (!cached || Date.now() - cached.at > LIST_STALE_GRACE_MS) return null
+  return cached.value
+}
+
+function remember<T>(cache: Map<string, TimedCache<T>>, key: string, value: T): T {
+  cache.set(key, { value, at: Date.now() })
+  return value
+}
+
 function requestHeaders(config: ServerConfig, body: boolean): Record<string, string> {
   const headers: Record<string, string> = { Accept: "application/json" }
   if (hasCredentials(config)) headers.Authorization = authHeader(config)
@@ -280,17 +300,33 @@ function normalizeTaskList(value: unknown, key: string, path: string): MachineTa
 
 export const taskClient = {
   async listProjects(config: ServerConfig): Promise<MachineProject[]> {
-    const payload = await machineRequest<unknown>(config, "/v1/projects")
-    return requireArray<MachineProject>(payload, "projects", "/v1/projects")
+    const key = cacheKey(config)
+    try {
+      const payload = await machineRequest<unknown>(config, "/v1/projects")
+      return remember(projectListCache, key, requireArray<MachineProject>(payload, "projects", "/v1/projects"))
+    } catch (error) {
+      const cached = readRecent(projectListCache, key)
+      if (cached) return cached
+      throw error
+    }
   },
 
   async listTasks(config: ServerConfig): Promise<MachineTask[]> {
+    const key = cacheKey(config)
     try {
-      return normalizeTaskList(await machineRequest<unknown>(config, "/v1/work-threads"), "workThreads", "/v1/work-threads")
+      let tasks: MachineTask[]
+      try {
+        tasks = normalizeTaskList(await machineRequest<unknown>(config, "/v1/work-threads"), "workThreads", "/v1/work-threads")
+      } catch (error) {
+        // Compatibility with a daemon from before the Work Thread product endpoint existed.
+        if (!/404|not found|cannot reach/i.test(error instanceof Error ? error.message : String(error))) throw error
+        tasks = normalizeTaskList(await machineRequest<unknown>(config, "/v1/tasks"), "tasks", "/v1/tasks")
+      }
+      return remember(taskListCache, key, tasks)
     } catch (error) {
-      // Compatibility with a daemon from before the Work Thread product endpoint existed.
-      if (!/404|not found|cannot reach/i.test(error instanceof Error ? error.message : String(error))) throw error
-      return normalizeTaskList(await machineRequest<unknown>(config, "/v1/tasks"), "tasks", "/v1/tasks")
+      const cached = readRecent(taskListCache, key)
+      if (cached) return cached
+      throw error
     }
   },
 
