@@ -376,6 +376,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
     return Number.isFinite(saved) && saved >= 260 && saved <= 480 ? saved : 330
   })
   const refreshGeneration = useRef(0)
+  const moreRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const generation = ++refreshGeneration.current
@@ -418,9 +419,39 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
 
   useEffect(() => {
     if (!loaded) return
-    const timer = window.setInterval(() => setRevision((value) => value + 1), 10_000)
-    return () => window.clearInterval(timer)
+    let timer: number | undefined
+    const schedule = () => {
+      if (timer !== undefined) window.clearInterval(timer)
+      timer = undefined
+      if (document.visibilityState === "visible") timer = window.setInterval(() => setRevision((value) => value + 1), 10_000)
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") setRevision((value) => value + 1)
+      schedule()
+    }
+    schedule()
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      if (timer !== undefined) window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
   }, [loaded])
+
+  useEffect(() => {
+    if (!moreOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [moreOpen])
 
   useEffect(() => {
     localStorage.setItem(WORKSPACE_COLLAPSED_KEY, String(workspaceCollapsed))
@@ -457,9 +488,9 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   }, [projectScopedThreads, taskFilter, search])
 
   useEffect(() => {
-    if (selectedThreadKey && visibleThreads.some((record) => record.key === selectedThreadKey)) return
+    if (selectedThreadKey && threads.some((record) => record.key === selectedThreadKey)) return
     setSelectedThreadKey(visibleThreads[0]?.key || null)
-  }, [visibleThreads, selectedThreadKey])
+  }, [threads, visibleThreads, selectedThreadKey])
 
   const selected = threads.find((record) => record.key === selectedThreadKey) || null
   const selectedProject = selectedProjectKey === "all" ? null : projects.find((record) => record.key === selectedProjectKey) || null
@@ -476,6 +507,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   }
 
   function selectMachine(id: string) {
+    setSelectedThreadKey(null)
     setSelectedMachineID(id)
     setSelectedProjectKey("all")
     setTaskFilter("all")
@@ -483,6 +515,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
   }
 
   function selectProject(key: string) {
+    setSelectedThreadKey(null)
     setSelectedProjectKey(key)
     if (key !== "all") {
       const record = projects.find((candidate) => candidate.key === key)
@@ -576,7 +609,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
           <button type="button" className="tdw-icon-button" onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings"><SettingsIcon size={16} /></button>
           <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label="Refresh" disabled={refreshing}><RefreshIcon size={16} /></button>
           <button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={15} /> New Task</button>
-          <div className="tdw-more-wrap">
+          <div className="tdw-more-wrap" ref={moreRef}>
             <button type="button" className="tdw-icon-button" onClick={() => setMoreOpen((value) => !value)} aria-label="More" title="More"><MoreVerticalIcon size={18} /></button>
             {moreOpen ? <div className="tdw-more-menu"><button type="button" className="tdw-mobile-only-menu" onClick={() => { setMoreOpen(false); onManageMachines() }}>Machines</button><button type="button" onClick={() => { setMoreOpen(false); setSettingsOpen(true) }}>Settings</button><button type="button" onClick={() => { setMoreOpen(false); setMode("sessions") }}>Advanced: Native Sessions</button><button type="button" onClick={() => { setMoreOpen(false); setMode("classic") }}>Classic Harness Remote</button></div> : null}
           </div>
@@ -593,7 +626,13 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
             </button>
             <div className="tdw-workspace-section-body">
               <button type="button" className={`tdw-side-row${selectedMachineID === "all" ? " active" : ""}`} onClick={() => selectMachine("all")} title="All machines"><span className="tdw-side-icon"><ServerIcon size={14} /></span><span><strong>All machines</strong><small>{onlineCount}/{runtimes.length} online</small></span></button>
-              {runtimes.map((runtime) => <button type="button" className={`tdw-side-row${selectedMachineID === runtime.machine.id ? " active" : ""}`} onClick={() => selectMachine(runtime.machine.id)} key={runtime.machine.id} title={runtime.snapshot?.machine.name || runtime.machine.name}><span className={`tdw-presence-dot ${runtime.state}`} /><span><strong>{runtime.snapshot?.machine.name || runtime.machine.name}</strong><small>{runtime.snapshot?.agents.filter(harnessReady).length || 0}/{runtime.snapshot?.agents.length || 0} harnesses ready</small></span></button>)}
+              {runtimes.map((runtime) => {
+                const machineName = runtime.snapshot?.machine.name || runtime.machine.name
+                const summary = runtime.state === "offline"
+                  ? runtime.error || "Machine offline"
+                  : `${runtime.snapshot?.agents.filter(harnessReady).length || 0}/${runtime.snapshot?.agents.length || 0} harnesses ready`
+                return <button type="button" className={`tdw-side-row${selectedMachineID === runtime.machine.id ? " active" : ""}`} onClick={() => selectMachine(runtime.machine.id)} key={runtime.machine.id} title={runtime.state === "offline" && runtime.error ? `${machineName}: ${runtime.error}` : machineName}><span className={`tdw-presence-dot ${runtime.state}`} /><span><strong>{machineName}</strong><small>{summary}</small></span></button>
+              })}
             </div>
           </div>
 
