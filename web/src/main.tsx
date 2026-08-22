@@ -24,6 +24,8 @@ import "./v3-polish.css"
 installAppPreferences()
 installCompletionAudioGuard()
 
+// RC1 intentionally retires the Classic ACTIVE_PROFILE_CHANGED_EVENT boundary and its old
+// `return <App key={revision} />` remount path. Machine persistence now remounts the v3 control plane.
 const conversationTestMode = import.meta.env.DEV && new URLSearchParams(window.location.search).get("taskdesk-test") === "1"
 
 function HarnessRemoteBoundary() {
