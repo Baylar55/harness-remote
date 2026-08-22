@@ -63,16 +63,18 @@ function isActive(task: MachineTask): boolean {
   return task.status === "starting" || task.status === "running"
 }
 
-function stateLabel(task: MachineTask): string {
+function stateLabel(task: MachineTask, needsAttention = false): string {
   if (task.finishedAt) return "Done"
+  if (needsAttention) return "Needs attention"
   if (isActive(task)) return "Working"
   if (task.status === "failed") return "Needs attention"
   if (task.status === "cancelled") return "Stopped"
   return "Ready"
 }
 
-function stateClass(task: MachineTask): string {
+function stateClass(task: MachineTask, needsAttention = false): string {
   if (task.finishedAt) return "done"
+  if (needsAttention) return "attention"
   if (isActive(task)) return "working"
   if (task.status === "failed") return "failed"
   if (task.status === "cancelled") return "stopped"
@@ -238,6 +240,7 @@ export function WorkThreadDetail({ task, baseConfig, agents, machineName, onTask
   const [checkpointing, setCheckpointing] = useState(false)
   const [restoring, setRestoring] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [needsAttention, setNeedsAttention] = useState(false)
   const runs = useMemo(() => workThreadRuns(task), [task.runs, task.run])
   const current = task.run
 
@@ -245,6 +248,7 @@ export function WorkThreadDetail({ task, baseConfig, agents, machineName, onTask
     setTab("conversation")
     setInspection(null)
     setError(null)
+    setNeedsAttention(false)
   }, [task.id])
 
   useEffect(() => {
@@ -312,7 +316,7 @@ export function WorkThreadDetail({ task, baseConfig, agents, machineName, onTask
           <div className="tdw-thread-title-edit"><h1>{titleFor(task)}</h1><button type="button" onClick={() => void rename()} title="Rename Task">Rename</button></div>
           <p>{agentLabel(agents, runAgent(task, current))} · {modelLabel(current, task)} · {machineName}</p>
         </div>
-        <span className={`tdw-live-state ${stateClass(task)}`}><i />{stateLabel(task)}</span>
+        <span className={`tdw-live-state ${stateClass(task, needsAttention)}`}><i />{stateLabel(task, needsAttention)}</span>
       </header>
 
       <nav className="tdw-detail-tabs" aria-label="Task detail">
@@ -326,7 +330,15 @@ export function WorkThreadDetail({ task, baseConfig, agents, machineName, onTask
 
       <div className="tdw-detail-body">
         {tab === "conversation" ? (
-          <WorkThreadConversation key={task.id} task={task} baseConfig={baseConfig} agents={agents} onTaskUpdate={onTaskUpdate} onWorkspaceRefresh={() => { setRevision((value) => value + 1); onWorkspaceRefresh?.() }} />
+          <WorkThreadConversation
+            key={task.id}
+            task={task}
+            baseConfig={baseConfig}
+            agents={agents}
+            onTaskUpdate={onTaskUpdate}
+            onAttentionChange={setNeedsAttention}
+            onWorkspaceRefresh={() => { setRevision((value) => value + 1); onWorkspaceRefresh?.() }}
+          />
         ) : null}
         {tab === "changes" ? <ChangesPanel task={task} baseConfig={baseConfig} agents={agents} revision={revision} /> : null}
         {tab === "result" ? <ResultPanel task={task} agents={agents} inspection={inspection} onDone={() => void markDone()} finishing={finishing} /> : null}
