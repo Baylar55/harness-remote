@@ -73,7 +73,9 @@ test("Task summary stays attached to its Run prompt after the Session is continu
 
 test("TaskDesk renderer keeps Activity collapsed by default while retaining technical content", () => {
   const renderer = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
-  assert.match(renderer, /groupConversationParts\(message\.parts\)/)
+  assert.match(renderer, /groupConversationParts\(message\.parts,/)
+  assert.match(renderer, /forceActivity: liveAssistant/)
+  assert.match(renderer, /forceRunning: liveAssistant/)
   assert.match(renderer, /group\.kind === "content"/)
   assert.match(renderer, /uw-activity-group/)
   assert.match(renderer, /ActivityPart/)
