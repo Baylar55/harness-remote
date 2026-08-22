@@ -11,6 +11,7 @@ export function isConversationActivityPart(part: MessagePart): boolean {
 function activityStatus(parts: MessagePart[]): "running" | "completed" | "error" {
   if (parts.some((part) => part.type === "tool" && part.state?.status === "error")) return "error"
   if (parts.some((part) => part.type === "tool" && part.state?.status && part.state.status !== "completed")) return "running"
+  if (parts.some((part) => part.type === "reasoning" && part.time?.start && !part.time.end)) return "running"
   return "completed"
 }
 
