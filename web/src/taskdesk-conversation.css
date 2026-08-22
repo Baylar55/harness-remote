@@ -83,12 +83,12 @@
   max-width: 100%;
   color: var(--td3-text-2);
   font-size: 15.5px;
-  line-height: 1.72;
+  line-height: 1.58;
   overflow-wrap: anywhere;
 }
 
 .tdw-work-thread-conversation .uw-markdown p {
-  margin: 7px 0;
+  margin: 6px 0;
 }
 
 .tdw-work-thread-conversation .uw-markdown h1 { font-size: 1.38em; }
@@ -106,11 +106,11 @@
 
 .tdw-work-thread-conversation .uw-markdown pre {
   max-width: 100%;
-  margin: 10px 0;
+  margin: 9px 0;
   padding: 13px 14px;
   overflow: auto;
   border-radius: 11px;
-  line-height: 1.55;
+  line-height: 1.48;
 }
 
 .tdw-work-thread-conversation .uw-message-user .uw-message-body {
@@ -217,7 +217,7 @@
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 
 .tdw-work-thread-conversation .uw-reasoning {
@@ -241,7 +241,7 @@
 
 .tdw-work-thread-conversation .uw-reasoning .uw-markdown {
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.48;
 }
 
 .tdw-work-thread-conversation .uw-reasoning .uw-markdown pre,
@@ -263,7 +263,7 @@
   min-height: 76px;
   padding: 14px 15px 7px;
   font-size: 15px;
-  line-height: 1.58;
+  line-height: 1.48;
 }
 
 .tdw-work-thread-conversation .uw-composer-footer {
@@ -361,30 +361,40 @@
 }
 
 @keyframes tdw-thinking-shimmer {
-  0% { left: -35%; opacity: 0; }
-  18% { opacity: .75; }
-  65%, 100% { left: 115%; opacity: 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .uw-thinking-orb i,
-  .uw-thinking-shimmer { animation: none !important; }
-  .uw-thinking-orb i { opacity: .72; transform: none; }
-  .uw-thinking-shimmer { display: none; }
+  0%, 18% { transform: translateX(0) skewX(-18deg); opacity: 0; }
+  36% { opacity: .7; }
+  68%, 100% { transform: translateX(560%) skewX(-18deg); opacity: 0; }
 }
 
 @media (max-width: 780px) {
-  .tdw-work-thread-conversation .uw-transcript { padding: 14px 12px 22px; }
+  .tdw-work-thread-conversation .uw-transcript {
+    padding: 14px 12px 24px;
+  }
+
   .tdw-work-thread-conversation .uw-message {
     grid-template-columns: 30px minmax(0, 1fr);
     gap: 9px;
-    margin-bottom: 21px;
+    margin-bottom: 20px;
   }
-  .tdw-work-thread-conversation .uw-avatar { width: 29px; height: 29px; }
-  .tdw-work-thread-conversation .uw-markdown { font-size: 14.5px; line-height: 1.68; }
-  .tdw-work-thread-conversation .uw-message-user .uw-message-body { padding: 8px 10px 9px; }
-  .tdw-work-thread-conversation .uw-composer-shell { width: calc(100% - 20px); margin-bottom: 10px; }
-  .tdw-work-thread-conversation .uw-composer-shell textarea { font-size: 16px; }
-  .tdw-work-thread-conversation .uw-session-typing { width: 100%; min-height: 50px; margin-bottom: 16px; }
-  .tdw-work-thread-conversation .uw-activity-group { width: 100%; }
+
+  .tdw-work-thread-conversation .uw-avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .tdw-work-thread-conversation .uw-markdown {
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  .tdw-work-thread-conversation .uw-composer-shell {
+    width: calc(100% - 20px);
+    margin-bottom: 10px;
+  }
+
+  .tdw-work-thread-conversation .uw-composer-shell textarea {
+    min-height: 66px;
+    font-size: 16px;
+    line-height: 1.45;
+  }
 }
