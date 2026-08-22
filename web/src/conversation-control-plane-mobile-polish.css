@@ -45,6 +45,19 @@
     margin: 0;
   }
 
+  /* Use a geometric icon for the mobile Send action rather than a font arrow. Font glyph metrics
+     vary between Android WebView builds and can look low or off-center inside a square button. */
+  .hr-control-plane .tdw-work-thread-conversation .uw-composer-footer .uw-button-primary:not(:has(svg))::after {
+    content: "";
+    width: 18px;
+    height: 18px;
+    display: block;
+    flex: none;
+    background: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 19V5M5 12l7-7 7 7' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 18px 18px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 19V5M5 12l7-7 7 7' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 18px 18px no-repeat;
+  }
+
   .hr-control-plane .tdw-work-thread-conversation .uw-composer-footer .uw-button .uw-button-label {
     display: none !important;
   }
