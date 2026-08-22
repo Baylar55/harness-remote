@@ -19,12 +19,13 @@ test("mobile opens a Conversation explicitly and can return to the list without 
 })
 
 test("mobile keeps Projects as a swipeable filter rail", () => {
+  assert.match(mobile, /@media \(max-width: 780px\)/)
+  assert.match(mobile, /\.tdw-project-column \{[\s\S]*?display: flex !important/)
+  assert.match(mobile, /flex-direction: row !important/)
+  assert.match(mobile, /overflow-x: auto/)
   assert.match(workspaceNavigation, /@media \(max-width: 780px\)/)
-  assert.match(workspaceNavigation, /\.tdw-project-column \{[\s\S]*?display: flex !important/)
-  assert.match(workspaceNavigation, /flex-direction: row !important/)
-  assert.match(workspaceNavigation, /overflow-x: auto/)
-  assert.match(workspaceNavigation, /\.tdw-project-list \{[\s\S]*?display: flex/)
-  assert.doesNotMatch(workspaceNavigation, /\.tdw-project-column \{\s*display: none !important/)
+  assert.match(workspaceNavigation, /\.tdw-project-section \.tdw-project-list \{ display: flex/)
+  assert.doesNotMatch(mobile, /\.tdw-project-column \{\s*display: none !important/)
 })
 
 test("mobile Conversation detail uses the full dynamic viewport and avoids duplicated chrome", () => {
