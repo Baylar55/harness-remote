@@ -8,7 +8,7 @@ const mobile = readFileSync(new URL("./taskdesk-mobile-navigation.css", import.m
 
 test("mobile opens a Work Thread explicitly and can return to the list without clearing selection", () => {
   assert.match(workspace, /const \[mobileDetailOpen, setMobileDetailOpen\] = useState\(false\)/)
-  assert.match(workspace, /setSelectedThreadKey\(record\.key\); setMobileDetailOpen\(true\)/)
+  assert.match(workspace, /setSelectedThreadKey\(record\.key\); setTaskDrawerOpen\(false\); setMobileDetailOpen\(true\)/)
   assert.match(workspace, /tdw-main\$\{mobileDetailOpen \? " mobile-open" : ""\}/)
   assert.match(workspace, /className="tdw-mobile-back" onClick=\{\(\) => setMobileDetailOpen\(false\)\}/)
   assert.match(workspace, /import "\.\.\/taskdesk-mobile-navigation\.css"/)
