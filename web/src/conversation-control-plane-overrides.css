@@ -6,3 +6,108 @@
 .hr-control-plane .tdw-work-thread-conversation .uw-empty-copy {
   max-width: 520px;
 }
+
+/* Keep the first-run state visually anchored to the canvas center even though the welcome block has
+   an explicit reading width. The copy below is stateful without becoming another card or banner. */
+.hr-control-plane .hr-welcome {
+  align-self: center;
+  margin-inline: auto;
+}
+
+.hr-control-plane .hr-welcome > p::after {
+  content: "Next: select a project and start a conversation. If nothing is available yet, open Machines to add or reconnect a coding computer.";
+  width: fit-content;
+  max-width: 100%;
+  margin: 14px auto 0;
+  padding: 7px 10px;
+  display: block;
+  border: 1px solid var(--td3-border);
+  border-radius: 9px;
+  color: var(--td3-text-3);
+  background: var(--td3-raise-1);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.hr-control-plane:has(.tdw-machine-health i.offline) .hr-welcome > p::after {
+  content: "No coding machine is connected. Open Machines to add one or reconnect an existing computer.";
+}
+
+.hr-control-plane:has(.tdw-presence-dot.loading) .hr-welcome > p::after {
+  content: "Connecting to your machines · loading projects and conversations";
+  padding-left: 29px;
+  border-color: var(--td3-blue-border-soft);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 14px 50%, var(--td3-blue-text) 0 3px, transparent 3.5px),
+    var(--td3-raise-1);
+  animation: tdw-welcome-prepare 1.5s ease-in-out infinite;
+}
+
+/* Agent/model transitions are part of the conversation history. Keep them quiet, but make them
+   unmistakable enough that a user can see where continuity crossed a native Session boundary. */
+.hr-control-plane .tdw-conversation-event {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px 6px 8px;
+  border-color: var(--td3-blue-border-soft);
+  color: var(--td3-text-3);
+  background: var(--td3-blue-soft-2);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.hr-control-plane .tdw-conversation-event::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--td3-blue-text);
+  box-shadow: 0 0 0 3px var(--td3-blue-soft);
+}
+
+/* Once native reasoning/tool/text exists, the preparatory row disappears. The Activity header then
+   becomes the single live indicator, so work never looks stalled and no second status is added. */
+.hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary {
+  background: var(--td3-blue-soft-2);
+}
+
+.hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary .uw-tool-icon {
+  color: var(--td3-blue-text);
+  animation: hr-activity-working 1.25s ease-in-out infinite;
+}
+
+.hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary .uw-tool-status {
+  color: var(--td3-blue-text);
+  font-size: 0;
+}
+
+.hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary .uw-tool-status::after {
+  content: "Working";
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .01em;
+}
+
+@keyframes hr-activity-working {
+  0%, 100% { opacity: .48; transform: scale(.88); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hr-control-plane:has(.tdw-presence-dot.loading) .hr-welcome > p::after,
+  .hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary .uw-tool-icon {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .hr-control-plane .hr-welcome > p::after {
+    text-align: left;
+  }
+}
