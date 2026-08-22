@@ -88,6 +88,39 @@
   .tdw-thread-column .tdw-pane-resizer { right: -4px; }
 }
 
+/* Startup should feel alive without taking over the product. The welcome copy gets one calm,
+   self-removing preparation row only while at least one machine is still in initial discovery. */
+.tdw-shell:has(.tdw-presence-dot.loading) .tdw-welcome p::after {
+  content: "Preparing your workspace · connecting machines and loading conversations";
+  width: fit-content;
+  max-width: 100%;
+  margin: 14px auto 0;
+  padding: 8px 12px 8px 30px;
+  display: block;
+  border: 1px solid var(--td3-border);
+  border-radius: 999px;
+  color: var(--td3-text-3);
+  background:
+    radial-gradient(circle at 15px 50%, var(--td3-blue-text) 0 3px, transparent 3.5px),
+    var(--td3-raise-1);
+  box-shadow: 0 0 0 0 transparent;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.35;
+  animation: tdw-welcome-prepare 1.5s ease-in-out infinite;
+}
+
+@keyframes tdw-welcome-prepare {
+  0%, 100% {
+    border-color: var(--td3-border);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    border-color: var(--td3-blue-border);
+    box-shadow: 0 0 0 4px var(--td3-blue-soft);
+  }
+}
+
 /* Initial machine discovery is neither online nor offline. Animate the same small presence light
    already used by the workspace instead of replacing labels with extra loading copy. */
 .tdw-presence-dot.loading,
@@ -116,6 +149,41 @@
   }
 }
 
+/* Before the first native reasoning/tool/text arrives, use a lightweight assistant-presence row.
+   Once real Activity exists it disappears, so it never becomes a second permanent working widget. */
+.tdw-work-thread-conversation .uw-session-typing {
+  width: min(1040px, 100%);
+  max-width: none;
+  min-height: 38px;
+  margin: 2px auto 22px;
+  padding: 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  color: var(--td3-text-2);
+  background: transparent;
+  box-shadow: none;
+}
+
+.tdw-work-thread-conversation .uw-thinking-orb {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.tdw-work-thread-conversation .uw-thinking-copy strong {
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.tdw-work-thread-conversation .uw-thinking-copy small {
+  font-size: 9px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tdw-presence-dot.loading,
   .tdw-shell:has(.tdw-presence-dot.loading) .tdw-machine-health > i {
@@ -124,6 +192,12 @@
     opacity: 1;
     transform: none;
   }
+
+  .tdw-shell:has(.tdw-presence-dot.loading) .tdw-welcome p::after {
+    animation: none;
+    border-color: var(--td3-blue-border);
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 780px) {
@@ -131,5 +205,11 @@
   .tdw-task-drawer-close,
   .tdw-tasks-toggle {
     display: none !important;
+  }
+
+  .tdw-shell:has(.tdw-presence-dot.loading) .tdw-welcome p::after {
+    margin-top: 12px;
+    border-radius: 12px;
+    text-align: left;
   }
 }
