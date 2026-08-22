@@ -113,6 +113,12 @@ function transcriptTurns(messages: MessageEnvelope[]): MessageEnvelope[][] {
   let current: MessageEnvelope[] = []
   for (const message of messages) {
     if (message.info.role === "user") {
+      // Empty transport-level user envelopes are not product turns. Treating them as boundaries can
+      // split one assistant response in two and strand the final chunks outside the matched Run.
+      if (!textParts(message.parts)) {
+        if (current.length) current.push(message)
+        continue
+      }
       if (current.length) turns.push(current)
       current = [message]
       continue
@@ -126,7 +132,7 @@ function transcriptTurns(messages: MessageEnvelope[]): MessageEnvelope[][] {
 }
 
 function userTextForTurn(turn: MessageEnvelope[]): string {
-  const user = turn.find((message) => message.info.role === "user")
+  const user = turn.find((message) => message.info.role === "user" && Boolean(textParts(message.parts)))
   return user ? textParts(user.parts) : ""
 }
 
@@ -168,10 +174,9 @@ function compactTextPartIDs(parts: MessagePart[]): Set<string> {
       continue
     }
     if (previous && currentNormalized && previousNormalized.startsWith(currentNormalized)) continue
-    if (previous && currentNormalized === previousNormalized) {
-      compacted[compacted.length - 1] = part
-      continue
-    }
+    // Exact journal copies are duplicates. Keep the first form so a later replay with odd spacing
+    // cannot replace already clean visible text.
+    if (previous && currentNormalized === previousNormalized) continue
     compacted.push(part)
   }
   return new Set(compacted.map((part) => part.id))
@@ -180,7 +185,7 @@ function compactTextPartIDs(parts: MessagePart[]): Set<string> {
 function normalizeAssistantParts(messages: MessageEnvelope[], aggregateID: string): MessagePart[] {
   const flattened: MessagePart[] = []
   const toolIndex = new Map<string, number>()
-  const seenReasoning = new Set<string>()
+  const reasoningIndex = new Map<string, number>()
 
   for (const message of messages) {
     for (const raw of message.parts ?? []) {
@@ -194,7 +199,7 @@ function normalizeAssistantParts(messages: MessageEnvelope[], aggregateID: strin
         const identity = part.callID || `${message.info.id}:${raw.id}`
         const prior = toolIndex.get(identity)
         if (prior !== undefined) {
-          flattened[prior] = part
+          flattened[prior] = { ...part, id: flattened[prior].id }
           continue
         }
         toolIndex.set(identity, flattened.length)
@@ -202,8 +207,14 @@ function normalizeAssistantParts(messages: MessageEnvelope[], aggregateID: strin
 
       if (part.type === "reasoning" && partText(part)) {
         const signature = normalizedText(partText(part))
-        if (signature && seenReasoning.has(signature)) continue
-        if (signature) seenReasoning.add(signature)
+        const prior = reasoningIndex.get(signature)
+        if (signature && prior !== undefined) {
+          // Replay/update can repeat the same reasoning text with a later completion timestamp.
+          // Replace state in place so the Activity status advances without duplicating the text.
+          flattened[prior] = { ...part, id: flattened[prior].id }
+          continue
+        }
+        if (signature) reasoningIndex.set(signature, flattened.length)
       }
 
       flattened.push(part)
