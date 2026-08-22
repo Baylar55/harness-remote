@@ -127,6 +127,7 @@ test("TaskDesk handoff packet never becomes a You message", () => {
     id: "run-2",
     sequence: 2,
     agentId: "claude",
+    model: { providerID: "anthropic", modelID: "claude-sonnet", variant: "high" },
     prompt: "Check the architecture too",
     sessionId: "session-claude",
     startedAt: "2026-08-21T10:02:00.000Z",
@@ -160,9 +161,39 @@ test("TaskDesk handoff packet never becomes a You message", () => {
   assert.deepEqual(timeline.map(textOf), [
     "Initial request",
     "Codex result",
-    "Switched to Claude · context transferred",
+    "Continued with Claude · claude-sonnet · high · context transferred",
     second.prompt,
     "Claude result"
+  ])
+})
+
+test("changing only the model is visible in the conversation timeline", () => {
+  const first = run({ sessionId: "same-session" })
+  const second = run({
+    id: "run-2",
+    sequence: 2,
+    model: { providerID: "openai", modelID: "gpt-next", variant: "high" },
+    prompt: "Continue with the stronger model",
+    sessionId: "same-session",
+    startedAt: "2026-08-21T10:02:00.000Z",
+    finishedAt: "2026-08-21T10:03:00.000Z"
+  })
+  const value = task({ run: second, runs: [first, second] })
+  const timeline = buildWorkThreadTimeline(value, {
+    "same-session": [
+      message("same-session", "u1", "user", 1, first.prompt),
+      message("same-session", "a1", "assistant", 2, "First answer"),
+      message("same-session", "u2", "user", 3, second.prompt),
+      message("same-session", "a2", "assistant", 4, "Second answer")
+    ]
+  }, agents)
+
+  assert.deepEqual(timeline.map(textOf), [
+    "Initial request",
+    "First answer",
+    "Model changed to gpt-next · high · continuing with Codex",
+    second.prompt,
+    "Second answer"
   ])
 })
 
