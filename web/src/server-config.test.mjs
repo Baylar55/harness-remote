@@ -85,6 +85,8 @@ assert.notEqual(
 )
 assert.doesNotThrow(() => authHeader(creds('opencode', 'påsswörd☂')), 'characters above U+00FF must not throw')
 assert.equal(hasCredentials(creds('', '')), false, 'empty credentials must not send Authorization')
-assert.equal(hasCredentials(creds('opencode', '')), true, 'a username alone is still an explicit Basic Auth configuration')
+assert.equal(hasCredentials(creds('opencode', '')), false, 'partial credentials must not be treated as a complete Basic Auth pair')
+assert.equal(hasCredentials(creds('', 'secret')), false, 'a password without a username must not be treated as a complete Basic Auth pair')
+assert.equal(hasCredentials(creds('opencode', 'secret')), true, 'a complete credential pair must send Authorization')
 
 console.log('server config regression tests passed')
