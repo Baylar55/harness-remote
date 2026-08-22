@@ -510,6 +510,10 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
 
   const selected = threads.find((record) => record.key === selectedThreadKey) || null
   const selectedProject = selectedProjectKey === "all" ? null : projects.find((record) => record.key === selectedProjectKey) || null
+  const taskDrawerEyebrow = selectedProject?.project.name
+    || selected?.task.project?.name
+    || (selectedMachineID !== "all" ? runtimes.find((runtime) => runtime.machine.id === selectedMachineID)?.machine.name : undefined)
+    || "All projects"
   const profiles = useMemo(() => machines.map(profileForMachine), [machines])
   const activeProfileID = selected?.runtime.machine.id || (selectedMachineID !== "all" ? selectedMachineID : activeMachineID) || profiles[0]?.id || ""
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
@@ -690,7 +694,7 @@ export function TaskDeskWorkspace({ machines, activeMachineID, onActiveMachineID
         {taskDrawerOpen ? <button type="button" className="tdw-task-drawer-scrim" aria-label="Close task list" onClick={() => setTaskDrawerOpen(false)} /> : null}
 
         <section className="tdw-thread-column">
-          <div className="tdw-column-heading"><div><span>{selectedProjectKey === "all" ? "Current scope" : selectedProject?.project.name || "Project"}</span><h2>Tasks</h2></div><div className="tdw-task-drawer-heading-actions"><strong>{visibleThreads.length}</strong><button type="button" className="tdw-task-drawer-close" onClick={() => setTaskDrawerOpen(false)} aria-label="Close task list">×</button></div></div>
+          <div className="tdw-column-heading tdw-task-drawer-heading"><div><span>{taskDrawerEyebrow}</span><h2>Tasks <strong className="tdw-task-drawer-count">{visibleThreads.length}</strong></h2></div><button type="button" className="tdw-sidebar-collapse tdw-task-drawer-close" onClick={() => setTaskDrawerOpen(false)} aria-label="Close task list" title="Close task list">×</button></div>
           <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks and conversations..." /></div>
           <div className="tdw-thread-list">
             {!loaded && threads.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Loading your workspace...</strong></div> : visibleThreads.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No Tasks in this view</strong><span>Change the filters or start a new Task.</span><button type="button" className="tdw-button primary" onClick={() => setNewThreadOpen(true)}><PlusIcon size={14} /> New Task</button></div> : visibleThreads.map((record) => {
