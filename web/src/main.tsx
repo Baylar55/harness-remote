@@ -21,6 +21,7 @@ import "./taskdesk-v3-unified.css"
 import "./taskdesk-run-review.css"
 import "./v3-polish.css"
 import "./conversation-control-plane-overrides.css"
+import "./conversation-control-plane-mobile-polish.css"
 
 installAppPreferences()
 installCompletionAudioGuard()
