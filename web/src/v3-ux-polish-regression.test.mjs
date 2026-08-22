@@ -51,7 +51,7 @@ assert.match(polish, /@media \(max-width: 900px\)/)
 assert.match(polish, /prefers-reduced-motion/)
 
 assert.match(readme, /normal public port is \*\*4097\*\*/)
-assert.match(readme, /loopback port, normally on loopback port \*\*4096\*\*/)
+assert.match(readme, /normally on loopback port \*\*4096\*\*/)
 assert.match(readme, /one launcher per machine/)
 assert.match(readme, /Project[\s\S]*Conversations[\s\S]*Native Session: OpenCode/)
 assert.match(readme, /does \*\*not\*\* create a hidden Git worktree/)
