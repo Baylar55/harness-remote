@@ -70,21 +70,22 @@ function compactTextParts(parts: MessagePart[]): MessagePart[] {
       continue
     }
     if (previous && currentNormalized && previousNormalized.startsWith(currentNormalized)) continue
-    if (previous && currentNormalized === previousNormalized) continue
+    if (previous && currentNormalized === previousNormalized) {
+      compacted[compacted.length - 1] = part
+      continue
+    }
     compacted.push(part)
   }
   return compacted
 }
 
 function compactAssistantParts(parts: MessagePart[]): MessagePart[] {
-  const text = compactTextParts(parts.filter((part) => part.type === "text"))
-  const nonText = parts.filter((part) => part.type !== "text")
+  const keptText = new Set(compactTextParts(parts.filter((part) => part.type === "text")).map((part) => part.id))
 
-  // Product chat keeps the answer after Activity, but the Activity itself stays in native order.
-  // In particular, do not merge every reasoning fragment into the first one: OMP can interleave
-  // reasoning and completed tools, and moving later reasoning above those tools made the expanded
-  // disclosure look corrupted. Separate reasoning fragments are cheap because Activity is lazy.
-  return [...nonText, ...text]
+  // Preserve native wire order. Moving every text part after reasoning/tools made an OMP working
+  // narration look like a normal chat answer even though more technical activity followed it.
+  // Only de-duplicate partial/repeated text; grouping decides which text is terminal dialogue.
+  return parts.filter((part) => part.type !== "text" || keptText.has(part.id))
 }
 
 function compactAssistantMessage(message: MessageEnvelope): MessageEnvelope {
