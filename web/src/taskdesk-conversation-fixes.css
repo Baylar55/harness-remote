@@ -3,8 +3,7 @@
 
 /* The conversation should actually consume space returned by collapsing the workspace rail.
    A ceiling still keeps very wide monitors readable instead of stretching prose edge-to-edge. */
-.tdw-work-thread-conversation .uw-message,
-.tdw-work-thread-conversation .uw-session-typing {
+.tdw-work-thread-conversation .uw-message {
   width: min(1280px, 100%);
 }
 
@@ -79,58 +78,6 @@
   word-break: break-word;
 }
 
-/* A Work Thread has one live assistant turn. The waiting animation belongs to that turn rather than
-   to a detached row at the bottom of the transcript, so streamed reasoning cannot push it around. */
-.tdw-work-thread-conversation .tdw-turn-working {
-  position: relative;
-  width: min(560px, 100%);
-  min-height: 48px;
-  margin: 2px 0 9px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  overflow: hidden;
-  border: 1px solid var(--td3-green-border);
-  border-radius: 12px;
-  background: linear-gradient(110deg, var(--td3-green-soft), var(--td3-panel), var(--td3-green-soft));
-}
-
-.tdw-work-thread-conversation .tdw-turn-working .uw-thinking-orb {
-  width: 30px;
-  height: 30px;
-  border-color: var(--td3-green-border);
-  background: var(--td3-green-soft);
-  box-shadow: 0 0 0 4px var(--td3-green-soft);
-}
-
-.tdw-work-thread-conversation .tdw-turn-working .uw-thinking-orb i {
-  background: var(--td3-green);
-}
-
-.tdw-work-thread-conversation .tdw-turn-working .uw-thinking-shimmer {
-  background: linear-gradient(90deg, transparent, var(--td3-green-soft), transparent);
-}
-
-/* No yellow status lights in the TaskDesk conversation chrome. Working is a healthy state, so it
-   stays green; attention uses the normal accent rather than looking like a harness warning. */
-.tdw-conversation-state.working i,
-.tdw-live-state.working i {
-  background: var(--td3-green);
-  box-shadow: 0 0 0 3px var(--td3-green-soft);
-  animation: tdw-live-green-pulse 1.65s ease-in-out infinite;
-}
-
-.tdw-conversation-state.attention i {
-  background: var(--td3-blue-text);
-  box-shadow: 0 0 0 3px var(--td3-blue-soft);
-}
-
-@keyframes tdw-live-green-pulse {
-  0%, 100% { transform: scale(.88); opacity: .72; }
-  50% { transform: scale(1.08); opacity: 1; }
-}
-
 /* The compact model picker used to position its 620px popover relative to the tiny trigger. Opening
    to the left crossed the Task-list boundary and the detail pane clipped it. Anchor the popover to
    the whole conversation toolbar instead, so it always stays inside the chat pane. */
@@ -156,17 +103,12 @@
 }
 
 @media (max-width: 780px) {
-  .tdw-work-thread-conversation .uw-message,
-  .tdw-work-thread-conversation .uw-session-typing {
+  .tdw-work-thread-conversation .uw-message {
     width: 100%;
   }
 
   .tdw-work-thread-conversation .uw-composer-shell {
     width: calc(100% - 20px);
-  }
-
-  .tdw-work-thread-conversation .tdw-turn-working {
-    width: 100%;
   }
 
   /* Mobile keeps the bottom-sheet/fixed overlay behavior rather than inheriting the desktop
