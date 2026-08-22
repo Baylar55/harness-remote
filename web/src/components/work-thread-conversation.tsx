@@ -297,7 +297,22 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
       pages += 1
     }
     if (loadGeneration.current !== generation) return
-    setFeeds((current) => ({ ...current, [target.sessionID]: feed }))
+    setFeeds((current) => {
+      const live = current[target.sessionID]
+      if (!live) return { ...current, [target.sessionID]: feed }
+      const preferBackgroundCursor = feed.messages.length >= live.messages.length
+      const hasMore = feed.hasMore && live.hasMore
+      return {
+        ...current,
+        [target.sessionID]: {
+          // Background paging may finish after streaming or a manual older-page request. It may add
+          // older history, but it must never replace the live tail already stored in `current`.
+          messages: prependOlderMessagePage(live.messages, feed.messages),
+          before: hasMore ? (preferBackgroundCursor ? feed.before : live.before) : undefined,
+          hasMore
+        }
+      }
+    })
   }, [])
 
   useEffect(() => {
@@ -315,8 +330,9 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
         if (cancelled || loadGeneration.current !== generation) return
         setFeeds((current) => ({ ...current, [target.sessionID]: feed }))
         void fillOlderHistory(target, feed, generation).catch(() => undefined)
-      } catch (reason) {
-        if (!cancelled && loadGeneration.current === generation) setError(reason instanceof Error ? reason.message : String(reason))
+      } catch {
+        // Missing/stale historical native Sessions are normal for a durable Task. Persisted Run
+        // outcome/error data remains available, so a background transcript read is not a chat error.
       }
     })).finally(() => {
       if (!cancelled && loadGeneration.current === generation) setLoading(false)
@@ -356,7 +372,8 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
         runId: activeRunID,
         agentId: currentAgentID,
         agentLabel: agent?.label || currentAgentID,
-        agentBackend: agent?.backend
+        agentBackend: agent?.backend,
+        active: true
       }
     }]
   }, [timeline, working, activeAssistant, task.run?.startedAt, task.id, currentSessionID, currentAgentID, activeRunID, workingMessageID, agentsByID])
@@ -383,8 +400,9 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
             : { messages: page.messages, before: page.before, hasMore: page.hasMore }
         }
       })
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+    } catch {
+      // Live tail refresh is opportunistic. The next SSE event/reconcile retries it and the already
+      // rendered conversation remains authoritative until then.
     }
   }, [task, baseConfig, agents])
 
@@ -429,15 +447,18 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
           // Checkpoints are a product bonus for managed Git workspaces, never a chat blocker.
         }
       }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+    } catch {
+      // Reconciliation is a background freshness path. A transient poll failure must not repeatedly
+      // overwrite the chat with an action-style error banner while valid cached data is still shown.
     }
   }, [baseConfig, task.id, agents, onTaskUpdate, onWorkspaceRefresh, refreshCurrentTail, refreshAttention])
 
   useEffect(() => {
     void refreshAttention()
     const delay = working ? ACTIVE_RECONCILE_MS : IDLE_RECONCILE_MS
-    const timer = window.setInterval(() => void reconcile(), delay)
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void reconcile()
+    }, delay)
     return () => window.clearInterval(timer)
   }, [working, reconcile, refreshAttention])
 
@@ -510,6 +531,8 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
           }
         })
       }))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setLoadingOlder(false)
     }
@@ -518,8 +541,6 @@ export function WorkThreadConversation({ task, baseConfig, agents, onTaskUpdate,
   async function send() {
     const text = draft.trim()
     if (!text || sending || working || sendInFlightRef.current) return
-    // State updates are asynchronous. The ref closes the tiny window in which Enter and a click (or
-    // two key events) could both reach this function before React re-rendered `sending=true`.
     sendInFlightRef.current = true
     setSending(true)
     setError(null)
