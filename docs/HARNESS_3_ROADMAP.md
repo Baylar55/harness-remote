@@ -29,7 +29,7 @@ A Conversation can begin with one coding agent and continue with another. The un
 
 ## 2. Why this direction
 
-The coding-agent market has moved quickly. Modern harnesses already provide sophisticated Session history, compaction, memory, tools, permissions, Git workflows, background execution and increasingly strong remote experiences.
+Modern harnesses already provide strong Session history, compaction, memory, tools, permissions, Git workflows, background execution and increasingly good remote experiences.
 
 Rebuilding those capabilities above every harness would create a weaker duplicate and force Harness Remote to chase each vendor indefinitely.
 
@@ -42,7 +42,7 @@ Harness Remote instead owns the layer no single vendor is naturally motivated to
 - one remote interface on desktop, web and Android;
 - local execution with the user's existing repositories, credentials and subscriptions.
 
-Harness count matters as coverage, not as the product vision. The important capability is that the user's work is not locked to one harness.
+Harness count matters as coverage, not as the product vision. Reliable interoperability is the value.
 
 ## 3. Product boundary
 
@@ -72,7 +72,7 @@ Harness count matters as coverage, not as the product vision. The important capa
 - harness-specific Git features;
 - native Session resume semantics.
 
-The architecture rule is simple:
+Architecture rule:
 
 > If a harness already owns a capability well, Harness Remote should orchestrate it rather than clone it.
 
@@ -80,13 +80,11 @@ The architecture rule is simple:
 
 A Conversation is intentionally thinner than the previous Task concept.
 
-It stores only what is required to keep one piece of work coherent across native Sessions.
-
 ### Same coding agent
 
-When possible, resume the most recent compatible native Session.
+Resume the most recent compatible native Session when possible.
 
-If the Session no longer exists, create a new native Session and transfer the minimum useful continuity context.
+If the Session no longer exists, create a new native Session and transfer only the minimum useful continuity context.
 
 ### Different coding agent
 
@@ -118,18 +116,15 @@ Project /home/user/Software/harness-remote
 
 A hidden daemon-managed worktree is **not** the default.
 
-Worktree isolation remains useful for deliberate parallel work, but it must be an explicit user choice with visible branch, path and lifecycle. It is a workspace option, not the reason a Conversation exists.
+Worktree isolation remains useful for deliberate parallel work, but it must be an explicit user choice with visible branch, path and lifecycle.
 
 ## 6. Primary experience
-
-The 3.0 shell should make the product understandable without documentation.
 
 ```text
 Workspace
   Machines
   Projects
   Coding agents
-  Conversation filters
 
 Project
   Conversations
@@ -138,25 +133,13 @@ Project
     Changes
 ```
 
-Core actions:
-
 ### New conversation
 
-Choose:
-
-- Machine;
-- Project;
-- coding agent;
-- model;
-- first message.
-
-Start in the real Project directory.
+Choose Machine, Project, coding agent, model and first message. Start in the real Project directory.
 
 ### Continue with
 
-Inside a Conversation, change coding agent or model and send the next instruction.
-
-Harness Remote performs the native Session resume/create and continuity handoff.
+Inside a Conversation, change coding agent or model and send the next instruction. Harness Remote performs the native Session resume/create and continuity handoff.
 
 ### Sessions
 
@@ -166,23 +149,25 @@ Show the actual native Session chain, including agent changes and native Session
 
 Show the real Project workspace changes without inventing a separate source-control lifecycle.
 
+### Mobile
+
+Android uses a real app hierarchy with Conversations, Machines and Settings. Opening a Conversation becomes a focused chat page. Mobile is not a compressed desktop shell.
+
 ## 7. What 3.0 removes from the primary product
 
-The following are no longer first-class product concepts:
+The following are no longer first-class concepts:
 
 - visible Task versus Session choice;
 - separate Classic mode;
 - separate Advanced Native Sessions mode;
 - automatic hidden worktree creation;
-- a Task transcript that competes with the native Session transcript;
+- a Task transcript competing with native Session truth;
 - Run as something the user must understand;
 - task-manager language such as queue/complete/archive unless a future feature genuinely requires it.
 
-Existing Task/Run storage and compatibility code may remain internally during migration. Internal persistence names do not define the product model.
+Existing Task/Run storage and compatibility code may remain internally during migration. Internal persistence names do not define product architecture.
 
 ## 8. Existing strengths we keep
-
-The new direction does not discard the useful v3 foundation.
 
 Keep and harden:
 
@@ -202,15 +187,13 @@ Keep and harden:
 - theme and language preferences;
 - long-conversation performance work;
 - shared conversation rendering;
-- restart reconciliation and missing-Session recovery where still relevant.
+- restart reconciliation and missing-Session recovery where relevant.
 
 ## 9. Differentiation
 
 Harness Remote should not compete with Codex by being a worse Codex UI or with Claude by being a worse Claude UI.
 
-It should become more useful as the agent market becomes more competitive.
-
-The durable wedge is:
+Its durable wedge is:
 
 ### Agent independence
 
@@ -226,35 +209,30 @@ The same Conversations can be supervised from desktop, web and Android.
 
 ### Multi-machine reach
 
-One control plane can eventually span the user's workstation, laptop, server or VM without centralizing source code or provider credentials.
-
-Multi-machine remains strategically useful, but it should extend the Conversation model rather than replace it with a fleet/task-manager product.
+One control plane can span the user's workstation, laptop, server or VM without centralizing source code or provider credentials.
 
 ## 10. Harness expansion strategy
-
-Supporting more coding agents is valuable when each adapter preserves native behavior well.
 
 Priority order:
 
 1. make OpenCode, Codex, Claude, OMP and PI reliable;
-2. make cross-agent continuation trustworthy;
-3. make adapter contracts inexpensive to implement and test;
-4. add high-demand harnesses and ACP-compatible agents;
-5. never sacrifice fidelity merely to increase the supported-agent count.
+2. make model/capability discovery accurate for each adapter;
+3. make cross-agent continuation trustworthy;
+4. make adapter contracts inexpensive to implement and test;
+5. add high-demand harnesses and ACP-compatible agents;
+6. never sacrifice fidelity merely to increase supported-agent count.
 
 A long compatibility list is not a moat by itself. Reliable interoperability is.
 
 ## 11. Attention and supervision
 
-Questions, permissions, failures and Stop remain important because remote supervision is a core Harness Remote use case.
+Questions, permissions, failures and Stop remain important because remote supervision is a core use case.
 
-The UI should normalize these only enough to make them actionable from one surface. It should not hide harness-specific meaning when that meaning matters.
+The UI should normalize them only enough to make them actionable from one surface. It should not hide harness-specific meaning when that meaning matters.
 
-A future cross-machine "Needs you" view can aggregate real native attention events without introducing a separate Task lifecycle.
+## 12. Performance and backend reliability rules
 
-## 12. Performance rules
-
-Conversation fidelity and responsiveness are release blockers.
+Conversation fidelity and backend reliability are release blockers.
 
 Required behavior:
 
@@ -264,11 +242,14 @@ Required behavior:
 - streamed output does not cause excessive React/DOM churn;
 - scroll position remains stable;
 - old history loads explicitly and predictably;
-- live events are primary, reconciliation is a safety net;
+- live events are primary, reconciliation is a bounded safety net;
 - model catalog requests cannot race across agent changes;
-- subscriptions do not leak;
+- model catalogs are scoped correctly per machine and harness;
+- subscriptions/listeners do not leak;
+- transient transport loss does not falsely end a native turn that is still running;
 - Stop reaches the real native Session;
-- permissions/questions remain actionable.
+- permissions/questions remain actionable;
+- caches and retained transcript state remain bounded.
 
 ## 13. Security principles
 
@@ -292,7 +273,7 @@ Do not prioritize:
 - a hosted cloud backend before local value is excellent;
 - architectural abstractions that cannot be explained to a user in one sentence.
 
-## 15. RC1
+## 15. Current beta baseline
 
 Current implementation path:
 
@@ -301,23 +282,132 @@ Current implementation path:
 - base: `v3/taskdesk`;
 - canonical plan: issue #197.
 
-RC1 must demonstrate the vision, not just rename Task to Conversation:
+The conversation-first interface is now a usable beta baseline with:
 
 1. direct conversation-first boot;
 2. no Classic/Advanced product modes;
 3. machine/project/agent/model selection;
 4. New conversation in the real Project directory;
-5. high-fidelity native chat;
+5. native-oriented chat and Activity;
 6. Continue with another agent/model;
 7. native Session continuity view;
 8. Changes view;
 9. permissions/questions and Stop;
 10. desktop/web/Android navigation;
-11. retained settings;
-12. green automated tests and APK build;
-13. real-harness manual validation before promotion.
+11. retained Settings;
+12. green automated builds/tests on the current validated beta code baseline.
 
-## 16. Success criterion
+This is **not yet an RC** because real testing has exposed backend and adapter reliability problems.
+
+## 16. Next release gate: complete backend audit
+
+Canonical backend audit: issue #287.
+
+The next engineering phase must focus on evidence, diagnostics and real harness behavior rather than UI feature work.
+
+### Priority symptoms
+
+- Android/local-network conversations sometimes disconnect or show red server errors while the native harness may still be working.
+- OMP and PI model catalogs do not look consistent with their configured access.
+- PI often fails on first selection and recovers only after switching away and back.
+- OpenCode exposes richer model options/variants than other harnesses, and it is unclear whether this reflects real capability differences or incomplete adapter discovery.
+- OpenCode repeatedly logs `MaxListenersExceededWarning`.
+
+### Audit scope
+
+Audit the complete path:
+
+```text
+UI / Android transport
+  -> machine daemon
+  -> agent host
+  -> harness adapter
+  -> native Session
+```
+
+Validate:
+
+- timeout policy by operation;
+- accepted-prompt recovery;
+- reconnect after network loss/background/sleep;
+- event/SSE/ACP listener ownership and disposal;
+- duplicate subscriptions and requests;
+- cancellation and AbortController cleanup;
+- harness lazy startup;
+- per-harness model source;
+- model/provider ID normalization;
+- defaults and current model;
+- variants/reasoning levels/options;
+- cache keys, refresh and invalidation;
+- stale picker state after agent changes;
+- transcript/cache bounds and pagination;
+- diagnostics and soak behavior.
+
+Do not solve listener warnings by raising the listener limit.
+Do not solve transport problems by blindly increasing timeouts.
+
+## 17. Harness capability matrix
+
+Before release promotion, document what Harness Remote can actually discover/control for:
+
+- OpenCode;
+- Codex;
+- Claude;
+- PI;
+- OMP.
+
+For each adapter record:
+
+- Session create/resume/stop support;
+- event/stream transport;
+- model catalog source;
+- default model behavior;
+- model variants/reasoning levels and selectable capabilities;
+- cache/refresh behavior;
+- known limitations.
+
+Preserve useful harness-specific metadata. Do not invent a common option that the harness does not expose.
+
+## 18. Real-harness validation
+
+For each available harness:
+
+1. discover/start it;
+2. load/refresh its model catalog;
+3. create a Conversation;
+4. run 10+ turns;
+5. run a long reasoning/tool turn;
+6. Stop a real turn;
+7. background/foreground Android or introduce a short local-network interruption;
+8. reconnect without losing configured workspace state;
+9. switch away and back;
+10. restart daemon/app and recover/resume;
+11. repeat open/close/switch cycles and prove listener/subscription state remains bounded.
+
+Cross-harness tests must include at least:
+
+```text
+OpenCode -> PI -> OpenCode
+OpenCode -> Codex -> Claude
+```
+
+Verify target model, target native Session and continuity every time.
+
+## 19. Promotion sequence
+
+1. Keep PR #286 DRAFT and call the interface beta.
+2. Complete backend audit #287 from reproducible evidence.
+3. Add diagnostics before guessing at timeout/listener failures.
+4. Produce the harness capability/model matrix.
+5. Pass automated tests and the real-harness backend matrix.
+6. Re-run the full mobile/conversation manual gate on one exact candidate SHA.
+7. Only then mark #286 ready and merge into `v3/taskdesk`, never directly into `main`.
+8. Revalidate `v3/taskdesk`.
+9. Only after that prepare a dedicated 3.0 release PR toward `main`.
+
+Superseded Task-first work is closed and kept only for reference: PRs #279, #281 and #283, plus old Task/Classic issues now replaced by #197/#287.
+
+## 20. Success criterion
 
 Harness Remote 3.0 succeeds when the user can say:
 
@@ -325,8 +415,9 @@ Harness Remote 3.0 succeeds when the user can say:
 
 It has failed if the user has to ask:
 
-- Should I create a Task or a Session?
+- Why did the server disconnect while the agent was still working?
+- Are these really all the models and options my harness exposes?
+- Why did changing agent leave the model picker broken?
+- Why are listeners accumulating in the backend?
 - Why does Harness Remote show a different chat from my native Session?
 - Where did my code go?
-- Why did changing agent lose context?
-- Why is there a separate mode just to see the real Session?
