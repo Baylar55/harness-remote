@@ -201,7 +201,7 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: 
   if (message.info.role === "taskdesk") {
     return (
       <div className="tdw-conversation-event">
-        <span>{message.parts.find((part) => part.type === "text")?.text || "TaskDesk event"}</span>
+        <span>{message.parts.find((part) => part.type === "text")?.text || "Conversation event"}</span>
       </div>
     )
   }
@@ -614,7 +614,7 @@ export function WorkThreadConversation({
       <div className="tdw-conversation-toolbar">
         <div className="tdw-agent-control">
           <label>
-            <span>Coding agent</span>
+            <span>Continue with</span>
             <select value={targetAgentID} disabled={working || sending} onChange={(event) => setTargetAgentID(event.target.value)}>
               {agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label}</option>)}
             </select>
@@ -657,7 +657,7 @@ export function WorkThreadConversation({
         onStop={working ? stop : undefined}
         stopping={stopping}
         placeholder={`Message ${agentLabel(agents, targetAgentID)}…`}
-        emptyText="Start talking to the coding agent. This Task keeps the whole conversation together."
+        emptyText="Start the conversation. You can continue with another coding agent at any time."
         footerHint={hasAttention ? "Your input is required before the agent can continue" : working ? "The agent is working on your last message" : undefined}
         renderMessage={(message) => <WorkThreadBubble key={message.info.id} message={message as WorkThreadMessage} />}
       />
