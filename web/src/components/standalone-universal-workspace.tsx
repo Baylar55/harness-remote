@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import { Capacitor } from "@capacitor/core"
 import { discoverMachine } from "../machineClient"
@@ -7,12 +7,11 @@ import {
   createWorkspaceMachine,
   type WorkspaceMachine
 } from "../workspaceMachines"
-import { TaskDeskWorkspace } from "./taskdesk-workspace"
+import { ConversationWorkspace } from "./conversation-workspace"
 
 type Props = {
   machines: WorkspaceMachine[]
   onPersistMachines: (machines: WorkspaceMachine[]) => void
-  legacyView: ReactNode
 }
 
 type MachineEditorProps = {
@@ -58,7 +57,7 @@ function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps)
         const count = snapshot.agents.length
         setTestResult({
           ok: true,
-          text: `Connected to ${snapshot.machine.name}. ${count} harness${count === 1 ? "" : "es"} discovered.`
+          text: `Connected to ${snapshot.machine.name}. ${count} coding agent${count === 1 ? "" : "s"} discovered.`
         })
       }
     } catch (error) {
@@ -109,19 +108,24 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
     else onPersist(machines.map((candidate) => candidate.id === machine.id ? machine : candidate))
     setEditingID(null)
   }
+
   const remove = (machine: WorkspaceMachine) => {
-    if (!window.confirm(`Remove "${machine.name}" from this workspace?`)) return
+    if (!window.confirm(`Remove "${machine.name}" from Harness Remote?`)) return
     onPersist(machines.filter((candidate) => candidate.id !== machine.id))
     if (editingID === machine.id) setEditingID(null)
   }
+
   const availableCount = Object.values(snapshots).reduce((count, snapshot) => count + (snapshot?.agents.filter((agent) => agent.state === "available").length || 0), 0)
 
   return (
     <div className="uw-manager-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="uw-machine-manager" role="dialog" aria-modal="true" aria-label="Machines" onMouseDown={(event) => event.stopPropagation()}>
-        <header className="uw-machine-manager-header"><div><h2>Machines</h2><p>Configure TaskDesk machines and see the harnesses each daemon currently detects.</p></div><button type="button" className="uw-manager-close" onClick={onClose} aria-label="Close">×</button></header>
+        <header className="uw-machine-manager-header">
+          <div><h2>Machines</h2><p>Connect the computers where your repositories, coding agents, credentials and model access already live.</p></div>
+          <button type="button" className="uw-manager-close" onClick={onClose} aria-label="Close">×</button>
+        </header>
         <div className="uw-machine-manager-body">
-          {machines.length === 0 && editingID !== "new" ? <div className="uw-machine-manager-empty"><strong>No machines configured</strong><span>Add a Harness machine daemon to use TaskDesk.</span></div> : null}
+          {machines.length === 0 && editingID !== "new" ? <div className="uw-machine-manager-empty"><strong>No machines configured</strong><span>Add a Harness Remote daemon to discover its projects and coding agents.</span></div> : null}
           {machines.map((machine) => {
             const snapshot = snapshots[machine.id]
             return (
@@ -129,7 +133,7 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
                 <div className="uw-machine-config-main">
                   <strong>{snapshot?.machine.name || machine.name}</strong>
                   <span>{machine.config.host}:{machine.config.port}</span>
-                  <small>{snapshot === undefined ? "Checking harnesses..." : snapshot ? `${snapshot.agents.length} harness${snapshot.agents.length === 1 ? "" : "es"} detected` : "Machine unavailable"}</small>
+                  <small>{snapshot === undefined ? "Checking coding agents..." : snapshot ? `${snapshot.agents.length} coding agent${snapshot.agents.length === 1 ? "" : "s"} detected` : "Machine unavailable"}</small>
                   {snapshot?.agents.length ? <div className="uw-machine-harness-list">{snapshot.agents.map((agent) => <span className="uw-machine-harness" key={agent.id}><i className={agent.state} /><strong>{agent.label}</strong><small>{agent.state}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span>)}</div> : null}
                 </div>
                 <div className="uw-machine-config-actions"><button type="button" className="uw-manager-button" onClick={() => setEditingID(machine.id)}>Edit</button><button type="button" className="uw-manager-button danger" onClick={() => remove(machine)}>Remove</button></div>
@@ -138,13 +142,13 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
           })}
           {draft ? <MachineEditor key={draft.id} machine={draft} isNew={editingID === "new"} onCancel={() => setEditingID(null)} onSave={save} /> : null}
         </div>
-        <footer className="uw-machine-manager-footer"><span>{machines.length} machine{machines.length === 1 ? "" : "s"} configured · {availableCount} harness{availableCount === 1 ? "" : "es"} available</span><button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ Add machine</button></footer>
+        <footer className="uw-machine-manager-footer"><span>{machines.length} machine{machines.length === 1 ? "" : "s"} configured · {availableCount} coding agent{availableCount === 1 ? "" : "s"} running</span><button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ Add machine</button></footer>
       </section>
     </div>
   )
 }
 
-export function StandaloneUniversalWorkspace({ machines, onPersistMachines, legacyView }: Props) {
+export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Props) {
   const [managerOpen, setManagerOpen] = useState(machines.length === 0)
   const [activeMachineID, setActiveMachineID] = useState(machines[0]?.id || "")
   const activeID = machines.some((machine) => machine.id === activeMachineID) ? activeMachineID : machines[0]?.id || ""
@@ -159,8 +163,6 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
         return
       }
 
-      if (document.querySelector(".tdw-classic-host")) return
-
       const modelPickerTrigger = document.querySelector<HTMLButtonElement>(".tdw-model-picker.open .tdw-model-trigger")
       if (modelPickerTrigger) {
         modelPickerTrigger.click()
@@ -170,18 +172,6 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
       const modalClose = document.querySelector<HTMLButtonElement>(".tdw-modal-backdrop .tdw-modal header button")
       if (modalClose) {
         modalClose.click()
-        return
-      }
-
-      const moreMenu = document.querySelector(".tdw-more-menu")
-      if (moreMenu) {
-        document.querySelector<HTMLButtonElement>('.tdw-more-wrap > button[aria-label="More"]')?.click()
-        return
-      }
-
-      const advancedBack = document.querySelector<HTMLButtonElement>(".tdw-advanced-host .tdw-advanced-bar > button")
-      if (advancedBack) {
-        advancedBack.click()
         return
       }
 
@@ -204,14 +194,16 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines, lega
 
   return (
     <div className="uw-standalone-host">
-      <TaskDeskWorkspace
+      <ConversationWorkspace
         machines={machines}
         activeMachineID={activeID}
         onActiveMachineID={setActiveMachineID}
         onManageMachines={() => setManagerOpen(true)}
-        legacyView={legacyView}
       />
-      {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={(nextMachines) => { onPersistMachines(nextMachines); if (!nextMachines.some((machine) => machine.id === activeID)) setActiveMachineID(nextMachines[0]?.id || "") }} /> : null}
+      {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={(nextMachines) => {
+        onPersistMachines(nextMachines)
+        if (!nextMachines.some((machine) => machine.id === activeID)) setActiveMachineID(nextMachines[0]?.id || "")
+      }} /> : null}
     </div>
   )
 }
