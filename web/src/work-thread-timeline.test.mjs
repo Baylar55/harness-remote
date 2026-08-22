@@ -208,9 +208,6 @@ test("replayed ACP timestamps after old Runs still recover the complete Task bef
     finishedAt: "2026-08-21T10:03:00.000Z"
   })
   const value = task({ run: second, runs: [first, second], updatedAt: second.finishedAt })
-  // ACP replay chunks have no historical timestamp, so the bridge has to stamp them when replay
-  // happens. Before this regression fix, every native message below was outside both old Run windows
-  // and the Task looked empty until sending the next prompt created a new window around 12:00.
   const replayedAt = Date.parse("2026-08-21T12:00:00.000Z")
   const native = [
     message("replayed-session", "u1", "user", replayedAt, first.prompt),
@@ -244,4 +241,57 @@ test("PI-style partial text keeps fragmented reasoning ordered and one final ans
   assert.equal(assistant.parts.filter((part) => part.type === "text").length, 1)
   assert.equal(textOf(assistant), "The bug comes from the stale session. I fixed the fallback and added a regression test.")
   assert.deepEqual(assistant.parts.map((part) => part.type), ["reasoning", "reasoning", "text"])
+})
+
+test("many native assistant envelopes become one assistant bubble for the Run", () => {
+  const first = run()
+  const started = Date.parse(first.startedAt)
+  const value = task({ run: first, runs: [first] })
+  const timeline = buildWorkThreadTimeline(value, {
+    "session-codex": [
+      message("session-codex", "u1", "user", started + 1, first.prompt),
+      {
+        info: { id: "a-note", sessionID: "session-codex", role: "assistant", time: { created: started + 5_000 } },
+        parts: [
+          { id: "note", messageID: "a-note", type: "text", text: "I am checking the implementation." },
+          { id: "reason", messageID: "a-note", type: "reasoning", text: "Inspect the current layout." }
+        ]
+      },
+      {
+        info: { id: "a-tool", sessionID: "session-codex", role: "assistant", time: { created: started + 10_000 } },
+        parts: [{ id: "tool", messageID: "a-tool", type: "tool", tool: "Read", callID: "read-1", state: { status: "completed" } }]
+      },
+      message("session-codex", "a-final", "assistant", started + 15_000, "The implementation is now correct.")
+    ]
+  }, agents)
+
+  const assistants = timeline.filter((entry) => entry.info.role === "assistant")
+  assert.equal(assistants.length, 1)
+  assert.deepEqual(assistants[0].parts.map((part) => part.type), ["text", "reasoning", "tool", "text"])
+  assert.equal(timeline.filter((entry) => entry.info.role === "user").length, 1)
+})
+
+test("a failed Run keeps its error after a later successful continuation", () => {
+  const first = run({ status: "failed", error: { message: "Session native-1 not found" } })
+  const second = run({
+    id: "run-2",
+    sequence: 2,
+    prompt: "Continue safely",
+    sessionId: "session-codex-2",
+    startedAt: "2026-08-21T10:02:00.000Z",
+    finishedAt: "2026-08-21T10:03:00.000Z"
+  })
+  const value = task({ status: "completed", error: null, run: second, runs: [first, second] })
+  const timeline = buildWorkThreadTimeline(value, {
+    "session-codex": [message("session-codex", "a1", "assistant", Date.parse(first.startedAt) + 10_000, "Partial answer")],
+    "session-codex-2": [message("session-codex-2", "a2", "assistant", Date.parse(second.startedAt) + 10_000, "Recovered answer")]
+  }, agents)
+
+  assert.deepEqual(timeline.map((entry) => [entry.info.role, textOf(entry)]), [
+    ["user", "Initial request"],
+    ["assistant", "Partial answer"],
+    ["taskdesk", "Turn failed: Session native-1 not found"],
+    ["user", "Continue safely"],
+    ["assistant", "Recovered answer"]
+  ])
 })
