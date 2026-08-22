@@ -59,23 +59,45 @@
     cursor: default;
   }
 
+  /* The count is title metadata, not a detached status badge. Keep the existing semantic DOM but
+     lay the count on the Tasks baseline and render it as subtle parenthesised text. */
+  .tdw-thread-column > .tdw-column-heading {
+    display: grid;
+    grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto;
+    align-items: end;
+    justify-content: initial;
+    column-gap: 5px;
+  }
+
+  .tdw-thread-column > .tdw-column-heading > div:first-child {
+    grid-column: 1;
+  }
+
   .tdw-task-drawer-heading-actions {
-    display: flex;
-    align-items: center;
-    gap: 7px;
+    display: contents;
   }
 
   .tdw-task-drawer-heading-actions > strong {
-    min-width: 24px;
-    padding: 3px 7px;
-    border-radius: 999px;
-    background: var(--td3-raise-2);
-    color: var(--td3-text-2);
-    font-size: 10px;
-    text-align: center;
+    grid-column: 2;
+    align-self: end;
+    min-width: 0;
+    margin: 0 0 1px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--td3-text-3);
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.2;
+    text-align: left;
   }
 
+  .tdw-task-drawer-heading-actions > strong::before { content: "("; }
+  .tdw-task-drawer-heading-actions > strong::after { content: ")"; }
+
   .tdw-task-drawer-close {
+    grid-column: 4;
+    align-self: center;
     width: 28px;
     height: 28px;
     display: grid;
