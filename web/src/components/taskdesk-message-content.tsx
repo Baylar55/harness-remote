@@ -6,6 +6,7 @@ import type { MessageEnvelope, MessagePart } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
 type ActivityGroupValue = Extract<ConversationPartGroup, { kind: "activity" }>
+type ContentGroupValue = Extract<ConversationPartGroup, { kind: "content" }>
 
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
@@ -44,11 +45,26 @@ function ToolPartCard({ part }: { part: MessagePart }) {
   )
 }
 
-function TextPart({ part }: { part: MessagePart }) {
-  if (part.type !== "text" || !part.text) return null
+function UnsupportedPart({ part }: { part: MessagePart }) {
+  const label = part.filename || part.tool || part.type || "unknown"
+  return <div className="uw-unsupported-part" title={`Unsupported message part: ${part.type}`}>{label}</div>
+}
+
+function ContentGroup({ group }: { group: ContentGroupValue }) {
+  const text = group.parts
+    .filter((part) => part.type === "text" && typeof part.text === "string" && part.text.trim())
+    .map((part) => part.text!.trim())
+    .join("\n\n")
+  const other = group.parts.filter((part) => part.type !== "text")
+
   return (
-    <div className="uw-markdown td3-markdown">
-      <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{part.text}</ReactMarkdown>
+    <div className="uw-message-content-group">
+      {text ? (
+        <div className="uw-markdown td3-markdown">
+          <ReactMarkdown remarkPlugins={REMARK_PLUGINS}>{text}</ReactMarkdown>
+        </div>
+      ) : null}
+      {other.map((part) => <UnsupportedPart key={part.id} part={part} />)}
     </div>
   )
 }
@@ -65,7 +81,7 @@ function ActivityPart({ part }: { part: MessagePart }) {
     )
   }
   if (part.type === "tool") return <ToolPartCard part={part} />
-  return null
+  return <UnsupportedPart part={part} />
 }
 
 function ActivityGroup({ group }: { group: ActivityGroupValue }) {
@@ -132,11 +148,10 @@ function messageErrorText(message: MessageEnvelope): string {
 }
 
 /**
- * Render the harness payload in native wire order while keeping the normal conversation readable.
- * Reasoning, tools and interstitial working narration stay inside Activity; only terminal assistant
- * text is normal dialogue. Collapsed Activity and tool bodies are not mounted at all, so long
- * reasoning/tool transcripts do not make scrolling expensive while hidden. Native turn failures
- * are rendered with the message itself so the reason remains visible after refresh or reopening.
+ * Render one logical conversation turn. Transport-level text chunks are joined into one Markdown
+ * body, while reasoning, tools and working narration remain inside Activity. Collapsed Activity and
+ * tool bodies are not mounted, so long transcripts stay cheap. Unknown part types remain visible as
+ * compact placeholders instead of silently disappearing.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const groups = groupConversationParts(message.parts)
@@ -146,14 +161,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
     <div className="uw-message-parts">
       {groups.map((group, groupIndex) => {
         const key = group.parts[0]?.id || `${message.info.id}:${groupIndex}`
-        if (group.kind === "content") {
-          return (
-            <div className="uw-message-content-group" key={key}>
-              {group.parts.map((part) => <TextPart key={part.id} part={part} />)}
-            </div>
-          )
-        }
-
+        if (group.kind === "content") return <ContentGroup group={group} key={key} />
         return <ActivityGroup group={group} key={key} />
       })}
       {turnError ? <div className="uw-message-turn-error" role="alert"><strong>Turn failed</strong><span>{turnError}</span></div> : null}
