@@ -72,7 +72,8 @@ function ActivityGroup({ group }: { group: ActivityGroupValue }) {
   const [open, setOpen] = useState(group.status !== "completed")
 
   useEffect(() => {
-    if (group.status !== "completed") setOpen(true)
+    if (group.status === "completed") setOpen(false)
+    else setOpen(true)
   }, [group.status])
 
   return (
@@ -128,9 +129,9 @@ function messageErrorText(message: MessageEnvelope): string {
 /**
  * Render the harness payload in native wire order while keeping the normal conversation readable.
  * Reasoning, tools and interstitial working narration stay inside Activity; only terminal assistant
- * text is normal dialogue. Live Activity opens while the harness is working, then remains available
- * as the same disclosure after completion. Native turn failures are rendered with the message itself
- * so the reason remains visible after refresh or reopening the Task.
+ * text is normal dialogue. Live Activity opens while the harness is working and automatically
+ * collapses when it completes so long transcripts stay cheap to scroll. Native turn failures remain
+ * visible with the message after refresh or reopening the Task.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
   const groups = groupConversationParts(message.parts)
