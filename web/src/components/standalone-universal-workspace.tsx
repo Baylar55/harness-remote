@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import { Capacitor } from "@capacitor/core"
+import {
+  isThemePreference,
+  loadLanguage,
+  loadThemePreference,
+  persistLanguage,
+  persistThemePreference,
+  type ThemePreference
+} from "../appPreferences"
+import { ChatIcon, ServerIcon, SettingsIcon } from "../Icons"
+import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine } from "../machineClient"
 import type { MachineSnapshot } from "../types"
 import {
@@ -145,16 +155,58 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
   )
 }
 
+function MobileSettingsPage({ onClose }: { onClose: () => void }) {
+  const [language, setLanguage] = useState<LanguageCode>(loadLanguage)
+  const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
+  const t = useMemo(() => createTranslator(language), [language])
+
+  function changeLanguage(value: string) {
+    const next = languageOptions.find((option) => option.code === value)?.code
+    if (!next) return
+    setLanguage(next)
+    persistLanguage(next)
+  }
+
+  function changeTheme(value: string) {
+    if (!isThemePreference(value)) return
+    setTheme(value)
+    persistThemePreference(value)
+  }
+
+  return (
+    <section className="hr-mobile-settings-page" aria-label={t("nav.settings")}>
+      <header>
+        <div><span>Harness Remote</span><h2>{t("nav.settings")}</h2></div>
+        <button type="button" onClick={onClose} aria-label={t("action.close")}>×</button>
+      </header>
+      <div className="hr-mobile-settings-body">
+        <div className="hr-mobile-settings-group">
+          <span>Appearance</span>
+          <label><strong>{t("settings.theme")}</strong><select value={theme} onChange={(event) => changeTheme(event.target.value)}><option value="system">{t("settings.themeSystem")}</option><option value="light">{t("settings.themeLight")}</option><option value="dark">{t("settings.themeDark")}</option></select></label>
+          <label><strong>{t("settings.language")}</strong><select value={language} onChange={(event) => changeLanguage(event.target.value)}>{languageOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label>
+        </div>
+        <p>Appearance and language are shared across Harness Remote on this device.</p>
+      </div>
+    </section>
+  )
+}
+
 export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Props) {
   const [managerOpen, setManagerOpen] = useState(machines.length === 0)
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
   const [activeMachineID, setActiveMachineID] = useState(machines[0]?.id || "")
   const activeID = machines.some((machine) => machine.id === activeMachineID) ? activeMachineID : machines[0]?.id || ""
+  const mobileSection = managerOpen ? "machines" : mobileSettingsOpen ? "settings" : "conversations"
 
   useEffect(() => {
     if (Capacitor.getPlatform() !== "android") return
     let disposed = false
     let handle: { remove: () => Promise<void> } | undefined
     void CapacitorApp.addListener("backButton", () => {
+      if (mobileSettingsOpen) {
+        setMobileSettingsOpen(false)
+        return
+      }
       if (managerOpen) {
         setManagerOpen(false)
         return
@@ -193,7 +245,22 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       disposed = true
       if (handle) void handle.remove()
     }
-  }, [managerOpen])
+  }, [managerOpen, mobileSettingsOpen])
+
+  function showConversations() {
+    setManagerOpen(false)
+    setMobileSettingsOpen(false)
+  }
+
+  function showMachines() {
+    setMobileSettingsOpen(false)
+    setManagerOpen(true)
+  }
+
+  function showSettings() {
+    setManagerOpen(false)
+    setMobileSettingsOpen(true)
+  }
 
   return (
     <div className="uw-standalone-host">
@@ -201,12 +268,18 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
         machines={machines}
         activeMachineID={activeID}
         onActiveMachineID={setActiveMachineID}
-        onManageMachines={() => setManagerOpen(true)}
+        onManageMachines={showMachines}
       />
       {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={(nextMachines) => {
         onPersistMachines(nextMachines)
         if (!nextMachines.some((machine) => machine.id === activeID)) setActiveMachineID(nextMachines[0]?.id || "")
       }} /> : null}
+      {mobileSettingsOpen ? <MobileSettingsPage onClose={() => setMobileSettingsOpen(false)} /> : null}
+      <nav className="hr-mobile-nav" aria-label="Main navigation">
+        <button type="button" className={mobileSection === "conversations" ? "active" : ""} onClick={showConversations} aria-current={mobileSection === "conversations" ? "page" : undefined}><ChatIcon size={20} /><span>Conversations</span></button>
+        <button type="button" className={mobileSection === "machines" ? "active" : ""} onClick={showMachines} aria-current={mobileSection === "machines" ? "page" : undefined}><ServerIcon size={20} /><span>Machines</span></button>
+        <button type="button" className={mobileSection === "settings" ? "active" : ""} onClick={showSettings} aria-current={mobileSection === "settings" ? "page" : undefined}><SettingsIcon size={20} /><span>Settings</span></button>
+      </nav>
     </div>
   )
 }
