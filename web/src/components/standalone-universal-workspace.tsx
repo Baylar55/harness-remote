@@ -55,10 +55,7 @@ function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps)
         setTestResult({ ok: false, text: "Connected, but this endpoint is not a Harness machine daemon." })
       } else {
         const count = snapshot.agents.length
-        setTestResult({
-          ok: true,
-          text: `Connected to ${snapshot.machine.name}. ${count} coding agent${count === 1 ? "" : "s"} discovered.`
-        })
+        setTestResult({ ok: true, text: `Connected to ${snapshot.machine.name}. ${count} coding agent${count === 1 ? "" : "s"} discovered.` })
       }
     } catch (error) {
       setTestResult({ ok: false, text: error instanceof Error ? error.message : String(error) })
@@ -172,6 +169,12 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       const modalClose = document.querySelector<HTMLButtonElement>(".tdw-modal-backdrop .tdw-modal header button")
       if (modalClose) {
         modalClose.click()
+        return
+      }
+
+      const drawerScrim = document.querySelector<HTMLButtonElement>(".tdw-task-drawer-scrim")
+      if (drawerScrim && drawerScrim.getClientRects().length > 0) {
+        drawerScrim.click()
         return
       }
 
