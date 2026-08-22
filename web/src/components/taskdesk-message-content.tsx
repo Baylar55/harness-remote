@@ -7,6 +7,7 @@ import type { MessageEnvelope, MessagePart } from "../types"
 const REMARK_PLUGINS = [remarkGfm]
 type ActivityGroupValue = Extract<ConversationPartGroup, { kind: "activity" }>
 type ContentGroupValue = Extract<ConversationPartGroup, { kind: "content" }>
+type TaskDeskEnvelope = MessageEnvelope & { taskdesk?: { active?: boolean } }
 
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
@@ -149,12 +150,16 @@ function messageErrorText(message: MessageEnvelope): string {
 
 /**
  * Render one logical conversation turn. Transport-level text chunks are joined into one Markdown
- * body, while reasoning, tools and working narration remain inside Activity. Collapsed Activity and
- * tool bodies are not mounted, so long transcripts stay cheap. Unknown part types remain visible as
- * compact placeholders instead of silently disappearing.
+ * body, while reasoning, tools and working narration remain inside Activity. While a Task Run is
+ * live, the whole assistant payload stays inside Activity so streamed chunks never jump between
+ * working state and final dialogue. Unknown part types stay visible instead of disappearing.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
-  const groups = groupConversationParts(message.parts)
+  const liveAssistant = message.info.role === "assistant" && Boolean((message as TaskDeskEnvelope).taskdesk?.active)
+  const groups = groupConversationParts(message.parts, {
+    forceActivity: liveAssistant,
+    forceRunning: liveAssistant
+  })
   const turnError = messageErrorText(message)
 
   return (
