@@ -48,6 +48,20 @@ test("plain assistant text with no technical activity remains normal conversatio
   assert.deepEqual(groups[0].parts.map((item) => item.id), ["text-1", "text-2"])
 })
 
+test("a live assistant turn keeps every streamed part inside one running Activity", () => {
+  const parts = [
+    part("text-1", "text", { text: "I found the file." }),
+    part("reasoning", "reasoning", { text: "Checking the caller.", time: { start: 1, end: 2 } }),
+    part("text-2", "text", { text: "This may become the final response." })
+  ]
+  const groups = groupConversationParts(parts, { forceActivity: true, forceRunning: true })
+
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].kind, "activity")
+  assert.equal(groups[0].status, "running")
+  assert.deepEqual(groups[0].parts.map((item) => item.id), parts.map((item) => item.id))
+})
+
 test("an activity group exposes error state without forcing it into normal dialogue", () => {
   const groups = groupConversationParts([
     part("tool-1", "tool", { tool: "Shell", state: { status: "completed" } }),
