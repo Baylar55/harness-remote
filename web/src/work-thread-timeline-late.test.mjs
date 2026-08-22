@@ -9,9 +9,29 @@ function message(sessionID, id, role, created, text) {
   }
 }
 
-test("a delayed assistant reply stays attached to the Run whose prompt opened the native turn", () => {
-  const startedAt = "2026-08-21T10:00:00.000Z"
-  const finishedAt = "2026-08-21T10:01:00.000Z"
+function baseTask(run) {
+  return {
+    id: "task-1",
+    machineId: "machine-1",
+    projectId: "project-1",
+    project: { name: "Harness Remote", path: "/repo", kind: "git" },
+    agentId: run.agentId,
+    prompt: run.prompt,
+    model: run.model,
+    status: "completed",
+    workspace: { mode: "worktree", path: "/repo-task" },
+    run,
+    runs: [run],
+    createdAt: run.startedAt,
+    updatedAt: run.finishedAt
+  }
+}
+
+function texts(entry) {
+  return entry.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n")
+}
+
+test("a delayed assistant fragment remains inside the single logical assistant turn", () => {
   const run = {
     id: "run-1",
     sequence: 1,
@@ -22,27 +42,12 @@ test("a delayed assistant reply stays attached to the Run whose prompt opened th
     transport: "acp",
     directory: "/repo-task",
     prompt: "Do a long audit",
-    startedAt,
-    finishedAt
+    startedAt: "2026-08-21T10:00:00.000Z",
+    finishedAt: "2026-08-21T10:01:00.000Z"
   }
-  const task = {
-    id: "task-1",
-    machineId: "machine-1",
-    projectId: "project-1",
-    project: { name: "Harness Remote", path: "/repo", kind: "git" },
-    agentId: "omp",
-    prompt: run.prompt,
-    model: run.model,
-    status: "completed",
-    workspace: { mode: "worktree", path: "/repo-task" },
-    run,
-    runs: [run],
-    createdAt: startedAt,
-    updatedAt: finishedAt
-  }
-  const start = Date.parse(startedAt)
-  const late = Date.parse(finishedAt) + 45_000
-  const timeline = buildWorkThreadTimeline(task, {
+  const start = Date.parse(run.startedAt)
+  const late = Date.parse(run.finishedAt) + 45_000
+  const timeline = buildWorkThreadTimeline(baseTask(run), {
     "session-omp": [
       message("session-omp", "user-1", "user", start + 1, run.prompt),
       message("session-omp", "assistant-1", "assistant", start + 20_000, "First part"),
@@ -50,20 +55,14 @@ test("a delayed assistant reply stays attached to the Run whose prompt opened th
     ]
   }, { omp: { label: "Oh My Pi", backend: "omp" } })
 
-  assert.deepEqual(
-    timeline.map((entry) => [entry.info.role, entry.parts.filter((part) => part.type === "text").map((part) => part.text).join("\n")]),
-    [
-      ["user", "Do a long audit"],
-      ["assistant", "First part"],
-      ["assistant", "Delayed final part"]
-    ]
-  )
-  assert.ok(timeline[2].info.time.created < Date.parse(finishedAt) + 5_000, "late replay timing should be normalized inside the historical Run")
+  assert.deepEqual(timeline.map((entry) => [entry.info.role, texts(entry)]), [
+    ["user", "Do a long audit"],
+    ["assistant", "First part\nDelayed final part"]
+  ])
+  assert.equal(timeline.filter((entry) => entry.info.role === "assistant").length, 1)
 })
 
 test("an unrelated native-session turn is not silently absorbed into the Task", () => {
-  const startedAt = "2026-08-21T10:00:00.000Z"
-  const finishedAt = "2026-08-21T10:01:00.000Z"
   const run = {
     id: "run-1",
     sequence: 1,
@@ -73,32 +72,17 @@ test("an unrelated native-session turn is not silently absorbed into the Task", 
     transport: "acp",
     directory: "/repo-task",
     prompt: "TaskDesk request",
-    startedAt,
-    finishedAt
+    startedAt: "2026-08-21T10:00:00.000Z",
+    finishedAt: "2026-08-21T10:01:00.000Z"
   }
-  const task = {
-    id: "task-1",
-    machineId: "machine-1",
-    projectId: "project-1",
-    agentId: "omp",
-    prompt: run.prompt,
-    status: "completed",
-    workspace: { mode: "worktree", path: "/repo-task" },
-    run,
-    runs: [run],
-    createdAt: startedAt,
-    updatedAt: finishedAt
-  }
-  const start = Date.parse(startedAt)
-  const timeline = buildWorkThreadTimeline(task, {
+  const timeline = buildWorkThreadTimeline(baseTask(run), {
     "session-omp": [
-      message("session-omp", "user-task", "user", start + 1, run.prompt),
-      message("session-omp", "assistant-task", "assistant", start + 5_000, "Task answer"),
-      message("session-omp", "user-manual", "user", start + 120_000, "Manual native-session question"),
-      message("session-omp", "assistant-manual", "assistant", start + 125_000, "Manual native answer")
+      message("session-omp", "user-task", "user", 1, run.prompt),
+      message("session-omp", "assistant-task", "assistant", 2, "Task answer"),
+      message("session-omp", "user-manual", "user", 3, "Manual native-session question"),
+      message("session-omp", "assistant-manual", "assistant", 4, "Manual native answer")
     ]
   }, { omp: { label: "Oh My Pi", backend: "omp" } })
 
-  const text = timeline.flatMap((entry) => entry.parts.filter((part) => part.type === "text").map((part) => part.text))
-  assert.deepEqual(text, ["TaskDesk request", "Task answer"])
+  assert.deepEqual(timeline.map(texts), ["TaskDesk request", "Task answer"])
 })
