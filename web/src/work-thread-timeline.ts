@@ -49,6 +49,11 @@ function isTaskDeskTransfer(text: string): boolean {
     || (text.includes("The context below was transferred by TaskDesk") && text.includes("USER INSTRUCTION"))
 }
 
+function transferContainsPrompt(text: string, prompt: string): boolean {
+  if (!isTaskDeskTransfer(text) || !prompt.trim()) return false
+  return normalizedText(text).includes(normalizedText(prompt))
+}
+
 function samePrompt(left: string, right: string): boolean {
   return Boolean(right.trim()) && normalizedText(left) === normalizedText(right)
 }
@@ -158,15 +163,38 @@ function transcriptTurns(messages: MessageEnvelope[]): MessageEnvelope[][] {
   return turns
 }
 
+function userTextForTurn(turn: MessageEnvelope[]): string {
+  const user = turn.find((message) => message.info.role === "user")
+  return user ? textParts(user.parts) : ""
+}
+
+/**
+ * Prefer the actual native turn whose user text is this Run's prompt. This is stronger than ACP
+ * timestamps: replay can restamp an old transcript at the current time, and final chunks can land
+ * just after TaskDesk persisted `finishedAt`. Matching the prompt lets us keep the complete native
+ * answer without absorbing unrelated manual turns from Advanced Sessions.
+ */
+function promptTurnForRun(messages: MessageEnvelope[], prompt: string, ordinal: number, sessionRunCount: number): MessageEnvelope[] {
+  if (!messages.length || !prompt.trim()) return []
+  const matches = transcriptTurns(messages).filter((turn) => {
+    const userText = userTextForTurn(turn)
+    return samePrompt(userText, prompt) || transferContainsPrompt(userText, prompt)
+  })
+  if (!matches.length) return []
+  if (matches.length === 1) return matches[0]
+  const firstRelevant = Math.max(0, matches.length - sessionRunCount)
+  return matches[firstRelevant + ordinal] ?? []
+}
+
 /**
  * ACP replay notifications do not carry historical timestamps. The bridge therefore has to stamp
  * them when replay happens; after a daemon restart those timestamps can be hours or days after the
  * Task Run that actually produced the messages. Time-window slicing then returns an empty old Task
  * until the user sends another prompt and creates a new window around the replay time.
  *
- * A Task-owned native Session has one user turn per Run. When timestamps select no assistant reply,
- * recover by turn order instead. Taking the last N turns also tolerates a Session that contained
- * unrelated history before TaskDesk adopted it.
+ * A Task-owned native Session has one user turn per Run. When neither prompt matching nor timestamps
+ * can recover an assistant reply, fall back to turn order. Taking the last N turns also tolerates a
+ * Session that contained unrelated history before TaskDesk adopted it.
  */
 function replayFallbackForRun(messages: MessageEnvelope[], ordinal: number, sessionRunCount: number): MessageEnvelope[] {
   if (!messages.length) return []
@@ -210,12 +238,20 @@ function nativeForRun(
     const created = Number(message.info?.time?.created) || 0
     return !created || created >= start - 5_000 && created < end
   })
+  const promptTurn = promptTurnForRun(messages, prompt, sessionOrdinal, sessionRunCount)
+  const promptTurnHasAssistant = promptTurn.some((message) => message.info.role === "assistant")
   const nativeHasAssistant = messages.some((message) => message.info.role === "assistant")
   const windowHasAssistant = timestampWindow.some((message) => message.info.role === "assistant")
-  const usingReplayFallback = nativeHasAssistant && !windowHasAssistant
-  const selectedMessages = usingReplayFallback
-    ? replayFallbackForRun(messages, sessionOrdinal, sessionRunCount)
-    : timestampWindow
+  const usingReplayFallback = !promptTurnHasAssistant && nativeHasAssistant && !windowHasAssistant
+  const selectedMessages = promptTurnHasAssistant
+    ? promptTurn
+    : usingReplayFallback
+      ? replayFallbackForRun(messages, sessionOrdinal, sessionRunCount)
+      : timestampWindow
+  const needsSyntheticTiming = selectedMessages.some((message) => {
+    const created = Number(message.info?.time?.created) || 0
+    return created && (created < start - 5_000 || created >= end)
+  })
 
   selectedMessages.forEach((rawMessage, selectedIndex) => {
     const message = compactAssistantMessage(rawMessage)
@@ -227,10 +263,10 @@ function nativeForRun(
       return
     }
     seen.add(identity)
-    // Replayed ACP messages were stamped at replay time, not historical time. Once turn-order
-    // fallback selected the right Run, give those rows a stable synthetic position inside that Run
-    // so the final chronological sort cannot move an old answer beneath a newer Task turn.
-    const created = usingReplayFallback ? start + 1 + selectedIndex : message.info.time.created
+    // Prompt/turn matching can intentionally select replayed or delayed messages outside the Run's
+    // historical timestamp window. Give them a stable synthetic position inside this Run so the
+    // final chronological sort cannot move an old answer beneath a newer Task turn.
+    const created = needsSyntheticTiming || usingReplayFallback ? start + 1 + selectedIndex : message.info.time.created
     result.push({
       ...message,
       info: { ...message.info, id: `work-thread:${task.id}:${identity}`, time: { ...message.info.time, created } },
