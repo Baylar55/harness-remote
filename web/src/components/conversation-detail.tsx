@@ -65,17 +65,6 @@ function titleFor(conversation: MachineTask): string {
   return line.length > 100 ? `${line.slice(0, 97)}...` : line
 }
 
-function isActive(conversation: MachineTask): boolean {
-  return conversation.status === "starting" || conversation.status === "running"
-}
-
-function stateLabel(conversation: MachineTask, needsAttention = false): string {
-  if (needsAttention || conversation.status === "failed") return "Needs attention"
-  if (isActive(conversation)) return "Working"
-  if (conversation.status === "cancelled") return "Stopped"
-  return "Ready"
-}
-
 function formatDate(value?: string | null): string {
   if (!value) return ""
   const parsed = Date.parse(value)
@@ -230,14 +219,12 @@ export function ConversationDetail({ conversation, baseConfig, agents, machineNa
   const [tab, setTab] = useState<DetailTab>("chat")
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [needsAttention, setNeedsAttention] = useState(false)
   const sessions = useMemo(() => nativeSessions(conversation), [conversation.runs, conversation.run, conversation.id])
   const current = conversation.run
 
   useEffect(() => {
     setTab("chat")
     setError(null)
-    setNeedsAttention(false)
   }, [conversation.id])
 
   async function rename() {
@@ -262,9 +249,6 @@ export function ConversationDetail({ conversation, baseConfig, agents, machineNa
           </div>
           <p>{agentLabel(agents, runAgent(conversation, current))} · {modelLabel(current, conversation)} · {machineName}</p>
         </div>
-        <div className={`hr-header-state ${needsAttention || conversation.status === "failed" ? "attention" : isActive(conversation) ? "working" : "ready"}`}>
-          <i />{stateLabel(conversation, needsAttention)}
-        </div>
       </header>
 
       <nav className="tdw-detail-tabs hr-conversation-tabs" aria-label="Conversation detail">
@@ -283,7 +267,6 @@ export function ConversationDetail({ conversation, baseConfig, agents, machineNa
             baseConfig={baseConfig}
             agents={agents}
             onTaskUpdate={onConversationUpdate}
-            onAttentionChange={setNeedsAttention}
             onWorkspaceRefresh={() => {
               setRevision((value) => value + 1)
               onWorkspaceRefresh?.()
