@@ -9,7 +9,7 @@ function part(id, type, extra = {}) {
 test("technical activity is grouped without changing native wire order", () => {
   const parts = [
     part("text-1", "text", { text: "I will inspect it." }),
-    part("reasoning-1", "reasoning", { text: "Need the component." }),
+    part("reasoning-1", "reasoning", { text: "Need the component.", time: { start: 1, end: 2 } }),
     part("tool-1", "tool", { tool: "Read", state: { status: "completed" } }),
     part("tool-2", "tool", { tool: "Edit", state: { status: "completed" } }),
     part("text-2", "text", { text: "Fixed." })
@@ -20,6 +20,21 @@ test("technical activity is grouped without changing native wire order", () => {
   assert.deepEqual(groups.flatMap((group) => group.parts.map((item) => item.id)), parts.map((item) => item.id))
   assert.equal(groups[1].status, "completed")
   assert.equal(activityLabel(groups[1]), "Activity · 2 tools · reasoning")
+})
+
+test("assistant narration between technical parts stays inside Activity", () => {
+  const parts = [
+    part("reasoning-1", "reasoning", { text: "Inspect the file.", time: { start: 1, end: 2 } }),
+    part("note", "text", { text: "I found the component, checking the caller now." }),
+    part("tool", "tool", { tool: "Read", state: { status: "completed" } }),
+    part("final", "text", { text: "Fixed and verified." })
+  ]
+
+  const groups = groupConversationParts(parts)
+  assert.deepEqual(groups.map((group) => group.kind), ["activity", "content"])
+  assert.deepEqual(groups[0].parts.map((item) => item.id), ["reasoning-1", "note", "tool"])
+  assert.equal(activityLabel(groups[0]), "Activity · 1 tool · reasoning · working notes")
+  assert.deepEqual(groups[1].parts.map((item) => item.id), ["final"])
 })
 
 test("an activity group exposes error state without forcing it into normal dialogue", () => {
@@ -33,10 +48,19 @@ test("an activity group exposes error state without forcing it into normal dialo
   assert.equal(groups[0].status, "error")
 })
 
-test("running activity remains distinct from completed activity", () => {
+test("running tool activity remains distinct from completed activity", () => {
   const groups = groupConversationParts([
-    part("reasoning", "reasoning", { text: "thinking" }),
+    part("reasoning", "reasoning", { text: "thinking", time: { start: 1, end: 2 } }),
     part("tool", "tool", { tool: "Read", state: { status: "running" } })
+  ])
+
+  assert.equal(groups[0].kind, "activity")
+  assert.equal(groups[0].status, "running")
+})
+
+test("an unfinished reasoning fragment keeps Activity live", () => {
+  const groups = groupConversationParts([
+    part("reasoning", "reasoning", { text: "still thinking", time: { start: 1 } })
   ])
 
   assert.equal(groups[0].kind, "activity")
