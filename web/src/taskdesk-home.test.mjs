@@ -131,7 +131,7 @@ test("lazy detected harnesses are healthy Ready while started harnesses are Runn
   assert.match(css, /uw-machine-harness > i\.available, \.uw-machine-harness > i\.configured/)
 })
 
-test("Task states distinguish agent completion from user completion", () => {
+test("Task states distinguish agent completion from user completion and pending native attention", () => {
   const shell = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
   const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
   const css = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
@@ -141,7 +141,8 @@ test("Task states distinguish agent completion from user completion", () => {
   assert.match(shell, /task\.status === "cancelled"\) return "stopped"/)
   assert.match(shell, /task\.status === "completed"\) return "ready"/)
   assert.match(detail, /if \(task\.finishedAt\) return "Done"/)
-  assert.match(detail, /stateClass\(task\)/)
+  assert.match(detail, /stateClass\(task, needsAttention\)/)
+  assert.match(detail, /onAttentionChange=\{setNeedsAttention\}/)
   assert.match(css, /tdw-thread-status\.done/)
   assert.match(css, /tdw-live-state\.done/)
 })
@@ -195,16 +196,16 @@ test("model selection is searchable grouped and shared between creation and conv
   assert.match(shellCss, /color-scheme: dark/)
 })
 
-test("Working state is reconciled from the real native session and the chat exposes Stop plus waiting feedback", () => {
+test("Working state is event driven with slow reconciliation and the chat exposes Stop without transcript shimmer", () => {
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const shared = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
-  const server = readFileSync(new URL("../../bridge/src/work-thread-controller.js", import.meta.url), "utf8")
   const abort = readFileSync(new URL("../../bridge/src/work-thread-abort.js", import.meta.url), "utf8")
 
-  assert.match(conversation, /ACTIVE_RECONCILE_MS = 1_000/)
-  assert.match(conversation, /waiting=\{working\}/)
+  assert.match(conversation, /ACTIVE_RECONCILE_MS = 5_000/)
+  assert.match(conversation, /startTaskDeskSessionLiveRefresh/)
+  assert.match(conversation, /showWaitingIndicator=\{false\}/)
   assert.match(conversation, /onStop=\{working \? stop : undefined\}/)
-  assert.match(shared, /className="uw-session-typing" role="status"/)
+  assert.match(conversation, /These scalar values identify the native stream/)
   assert.match(shared, /ThinkingIndicator/)
   assert.match(shared, /workingLabel/)
   assert.match(shared, /waiting && onStop/)
@@ -212,11 +213,14 @@ test("Working state is reconciled from the real native session and the chat expo
   assert.match(abort, /service\.abort\(sessionID\)/)
 })
 
-test("real native questions and permissions appear inline rather than as permanent navigation", () => {
+test("real native questions and permissions appear inline and propagate Needs attention", () => {
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+  const detail = readFileSync(new URL("./components/work-thread-detail.tsx", import.meta.url), "utf8")
   const attention = readFileSync(new URL("./components/work-thread-attention.tsx", import.meta.url), "utf8")
   assert.match(conversation, /api\.loadQuestions/)
   assert.match(conversation, /api\.loadPermissions/)
+  assert.match(conversation, /onAttentionChangeRef\.current\?\.\(hasAttention\)/)
+  assert.match(detail, /Needs attention/)
   assert.match(attention, /api\.replyQuestion/)
   assert.match(attention, /api\.replyPermission/)
 })
@@ -242,19 +246,22 @@ test("Native Sessions remain available only as Advanced diagnostics in the norma
   assert.match(shell, /<UniversalWorkspace profiles=\{profiles\}/)
 })
 
-test("shared conversation keeps bounded paging streaming autoscroll memoized rows and mobile-friendly keyboard behavior", () => {
+test("shared conversation keeps bounded paging stable autoscroll memoized rows and mobile-friendly keyboard behavior", () => {
   const source = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
   const css = readFileSync(new URL("./taskdesk-conversation.css", import.meta.url), "utf8")
 
   assert.match(source, /const MessageBubble = memo/)
   assert.match(source, /NEAR_BOTTOM_PX = 96/)
   assert.match(source, /previousHeight/)
-  assert.match(source, /messages, loading, ready, waiting, sending/)
+  assert.match(source, /\[messages, loading, ready, sending\]/)
+  assert.doesNotMatch(source, /\[messages, loading, ready, waiting, sending\]/)
+  assert.match(source, /startedSend/)
+  assert.match(source, /if \(!nearBottomRef\.current/)
   assert.match(source, /hasTouchFirstPointer/)
   assert.match(source, /event\.ctrlKey/)
   assert.match(source, /event\.metaKey/)
   assert.match(source, /COMPOSER_MAX_HEIGHT_PX = 180/)
-  assert.match(source, /uw-thinking-orb/)
+  assert.match(source, /requestAnimationFrame/)
   assert.match(css, /font-size: 15\.5px/)
   assert.match(css, /width: min\(1040px, 100%\)/)
   assert.match(css, /uw-activity-parts/)
