@@ -35,10 +35,9 @@ function daemonFor(host = {}) {
   }
 }
 
-test("normal Continue falls back to a fresh ACP Session when persisted history points at a missing native Session", async () => {
-  let current = completedTask()
-  let promptSent = ""
-  const store = {
+function memoryStore(initial) {
+  let current = initial
+  return {
     async list() { return [] },
     async get() { return structuredClone(current) },
     async setRunState(_id, update) {
@@ -49,6 +48,11 @@ test("normal Continue falls back to a fresh ACP Session when persisted history p
       return structuredClone(current)
     }
   }
+}
+
+test("normal Continue falls back to a fresh ACP Session when persisted history points at a missing native Session", async () => {
+  let promptSent = ""
+  const store = memoryStore(completedTask())
   const service = {
     async adoptTaskSession() { return true },
     async models() { throw new Error("Internal error: Session 01a0285c-cc51-7631-8161-ae9486b78cb1 not found") },
@@ -73,6 +77,35 @@ test("normal Continue falls back to a fresh ACP Session when persisted history p
   assert.equal(continued.run.handoffFromRunId, "run-1")
   assert.match(promptSent, /transferred by TaskDesk/i)
   assert.match(promptSent, /Continue from where we left off/)
+})
+
+test("normal Continue creates a fresh Session with Task context when no native Session is recorded", async () => {
+  const prior = completedTask()
+  prior.run = { ...prior.run, sessionId: null, transport: null }
+  prior.runs = [prior.run]
+  let promptSent = ""
+  const store = memoryStore(prior)
+  const service = {
+    async createSession() { return { id: "replacement-session" } },
+    async promptAndWait(_sessionID, text) { promptSent = text },
+    async messages() { return [] }
+  }
+  const launcher = new TaskLauncher({ daemon: daemonFor(), acpService: () => service })
+  const controller = new TaskRunController({
+    taskStore: store,
+    taskLauncher: launcher,
+    runIDFactory: () => "run-2",
+    clock: () => "2026-08-22T08:00:00.000Z"
+  })
+
+  const continued = await controller.continue("task-1", "Continue without native memory")
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(continued.status, "running")
+  assert.equal(continued.run.sessionId, "replacement-session")
+  assert.equal(continued.run.handoffFromRunId, "run-1")
+  assert.match(promptSent, /transferred by TaskDesk/i)
+  assert.match(promptSent, /Continue without native memory/)
 })
 
 test("raw ACP resume classifies a Session-not-found response before accepting the continuation", async () => {
