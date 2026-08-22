@@ -2,13 +2,14 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-const workspace = readFileSync(new URL("./components/taskdesk-workspace.tsx", import.meta.url), "utf8")
+const workspace = readFileSync(new URL("./components/conversation-workspace.tsx", import.meta.url), "utf8")
 const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
 const mobile = readFileSync(new URL("./taskdesk-mobile-navigation.css", import.meta.url), "utf8")
+const workspaceNavigation = readFileSync(new URL("./taskdesk-workspace-navigation.css", import.meta.url), "utf8")
 
-test("mobile opens a Work Thread explicitly and can return to the list without clearing selection", () => {
+test("mobile opens a Conversation explicitly and can return to the list without clearing selection", () => {
   assert.match(workspace, /const \[mobileDetailOpen, setMobileDetailOpen\] = useState\(false\)/)
-  assert.match(workspace, /setSelectedThreadKey\(record\.key\); setTaskDrawerOpen\(false\); setMobileDetailOpen\(true\)/)
+  assert.match(workspace, /setSelectedConversationKey\(record\.key\); setConversationDrawerOpen\(false\); setMobileDetailOpen\(true\)/)
   assert.match(workspace, /tdw-main\$\{mobileDetailOpen \? " mobile-open" : ""\}/)
   assert.match(workspace, /className="tdw-mobile-back" onClick=\{\(\) => setMobileDetailOpen\(false\)\}/)
   assert.match(workspace, /import "\.\.\/taskdesk-mobile-navigation\.css"/)
@@ -17,15 +18,16 @@ test("mobile opens a Work Thread explicitly and can return to the list without c
   assert.match(mobile, /\.tdw-main\.mobile-open \{[\s\S]*?display: flex !important/)
 })
 
-test("mobile keeps Projects as a swipeable filter rail instead of hiding navigation", () => {
-  assert.match(mobile, /\.tdw-project-column \{[\s\S]*?display: flex !important/)
-  assert.match(mobile, /flex-direction: row !important/)
-  assert.match(mobile, /overflow-x: auto/)
-  assert.match(mobile, /\.tdw-project-list \{[\s\S]*?display: flex/)
-  assert.doesNotMatch(mobile, /\.tdw-project-column \{\s*display: none !important/)
+test("mobile keeps Projects as a swipeable filter rail", () => {
+  assert.match(workspaceNavigation, /@media \(max-width: 780px\)/)
+  assert.match(workspaceNavigation, /\.tdw-project-column \{[\s\S]*?display: flex !important/)
+  assert.match(workspaceNavigation, /flex-direction: row !important/)
+  assert.match(workspaceNavigation, /overflow-x: auto/)
+  assert.match(workspaceNavigation, /\.tdw-project-list \{[\s\S]*?display: flex/)
+  assert.doesNotMatch(workspaceNavigation, /\.tdw-project-column \{\s*display: none !important/)
 })
 
-test("mobile Work Thread detail uses the full dynamic viewport and avoids duplicated chrome", () => {
+test("mobile Conversation detail uses the full dynamic viewport and avoids duplicated chrome", () => {
   assert.match(mobile, /height: 100dvh/)
   assert.match(mobile, /:has\(\.tdw-main\.mobile-open\) \.tdw-topbar \{[\s\S]*?display: none/)
   assert.match(mobile, /:has\(\.tdw-main\.mobile-open\) \.tdw-main\.mobile-open \{[\s\S]*?inset: 0/)
@@ -43,17 +45,19 @@ test("mobile controls are touch and keyboard friendly", () => {
   assert.match(mobile, /touch-action: manipulation/)
 })
 
-test("Android back unwinds transient overlays before mobile detail and app exit", () => {
+test("Android back unwinds the conversation UI before app exit", () => {
   assert.match(standalone, /CapacitorApp\.addListener\("backButton"/)
   assert.match(standalone, /if \(managerOpen\)[\s\S]*?setManagerOpen\(false\)/)
   assert.match(standalone, /\.tdw-model-picker\.open \.tdw-model-trigger/)
   assert.match(standalone, /modelPickerTrigger\.click\(\)/)
   assert.ok(standalone.indexOf("modelPickerTrigger") < standalone.indexOf("modalClose"), "model picker must close before its parent modal")
   assert.match(standalone, /\.tdw-modal-backdrop \.tdw-modal header button/)
-  assert.match(standalone, /\.tdw-more-menu/)
-  assert.match(standalone, /\.tdw-advanced-host \.tdw-advanced-bar > button/)
+  assert.match(standalone, /\.tdw-task-drawer-scrim/)
+  assert.match(standalone, /drawerScrim\.click\(\)/)
   assert.match(standalone, /\.tdw-mobile-back/)
   assert.match(standalone, /mobileBack\.getClientRects\(\)\.length > 0/)
   assert.match(standalone, /CapacitorApp\.exitApp\(\)/)
-  assert.match(standalone, /if \(document\.querySelector\("\.tdw-classic-host"\)\) return/)
+  assert.doesNotMatch(standalone, /tdw-more-menu/)
+  assert.doesNotMatch(standalone, /tdw-advanced-host/)
+  assert.doesNotMatch(standalone, /tdw-classic-host/)
 })
