@@ -15,15 +15,23 @@ function activityStatus(parts: MessagePart[]): "running" | "completed" | "error"
 }
 
 /**
- * Preserve the harness wire order while collapsing contiguous technical chatter into Activity.
- * Text stays in the normal conversation. Reasoning and tool parts remain inspectable, but they do
- * not compete with the user/agent dialogue in the default view.
+ * Preserve native wire order while collapsing technical chatter into Activity.
+ *
+ * Some ACP harnesses emit short assistant text while they are still reasoning and then continue
+ * with more tools/reasoning. Such interstitial narration is not a terminal answer, so keep it inside
+ * Activity when it sits between technical parts. Text before the first Activity can remain ordinary
+ * narration and text after the last Activity is the final visible answer.
  */
 export function groupConversationParts(parts: MessagePart[]): ConversationPartGroup[] {
   const groups: ConversationPartGroup[] = []
+  const activityIndexes = parts.flatMap((part, index) => isConversationActivityPart(part) ? [index] : [])
+  const firstActivity = activityIndexes[0] ?? -1
+  const lastActivity = activityIndexes.at(-1) ?? -1
 
-  for (const part of parts) {
-    const kind = isConversationActivityPart(part) ? "activity" : "content"
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]
+    const interstitialText = part.type === "text" && firstActivity >= 0 && index > firstActivity && index < lastActivity
+    const kind = isConversationActivityPart(part) || interstitialText ? "activity" : "content"
     const previous = groups[groups.length - 1]
 
     if (previous?.kind === kind) {
@@ -45,9 +53,11 @@ export function groupConversationParts(parts: MessagePart[]): ConversationPartGr
 export function activityLabel(group: Extract<ConversationPartGroup, { kind: "activity" }>): string {
   const toolCount = group.parts.filter((part) => part.type === "tool").length
   const hasReasoning = group.parts.some((part) => part.type === "reasoning")
+  const hasWorkingNotes = group.parts.some((part) => part.type === "text")
   const detail = [
     toolCount ? `${toolCount} tool${toolCount === 1 ? "" : "s"}` : "",
-    hasReasoning ? "reasoning" : ""
+    hasReasoning ? "reasoning" : "",
+    hasWorkingNotes ? "working notes" : ""
   ].filter(Boolean).join(" · ")
 
   return detail ? `Activity · ${detail}` : "Activity"
