@@ -73,7 +73,7 @@ test("primary product surface is Project -> Task -> Conversation while Runs and 
   const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
 
   assert.match(shell, /<span className="tdw-workspace-label">Projects<\/span>/)
-  assert.match(shell, /<h2>Tasks<\/h2>/)
+  assert.match(shell, /<h2>Tasks <strong className="tdw-task-drawer-count">\{visibleThreads\.length\}<\/strong><\/h2>/)
   assert.match(shell, />New Task</)
   assert.match(shell, /<WorkThreadDetail/)
   assert.match(shell, /key=\{selected\.key\}/)
@@ -203,10 +203,13 @@ test("Working state is event driven with slow reconciliation and the chat expose
 
   assert.match(conversation, /ACTIVE_RECONCILE_MS = 5_000/)
   assert.match(conversation, /startTaskDeskSessionLiveRefresh/)
+  assert.match(conversation, /currentRunHasAssistantSignal/)
+  assert.match(conversation, /preparingReply/)
   assert.match(conversation, /showWaitingIndicator=\{false\}/)
   assert.match(conversation, /onStop=\{working \? stop : undefined\}/)
   assert.match(conversation, /These scalar values identify the native stream/)
   assert.match(shared, /ThinkingIndicator/)
+  assert.match(shared, /sending \|\| \(waiting && showWaitingIndicator\)/)
   assert.match(shared, /workingLabel/)
   assert.match(shared, /waiting && onStop/)
   assert.match(shared, /className="uw-button uw-button-danger"/)
