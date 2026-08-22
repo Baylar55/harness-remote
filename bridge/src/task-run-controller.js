@@ -216,22 +216,18 @@ export class TaskRunController {
     const agentID = requestedAgent(task, options)
     if (!agentID) throw taskLaunchError("unknown_agent", "A target harness is required")
     const model = requestedModel(task, agentID, options)
-    await this.taskLauncher.validateModelSelection?.(agentID, model)
     const role = requestedRole(task, options)
     const requestedReuseSession = options.reuseSession === true
     const reusableRun = requestedReuseSession ? latestRunForAgent(task, agentID, { requireSession: true }) : null
     if (requestedReuseSession && !reusableRun) throw taskLaunchError("session_unavailable", "The requested native Session cannot be reused for this Run")
 
-    const context = await this.#contextForTask(task)
     const directNativeContinuation = Boolean(reusableRun && previousRun && reusableRun.id === previousRun.id)
     const restoredAfterReusableRun = Boolean(
       reusableRun && happenedAfter(task.restoredAt, reusableRun.finishedAt || reusableRun.startedAt)
     )
     let reuseSession = requestedReuseSession
     let needsHandoffContext = Boolean(previousRun && (!reuseSession || !directNativeContinuation || restoredAfterReusableRun))
-    let effectivePrompt = needsHandoffContext
-      ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
-      : userPrompt
+    let effectivePrompt = userPrompt
 
     const previousRunCount = taskRuns(task).length
     const baseRun = {
@@ -240,7 +236,9 @@ export class TaskRunController {
       agentId: agentID,
       model,
       role,
-      contextRevision: Number(context.revision) || 0,
+      // Persist acceptance before model discovery or Git/context inspection. The real revision is
+      // filled in below while the same run id remains authoritative.
+      contextRevision: 0,
       sessionId: null,
       transport: null,
       directory: task.workspace.path,
@@ -255,6 +253,8 @@ export class TaskRunController {
     })
 
     let run = runForContinuity()
+    // This write is the transport acceptance boundary. Once it succeeds, a client that loses the
+    // HTTP response can reconnect and observe the new run instead of resending an ambiguous prompt.
     let current = await this.taskStore.setRunState(taskID, { status: "starting", run })
     const currentForRun = () => ({
       ...current,
@@ -265,6 +265,14 @@ export class TaskRunController {
     })
 
     try {
+      await this.taskLauncher.validateModelSelection?.(agentID, model)
+      const context = await this.#contextForTask(task)
+      effectivePrompt = needsHandoffContext
+        ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
+        : userPrompt
+      run = { ...run, contextRevision: Number(context.revision) || 0 }
+      current = await this.taskStore.setRunState(taskID, { status: "starting", run, expectedRunId: baseRun.id })
+
       let session
       if (reuseSession) {
         try {
@@ -282,6 +290,7 @@ export class TaskRunController {
             : userPrompt
           run = {
             ...runForContinuity(),
+            contextRevision: Number(context.revision) || 0,
             ...(previousRun ? { handoffReason: "session_unavailable" } : {})
           }
           current = await this.taskStore.setRunState(taskID, { status: "starting", run, expectedRunId: baseRun.id })
