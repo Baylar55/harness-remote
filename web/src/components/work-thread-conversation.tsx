@@ -523,9 +523,10 @@ export function WorkThreadConversation({
     })
   }, [targetAgentID, task.id, baseConfig])
 
-  // Only a model verified by the current live catalog is sent explicitly. If discovery is still
-  // warming or failed, omitting `model` lets the selected harness use its own current default rather
-  // than replaying a persisted model id that may have since been removed by the provider.
+  // Only a model verified by the current live catalog is sent explicitly. A null selection is
+  // intentional: the controller distinguishes it from an omitted field, which means reuse the
+  // previous Run's model. Null therefore asks the harness for its current native default and cannot
+  // resurrect a persisted provider model that has since been removed.
   const selectedModel = models.find((model) => modelKey(model) === targetModelKey)
 
   async function loadOlder() {
@@ -571,7 +572,7 @@ export function WorkThreadConversation({
       const next = await taskClient.continueTask(baseConfig, task.id, {
         prompt: text,
         agentId: targetAgentID,
-        ...(selectedModel ? { model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant } } : {})
+        model: selectedModel ? { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant } : null
       })
       localStorage.removeItem(draftStorageKey)
       onTaskUpdateRef.current(next)
