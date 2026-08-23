@@ -23,6 +23,7 @@ import "./v3-polish.css"
 import "./conversation-control-plane-overrides.css"
 import "./conversation-control-plane-mobile-polish.css"
 import "./v3-mobile-regression-fixes.css"
+import "./v3-mobile-landscape-grid-fix.css"
 
 installAppPreferences()
 installCompletionAudioGuard()
