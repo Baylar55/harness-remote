@@ -15,6 +15,7 @@ const detail = read("components/conversation-detail.tsx")
 const conversation = read("components/work-thread-conversation.tsx")
 const polish = read("conversation-control-plane.css")
 const overrides = read("conversation-control-plane-overrides.css")
+const mobileParity = read("v3-mobile-product-parity.css")
 const readme = readRoot("README.md")
 
 assert.match(backendSetup, /return 4097/)
@@ -29,6 +30,8 @@ assert.match(profiles, /username: "harness"/)
 assert.doesNotMatch(main, /loadServerProfiles/)
 assert.match(main, /loadWorkspaceMachines/)
 assert.match(main, /import "\.\/conversation-control-plane-overrides\.css"/)
+assert.match(main, /import "\.\/v3-mobile-product-parity\.css"/)
+assert.ok(main.indexOf("v3-mobile-product-parity.css") > main.indexOf("v3-mobile-a11y-fix.css"), "mobile parity overrides must load last")
 
 // The first screen must communicate the product without exposing Task/Run plumbing.
 assert.match(workspace, />Harness Remote 3\.0</)
@@ -44,6 +47,14 @@ assert.match(overrides, /\.hr-control-plane \.hr-welcome \{/)
 assert.match(overrides, /align-self: center/)
 assert.match(overrides, /No coding machine is connected/)
 assert.match(overrides, /Connecting to your machines/)
+
+// Mobile remains a real app shell rather than deleting useful controls to make the screenshots fit.
+assert.match(mobileParity, /:has\(\.tdw-main\.mobile-open\) \.hr-mobile-nav[\s\S]*display: grid !important/)
+assert.match(mobileParity, /\.hr-mobile-settings-group label:nth-of-type\(2\)[\s\S]*display: grid !important/)
+assert.match(mobileParity, /\.uw-machine-harness-list[\s\S]*display: flex !important/)
+assert.match(mobileParity, /\.uw-transcript-jumps/)
+assert.match(mobileParity, /orientation: portrait/)
+assert.match(mobileParity, /\.hr-new-conversation-modal \.tdw-modal-body[\s\S]*display: flex !important/)
 
 // The differentiator has to be visible in normal conversation chrome, not hidden in documentation.
 assert.match(conversation, /<span>Continue with<\/span>/)
