@@ -69,6 +69,7 @@ jobs:
           npm run test:completion-audio
           npm run test:completion-timing
           npm run test:native-response
+          node src/v3-mobile-regression-fixes.test.mjs
         working-directory: web
 
       - name: Run bridge tests
@@ -100,9 +101,48 @@ jobs:
         run: npm test
         working-directory: bridge
 
+  # Source-level CSS assertions are useful but cannot tell us whether a control is actually clipped
+  # after the cascade. This job drives the production build in real Chromium with a touch viewport,
+  # two fake machines and all five harnesses, then rotates the phone to landscape. It is the release
+  # guard for the regressions that only appeared during the real Android walkthrough.
+  browser-smoke:
+    name: Chromium product smoke
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build production web app
+        run: npm run build
+        working-directory: web
+
+      - name: Install pinned Playwright runtime
+        run: npm install --no-save --package-lock=false playwright@1.55.0
+        working-directory: web
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: web
+
+      - name: Run portrait landscape and multi-machine smoke
+        run: node scripts/v3-browser-smoke.mjs
+        working-directory: web
+
   apk:
     name: Debug APK
-    needs: tests
+    needs: [tests, bridge-platforms, browser-smoke]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
