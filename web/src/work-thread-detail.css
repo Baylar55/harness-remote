@@ -184,7 +184,9 @@
   border-radius: 8px;
   outline: 0;
   color: var(--td3-text-2);
-  background: var(--td3-control);
+  /* This rule already reserves 25px of right padding for the chevron the base `select` rule draws.
+     The background shorthand was erasing it, leaving the gap and no affordance. */
+  background-color: var(--td3-control);
   font-size: 10.5px;
 }
 .tdw-agent-control select:focus { border-color: var(--td3-focus); box-shadow: 0 0 0 2px var(--td3-blue-soft); }

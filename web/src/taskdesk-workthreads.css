@@ -277,7 +277,9 @@
 /* A model catalog failure never blocks Start or Continue, so it reads as a field note everywhere it
    appears, not as a red error that makes a recoverable condition look fatal. */
 .tdw-field-note { color: var(--td3-yellow-text, var(--tdw-muted)); font-size: 10px; line-height: 1.45; }
-.tdw-modal select, .tdw-modal textarea { width: 100%; border: 1px solid var(--tdw-border); border-radius: 9px; outline: 0; color: var(--tdw-text); background: var(--td3-raise-1); }
+/* background-color, not the background shorthand: the base `select` rule draws the dropdown
+   chevron with background-image, and the shorthand silently erased it. */
+.tdw-modal select, .tdw-modal textarea { width: 100%; border: 1px solid var(--tdw-border); border-radius: 9px; outline: 0; color: var(--tdw-text); background-color: var(--td3-raise-1); }
 .tdw-modal select { height: 38px; padding: 0 9px; }
 .tdw-modal textarea { padding: 10px; resize: vertical; line-height: 1.55; }
 .tdw-modal select:focus, .tdw-modal textarea:focus { border-color: var(--td3-blue-border); box-shadow: 0 0 0 3px var(--td3-blue-soft); }

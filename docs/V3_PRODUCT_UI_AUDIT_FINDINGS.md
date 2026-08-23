@@ -72,6 +72,7 @@ Severity is user impact, not effort. **Fixed** findings link to the commit that 
 | L3 | Medium | Over a third of the visible desktop text rendered below 10px, including the daemon's own connection error at 8.5px. Contrast was already fine (7.4:1 – 16:1 in dark, 4.9:1 – 18:1 in light); the problem is purely size. | Fixed `4ccaa8b` |
 | L4 | Low | The mobile chat screen spends 331px of an 844px viewport on chrome (back bar 46, header 65, tabs 45, Continue-with toolbar 73, composer 102). At 667px — an iPhone SE — that is half the screen. See P4. | Open, proposed |
 | L5 | Low | An empty composer is 145px tall on desktop. | Open, proposed |
+| L6 | Medium | **Every `<select>` in the product had lost its dropdown chevron.** The base `select` rule draws one with `background-image`; three v3 rules set the `background` shorthand, which silently erased it. Machine, Project, Coding agent, Theme, Language and Continue with all rendered as plain boxes indistinguishable from text inputs — while the Model control beside them kept its chevron. `.tdw-agent-control select` even reserved 25px of right padding for the arrow that was no longer drawn, which is what identifies this as an unintended regression rather than a design choice. | Fixed `e960c6a` |
 
 ### Accessibility
 

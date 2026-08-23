@@ -552,7 +552,7 @@
     border: 1px solid var(--td3-border);
     border-radius: 9px;
     color: var(--td3-text);
-    background: var(--td3-panel-2);
+    background-color: var(--td3-panel-2);
     font-size: 16px;
   }
 

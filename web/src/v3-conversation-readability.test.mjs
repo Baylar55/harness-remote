@@ -68,3 +68,24 @@ test("a failed or cancelled Conversation does not report Ready in its own header
   assert.match(conversation, /status=\{task\.status\} detail=\{task\.error\?\.message \|\| undefined\}/)
   assert.match(read("work-thread-detail.css"), /\.tdw-conversation-state\.stopped \{/)
 })
+
+test("a select still looks like a select", () => {
+  // The base `select` rule draws the dropdown chevron with background-image. Three v3 rules used the
+  // `background` shorthand, which silently erased it, so Machine, Project, Coding agent, Theme,
+  // Language and Continue with all rendered as plain boxes indistinguishable from text inputs —
+  // while the Model control beside them kept its chevron. .tdw-agent-control even reserved 25px of
+  // right padding for the arrow that was no longer drawn.
+  const base = read("styles.css")
+  assert.match(base, /select \{\n\s*appearance: none;[\s\S]*?background-image: linear-gradient/)
+  for (const [file, selector] of [
+    ["taskdesk-workthreads.css", ".tdw-modal select"],
+    ["work-thread-detail.css", ".tdw-agent-control select"],
+    ["conversation-control-plane-overrides.css", ".hr-mobile-settings-group select"]
+  ]) {
+    const css = read(file)
+    const rule = css.slice(css.indexOf(selector))
+    const body = rule.slice(0, rule.indexOf("}") + 1)
+    assert.doesNotMatch(body, /(^|[^-])background:/m, `${selector} must not reset background-image`)
+    assert.match(body, /background-color:/, `${selector} must set background-color`)
+  }
+})
