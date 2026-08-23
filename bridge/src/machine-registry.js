@@ -9,6 +9,10 @@ function validIdentity(value) {
   return value && typeof value.id === "string" && value.id.length > 0 && typeof value.name === "string" && value.name.length > 0
 }
 
+function cloneRecord(value) {
+  return value && typeof value === "object" ? structuredClone(value) : {}
+}
+
 async function readIdentity(machineFile) {
   const parsed = JSON.parse(await readFile(machineFile, "utf8"))
   return validIdentity(parsed) ? parsed : undefined
@@ -84,10 +88,15 @@ export class MachineRegistry {
       transport: host.transport ?? "acp",
       managed: host.managed !== false,
       state: host.state ?? "configured",
-      capabilities: host.capabilities ? { ...host.capabilities } : {}
+      capabilities: cloneRecord(host.capabilities),
+      contract: cloneRecord(host.contract)
     }
     this.hosts.set(normalized.id, normalized)
-    return { ...normalized, capabilities: { ...normalized.capabilities } }
+    return {
+      ...normalized,
+      capabilities: cloneRecord(normalized.capabilities),
+      contract: cloneRecord(normalized.contract)
+    }
   }
 
   updateHost(id, patch) {
@@ -97,15 +106,24 @@ export class MachineRegistry {
       ...current,
       ...patch,
       id: current.id,
-      capabilities: patch.capabilities ? { ...patch.capabilities } : current.capabilities
+      capabilities: patch.capabilities ? cloneRecord(patch.capabilities) : current.capabilities,
+      contract: patch.contract ? cloneRecord(patch.contract) : current.contract
     }
     this.hosts.set(id, next)
-    return { ...next, capabilities: { ...next.capabilities } }
+    return {
+      ...next,
+      capabilities: cloneRecord(next.capabilities),
+      contract: cloneRecord(next.contract)
+    }
   }
 
   host(id) {
     const value = this.hosts.get(id)
-    return value ? { ...value, capabilities: { ...value.capabilities } } : undefined
+    return value ? {
+      ...value,
+      capabilities: cloneRecord(value.capabilities),
+      contract: cloneRecord(value.contract)
+    } : undefined
   }
 
   snapshot() {
@@ -113,7 +131,8 @@ export class MachineRegistry {
       machine: { ...this.identity },
       agents: [...this.hosts.values()].map((host) => ({
         ...host,
-        capabilities: { ...host.capabilities }
+        capabilities: cloneRecord(host.capabilities),
+        contract: cloneRecord(host.contract)
       }))
     }
   }
