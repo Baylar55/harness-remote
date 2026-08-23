@@ -1,0 +1,18 @@
+/* The desktop shell places the Conversation main pane in its third grid column. A landscape phone
+   intentionally switches back to the one-column mobile hierarchy, so the pane must also leave its
+   desktop grid area. Without this override `mobile-open` stays true but the grid item is positioned
+   outside the only valid column and Chromium treats it as hidden. */
+@media (pointer: coarse) and (max-height: 640px) and (min-width: 781px) {
+  .hr-control-plane .tdw-main,
+  .hr-control-plane .tdw-main.mobile-open {
+    grid-column: 1 / -1 !important;
+    grid-row: 1 / -1 !important;
+  }
+
+  .hr-control-plane .tdw-main.mobile-open {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+  }
+}
