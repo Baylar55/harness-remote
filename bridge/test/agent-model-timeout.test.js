@@ -1,4 +1,7 @@
 import assert from "node:assert/strict"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import test from "node:test"
 import { ACP_MODEL_CATALOG_TIMEOUT_MS, AcpAgentModelCatalog, HttpAgentModelCatalog, MODEL_CATALOG_TIMEOUT_MS } from "../src/agent-model-catalog.js"
 
@@ -41,45 +44,50 @@ test("ACP catalog passes one shrinking total budget through startup and Session 
 })
 
 test("optional ACP variant probing is bounded and cannot invalidate base models", async () => {
-  const options = [{
-    id: "model",
-    currentValue: "provider/one",
-    options: [
-      { value: "provider/one", name: "One" },
-      { value: "provider/two", name: "Two" },
-      { value: "provider/three", name: "Three" }
-    ]
-  }, {
-    id: "thinking",
-    currentValue: "medium",
-    options: [{ value: "low" }, { value: "medium" }, { value: "high" }]
-  }]
-  const seenTimeouts = []
-  const agent = {
-    async start() {},
-    async request(method, _params, timeoutMs) {
-      if (method === "session/new") return { sessionId: "technical", configOptions: options }
-      if (method === "session/set_config_option") {
-        seenTimeouts.push(timeoutMs)
-        throw new Error("slow optional variant probe")
-      }
-      throw new Error(`unexpected ${method}`)
-    },
-    close() {}
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-variant-timeout-"))
+  try {
+    const options = [{
+      id: "model",
+      currentValue: "provider/one",
+      options: [
+        { value: "provider/one", name: "One" },
+        { value: "provider/two", name: "Two" },
+        { value: "provider/three", name: "Three" }
+      ]
+    }, {
+      id: "thinking",
+      currentValue: "medium",
+      options: [{ value: "low" }, { value: "medium" }, { value: "high" }]
+    }]
+    const seenTimeouts = []
+    const agent = {
+      async start() {},
+      async request(method, _params, timeoutMs) {
+        if (method === "session/new") return { sessionId: "technical", configOptions: options }
+        if (method === "session/set_config_option") {
+          seenTimeouts.push(timeoutMs)
+          throw new Error("slow optional variant probe")
+        }
+        throw new Error(`unexpected ${method}`)
+      },
+      close() {}
+    }
+    const catalog = new AcpAgentModelCatalog({
+      agent,
+      agentID: "omp",
+      directory: "/repo",
+      stateDirectory,
+      timeoutMs: 100,
+      variantConfigIDs: ["thinking"]
+    })
+    const result = await catalog.list({ allowStale: false })
+    assert.deepEqual(result.models.filter((model) => !model.variant).map((model) => model.modelID), ["one", "two", "three"])
+    assert.equal(result.models.some((model) => model.modelID === "one" && model.variant === "high"), true)
+    assert.equal(catalog.diagnostics().variantProbe.incomplete, true)
+    assert.equal(seenTimeouts.every((timeout) => timeout > 0 && timeout <= 100), true)
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
   }
-  const catalog = new AcpAgentModelCatalog({
-    agent,
-    agentID: "omp",
-    directory: "/repo",
-    stateDirectory: "/state",
-    timeoutMs: 100,
-    variantConfigIDs: ["thinking"]
-  })
-  const result = await catalog.list({ allowStale: false })
-  assert.deepEqual(result.models.filter((model) => !model.variant).map((model) => model.modelID), ["one", "two", "three"])
-  assert.equal(result.models.some((model) => model.modelID === "one" && model.variant === "high"), true)
-  assert.equal(catalog.diagnostics().variantProbe.incomplete, true)
-  assert.equal(seenTimeouts.every((timeout) => timeout > 0 && timeout <= 100), true)
 })
 
 test("HTTP model discovery obeys the catalog-wide timeout budget", async () => {
