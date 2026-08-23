@@ -155,8 +155,24 @@ function fakeDaemon(fixture) {
 function preview() {
   const command = process.platform === "win32" ? "npm.cmd" : "npm"
   return spawn(command, ["run", "preview", "--", "--host", "127.0.0.1", "--port", String(PREVIEW_PORT), "--strictPort"], {
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32"
   })
+}
+
+function stopPreview(child) {
+  if (!child || child.killed || !child.pid) return
+  try {
+    if (process.platform === "win32") child.kill("SIGTERM")
+    else process.kill(-child.pid, "SIGTERM")
+  } catch {
+    try { child.kill("SIGTERM") } catch {}
+  }
+}
+
+function stopServer(server) {
+  try { server.closeAllConnections?.() } catch {}
+  try { server.close() } catch {}
 }
 
 async function ready(url) {
@@ -233,7 +249,10 @@ async function newConversationAudit(page, label) {
   }
 
   await machine.selectOption(fixtures[1].id)
-  await project.waitFor({ state: "visible" })
+  await page.waitForFunction((expected) => {
+    const select = document.querySelector('select[aria-label="Project"]')
+    return select && select.value === expected
+  }, fixtures[1].project.id)
   assert.equal(await project.inputValue(), fixtures[1].project.id, `${label}: switching machine did not switch Project`)
 
   await prompt.fill("Audit this candidate")
@@ -315,11 +334,14 @@ try {
   vite = preview()
   await ready(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
+  console.log("v3 browser controls smoke: mobile controls audit start")
   await runMobile(browser)
+  console.log("v3 browser controls smoke: mobile controls audit passed")
   await runDesktop(browser)
+  console.log("v3 browser controls smoke: desktop controls audit passed")
   console.log("v3 browser controls smoke: controls, model catalogs and screenshots passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
-  if (vite && !vite.killed) vite.kill("SIGTERM")
-  await Promise.all(servers.map((server) => new Promise((resolve) => server.close(() => resolve()))))
+  stopPreview(vite)
+  for (const server of servers) stopServer(server)
 }
