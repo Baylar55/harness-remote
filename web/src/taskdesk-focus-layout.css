@@ -70,7 +70,7 @@
     border-radius: 999px;
     background: var(--td3-raise-2);
     color: var(--td3-text-3);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -88,7 +88,7 @@
     border-radius: 999px;
     color: var(--td3-text-3);
     background: var(--td3-raise-2);
-    font-size: 9px;
+    font-size: 10px;
     text-align: center;
   }
 
@@ -194,7 +194,7 @@
 }
 
 .tdw-work-thread-conversation .uw-thinking-copy small {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 @media (prefers-reduced-motion: reduce) {

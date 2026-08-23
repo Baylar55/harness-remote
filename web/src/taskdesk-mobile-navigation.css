@@ -228,7 +228,7 @@
 
   .tdw-thread-heading > span {
     margin-bottom: 1px;
-    font-size: 8.5px;
+    font-size: 10px;
   }
 
   .tdw-thread-title-edit h1 {
@@ -249,7 +249,7 @@
   .tdw-live-state {
     min-height: 30px;
     padding-inline: 8px;
-    font-size: 9.5px;
+    font-size: 10px;
   }
 
   .tdw-detail-tabs {
@@ -292,7 +292,7 @@
   }
 
   .tdw-agent-control label > span {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .tdw-agent-control select,

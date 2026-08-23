@@ -80,14 +80,10 @@
   animation: hr-activity-working 1.25s ease-in-out infinite;
 }
 
+/* The label itself now comes from the component; only its emphasis belongs here. */
 .hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary .uw-tool-status {
   color: var(--td3-blue-text);
-  font-size: 0;
-}
-
-.hr-control-plane .tdw-work-thread-conversation .uw-activity-group.uw-tool-running > summary .uw-tool-status::after {
-  content: "Working";
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 750;
   letter-spacing: .01em;
 }
@@ -488,7 +484,7 @@
   .hr-mobile-settings-page > header span {
     display: block;
     color: var(--td3-muted);
-    font-size: 9.5px;
+    font-size: 10px;
     font-weight: 800;
     letter-spacing: .08em;
     text-transform: uppercase;

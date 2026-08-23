@@ -58,7 +58,8 @@ assert.match(polish, /@media \(max-width: 900px\)/)
 assert.match(polish, /prefers-reduced-motion/)
 assert.match(overrides, /tdw-conversation-event::before/)
 assert.match(overrides, /uw-activity-group\.uw-tool-running/)
-assert.match(overrides, /content: "Working"/)
+// "Working" is component copy now, not a CSS `content` pseudo-element.
+assert.match(read("components/taskdesk-message-content.tsx"), /status === "running" \? "Working" : status/)
 assert.match(overrides, /prefers-reduced-motion/)
 
 assert.match(readme, /normal public port is \*\*4097\*\*/)

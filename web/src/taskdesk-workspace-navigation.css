@@ -23,7 +23,7 @@
 }
 .tdw-workspace-section-header:hover { background: var(--td3-raise-1); }
 .tdw-workspace-label {
-  display: block; padding: 0; color: var(--td3-muted); font-size: 8.5px;
+  display: block; padding: 0; color: var(--td3-muted); font-size: 10px;
   font-weight: 800; letter-spacing: .09em; text-transform: uppercase;
 }
 .tdw-section-chevron {
@@ -43,7 +43,7 @@
 .tdw-side-row.active, .tdw-filter-row.active { border-color: var(--td3-blue-border); background: var(--td3-blue-soft); }
 .tdw-side-row > span:last-child, .tdw-harness-row > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tdw-side-row strong, .tdw-harness-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
-.tdw-side-row small, .tdw-harness-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td3-muted); font-size: 8.5px; }
+.tdw-side-row small, .tdw-harness-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td3-muted); font-size: 10px; }
 .tdw-side-icon { width: 18px; height: 18px; display: grid; place-items: center; color: var(--td3-text-3); }
 .tdw-presence-dot {
   width: 8px; height: 8px; justify-self: center; border-radius: 999px; background: var(--td3-muted);
@@ -58,11 +58,11 @@
 .tdw-harness-row .tdw-presence-dot { background: var(--td3-green); }
 .tdw-harness-row .tdw-presence-dot.unavailable { background: var(--td3-red); }
 .tdw-harness-row { grid-template-columns: 18px minmax(0, 1fr); }
-.tdw-side-empty { padding: 6px 7px; color: var(--td3-muted); font-size: 9px; }
+.tdw-side-empty { padding: 6px 7px; color: var(--td3-muted); font-size: 10px; }
 .tdw-project-section .tdw-project-row { width: 100%; margin: 2px 0; min-height: 40px; }
 .tdw-project-column .tdw-project-list { min-height: 0; flex: none; padding: 0; overflow: visible; }
 .tdw-filter-row { grid-template-columns: 10px minmax(0, 1fr) auto; cursor: pointer; font-size: 10px; }
-.tdw-filter-row b { color: var(--td3-muted); font-size: 9px; }
+.tdw-filter-row b { color: var(--td3-muted); font-size: 10px; }
 .tdw-filter-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--td3-muted); }
 .tdw-filter-dot.working { background: var(--td3-blue-text); }
 .tdw-filter-dot.attention { background: var(--td3-red); }
@@ -134,7 +134,7 @@
 .uw-machine-harness > i.loading { background: var(--td3-green); }
 .uw-machine-harness > i.unavailable { background: var(--td3-red); }
 .uw-machine-harness > strong { font-size: 10px; }
-.uw-machine-harness > small { color: var(--td3-muted); font-size: 8.5px; }
+.uw-machine-harness > small { color: var(--td3-muted); font-size: 10px; }
 
 /* Classic must remain usable even when an old harness supplies a pathological session title. */
 .tdw-classic-host { position: relative; height: 100vh; min-height: 0; padding-top: 52px; overflow: hidden; }

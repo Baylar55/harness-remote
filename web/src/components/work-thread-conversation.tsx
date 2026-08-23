@@ -186,25 +186,42 @@ function useElapsedSeconds(startedAt?: string): number {
   return elapsed
 }
 
+/**
+ * The pill used to know only working / questions-pending / ready, so a failed or cancelled
+ * Conversation reported "Ready" here while its own card in the list said "Needs attention" or
+ * "Stopped". The detail view was the one hiding the problem, and for a cancelled Conversation the
+ * interruption was not visible anywhere — the opposite of the fidelity rule in #197.
+ */
+function conversationOutcome(status: string): { state: "attention" | "stopped"; text: string } | null {
+  if (status === "failed") return { state: "attention", text: "Needs attention" }
+  if (status === "cancelled") return { state: "stopped", text: "Stopped" }
+  return null
+}
+
 function ConversationStatePill({
   working,
   attention,
   workingLabel,
-  startedAt
+  startedAt,
+  status,
+  detail
 }: {
   working: boolean
   attention: boolean
   workingLabel: string
   startedAt?: string
+  status: string
+  detail?: string
 }) {
   const elapsed = useElapsedSeconds(working && !attention ? startedAt : undefined)
-  const state = attention ? "attention" : working ? "working" : "ready"
+  const outcome = working || attention ? null : conversationOutcome(status)
+  const state = attention ? "attention" : working ? "working" : outcome?.state || "ready"
   const text = attention
     ? "Needs attention"
     : working
       ? `${workingLabel}${elapsed >= 2 ? ` · ${elapsed}s` : ""}`
-      : "Ready"
-  return <span className={`tdw-conversation-state ${state}`}><i aria-hidden="true" /><span>{text}</span></span>
+      : outcome?.text || "Ready"
+  return <span className={`tdw-conversation-state ${state}`} title={outcome && detail ? detail : undefined}><i aria-hidden="true" /><span>{text}</span></span>
 }
 
 const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: WorkThreadMessage }) {
@@ -663,7 +680,7 @@ export function WorkThreadConversation({
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
           </label>
         </div>
-        <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : task.run?.startedAt} />
+        <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : task.run?.startedAt} status={task.status} detail={task.error?.message || undefined} />
       </div>
 
       <WorkThreadAttention

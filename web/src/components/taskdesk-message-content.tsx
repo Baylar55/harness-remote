@@ -104,6 +104,15 @@ function ActivityPart({ part }: { part: MessagePart }) {
   return <UnsupportedPart part={part} />
 }
 
+/**
+ * The 3.0 shell used to relabel this with `font-size: 0` plus a `content: "Working"` pseudo-element.
+ * User-facing copy in CSS is invisible to translation and to anything that reads the DOM, and it
+ * left the raw protocol word "running" as the element's real text.
+ */
+function activityStatusLabel(status: string): string {
+  return status === "running" ? "Working" : status
+}
+
 function ActivityGroup({ group }: { group: ActivityGroupValue }) {
   const [open, setOpen] = useState(group.status === "error")
   const previousStatus = useRef(group.status)
@@ -126,7 +135,7 @@ function ActivityGroup({ group }: { group: ActivityGroupValue }) {
       <summary>
         <span className="uw-tool-icon">{group.status === "completed" ? "✓" : group.status === "error" ? "!" : "⋯"}</span>
         <span className="uw-tool-title">{activityLabel(group)}</span>
-        <span className="uw-tool-status">{group.status}</span>
+        <span className="uw-tool-status">{activityStatusLabel(group.status)}</span>
       </summary>
       {open ? (
         <div className="uw-activity-parts">

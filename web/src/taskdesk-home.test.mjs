@@ -160,6 +160,7 @@ test("conversation chat keeps bounded paging live events attention Stop and star
   const shared = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
   const parts = readFileSync(new URL("./conversation-parts.ts", import.meta.url), "utf8")
   const overrides = readFileSync(new URL("./conversation-control-plane-overrides.css", import.meta.url), "utf8")
+  const messageContent = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
   const abort = readFileSync(new URL("../../bridge/src/work-thread-abort.js", import.meta.url), "utf8")
 
   assert.match(conversation, /INITIAL_PAGE_SIZE = 200/)
@@ -176,7 +177,9 @@ test("conversation chat keeps bounded paging live events attention Stop and star
   assert.match(parts, /if \(forceRunning\) return "running"/)
   assert.doesNotMatch(parts, /state\?\.status === "error"\)\) return "error"/)
   assert.match(overrides, /uw-activity-group\.uw-tool-running/)
-  assert.match(overrides, /content: "Working"/)
+  // A running activity still reads as "Working", but the word is component copy now instead of a
+  // CSS `content` pseudo-element that left the raw protocol status as the element's real text.
+  assert.match(messageContent, /status === "running" \? "Working" : status/)
   assert.match(abort, /service\.abort\(sessionID\)/)
 })
 
