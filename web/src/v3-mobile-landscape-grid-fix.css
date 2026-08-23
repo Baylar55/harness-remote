@@ -1,8 +1,25 @@
 /* The desktop shell places the Conversation main pane in its third grid column. A landscape phone
    intentionally switches back to the one-column mobile hierarchy, so the pane must also leave its
    desktop grid area. Without this override `mobile-open` stays true but the grid item is positioned
-   outside the only valid column and Chromium treats it as hidden. */
+   outside the only valid column and Chromium treats it as hidden.
+
+   At tablet widths the conversation list can also inherit the desktop drawer's closed state after
+   drilling into a Conversation. On a short coarse-pointer viewport the list is the mobile master
+   page, so keep it laid out underneath the detail overlay regardless of the desktop drawer state. */
 @media (pointer: coarse) and (max-height: 640px) and (min-width: 781px) {
+  .hr-control-plane .tdw-thread-column {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    transform: none !important;
+    pointer-events: auto !important;
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+  }
+
   .hr-control-plane .tdw-main,
   .hr-control-plane .tdw-main.mobile-open {
     grid-column: 1 / -1 !important;
