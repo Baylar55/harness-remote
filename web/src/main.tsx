@@ -24,6 +24,7 @@ import "./conversation-control-plane-overrides.css"
 import "./conversation-control-plane-mobile-polish.css"
 import "./v3-mobile-regression-fixes.css"
 import "./v3-mobile-landscape-grid-fix.css"
+import "./v3-mobile-workspace-switcher-polish.css"
 
 installAppPreferences()
 installCompletionAudioGuard()
