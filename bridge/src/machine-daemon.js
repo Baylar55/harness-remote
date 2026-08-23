@@ -19,15 +19,15 @@ export class MachineDaemon {
     this.hosts = new Map()
   }
 
-  registerAcpHost({ id, label, backend = id, capabilities = {}, agent, modelCatalog, bridgeConfig, serviceOptions, managed = true }) {
-    this.registry.registerHost({ id, label, backend, transport: "acp", managed, state: "configured", capabilities })
+  registerAcpHost({ id, label, backend = id, capabilities = {}, contract = {}, agent, modelCatalog, bridgeConfig, serviceOptions, managed = true }) {
+    this.registry.registerHost({ id, label, backend, transport: "acp", managed, state: "configured", capabilities, contract })
     const tracked = trackAgentHostLifecycle(agent, this.registry, id)
     this.hosts.set(id, { id, kind: "acp", host: tracked, modelCatalog, bridgeConfig, serviceOptions, eager: false })
     return tracked
   }
 
-  registerManagedHttpHost({ id, label, backend = id, capabilities = {}, host, modelCatalog, managed = true, eager = true }) {
-    this.registry.registerHost({ id, label, backend, transport: "http", managed, state: "configured", capabilities })
+  registerManagedHttpHost({ id, label, backend = id, capabilities = {}, contract = {}, host, modelCatalog, managed = true, eager = true }) {
+    this.registry.registerHost({ id, label, backend, transport: "http", managed, state: "configured", capabilities, contract })
     const tracked = trackManagedHostLifecycle(host, this.registry, id)
     this.hosts.set(id, { id, kind: "http", host: tracked, modelCatalog, eager })
     return tracked
@@ -42,10 +42,10 @@ export class MachineDaemon {
     return entry.modelCatalog.list(options)
   }
 
-  modelDiagnostics(id) {
+  modelDiagnostics(id, options) {
     const entry = this.hostEntry(id)
     if (!entry) return undefined
-    return entry.modelCatalog?.diagnostics?.() ?? {
+    return entry.modelCatalog?.diagnostics?.(options) ?? {
       source: "unavailable",
       cachedModels: 0,
       refreshedAt: null,
@@ -56,19 +56,19 @@ export class MachineDaemon {
     }
   }
 
-  async resolveModel(id, model) {
+  async resolveModel(id, model, options) {
     if (!model) return null
     const entry = this.hostEntry(id)
     if (!entry) throw new Error(`Unknown agent: ${id}`)
     if (!entry.modelCatalog) throw new Error(`Agent ${id} does not expose model discovery`)
-    if (typeof entry.modelCatalog.resolve === "function") return entry.modelCatalog.resolve(model)
-    await entry.modelCatalog.validate(model)
+    if (typeof entry.modelCatalog.resolve === "function") return entry.modelCatalog.resolve(model, options)
+    await entry.modelCatalog.validate(model, options)
     return model
   }
 
-  async validateModel(id, model) {
+  async validateModel(id, model, options) {
     if (!model) return
-    await this.resolveModel(id, model)
+    await this.resolveModel(id, model, options)
   }
 
   async startManagedHosts() {
@@ -172,7 +172,7 @@ export function createMachineDaemonServer({
     })
   })
   const launchServer = createLaunchServer({ innerServer, config, taskRunController: runs })
-  const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks })
+  const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks, projectCatalog: projects })
   const finishServer = createFinishServer({ innerServer: modelServer, config, taskStore: tasks, worktreeManager: worktrees, taskRunController: runs })
   return createWorkThreadServerFactory({ innerServer: finishServer, config, controller: threads })
 }

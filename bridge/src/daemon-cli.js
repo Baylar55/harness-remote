@@ -3,6 +3,7 @@ import path from "node:path"
 import { AcpClient } from "./acp-client.js"
 import { AcpAgentModelCatalog, HttpAgentModelCatalog } from "./agent-model-catalog.js"
 import { parseConfig, usage as bridgeUsage } from "./config.js"
+import { acpHarnessCapabilityContract, openCodeCapabilityContract } from "./harness-capability-contract.js"
 import { harnessProfile, resolveAcpLaunch } from "./harness-profiles.js"
 import { canListen, resolveLaunchPlan } from "./launcher.js"
 import { loadMachineIdentity } from "./machine-registry.js"
@@ -143,6 +144,7 @@ async function main() {
       label: profile.label,
       backend: profile.id,
       capabilities: profile.capabilities,
+      contract: acpHarnessCapabilityContract(profile),
       agent: acp,
       modelCatalog,
       bridgeConfig: agentConfig,
@@ -182,6 +184,7 @@ async function main() {
       label: "OpenCode",
       backend: "opencode",
       capabilities: { sessions: true },
+      contract: openCodeCapabilityContract(),
       host: managedOpenCode,
       modelCatalog: openCodeModels,
       eager: false

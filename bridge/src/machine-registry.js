@@ -9,6 +9,14 @@ function validIdentity(value) {
   return value && typeof value.id === "string" && value.id.length > 0 && typeof value.name === "string" && value.name.length > 0
 }
 
+function cloneRecord(value) {
+  return value && typeof value === "object" ? structuredClone(value) : {}
+}
+
+function cloneOptionalRecord(value) {
+  return value && typeof value === "object" ? structuredClone(value) : undefined
+}
+
 async function readIdentity(machineFile) {
   const parsed = JSON.parse(await readFile(machineFile, "utf8"))
   return validIdentity(parsed) ? parsed : undefined
@@ -67,6 +75,14 @@ export async function loadMachineIdentity(stateDirectory, options = {}) {
   return installIdentity(machineFile, identity)
 }
 
+function publicHost(host) {
+  return {
+    ...host,
+    capabilities: cloneRecord(host.capabilities),
+    ...(host.contract ? { contract: cloneOptionalRecord(host.contract) } : {})
+  }
+}
+
 export class MachineRegistry {
   constructor(identity) {
     if (!validIdentity(identity)) throw new Error("MachineRegistry requires a stable machine identity")
@@ -84,10 +100,11 @@ export class MachineRegistry {
       transport: host.transport ?? "acp",
       managed: host.managed !== false,
       state: host.state ?? "configured",
-      capabilities: host.capabilities ? { ...host.capabilities } : {}
+      capabilities: cloneRecord(host.capabilities),
+      ...(host.contract && typeof host.contract === "object" ? { contract: cloneOptionalRecord(host.contract) } : {})
     }
     this.hosts.set(normalized.id, normalized)
-    return { ...normalized, capabilities: { ...normalized.capabilities } }
+    return publicHost(normalized)
   }
 
   updateHost(id, patch) {
@@ -97,24 +114,22 @@ export class MachineRegistry {
       ...current,
       ...patch,
       id: current.id,
-      capabilities: patch.capabilities ? { ...patch.capabilities } : current.capabilities
+      capabilities: patch.capabilities ? cloneRecord(patch.capabilities) : current.capabilities,
+      ...(patch.contract && typeof patch.contract === "object" ? { contract: cloneOptionalRecord(patch.contract) } : {})
     }
     this.hosts.set(id, next)
-    return { ...next, capabilities: { ...next.capabilities } }
+    return publicHost(next)
   }
 
   host(id) {
     const value = this.hosts.get(id)
-    return value ? { ...value, capabilities: { ...value.capabilities } } : undefined
+    return value ? publicHost(value) : undefined
   }
 
   snapshot() {
     return {
       machine: { ...this.identity },
-      agents: [...this.hosts.values()].map((host) => ({
-        ...host,
-        capabilities: { ...host.capabilities }
-      }))
+      agents: [...this.hosts.values()].map(publicHost)
     }
   }
 }

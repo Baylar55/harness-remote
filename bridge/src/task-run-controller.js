@@ -279,7 +279,7 @@ export class TaskRunController {
     })
 
     try {
-      await this.taskLauncher.validateModelSelection?.(agentID, model)
+      await this.taskLauncher.validateModelSelection?.(agentID, model, task.workspace.path)
       const context = await this.#contextForTask(task)
       effectivePrompt = needsHandoffContext
         ? formatTaskHandoff(context, { targetAgentId: agentID, role, instruction: userPrompt })
