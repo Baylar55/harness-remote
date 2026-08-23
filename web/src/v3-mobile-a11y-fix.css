@@ -1,3 +1,11 @@
+/* Final mobile interaction guards loaded after the product pass. */
+@media (max-width: 780px), (pointer: coarse) and (max-height: 640px) {
+  /* New Conversation is a focused sheet/page. The persistent app nav must not overlap its footer. */
+  .uw-standalone-host:has(.tdw-modal-backdrop) .hr-mobile-nav {
+    display: none !important;
+  }
+}
+
 /* Keep icon-only landscape navigation compact without removing its accessible names. */
 @media (pointer: coarse) and (max-height: 640px) {
   .hr-mobile-nav button span {
