@@ -20,6 +20,7 @@ import type {
 } from "../types"
 import {
   buildWorkThreadTimeline,
+  CONVERSATION_EVENT_ROLE,
   runSessionID,
   workThreadRuns,
   type WorkThreadMessage,
@@ -208,7 +209,7 @@ function ConversationStatePill({
 
 const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: WorkThreadMessage }) {
   const meta = message.taskdesk
-  if (message.info.role === "taskdesk") {
+  if (message.info.role === CONVERSATION_EVENT_ROLE) {
     return (
       <div className="tdw-conversation-event">
         <span>{message.parts.find((part) => part.type === "text")?.text || "Conversation event"}</span>

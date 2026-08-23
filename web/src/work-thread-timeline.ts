@@ -1,6 +1,9 @@
 import type { MachineTask, MachineTaskRun } from "./taskClient"
 import type { MessageEnvelope, MessagePart } from "./types"
 
+/** Synthetic role for Harness Remote's own timeline lines, distinct from every harness role. */
+export const CONVERSATION_EVENT_ROLE = "conversation-event"
+
 export type WorkThreadMessageMeta = {
   kind: "native" | "event" | "synthetic-user" | "fallback-result" | "error"
   agentId?: string
@@ -325,7 +328,9 @@ export function buildWorkThreadTimeline(
     if (event) {
       timeline.push(syntheticMessage({
         id: `work-thread:${task.id}:run:${run.id || index}:handoff`,
-        role: "taskdesk",
+        // A client-side synthetic role for handoff/lifecycle lines in the merged timeline. It is
+        // never sent to or received from a harness, so the product noun does not belong in it.
+        role: CONVERSATION_EVENT_ROLE,
         sessionID: session,
         created: start - 1,
         text: event,
