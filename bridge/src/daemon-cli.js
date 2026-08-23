@@ -7,6 +7,7 @@ import { harnessProfile, resolveAcpLaunch } from "./harness-profiles.js"
 import { canListen, resolveLaunchPlan } from "./launcher.js"
 import { loadMachineIdentity } from "./machine-registry.js"
 import { MachineDaemon, createMachineDaemonServer } from "./machine-daemon.js"
+import { NativeFilteredModelCatalog } from "./native-filtered-model-catalog.js"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
 
 function requireValue(args, index, option) {
@@ -126,15 +127,24 @@ async function main() {
       permissionMode: profile.permissionMode,
       preferredAuthMethod: profile.authMethod
     })
-    // Model discovery owns a separate ACP connection and one durable prompt-less session. That keeps
-    // New Task catalog refreshes from interfering with user-facing ACP session history.
-    const modelCatalog = new AcpAgentModelCatalog({
+    // Model discovery owns a separate ACP connection and one prompt-less session. PI and OMP then
+    // intersect those ACP candidates with the installed harness's own --list-models output, so a
+    // stale adapter catalog can never make a removed model selectable in Harness Remote.
+    const baseModelCatalog = new AcpAgentModelCatalog({
       agent: new AcpClient({ command: launch.command, args: launch.args, permissionMode: profile.permissionMode, preferredAuthMethod: profile.authMethod }),
       agentID: profile.id,
       directory: config.roots?.[0] ?? process.cwd(),
       stateDirectory: config.stateDirectory,
       variantConfigIDs: profile.modelVariantConfigIDs
     })
+    const modelCatalog = profile.nativeModelList
+      ? new NativeFilteredModelCatalog({
+          catalog: baseModelCatalog,
+          command: profile.nativeModelList.command,
+          args: profile.nativeModelList.args,
+          cwd: config.roots?.[0] ?? process.cwd()
+        })
+      : baseModelCatalog
     // Load persisted technical-session ids before the server starts, so they never leak into lists.
     await modelCatalog.preloadState()
     daemon.registerAcpHost({
