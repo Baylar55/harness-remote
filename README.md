@@ -1,10 +1,8 @@
 # Harness Remote
 
-**Run and supervise AI coding agents on the machines where your code already lives, from anywhere.**
+**Your projects. Any coding agent. One workspace.**
 
 Harness Remote is a local-first control plane for AI coding agents. Connect the machines where your repositories, CLIs, subscriptions and credentials already live, then use OpenCode, Claude Code, Codex CLI, Oh My Pi and PI from one interface on phone, web or desktop.
-
-**Your projects. Any coding agent. One workspace.**
 
 > Harness Remote is not another coding agent. It is the control plane above them.
 
@@ -12,32 +10,90 @@ Execution stays on your machines. Repositories stay on your machines. Agent cred
 
 ## Harness Remote 3.0
 
-Harness Remote 3.0 is conversation-first. It does not recreate the Session model already provided by modern coding agents.
+Harness Remote 3.0 changes the center of the product from **remote agent Sessions** to **persistent work Conversations**.
 
-The product model is:
+The idea is simple:
+
+> Start with any agent. Continue with another. Keep the same piece of work.
+
+A modern coding agent already knows how to own a Session: transcript, tools, reasoning, permissions, context, memory, model behavior and resume semantics. Harness Remote should not rebuild that layer.
+
+Instead, 3.0 adds the continuity layer that individual coding agents cannot provide on their own.
 
 ```text
 Machine
-  Projects
-    Project
-      Conversations
-        Conversation
-          Native Session: OpenCode
-          Native Session: Codex
-          Native Session: Claude
+  Project
+    Conversation
+      Native Session: OpenCode
+      Native Session: Codex
+      Native Session: Claude
 ```
 
-A **Conversation** is a thin continuity layer above real native Sessions. It keeps one piece of work easy to return to while the underlying coding agent remains responsible for its own Session history, streaming, tools, reasoning, permissions and memory.
+A **Project** is the real workspace on one of your machines.
 
-The important capability is agent independence:
+A **Conversation** is the persistent piece of work you see and return to in Harness Remote. It belongs to a Project and can continue across coding agents.
 
-1. start a Conversation with the coding agent and model you want;
-2. work in the real project directory;
-3. continue the same Conversation with another coding agent when useful;
-4. Harness Remote creates or resumes the target agent's native Session and carries the continuity context across;
-5. inspect the native Sessions and project Changes without replacing the harness transcript with a second chat protocol.
+A **Native Session** is the real harness-owned Session underneath that Conversation. OpenCode, Codex, Claude, OMP and PI keep ownership of their own history and runtime behavior.
 
-A normal Conversation does **not** create a hidden Git worktree. Isolation can be added explicitly for true parallel work, but it is not the default workspace model.
+### Conversation vs Native Session
+
+| | Conversation | Native Session |
+|---|---|---|
+| Owned by | Harness Remote | The coding agent / harness |
+| Purpose | Keep one piece of work continuous across agents | Execute work inside one specific agent |
+| Scope | Project-level, cross-agent | Harness-specific |
+| Stable identity | Yes | Depends on the harness |
+| Can switch coding agent | Yes | No, it belongs to one harness |
+| Transcript/tool semantics | Does not redefine them | Native to the harness |
+| Reasoning, tools, permissions, memory | Orchestrated, not reimplemented | Owned by the harness |
+| Model and agent-specific capabilities | Selected through the control plane | Applied by the native harness |
+
+This distinction is central to 3.0. Harness Remote is not trying to create a universal fake Session format. It keeps enough continuity to let you move between agents while preserving the native Session as the source of truth.
+
+### One Conversation, several agents
+
+For example, one Project Conversation might evolve like this:
+
+```text
+Conversation: "Refactor authentication"
+
+1. OpenCode Session
+   explore the repository and identify the current auth flow
+
+2. Codex Session
+   continue the same work and implement the refactor
+
+3. Claude Session
+   review the resulting design and find edge cases
+```
+
+From the user's point of view this is still one Conversation. Underneath, each coding agent works through its own native Session.
+
+The **Sessions** view exists precisely to make that native chain visible instead of hiding it.
+
+The **Changes** view remains grounded in the real Project workspace.
+
+### Why this matters
+
+Coding agents change quickly. The best agent, model or subscription for one step may not be the best one for the next step.
+
+Harness Remote 3.0 is designed so the workspace and the work survive that choice:
+
+- start a Conversation with the agent and model you want;
+- work directly in the real Project directory;
+- continue the same Conversation with another agent when useful;
+- create or resume the appropriate native Session for that agent;
+- preserve explicit continuity between those Sessions;
+- inspect the native Session chain instead of replacing it with a second competing protocol;
+- supervise the same work from desktop, web or Android.
+
+A normal Conversation does **not** create a hidden Git worktree. Isolation may be added explicitly for true parallel work, but it is not the default workspace model.
+
+### 3.0 status
+
+Harness Remote 3.0 is currently in pre-release audit and integration work. The conversation-first UI is usable, while the final release gate is focused on real-harness reliability, transport/reconnect behavior, capability discovery and cross-agent continuity.
+
+The stable `main` branch remains the 2.x line until the 3.0 candidate completes those gates.
 
 ## Quick start
 
@@ -116,9 +172,9 @@ Each coding agent keeps its own native Session format and behavior.
 
 When a Conversation continues with the same agent, Harness Remote resumes the most recent compatible native Session when possible. When it continues with another agent, Harness Remote creates or resumes that agent's native Session and transfers explicit continuity context.
 
-If a previously persisted native Session is no longer available, Harness Remote can create a new native Session and continue from the persisted conversation context rather than exposing an implementation-level Session ID failure to the user.
+If a previously persisted native Session is no longer available, Harness Remote can create a new native Session and continue from persisted Conversation context rather than exposing an implementation-level Session ID failure to the user.
 
-The **Sessions** tab makes this chain visible. The **Changes** tab stays grounded in the current project workspace and native Session.
+The **Sessions** tab makes this chain visible. The **Changes** tab stays grounded in the current Project workspace.
 
 ## What remains native
 
@@ -127,7 +183,7 @@ Harness Remote should orchestrate capabilities that coding agents already implem
 Harness Remote adds the layer that an individual harness cannot provide by itself:
 
 - one machine connection for multiple coding agents;
-- one project workspace across agents;
+- one Project workspace across agents;
 - one Conversation that can continue through several native Sessions;
 - agent and model switching from the same interface;
 - remote supervision from desktop, web and Android;
@@ -135,7 +191,7 @@ Harness Remote adds the layer that an individual harness cannot provide by itsel
 
 ## Legacy compatibility
 
-The repository still contains lower-level bridge and compatibility code because stable 2.x installations may depend on it. Those paths are not separate product modes in the 3.0 interface.
+The repository still contains lower-level bridge and compatibility code because stable 2.x installations may depend on it. Existing internal Task/Run naming is also retained where changing it would create unnecessary compatibility risk. Those implementation details are not the 3.0 product model.
 
 For low-level legacy setup details see [REFERENCE.md](REFERENCE.md).
 
@@ -172,6 +228,6 @@ Pull-request CI type-checks and builds the web app, runs regression and bridge t
 
 ## Project status
 
-The 3.0 release-candidate path is moving Harness Remote from a remote Session viewer to a conversation-first universal agent control plane.
+The 3.0 release path is moving Harness Remote from a remote Session viewer to a conversation-first universal agent control plane.
 
-The release gate is practical: each supported harness must route to the correct native Sessions and models, cross-agent continuation must preserve useful context, the project workspace must remain predictable, desktop/web/Android must behave consistently, and the exact candidate SHA must pass both automated checks and real-harness manual testing before promotion.
+The release gate is practical: each supported harness must route to the correct native Sessions and models, cross-agent continuation must preserve useful context, the Project workspace must remain predictable, desktop/web/Android must behave consistently, and the exact candidate SHA must pass both automated checks and real-harness manual testing before promotion.
