@@ -47,6 +47,17 @@ test("shared conversation owns paging and scroll preservation", () => {
   assert.match(component, /nearBottomRef/)
 })
 
+test("long conversations retain v2-style jump-to-top and jump-to-bottom affordances", () => {
+  assert.match(component, /JUMP_AFFORDANCE_MIN_RANGE/)
+  assert.match(component, /function jumpAffordancesFor/)
+  assert.match(component, /JumpToTopIcon/)
+  assert.match(component, /JumpToBottomIcon/)
+  assert.match(component, /aria-label="Jump to top"/)
+  assert.match(component, /aria-label="Jump to bottom"/)
+  assert.match(component, /scrollTo\(\{ top: 0, behavior: "smooth" \}\)/)
+  assert.match(component, /scrollTo\(\{ top: current\.scrollHeight, behavior: "smooth" \}\)/)
+})
+
 test("shared conversation owns working state presentation", () => {
   assert.match(component, /uw-session-typing/)
   assert.match(component, /waiting/)
