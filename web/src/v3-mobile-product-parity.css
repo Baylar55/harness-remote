@@ -1,0 +1,272 @@
+/* Harness Remote 3.0 mobile parity pass.
+   Audit read: compact native-feeling devtool, utility-first and conversation-first. Preserve the
+   quieter 3.0 visual system, but do not remove navigation or high-value controls that reduce work.
+   This file is intentionally loaded last so it can correct the previous aggressive mobile pass
+   without touching desktop behavior or backend logic. */
+
+/* Conversation jump controls are useful on every viewport and were a proven Harness Remote 2 affordance. */
+.uw-transcript-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+}
+
+.uw-transcript-shell > .uw-transcript {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.uw-transcript-jumps {
+  position: absolute;
+  z-index: 12;
+  right: 12px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  pointer-events: none;
+}
+
+.uw-transcript-jump {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--td3-border-strong);
+  border-radius: 11px;
+  color: var(--td3-text-2);
+  background: color-mix(in srgb, var(--td3-panel-2) 92%, transparent);
+  box-shadow: 0 7px 22px rgba(0, 0, 0, .2);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.uw-transcript-jump:hover,
+.uw-transcript-jump:focus-visible {
+  color: var(--td3-text);
+  border-color: var(--td3-blue-border);
+  background: var(--td3-blue-soft);
+  outline: 0;
+}
+
+@media (max-width: 780px), (pointer: coarse) and (orientation: landscape) and (max-height: 640px) {
+  /* Navigation is app chrome, not page content. Keep it present in Conversation detail too. */
+  .uw-standalone-host:has(.tdw-main.mobile-open) .hr-mobile-nav {
+    display: grid !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  .hr-control-plane .tdw-main.mobile-open {
+    inset: 0 0 var(--hr-mobile-nav-height) 0 !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  .hr-control-plane:has(.tdw-main.mobile-open) .tdw-layout {
+    height: calc(100dvh - var(--hr-mobile-nav-height)) !important;
+  }
+
+  /* Language is a real persisted preference and should not disappear just because this is mobile. */
+  .hr-mobile-settings-group label:nth-of-type(2) {
+    display: grid !important;
+  }
+
+  .hr-mobile-settings-body > p {
+    display: block !important;
+    margin: 10px 4px 0 !important;
+    color: var(--td3-muted) !important;
+    font-size: 10px !important;
+    line-height: 1.45 !important;
+  }
+
+  /* Machines should expose which harnesses are actually present instead of collapsing them to a count. */
+  .uw-machine-config-card {
+    min-height: 96px !important;
+    align-items: start !important;
+  }
+
+  .uw-machine-harness-list {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    margin-top: 8px !important;
+  }
+
+  .uw-machine-harness {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    min-height: 24px !important;
+    display: inline-grid !important;
+    grid-template-columns: 7px minmax(0, auto) !important;
+    align-items: center !important;
+    gap: 5px !important;
+    padding: 3px 7px !important;
+    border: 1px solid var(--td3-border-soft) !important;
+    border-radius: 999px !important;
+    color: var(--td3-text-3) !important;
+    background: var(--td3-raise-1) !important;
+  }
+
+  .uw-machine-harness > i {
+    width: 6px !important;
+    height: 6px !important;
+    display: block !important;
+    border-radius: 999px !important;
+    background: var(--td3-muted) !important;
+  }
+
+  .uw-machine-harness > i.available {
+    background: var(--td3-green) !important;
+    box-shadow: 0 0 0 2px var(--td3-green-soft) !important;
+  }
+
+  .uw-machine-harness > i.configured {
+    background: var(--td3-yellow) !important;
+  }
+
+  .uw-machine-harness > i.unavailable {
+    background: var(--td3-red) !important;
+  }
+
+  .uw-machine-harness > strong {
+    min-width: 0 !important;
+    max-width: 120px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 10px !important;
+    font-weight: 650 !important;
+  }
+
+  .uw-machine-harness > small {
+    display: none !important;
+  }
+
+  .uw-transcript-jumps {
+    right: 8px;
+    bottom: 9px;
+    gap: 6px;
+  }
+
+  .uw-transcript-jump {
+    width: 34px;
+    height: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    border-radius: 10px;
+  }
+}
+
+/* Android resizes the WebView when the keyboard opens. Height alone must never turn portrait into
+   our short-landscape layout: that was what pushed First message into a narrow right-hand column. */
+@media (pointer: coarse) and (orientation: portrait) and (max-height: 640px) {
+  .tdw-modal-backdrop {
+    align-items: flex-start !important;
+    padding: 5px !important;
+  }
+
+  .hr-new-conversation-modal {
+    width: calc(100vw - 10px) !important;
+    max-width: none !important;
+    max-height: calc(100dvh - 10px) !important;
+    margin: 0 !important;
+    border-radius: 13px !important;
+  }
+
+  .hr-new-conversation-modal > header {
+    min-height: 44px !important;
+    padding: 7px 11px !important;
+  }
+
+  .hr-new-conversation-modal > header h2 {
+    font-size: 14px !important;
+  }
+
+  .hr-new-conversation-modal > header span {
+    display: none !important;
+  }
+
+  .hr-new-conversation-modal .tdw-modal-body {
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 7px !important;
+    padding: 7px 10px !important;
+    overflow-y: auto !important;
+  }
+
+  .hr-new-conversation-modal .tdw-form-row,
+  .hr-new-conversation-modal .tdw-form-row:first-child,
+  .hr-new-conversation-modal .tdw-form-row:nth-child(2) {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 7px !important;
+  }
+
+  .hr-new-conversation-modal .tdw-prompt-field {
+    grid-column: auto !important;
+    grid-row: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .hr-new-conversation-modal .tdw-prompt-field textarea {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 86px !important;
+    min-height: 86px !important;
+    max-height: 104px !important;
+    resize: none !important;
+  }
+
+  .hr-new-conversation-modal select,
+  .hr-new-conversation-modal input,
+  .hr-new-conversation-modal .tdw-model-trigger {
+    height: 36px !important;
+    min-height: 36px !important;
+    font-size: 13px !important;
+  }
+
+  .hr-new-conversation-modal > footer {
+    min-height: 44px !important;
+    padding: 5px 9px !important;
+  }
+
+  .hr-new-conversation-modal > footer .tdw-button {
+    min-height: 34px !important;
+  }
+}
+
+/* Short landscape is a real orientation, not merely a short viewport after IME resize. */
+@media (pointer: coarse) and (orientation: landscape) and (max-height: 640px) {
+  .uw-machine-config-card {
+    min-height: 78px !important;
+  }
+
+  .uw-machine-harness-list {
+    margin-top: 5px !important;
+  }
+
+  .uw-machine-harness {
+    min-height: 21px !important;
+    padding: 2px 6px !important;
+  }
+
+  .hr-mobile-settings-group label:nth-of-type(2) {
+    display: grid !important;
+  }
+}
