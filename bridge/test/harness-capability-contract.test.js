@@ -6,13 +6,19 @@ import { harnessProfile } from "../src/harness-profiles.js"
 test("ACP capability contract preserves runtime-specific model controls without inventing them", () => {
   const omp = acpHarnessCapabilityContract(harnessProfile("omp"))
   const pi = acpHarnessCapabilityContract(harnessProfile("pi"))
+  const codex = acpHarnessCapabilityContract(harnessProfile("codex"))
   const claude = acpHarnessCapabilityContract(harnessProfile("claude"))
 
-  assert.equal(omp.protocol, "acp")
-  assert.equal(omp.transport.control, "stdio-json-rpc")
-  assert.equal(omp.models.cacheScope, "project-cwd")
+  for (const contract of [omp, pi, codex, claude]) {
+    assert.equal(contract.protocol, "acp")
+    assert.equal(contract.transport.control, "stdio-json-rpc")
+    assert.equal(contract.models.cacheScope, "machine")
+    assert.equal(contract.lifecycle.sessionAuthority, "native-harness")
+  }
+
   assert.ok(omp.models.variantConfigIDs.includes("thinking"))
   assert.ok(pi.models.variantConfigIDs.some((id) => ["thinkingLevel", "thinking_level", "thinking"].includes(id)))
+  assert.ok(codex.models.variantConfigIDs.some((id) => ["reasoning_effort", "reasoningEffort"].includes(id)))
   assert.deepEqual(claude.models.variantConfigIDs, [])
   assert.equal(claude.models.variants, "runtime-advertised-only")
 })
