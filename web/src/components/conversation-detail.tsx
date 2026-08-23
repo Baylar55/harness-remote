@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react"
 import { api } from "../api"
 import {
   taskClient,
@@ -156,13 +156,16 @@ function NativeSessionsPanel({ conversation, agents }: { conversation: MachineTa
 function ChangesPanel({ conversation, baseConfig, agents, revision }: { conversation: MachineTask; baseConfig: ServerConfig; agents: MachineAgentHost[]; revision: number }) {
   const [inspection, setInspection] = useState<TaskWorkspaceInspection | null>(null)
   const [diff, setDiff] = useState<DiffFile[]>([])
-  const [loading, setLoading] = useState(true)
+  // `updatedAt` moves on every turn of a running conversation, so this panel reloads often. Only the
+  // very first load may blank the panel: replacing a rendered diff with a spinner threw away the
+  // reader's scroll position and collapsed every expanded file on each refresh.
+  const [loaded, setLoaded] = useState(false)
+  const [refreshing, setRefreshing] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setRefreshing(true)
     const run = conversation.run
     const session = runSessionID(run)
     const config = configForRun(baseConfig, agents, conversation, run)
@@ -174,16 +177,21 @@ function ChangesPanel({ conversation, baseConfig, agents, revision }: { conversa
       if (cancelled) return
       setInspection(nextInspection)
       setDiff(nextDiff)
+      setError(null)
     }).catch((reason) => {
       if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason))
     }).finally(() => {
-      if (!cancelled) setLoading(false)
+      if (cancelled) return
+      setLoaded(true)
+      setRefreshing(false)
     })
     return () => { cancelled = true }
   }, [conversation.id, conversation.updatedAt, revision])
 
-  if (loading) return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading project changes...</div>
-  if (error) return <div className="tdw-inline-error" role="alert">{error}</div>
+  if (!loaded && refreshing) return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading project changes...</div>
+  // A refresh that failed while a previous result is on screen is a stale-data warning, not a reason
+  // to throw the changes away and show only a red box.
+  if (error && !loaded) return <div className="tdw-inline-error" role="alert">{error}</div>
 
   const changedFiles = inspection?.changedFiles ?? diff.map((file) => file.file)
   if (!inspection?.changeCount && diff.length === 0) {
@@ -196,7 +204,8 @@ function ChangesPanel({ conversation, baseConfig, agents, revision }: { conversa
   }
 
   return (
-    <div className="tdw-changes-panel hr-changes-panel">
+    <div className={`tdw-changes-panel hr-changes-panel${refreshing ? " refreshing" : ""}`} aria-busy={refreshing}>
+      {error ? <div className="tdw-field-note" role="status">Showing the last known changes. Refresh failed: {error}</div> : null}
       <div className="tdw-detail-summary-strip">
         <span><small>Changed files</small><strong>{inspection?.changeCount ?? diff.length}</strong></span>
         <span><small>Project workspace</small><strong>{inspection?.dirty ? "Modified" : "Clean"}</strong></span>
@@ -215,27 +224,62 @@ function ChangesPanel({ conversation, baseConfig, agents, revision }: { conversa
   )
 }
 
+const DETAIL_TABS: DetailTab[] = ["chat", "sessions", "changes"]
+
 export function ConversationDetail({ conversation, baseConfig, agents, machineName, onConversationUpdate, onWorkspaceRefresh }: Props) {
   const [tab, setTab] = useState<DetailTab>("chat")
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [titleDraft, setTitleDraft] = useState("")
+  const [savingTitle, setSavingTitle] = useState(false)
+  const tabsRef = useRef<HTMLElement>(null)
   const sessions = useMemo(() => nativeSessions(conversation), [conversation.runs, conversation.run, conversation.id])
   const current = conversation.run
 
   useEffect(() => {
     setTab("chat")
     setError(null)
+    setRenaming(false)
   }, [conversation.id])
 
-  async function rename() {
-    const next = window.prompt("Conversation title", titleFor(conversation))
-    if (!next?.trim() || next.trim() === titleFor(conversation)) return
+  function beginRename() {
+    setTitleDraft(titleFor(conversation))
+    setRenaming(true)
+  }
+
+  // window.prompt is a blocking native dialog. The Android WebView renders it as a bare system alert
+  // outside the app, and some embeddings suppress it entirely, which left rename simply not working.
+  async function commitRename() {
+    const next = titleDraft.trim()
+    if (!next || next === titleFor(conversation)) {
+      setRenaming(false)
+      return
+    }
     setError(null)
+    setSavingTitle(true)
     try {
-      onConversationUpdate(await taskClient.renameWorkThread(baseConfig, conversation.id, next.trim()))
+      onConversationUpdate(await taskClient.renameWorkThread(baseConfig, conversation.id, next))
+      setRenaming(false)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSavingTitle(false)
     }
+  }
+
+  /** Roving focus, as ARIA requires for a tab list: arrow keys move between tabs, Home/End jump. */
+  function onTabKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    const index = DETAIL_TABS.indexOf(tab)
+    let next = index
+    if (event.key === "ArrowRight") next = (index + 1) % DETAIL_TABS.length
+    else if (event.key === "ArrowLeft") next = (index - 1 + DETAIL_TABS.length) % DETAIL_TABS.length
+    else if (event.key === "Home") next = 0
+    else if (event.key === "End") next = DETAIL_TABS.length - 1
+    else return
+    event.preventDefault()
+    setTab(DETAIL_TABS[next])
+    tabsRef.current?.querySelectorAll<HTMLButtonElement>("[role='tab']")[next]?.focus()
   }
 
   return (
@@ -244,22 +288,43 @@ export function ConversationDetail({ conversation, baseConfig, agents, machineNa
         <div className="tdw-thread-heading">
           <span>{conversation.project?.name || conversation.projectId}</span>
           <div className="tdw-thread-title-edit">
-            <h1>{titleFor(conversation)}</h1>
-            <button type="button" onClick={() => void rename()} title="Rename conversation">Rename</button>
+            {renaming ? (
+              <>
+                <input
+                  className="tdw-thread-title-input"
+                  value={titleDraft}
+                  autoFocus
+                  disabled={savingTitle}
+                  aria-label="Conversation title"
+                  onChange={(event) => setTitleDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") { event.preventDefault(); void commitRename() }
+                    if (event.key === "Escape") { event.preventDefault(); setRenaming(false) }
+                  }}
+                />
+                <button type="button" disabled={savingTitle} onClick={() => void commitRename()}>{savingTitle ? "Saving..." : "Save"}</button>
+                <button type="button" disabled={savingTitle} onClick={() => setRenaming(false)}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <h1>{titleFor(conversation)}</h1>
+                <button type="button" onClick={beginRename} title="Rename conversation">Rename</button>
+              </>
+            )}
           </div>
           <p>{agentLabel(agents, runAgent(conversation, current))} · {modelLabel(current, conversation)} · {machineName}</p>
         </div>
       </header>
 
-      <nav className="tdw-detail-tabs hr-conversation-tabs" aria-label="Conversation detail">
-        <button type="button" className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>Chat</button>
-        <button type="button" className={tab === "sessions" ? "active" : ""} onClick={() => setTab("sessions")}>Sessions <span>{sessions.length}</span></button>
-        <button type="button" className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>Changes</button>
+      <nav className="tdw-detail-tabs hr-conversation-tabs" role="tablist" aria-label="Conversation detail" ref={tabsRef} onKeyDown={onTabKeyDown}>
+        <button type="button" role="tab" id="hr-tab-chat" aria-selected={tab === "chat"} aria-controls="hr-panel-chat" tabIndex={tab === "chat" ? 0 : -1} className={tab === "chat" ? "active" : ""} onClick={() => setTab("chat")}>Chat</button>
+        <button type="button" role="tab" id="hr-tab-sessions" aria-selected={tab === "sessions"} aria-controls="hr-panel-sessions" tabIndex={tab === "sessions" ? 0 : -1} className={tab === "sessions" ? "active" : ""} onClick={() => setTab("sessions")}>Sessions <span>{sessions.length}</span></button>
+        <button type="button" role="tab" id="hr-tab-changes" aria-selected={tab === "changes"} aria-controls="hr-panel-changes" tabIndex={tab === "changes" ? 0 : -1} className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>Changes</button>
       </nav>
 
       {error ? <div className="tdw-detail-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
 
-      <div className="tdw-detail-body">
+      <div className="tdw-detail-body" role="tabpanel" id={`hr-panel-${tab}`} aria-labelledby={`hr-tab-${tab}`}>
         {tab === "chat" ? (
           <WorkThreadConversation
             key={conversation.id}

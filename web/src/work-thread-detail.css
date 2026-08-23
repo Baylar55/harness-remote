@@ -51,6 +51,22 @@
   font-size: 9px;
 }
 .tdw-thread-title-edit button:hover { color: var(--td3-text); background: var(--td3-raise-2); }
+.tdw-thread-title-edit button:disabled { opacity: .5; cursor: default; }
+/* Inline rename, in place of the native window.prompt the Android WebView renders outside the app. */
+.tdw-thread-title-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--td3-blue-border);
+  border-radius: 8px;
+  outline: 0;
+  color: var(--td3-text);
+  background: var(--td3-raise-1);
+  font: inherit;
+  font-size: 15px;
+}
+.tdw-thread-title-input:focus { box-shadow: 0 0 0 3px var(--td3-blue-soft); }
 .tdw-thread-heading p { margin: 4px 0 0; color: var(--td3-text-3); font-size: 10.5px; }
 
 .tdw-live-state,
