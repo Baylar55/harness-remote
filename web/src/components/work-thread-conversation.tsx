@@ -35,6 +35,9 @@ const OLDER_PAGE_SIZE = 500
 const ACTIVE_RECONCILE_MS = 5_000
 const IDLE_RECONCILE_MS = 30_000
 const DRAFT_STORAGE_PREFIX = "harness-remote.taskdesk.draft."
+// A synchronous localStorage write per keystroke is a measurable input cost on Android WebView and
+// on long conversations. The draft is still flushed before the conversation is left.
+const DRAFT_PERSIST_DEBOUNCE_MS = 400
 
 const HARNESS_ICON_FILES: Record<string, string> = {
   codex: "codex.svg",
@@ -163,14 +166,21 @@ function sameRequests(left: Array<{ id: string }>, right: Array<{ id: string }>)
 
 function useElapsedSeconds(startedAt?: string): number {
   const start = Date.parse(startedAt || "")
-  const [elapsed, setElapsed] = useState(() => Number.isFinite(start) ? Math.max(0, Math.floor((Date.now() - start) / 1_000)) : 0)
+  const running = Number.isFinite(start)
+  const [elapsed, setElapsed] = useState(() => running ? Math.max(0, Math.floor((Date.now() - start) / 1_000)) : 0)
 
   useEffect(() => {
-    const tick = () => setElapsed(Number.isFinite(start) ? Math.max(0, Math.floor((Date.now() - start) / 1_000)) : 0)
+    if (!running) {
+      // No running Run means no clock. Keeping a 1s interval alive here woke the whole conversation
+      // toolbar every second while the agent was idle.
+      setElapsed(0)
+      return
+    }
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1_000)))
     tick()
     const timer = window.setInterval(tick, 1_000)
     return () => window.clearInterval(timer)
-  }, [startedAt])
+  }, [startedAt, running, start])
 
   return elapsed
 }
@@ -250,6 +260,8 @@ export function WorkThreadConversation({
   const [targetModelKey, setTargetModelKey] = useState(modelKey(lastModelForAgent(task, agentForRun(task, task.run))))
   const loadGeneration = useRef(0)
   const modelGeneration = useRef(0)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   const targetAgentIDRef = useRef(targetAgentID)
   const sendInFlightRef = useRef(false)
   const stopInFlightRef = useRef(false)
@@ -277,14 +289,28 @@ export function WorkThreadConversation({
   const currentSessionID = runSessionID(task.run)
   const currentTarget = currentSessionID ? targets.find((target) => target.sessionID === currentSessionID) : undefined
   const working = isActive(task)
-  const conversationSignature = taskConversationSignature(task)
+  // JSON.stringify over every Run is far too expensive to repeat on each keystroke. The Task object
+  // identity only changes when the workspace actually reloads or updates the conversation.
+  const conversationSignature = useMemo(() => taskConversationSignature(task), [task])
+
+  const persistDraft = useCallback((key: string, value: string) => {
+    try {
+      if (value) localStorage.setItem(key, value)
+      else localStorage.removeItem(key)
+    } catch {
+      // A private-mode or storage-full browser still keeps the in-memory draft.
+    }
+  }, [])
 
   useEffect(() => { feedsRef.current = feeds }, [feeds])
   useEffect(() => { targetAgentIDRef.current = targetAgentID }, [targetAgentID])
   useEffect(() => {
-    if (draft) localStorage.setItem(draftStorageKey, draft)
-    else localStorage.removeItem(draftStorageKey)
-  }, [draft, draftStorageKey])
+    const timer = window.setTimeout(() => persistDraft(draftStorageKey, draftRef.current), DRAFT_PERSIST_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [draft, draftStorageKey, persistDraft])
+
+  // Leaving the conversation must not lose a draft that the debounce has not written yet.
+  useEffect(() => () => persistDraft(draftStorageKey, draftRef.current), [draftStorageKey, persistDraft])
 
   useEffect(() => {
     setFeeds({})

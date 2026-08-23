@@ -55,6 +55,7 @@ jobs:
           npm run test:config
           npm run test:ui
           npm run test:settings
+          npm run test:v3-product-ui
           npm run test:model
           npm run test:events
           npm run test:profiles
