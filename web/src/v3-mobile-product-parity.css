@@ -57,7 +57,7 @@
   outline: 0;
 }
 
-@media (max-width: 780px), (pointer: coarse) and (orientation: landscape) and (max-height: 640px) {
+@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
   /* Navigation is app chrome, not page content. Keep it present in Conversation detail too. */
   .uw-standalone-host:has(.tdw-main.mobile-open) .hr-mobile-nav {
     display: grid !important;
@@ -169,9 +169,10 @@
   }
 }
 
-/* Android resizes the WebView when the keyboard opens. Height alone must never turn portrait into
-   our short-landscape layout: that was what pushed First message into a narrow right-hand column. */
-@media (pointer: coarse) and (orientation: portrait) and (max-height: 640px) {
+/* Android resizes the WebView when the keyboard opens. The CSS `orientation` media feature can
+   itself flip when the visual viewport becomes shorter than it is wide, even though the phone did
+   not rotate. Width is the stable discriminator: a keyboard-resized portrait phone remains narrow. */
+@media (pointer: coarse) and (max-width: 599px) and (max-height: 640px) {
   .tdw-modal-backdrop {
     align-items: flex-start !important;
     padding: 5px !important;
@@ -251,8 +252,9 @@
   }
 }
 
-/* Short landscape is a real orientation, not merely a short viewport after IME resize. */
-@media (pointer: coarse) and (orientation: landscape) and (max-height: 640px) {
+/* Short landscape is selected by width, not `orientation`, so a portrait phone with an IME cannot
+   accidentally enter the landscape layout when the keyboard changes the viewport aspect ratio. */
+@media (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
   .uw-machine-config-card {
     min-height: 78px !important;
   }
