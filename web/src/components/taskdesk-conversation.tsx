@@ -178,6 +178,8 @@ const ConversationTranscript = memo(function ConversationTranscript({
   return (
     <div
       className="uw-transcript"
+      role="log"
+      aria-label="Conversation transcript"
       ref={transcriptRef}
       onWheel={(event) => {
         if (event.deltaY < 0) nearBottomRef.current = false
@@ -251,7 +253,9 @@ export function TaskDeskConversation({
   const composerFrameRef = useRef<number | undefined>(undefined)
   const touchFirst = hasTouchFirstPointer()
   const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
-  const hint = footerHint ?? (touchFirst ? "Ctrl/Cmd+Enter to send" : "Shift+Enter for newline")
+  // A phone has no Ctrl or Cmd key, so telling a touch user to press Ctrl/Cmd+Enter named the one
+  // way to send that they do not have. Enter inserts a newline there; the Send button is the action.
+  const hint = footerHint ?? (touchFirst ? "Enter adds a line. Tap Send to send." : "Enter to send · Shift+Enter for a newline")
 
   useEffect(() => {
     if (composerFrameRef.current !== undefined) window.cancelAnimationFrame(composerFrameRef.current)
@@ -301,6 +305,8 @@ export function TaskDeskConversation({
       />
 
       <div className="uw-composer-shell">
+        {/* A placeholder is not a label: it disappears as soon as the field has content, which left
+            the product's primary input unnamed for a screen reader. */}
         <textarea
           ref={composerRef}
           value={draft}
@@ -309,11 +315,13 @@ export function TaskDeskConversation({
           placeholder={waiting ? `${agentLabel} is working…` : placeholder || `Continue with ${agentLabel}…`}
           rows={3}
           disabled={!ready}
+          aria-label={`Message ${agentLabel}`}
+          aria-describedby="uw-composer-hint"
         />
         <div className="uw-composer-footer">
           <span className="uw-composer-directory">{directory || ""}</span>
           <div>
-            <small>{hint}</small>
+            <small id="uw-composer-hint">{hint}</small>
             {waiting && onStop ? (
               <button
                 type="button"
