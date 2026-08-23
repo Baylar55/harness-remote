@@ -178,7 +178,8 @@ async function waitForHttp(url, timeoutMs = 30_000) {
 function startPreview() {
   const executable = process.platform === "win32" ? "npm.cmd" : "npm"
   const child = spawn(executable, ["run", "preview", "--", "--host", "127.0.0.1", "--port", String(PREVIEW_PORT), "--strictPort"], {
-    stdio: ["ignore", "pipe", "pipe"]
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32"
   })
   let output = ""
   child.stdout.on("data", (chunk) => { output += chunk })
@@ -187,6 +188,21 @@ function startPreview() {
     if (code && code !== 0) process.stderr.write(`vite preview exited ${code}\n${output}\n`)
   })
   return child
+}
+
+function stopPreview(child) {
+  if (!child || child.killed || !child.pid) return
+  try {
+    if (process.platform === "win32") child.kill("SIGTERM")
+    else process.kill(-child.pid, "SIGTERM")
+  } catch {
+    try { child.kill("SIGTERM") } catch {}
+  }
+}
+
+function stopServer(server) {
+  try { server.closeAllConnections?.() } catch {}
+  try { server.close() } catch {}
 }
 
 async function boundingBoxInside(page, selector, label = selector) {
@@ -365,11 +381,14 @@ try {
   preview = startPreview()
   await waitForHttp(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
+  console.log("v3 browser smoke: mobile audit start")
   await runMobileAudit(browser)
+  console.log("v3 browser smoke: mobile audit passed")
   await runDesktopAudit(browser)
+  console.log("v3 browser smoke: desktop audit passed")
   console.log("v3 browser smoke: portrait, landscape, multi-machine, model toolbar and desktop geometry passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
-  if (preview && !preview.killed) preview.kill("SIGTERM")
-  await Promise.all(servers.map((server) => new Promise((resolve) => server.close(() => resolve()))))
+  stopPreview(preview)
+  for (const server of servers) stopServer(server)
 }
