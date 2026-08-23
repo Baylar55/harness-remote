@@ -23,6 +23,8 @@ assert.match(css, /\.tdw-model-popover[\s\S]*position: fixed !important/)
 
 assert.match(workspace, /function selectMachine\(id: string\)/)
 assert.match(workspace, /if \(id !== "all"\) onActiveMachineID\(id\)/)
-assert.match(workspace, /className=`tdw-side-row\$\{selectedMachineID === runtime\.machine\.id \? " active" : ""\}`/)
+assert.match(workspace, /selectedMachineID === runtime\.machine\.id/)
+assert.match(workspace, /onClick=\{\(\) => selectMachine\(runtime\.machine\.id\)\}/)
+assert.match(workspace, /onClick=\{\(\) => selectMachine\("all"\)\}/)
 
 console.log("v3 mobile regression guards: ok")
