@@ -1,3 +1,5 @@
+import { App as CapacitorApp } from "@capacitor/app"
+import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
 import type { SavedServerProfile } from "./serverProfiles"
 import { subscribeTaskDeskLiveEvents } from "./taskdesk-live-events"
 import type { ServerConfig } from "./types"
@@ -15,6 +17,8 @@ export type SelectedLiveSession = {
 
 type Timer = ReturnType<typeof setTimeout>
 
+const FOREGROUND_DEDUP_MS = 500
+
 function isAttentionEvent(type: string): boolean {
   return type.startsWith("permission.") || type.startsWith("question.")
 }
@@ -23,7 +27,12 @@ function isAttentionEvent(type: string): boolean {
  * Drive Session freshness from the existing per-agent event stream without turning every streamed
  * token into a full workspace refresh. Message chunks refresh only the selected transcript tail;
  * lifecycle events refresh the lightweight index and, for the selected Session, its detail data.
- * Polling remains a slow reconciliation fallback in the owning React component.
+ *
+ * Android can suspend the WebView while the native SSE reader keeps consuming events. Those events
+ * are then legitimately absent from the renderer when the app comes back, so waiting for the next
+ * event or interval can leave an already-finished Conversation painted as still working. Foreground
+ * transitions therefore force an authoritative index/detail/transcript reconciliation immediately.
+ * Polling remains the slow fallback while the page stays visible.
  */
 export function startTaskDeskSessionLiveRefresh({
   targets,
@@ -42,6 +51,9 @@ export function startTaskDeskSessionLiveRefresh({
   let messageTimer: Timer | undefined
   let indexTimer: Timer | undefined
   let detailTimer: Timer | undefined
+  let foregroundTimer: Timer | undefined
+  let lastForegroundRefreshAt = 0
+  let appStateHandle: PluginListenerHandle | undefined
 
   const throttle = (kind: "message" | "index" | "detail", delay: number, callback: () => void) => {
     if (closed) return
@@ -56,6 +68,44 @@ export function startTaskDeskSessionLiveRefresh({
     if (kind === "message") messageTimer = timer
     else if (kind === "index") indexTimer = timer
     else detailTimer = timer
+  }
+
+  const reconcileAfterForeground = () => {
+    if (closed) return
+    const now = Date.now()
+    if (foregroundTimer !== undefined || now - lastForegroundRefreshAt < FOREGROUND_DEDUP_MS) return
+    foregroundTimer = setTimeout(() => {
+      foregroundTimer = undefined
+      if (closed) return
+      lastForegroundRefreshAt = Date.now()
+      // The index callback owns the authoritative Conversation re-read. The selected transcript and
+      // attention callbacks are fired too so callers that keep those surfaces independent recover in
+      // the same foreground turn instead of waiting for another SSE event or polling interval.
+      onIndex()
+      if (getSelected()) {
+        onMessage()
+        onDetail()
+      }
+    }, 0)
+  }
+
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "visible") reconcileAfterForeground()
+  }
+  const onPageShow = () => reconcileAfterForeground()
+
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibilityChange)
+  if (typeof window !== "undefined") window.addEventListener("pageshow", onPageShow)
+
+  // `visibilitychange` is normally delivered by Android WebView, but appStateChange is the native
+  // lifecycle authority. Listen to both and deduplicate them because device/ROM behavior differs.
+  if (Capacitor.getPlatform() === "android") {
+    void CapacitorApp.addListener("appStateChange", ({ isActive }) => {
+      if (isActive) reconcileAfterForeground()
+    }).then((handle) => {
+      if (closed) void handle.remove()
+      else appStateHandle = handle
+    }).catch(() => undefined)
   }
 
   const subscriptions = targets.map((target) => subscribeTaskDeskLiveEvents({
@@ -118,6 +168,10 @@ export function startTaskDeskSessionLiveRefresh({
       if (messageTimer !== undefined) clearTimeout(messageTimer)
       if (indexTimer !== undefined) clearTimeout(indexTimer)
       if (detailTimer !== undefined) clearTimeout(detailTimer)
+      if (foregroundTimer !== undefined) clearTimeout(foregroundTimer)
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange)
+      if (typeof window !== "undefined") window.removeEventListener("pageshow", onPageShow)
+      if (appStateHandle) void appStateHandle.remove()
       for (const subscription of subscriptions) subscription.close()
     }
   }
