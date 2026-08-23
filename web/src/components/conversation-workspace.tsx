@@ -16,6 +16,7 @@ import {
 } from "../taskClient"
 import type { MachineAgentHost, MachineSnapshot, ModelOption } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
+import { fingerprint, mergeRecords, reuseList } from "../workspace-runtime-merge"
 import {
   ChatIcon,
   FolderIcon,
@@ -137,6 +138,40 @@ function harnessStateLabel(agent: MachineAgentHost): string {
   if (agent.state === "configured") return "Ready"
   if (agent.state === "unavailable") return "Unavailable"
   return agent.state
+}
+
+/**
+ * Keeps the identity of everything the poll did not actually change.
+ *
+ * The 10s workspace poll used to hand React a completely new object graph on every tick, which
+ * re-rendered the open Conversation and its transcript for no reason. Reusing equivalent values is
+ * what lets the downstream memos bail out.
+ */
+function reuseRuntime(previous: Runtime | undefined, next: Runtime): Runtime {
+  if (!previous) return next
+  const snapshot = fingerprint(previous.snapshot) === fingerprint(next.snapshot) ? previous.snapshot : next.snapshot
+  const projects = reuseList(previous.projects, next.projects)
+  const agents = reuseList(previous.agents, next.agents)
+  const conversations = mergeRecords(previous.conversations, next.conversations)
+  if (previous.machine === next.machine
+    && previous.state === next.state
+    && previous.error === next.error
+    && snapshot === previous.snapshot
+    && projects === previous.projects
+    && agents === previous.agents
+    && conversations === previous.conversations) return previous
+  return { ...next, snapshot, projects, agents, conversations }
+}
+
+function reuseRuntimes(previous: Runtime[], next: Runtime[]): Runtime[] {
+  const known = new Map(previous.map((runtime) => [runtime.machine.id, runtime]))
+  let changed = previous.length !== next.length
+  const merged = next.map((runtime, index) => {
+    const resolved = reuseRuntime(known.get(runtime.machine.id), runtime)
+    if (resolved !== previous[index]) changed = true
+    return resolved
+  })
+  return changed ? merged : previous
 }
 
 function loadCollapsedWorkspaceSections(): Set<WorkspaceSection> {
@@ -371,10 +406,12 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
       return
     }
     setRefreshing(true)
-    setRuntimes((current) => machines.map((machine) => {
+    // A machine that is already known to be offline keeps saying so while the next probe runs.
+    // Flipping it back to "loading" made the sidebar flash "Connecting..." every ten seconds.
+    setRuntimes((current) => reuseRuntimes(current, machines.map((machine) => {
       const previous = current.find((runtime) => runtime.machine.id === machine.id)
-      return previous ? { ...previous, machine, state: previous.state === "offline" ? "loading" : previous.state } : { machine, snapshot: null, projects: [], conversations: [], agents: [], state: "loading" }
-    }))
+      return previous ? { ...previous, machine } : { machine, snapshot: null, projects: [], conversations: [], agents: [], state: "loading" }
+    })))
     void Promise.all(machines.map(async (machine): Promise<Runtime> => {
       try {
         const snapshot = await discoverMachine(machine.config)
@@ -395,7 +432,7 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
         return { machine, snapshot: null, projects: [], conversations: [], agents: [], state: "offline", error: errorText(reason) }
       }
     })).then((next) => {
-      if (!cancelled && refreshGeneration.current === generation) setRuntimes(next)
+      if (!cancelled && refreshGeneration.current === generation) setRuntimes((current) => reuseRuntimes(current, next))
     }).finally(() => {
       if (!cancelled && refreshGeneration.current === generation) {
         setLoaded(true)
