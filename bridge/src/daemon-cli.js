@@ -4,14 +4,9 @@ import { AcpClient } from "./acp-client.js"
 import { AcpAgentModelCatalog, HttpAgentModelCatalog } from "./agent-model-catalog.js"
 import { parseConfig, usage as bridgeUsage } from "./config.js"
 import { harnessProfile, resolveAcpLaunch } from "./harness-profiles.js"
-import { canListen, findExecutable, resolveLaunchPlan } from "./launcher.js"
+import { canListen, resolveLaunchPlan } from "./launcher.js"
 import { loadMachineIdentity } from "./machine-registry.js"
 import { MachineDaemon, createMachineDaemonServer } from "./machine-daemon.js"
-import {
-  NativeFilteredAcpModelCatalog,
-  OmpNativeModelSource,
-  PiNativeModelSource
-} from "./native-model-catalog.js"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
 
 function requireValue(args, index, option) {
@@ -92,43 +87,6 @@ export async function ensureOpenCodePortAvailable({ port, host, canListenImpl = 
   throw new Error(`OpenCode port ${port} is already in use on ${host}. Is OpenCode already running? Use --opencode-port to choose another.`)
 }
 
-function modelCatalogForProfile({ profile, launch, config }) {
-  const directory = config.roots?.[0] ?? process.cwd()
-  const acpCatalog = new AcpAgentModelCatalog({
-    agent: new AcpClient({
-      command: launch.command,
-      args: launch.args,
-      permissionMode: profile.permissionMode,
-      preferredAuthMethod: profile.authMethod
-    }),
-    agentID: profile.id,
-    directory,
-    stateDirectory: config.stateDirectory,
-    variantConfigIDs: profile.modelVariantConfigIDs
-  })
-
-  // PI and OMP refresh their dynamic provider catalogs outside ACP before their native picker is
-  // authoritative. ACP configOptions are still useful for default/variant metadata, but they are
-  // not allowed to widen membership beyond a model confirmed by the native live inventory.
-  if (profile.id === "pi") {
-    return new NativeFilteredAcpModelCatalog({
-      inner: acpCatalog,
-      liveSource: new PiNativeModelSource({ command: findExecutable("pi") }),
-      agentID: profile.id,
-      directory
-    })
-  }
-  if (profile.id === "omp") {
-    return new NativeFilteredAcpModelCatalog({
-      inner: acpCatalog,
-      liveSource: new OmpNativeModelSource({ command: findExecutable("omp") }),
-      agentID: profile.id,
-      directory
-    })
-  }
-  return acpCatalog
-}
-
 async function main() {
   let parsed
   try {
@@ -168,10 +126,16 @@ async function main() {
       permissionMode: profile.permissionMode,
       preferredAuthMethod: profile.authMethod
     })
-    // Model discovery owns a separate ACP connection so prompt-less metadata probing cannot
-    // interfere with user-facing Session ownership. PI and OMP additionally gate that metadata
-    // through their refreshed native model inventories.
-    const modelCatalog = modelCatalogForProfile({ profile, launch, config })
+    // Model discovery owns a separate ACP connection so its prompt-less technical Session cannot
+    // interfere with user-facing Session ownership. Membership and options come from the running
+    // adapter itself; do not spawn a second native harness process to filter the same catalog.
+    const modelCatalog = new AcpAgentModelCatalog({
+      agent: new AcpClient({ command: launch.command, args: launch.args, permissionMode: profile.permissionMode, preferredAuthMethod: profile.authMethod }),
+      agentID: profile.id,
+      directory: config.roots?.[0] ?? process.cwd(),
+      stateDirectory: config.stateDirectory,
+      variantConfigIDs: profile.modelVariantConfigIDs
+    })
     // Load persisted technical-session ids before the server starts, so they never leak into lists.
     await modelCatalog.preloadState()
     daemon.registerAcpHost({
