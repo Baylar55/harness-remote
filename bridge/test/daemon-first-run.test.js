@@ -5,8 +5,8 @@ import { parseDaemonOptions } from "../src/daemon-cli.js"
 const detect = (backend = "pi") => () => ({ backend, detected: ["pi", "opencode"], mode: "daemon" })
 
 // A daemon is started once per machine and is expected to work out what that machine has. The
-// shared bridge parser defaults to `omp`, which is right for the standalone bridge — one server is
-// one harness and the user names it — and wrong here: a phone with PI and OpenCode installed
+// shared bridge parser defaults to `omp`, which is right for the standalone bridge - one server is
+// one harness and the user names it - and wrong here: a phone with PI and OpenCode installed
 // announced `omp` as its primary and then failed with `spawn omp ENOENT`.
 test("a daemon started without --backend resolves one from PATH", () => {
   assert.equal(parseDaemonOptions([], {}, detect()).config.backend, "pi")
@@ -26,8 +26,8 @@ test("a machine with no supported agent is refused rather than defaulted", () =>
   assert.throws(() => parseDaemonOptions([], {}, empty), /No supported agent CLI/)
 })
 
-// 15 seconds is not a universal truth. Under proot on a phone — the environment this project keeps
-// optimising for — OpenCode's first start routinely exceeds it, and the host then stays unavailable
+// 15 seconds is not a universal truth. Under proot on a phone - the environment this project keeps
+// optimising for - OpenCode's first start routinely exceeds it, and the host then stays unavailable
 // for the life of the daemon.
 test("the managed OpenCode readiness timeout can be raised", () => {
   assert.equal(parseDaemonOptions([], {}, detect()).openCodeTimeout, 15000)
@@ -47,7 +47,7 @@ test("an ACP adapter already on PATH is preferred over fetching one", async () =
 
   const fetched = resolveAcpLaunch(harnessProfile("pi"), { find: () => null })
   assert.equal(fetched.source, "npx")
-  assert.ok(fetched.args.includes("@automatalabs/pi-acp@0.2.5"))
+  assert.ok(fetched.args.includes("@automatalabs/pi-acp@0.5.0"))
 
   // OMP speaks ACP itself, so there is no adapter to look for and nothing to prefer.
   assert.deepEqual(resolveAcpLaunch(harnessProfile("omp"), { find: () => "/never/used" }), {
