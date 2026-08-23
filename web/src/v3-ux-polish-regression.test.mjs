@@ -62,10 +62,15 @@ assert.match(overrides, /uw-activity-group\.uw-tool-running/)
 assert.match(read("components/taskdesk-message-content.tsx"), /status === "running" \? "Working" : status/)
 assert.match(overrides, /prefers-reduced-motion/)
 
+// An existing Conversation may have Project-specific provider/model configuration. The integrated
+// product/UI audit must not erase the capability audit's server-resolved Conversation scope.
+assert.match(conversation, /taskClient\.listAgentModels\(baseConfig, targetAgentID, \{ workThreadId: task\.id \}\)/)
+assert.match(conversation, /\[targetAgentID, task\.id, task\.workspace\.path, baseConfig\]/)
+
 assert.match(readme, /normal public port is \*\*4097\*\*/)
 assert.match(readme, /normally on loopback port \*\*4096\*\*/)
 assert.match(readme, /one launcher per machine/)
-assert.match(readme, /Project[\s\S]*Conversations[\s\S]*Native Session: OpenCode/)
+assert.match(readme, /Project[\s\S]*Conversation[\s\S]*Native Session: OpenCode/)
 assert.match(readme, /does \*\*not\*\* create a hidden Git worktree/)
 assert.match(readme, /one Conversation that can continue through several native Sessions/)
 
