@@ -241,6 +241,7 @@ export function WorkThreadConversation({
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [modelError, setModelError] = useState<string | null>(null)
   const [questions, setQuestions] = useState<QuestionRequest[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [targetAgentID, setTargetAgentID] = useState(agentForRun(task, task.run))
@@ -290,6 +291,7 @@ export function WorkThreadConversation({
     feedsRef.current = {}
     setLoading(true)
     setError(null)
+    setModelError(null)
     setQuestions([])
     setPermissions([])
     setTargetAgentID(currentAgentID)
@@ -493,10 +495,14 @@ export function WorkThreadConversation({
     if (!targetAgentID) {
       setModels([])
       setTargetModelKey("")
+      setModelError(null)
       return
     }
+    // A model from the previously selected harness must never remain selectable while this catalog
+    // is warming. Conversation history stays usable independently of model discovery.
+    setModels([])
     setModelsLoading(true)
-    setError(null)
+    setModelError(null)
     void taskClient.listAgentModels(baseConfig, targetAgentID).then((catalog) => {
       if (modelGeneration.current !== current) return
       setModels(catalog.models)
@@ -505,18 +511,22 @@ export function WorkThreadConversation({
       const chosen = catalog.models.find((model) => modelKey(model) === priorKey)
         || catalog.models.find((model) => model.isDefault)
         || catalog.models[0]
-      setTargetModelKey(chosen ? modelKey(chosen) : priorKey)
+      setTargetModelKey(chosen ? modelKey(chosen) : "")
     }).catch((reason) => {
       if (modelGeneration.current === current) {
         setModels([])
-        setError(reason instanceof Error ? reason.message : String(reason))
+        setTargetModelKey("")
+        setModelError(reason instanceof Error ? reason.message : String(reason))
       }
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
   }, [targetAgentID, task.id, baseConfig])
 
-  const selectedModel = models.find((model) => modelKey(model) === targetModelKey) ?? lastModelForAgent(task, targetAgentID)
+  // Only a model verified by the current live catalog is sent explicitly. If discovery is still
+  // warming or failed, omitting `model` lets the selected harness use its own current default rather
+  // than replaying a persisted model id that may have since been removed by the provider.
+  const selectedModel = models.find((model) => modelKey(model) === targetModelKey)
 
   async function loadOlder() {
     if (loadingOlder) return
@@ -622,6 +632,7 @@ export function WorkThreadConversation({
           <label className="tdw-model-control">
             <span>Model</span>
             <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} />
+            {modelError ? <small title={modelError}>Model catalog unavailable. The harness default will be used.</small> : null}
           </label>
         </div>
         <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : task.run?.startedAt} />
