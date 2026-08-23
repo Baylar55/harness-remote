@@ -46,8 +46,10 @@ assert.match(preferences, /export function installAppPreferences/)
 assert.match(main, /installAppPreferences\(\)/, 'preferences must be installed before the product shell renders')
 
 // One machine connection discovers the available coding agents instead of asking for one profile per harness.
+// New Conversation discovery must remain scoped to the selected Project so project-specific providers
+// and model availability cannot leak across two workspaces on the same machine + harness.
 assert.match(workspace, /selectableMachineAgents\(snapshot\)/)
-assert.match(workspace, /taskClient\.listAgentModels\(runtime\.machine\.config, agentID\)/)
+assert.match(workspace, /taskClient\.listAgentModels\(runtime\.machine\.config, agentID, \{ projectId: projectID \}\)/)
 assert.match(workspace, /<span className="tdw-workspace-label">Coding agents<\/span>/)
 assert.match(machineClient, /export async function discoverMachine/)
 
