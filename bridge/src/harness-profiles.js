@@ -46,8 +46,11 @@ export const HARNESS_PROFILES = {
     // @automatalabs/pi-acp embeds PI through its published SDK and runs on Node. Version 0.5.0
     // advertises PI's credential- and provider-filter-aware model catalog directly over ACP, so
     // Harness Remote must not launch a second native `pi` process just to filter membership.
+    // npx cannot reliably infer a scoped package's executable from a package spec. Add the package
+    // explicitly and invoke the binary the package publishes, otherwise npm may try to execute the
+    // literal package spec and exit 127 on a real machine.
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", "@automatalabs/pi-acp@0.5.0"],
+    args: ["--yes", "--package=@automatalabs/pi-acp@0.5.0", "pi-acp"],
     adapterCommand: "pi-acp",
     permissionMode: "allow",
     historyLoader: createPiHistoryLoader(),
@@ -79,9 +82,9 @@ export const HARNESS_PROFILES = {
     // run `claude login` or set ANTHROPIC_API_KEY before starting the bridge.
     // Requires Node 22+ (same as the PI adapter it mirrors).
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
-    // release appeared in the registry index before its tarball could be fetched.
-    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.63.0"],
+    // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
+    // explicitly and invoke its published binary instead of relying on npx package-spec inference.
+    args: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.63.0", "claude-agent-acp"],
     adapterCommand: "claude-agent-acp",
     permissionMode: "allow",
     preserveListedTimestamps: true,
@@ -109,9 +112,9 @@ export const HARNESS_PROFILES = {
     // user must have run `codex login` (ChatGPT account) or set an OpenAI API key first.
     // Requires Node 22+ (same as the PI and Claude adapters it mirrors).
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
-    // release appeared in the registry index before its tarball could be fetched.
-    args: ["-y", "@agentclientprotocol/codex-acp@1.1.14"],
+    // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
+    // explicitly and invoke its published binary instead of relying on npx package-spec inference.
+    args: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"],
     adapterCommand: "codex-acp",
     permissionMode: "allow",
     // The adapter offers `api-key` before `chat-gpt`; the former demands CODEX_API_KEY or
