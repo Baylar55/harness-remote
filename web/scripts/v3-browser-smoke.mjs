@@ -202,6 +202,16 @@ async function boundingBoxInside(page, selector, label = selector) {
   assert.ok(box.y + box.height <= viewport.height + 1, `${label} is clipped vertically: ${box.y + box.height} > ${viewport.height}`)
 }
 
+async function waitForDrawerSettled(page, selector) {
+  await page.waitForFunction((target) => {
+    const element = document.querySelector(target)
+    if (!element) return false
+    const box = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return box.x >= -1 && Number(style.opacity) >= 0.999 && style.visibility === "visible"
+  }, selector)
+}
+
 async function assertNoDocumentOverflow(page, label) {
   const metrics = await page.evaluate(() => ({
     width: window.innerWidth,
@@ -329,6 +339,7 @@ async function runDesktopAudit(browser) {
   const conversationsButton = page.locator(".tdw-tasks-toggle")
   await conversationsButton.click()
   await desktopDrawer.waitFor({ state: "visible" })
+  await waitForDrawerSettled(page, ".tdw-thread-column")
   await boundingBoxInside(page, ".tdw-thread-column", "desktop conversation drawer")
   await assertNoDocumentOverflow(page, "desktop drawer open")
   assert.equal(await conversationsButton.getAttribute("aria-expanded"), "true", "desktop Conversations toggle did not report open")
