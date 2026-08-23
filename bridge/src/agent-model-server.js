@@ -46,7 +46,38 @@ async function settleWithin(promise, waitMs) {
   }
 }
 
-export function createAgentModelServer({ innerServer, config, daemon, taskStore, createServer = http.createServer }) {
+function requestError(status, message) {
+  const error = new Error(message)
+  error.status = status
+  return error
+}
+
+async function modelDirectory(url, { taskStore, projectCatalog }) {
+  const projectID = url.searchParams.get("projectId")?.trim() || ""
+  const workThreadID = url.searchParams.get("workThreadId")?.trim() || ""
+  if (projectID && workThreadID) throw requestError(400, "Model discovery accepts either projectId or workThreadId, not both")
+
+  if (workThreadID) {
+    if (typeof taskStore?.get !== "function") throw requestError(503, "Conversation model scope is unavailable")
+    const task = await taskStore.get(workThreadID)
+    if (!task) throw requestError(404, `Unknown conversation: ${workThreadID}`)
+    const directory = task.workspace?.path || task.project?.path
+    if (!directory) throw requestError(409, "Conversation workspace is not prepared")
+    return directory
+  }
+
+  if (projectID) {
+    if (typeof projectCatalog !== "function") throw requestError(503, "Project model scope is unavailable")
+    const projects = await projectCatalog()
+    const project = Array.isArray(projects) ? projects.find((candidate) => candidate?.id === projectID) : undefined
+    if (!project?.path) throw requestError(404, `Unknown project: ${projectID}`)
+    return project.path
+  }
+
+  return undefined
+}
+
+export function createAgentModelServer({ innerServer, config, daemon, taskStore, projectCatalog, createServer = http.createServer }) {
   return createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     const modelMatch = MODEL_ROUTE.exec(url.pathname)
@@ -59,14 +90,22 @@ export function createAgentModelServer({ innerServer, config, daemon, taskStore,
       }
       const agentID = decodeURIComponent(modelMatch[1])
       const refresh = url.searchParams.get("refresh") === "1"
-      const discovery = daemon.listModels(agentID, { allowStale: true, refresh })
+      let directory
+      try {
+        directory = await modelDirectory(url, { taskStore, projectCatalog })
+      } catch (error) {
+        writeJSON(response, Number(error?.status) || 400, { error: error instanceof Error ? error.message : String(error), models: [], stale: true })
+        return
+      }
+      const options = { allowStale: true, refresh, ...(directory ? { directory } : {}) }
+      const discovery = daemon.listModels(agentID, options)
       const settled = await settleWithin(discovery, modelWaitMs(url))
       if (!settled.settled) {
         // The discovery remains owned by the daemon/catalog and continues after this response. A
         // mobile/browser request is therefore never required to survive a cold `npx` adapter start.
-        // Subsequent polls join the same single-flight operation instead of starting another ACP
-        // process/session and the picker can survive background/foreground network transitions.
-        const diagnostics = daemon.modelDiagnostics?.(agentID) ?? {}
+        // Subsequent polls join the same single-flight operation for the same Project scope instead
+        // of starting another technical Session.
+        const diagnostics = daemon.modelDiagnostics?.(agentID, directory ? { directory } : undefined) ?? {}
         response.setHeader("Retry-After", "1")
         writeJSON(response, 202, {
           models: [],
@@ -96,7 +135,10 @@ export function createAgentModelServer({ innerServer, config, daemon, taskStore,
           writeJSON(response, 404, { error: `Unknown task: ${taskID}` })
           return
         }
-        if (task.model) await daemon.validateModel(task.agentId, task.model)
+        if (task.model) {
+          const options = task.workspace?.path ? { directory: task.workspace.path } : undefined
+          await daemon.validateModel(task.agentId, task.model, options)
+        }
       } catch (error) {
         const status = error?.code === "model_unavailable" ? 409 : 503
         writeJSON(response, status, { error: error instanceof Error ? error.message : String(error) })
