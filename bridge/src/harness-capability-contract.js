@@ -16,7 +16,11 @@ export function acpHarnessCapabilityContract(profile) {
     },
     models: {
       source: "acp-config-options",
-      cacheScope: "project-cwd",
+      // The release candidate deliberately keeps the last real-machine-validated ownership model:
+      // one daemon-owned technical catalog Session per harness adapter lifetime. Project-scoped ACP
+      // discovery was audited in isolation but regressed PI, Codex and Claude on Windows, so it is
+      // not part of the promotion candidate until it has its own real-harness proof.
+      cacheScope: "machine",
       variants: variantConfigIDs.length ? "runtime-advertised-config-options" : "runtime-advertised-only",
       variantConfigIDs
     },
