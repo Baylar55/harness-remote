@@ -320,9 +320,20 @@ async function runDesktopAudit(browser) {
   await page.locator(".tdw-topbar").waitFor({ state: "visible" })
   await boundingBoxInside(page, ".tdw-topbar", "desktop topbar")
   await boundingBoxInside(page, ".tdw-project-column", "desktop workspace")
-  await boundingBoxInside(page, ".tdw-thread-column", "desktop conversation list")
   await boundingBoxInside(page, ".tdw-main", "desktop main")
-  await assertNoDocumentOverflow(page, "desktop")
+  await assertNoDocumentOverflow(page, "desktop initial")
+
+  const desktopDrawer = page.locator(".tdw-thread-column")
+  await desktopDrawer.waitFor({ state: "attached" })
+  assert.equal(await desktopDrawer.isVisible(), false, "desktop conversation drawer should start hidden")
+  const conversationsButton = page.locator(".tdw-tasks-toggle")
+  await conversationsButton.click()
+  await desktopDrawer.waitFor({ state: "visible" })
+  await boundingBoxInside(page, ".tdw-thread-column", "desktop conversation drawer")
+  await assertNoDocumentOverflow(page, "desktop drawer open")
+  assert.equal(await conversationsButton.getAttribute("aria-expanded"), "true", "desktop Conversations toggle did not report open")
+  await page.locator(".tdw-task-drawer-close").click()
+  await desktopDrawer.waitFor({ state: "hidden" })
 
   const overlap = await page.evaluate(() => {
     const context = document.querySelector(".tdw-context-path")?.getBoundingClientRect()
