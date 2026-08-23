@@ -26,6 +26,9 @@ export const HARNESS_PROFILES = {
     args: ["acp"],
     permissionMode: "allow",
     historyLoader: createOmpHistoryLoader(),
+    // OMP's native picker and --list-models are the membership authority. ACP still provides
+    // metadata and model-specific config options, but cannot re-introduce models the harness hides.
+    nativeModelList: { command: "omp", args: ["--list-models"] },
     // OMP exposes thinking as a real ACP config option. We probe only ids the running adapter
     // actually advertises; this list is a routing hint, never a source of invented variants.
     modelVariantConfigIDs: ["thinking"],
@@ -45,14 +48,15 @@ export const HARNESS_PROFILES = {
     label: "PI",
     // @automatalabs/pi-acp embeds PI through its published SDK and runs on Node.
     // @victor-software-house/pi-acp declares engines.bun and shells out to `bun`, which this
-    // project deliberately does not depend on. The version is pinned because an unpinned
-    // default failed with `notarget` when a release outran its own tarball in the registry.
+    // project deliberately does not depend on. Pin a known published release so npx startup is
+    // reproducible while native PI still remains the final authority for model membership.
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", "@automatalabs/pi-acp@0.2.5"],
+    args: ["-y", "@automatalabs/pi-acp@0.5.0"],
     adapterCommand: "pi-acp",
     permissionMode: "allow",
     historyLoader: createPiHistoryLoader(),
     preserveListedTimestamps: true,
+    nativeModelList: { command: "pi", args: ["--list-models"] },
     // PI journals are authoritative for transcript and title metadata. session/load is a live-session
     // operation and cannot be used as a refresh primitive because PI rejects a second open.
     reloadOnHistoryRefresh: false,
@@ -158,7 +162,7 @@ export function harnessProfile(id) {
  *
  * An adapter already on PATH is preferred over fetching one: it is what the user installed, it
  * starts without a network round trip, and it sidesteps environments where `npx` cannot link a
- * binary — which is exactly what happens under proot on Android.
+ * binary - which is exactly what happens under proot on Android.
  */
 export function resolveAcpLaunch(profile, { find = findExecutable } = {}) {
   if (!profile.adapterCommand) return { command: profile.command, args: [...profile.args], source: "harness" }
