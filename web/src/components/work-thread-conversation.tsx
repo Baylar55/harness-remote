@@ -503,7 +503,7 @@ export function WorkThreadConversation({
     setModels([])
     setModelsLoading(true)
     setModelError(null)
-    void taskClient.listAgentModels(baseConfig, targetAgentID).then((catalog) => {
+    void taskClient.listAgentModels(baseConfig, targetAgentID, { workThreadId: task.id }).then((catalog) => {
       if (modelGeneration.current !== current) return
       setModels(catalog.models)
       const prior = lastModelForAgent(taskRef.current, targetAgentID)
@@ -521,7 +521,7 @@ export function WorkThreadConversation({
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, task.id, baseConfig])
+  }, [targetAgentID, task.id, task.workspace.path, baseConfig])
 
   // Only a model verified by the current live catalog is sent explicitly. A null selection is
   // intentional: the controller distinguishes it from an omitted field, which means reuse the
