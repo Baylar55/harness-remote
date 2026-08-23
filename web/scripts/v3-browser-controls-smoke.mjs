@@ -249,10 +249,7 @@ async function newConversationAudit(page, label) {
   }
 
   await machine.selectOption(fixtures[1].id)
-  await page.waitForFunction((expected) => {
-    const select = document.querySelector('select[aria-label="Project"]')
-    return select && select.value === expected
-  }, fixtures[1].project.id)
+  await project.locator(`option[value="${fixtures[1].project.id}"]`).waitFor({ state: "attached" })
   assert.equal(await project.inputValue(), fixtures[1].project.id, `${label}: switching machine did not switch Project`)
 
   await prompt.fill("Audit this candidate")
