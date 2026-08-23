@@ -294,6 +294,11 @@ async function runDesktop(browser) {
   await shot(page, "desktop-list")
   await noOverflow(page, "desktop list")
   await newConversationAudit(page, "desktop")
+
+  const conversationsToggle = page.locator(".tdw-tasks-toggle")
+  await conversationsToggle.click()
+  await page.locator(".tdw-thread-column").waitFor({ state: "visible" })
+  await shot(page, "desktop-drawer")
   await page.getByRole("button", { name: /Audit Windows UI/ }).click()
   await page.locator(".tdw-main").waitFor({ state: "visible" })
   await shot(page, "desktop-conversation")
