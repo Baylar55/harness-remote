@@ -12,9 +12,9 @@ const STALE = "deepseek-v4-flash-free"
 
 test("PI native table parser returns only rows in the native picker", () => {
   const output = [
-    "provider  model                     context  max-out  thinking  images",
-    "opencode  current-live              200K     32K      yes       no",
-    "anthropic claude-sonnet-current     1M       64K      yes       yes"
+    "provider   model                     context  max-out  thinking  images",
+    "opencode   current-live              200K     32K      yes       no",
+    "anthropic  claude-sonnet-current     1M       64K      yes       yes"
   ].join("\n")
   const models = modelsFromPiListOutput(output)
   assert.deepEqual(models.map((model) => `${model.providerID}/${model.modelID}`), [
