@@ -1,12 +1,14 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import type { MessageEnvelope } from "../types"
-import { ChatIcon, LoadingIcon, StopCircleIcon } from "../Icons"
+import { ChatIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
 const NEAR_BOTTOM_PX = 96
 const COMPOSER_MAX_HEIGHT_PX = 180
+const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
+const JUMP_AFFORDANCE_MIN_RANGE = 240
 
 type Props = {
   messages: MessageEnvelope[]
@@ -39,6 +41,8 @@ type TranscriptProps = Pick<Props,
   "loadingOlder" | "onLoadOlder" | "sending" | "workingLabel" | "showWaitingIndicator" | "emptyText" | "renderMessage"
 >
 
+type JumpAffordances = { top: boolean; bottom: boolean }
+
 function formatClock(timestamp: number): string {
   if (!timestamp) return ""
   return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp)
@@ -46,6 +50,15 @@ function formatClock(timestamp: number): string {
 
 function hasTouchFirstPointer(): boolean {
   return typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true
+}
+
+function jumpAffordancesFor(element: HTMLElement): JumpAffordances {
+  const fromTop = Math.max(0, element.scrollTop)
+  const fromBottom = Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight)
+  const range = fromTop + fromBottom
+  if (range < JUMP_AFFORDANCE_MIN_RANGE) return { top: false, bottom: false }
+  const threshold = Math.min(JUMP_AFFORDANCE_MAX_THRESHOLD, range * 0.25)
+  return { top: fromTop > threshold, bottom: fromBottom > threshold }
 }
 
 const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
@@ -130,7 +143,13 @@ const ConversationTranscript = memo(function ConversationTranscript({
   const followFrameRef = useRef<number | undefined>(undefined)
   const scrollFrameRef = useRef<number | undefined>(undefined)
   const previousSendingRef = useRef(false)
+  const [jumpAffordances, setJumpAffordances] = useState<JumpAffordances>({ top: false, bottom: false })
   loadOlderRef.current = onLoadOlder
+
+  function refreshJumpAffordances(element: HTMLElement) {
+    const next = jumpAffordancesFor(element)
+    setJumpAffordances((current) => current.top === next.top && current.bottom === next.bottom ? current : next)
+  }
 
   useEffect(() => () => {
     if (followFrameRef.current !== undefined) window.cancelAnimationFrame(followFrameRef.current)
@@ -152,8 +171,19 @@ const ConversationTranscript = memo(function ConversationTranscript({
       const current = transcriptRef.current
       if (!current || preservingOlderRef.current || !nearBottomRef.current) return
       current.scrollTop = current.scrollHeight
+      refreshJumpAffordances(current)
     })
   }, [messages, loading, ready, sending])
+
+  // Content can become scrollable without a scroll event (initial load, tool expansion, streaming).
+  // Refresh on transcript-state changes so the buttons never wait for the user to move first.
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const current = transcriptRef.current
+      if (current) refreshJumpAffordances(current)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [messages, loading, ready, sending, waiting])
 
   async function loadOlder() {
     const requestOlder = loadOlderRef.current
@@ -166,7 +196,10 @@ const ConversationTranscript = memo(function ConversationTranscript({
       await requestOlder()
       window.requestAnimationFrame(() => {
         const current = transcriptRef.current
-        if (current) current.scrollTop = previousTop + (current.scrollHeight - previousHeight)
+        if (current) {
+          current.scrollTop = previousTop + (current.scrollHeight - previousHeight)
+          refreshJumpAffordances(current)
+        }
         preservingOlderRef.current = false
       })
     } catch (error) {
@@ -175,46 +208,78 @@ const ConversationTranscript = memo(function ConversationTranscript({
     }
   }
 
+  function jumpToTop() {
+    const current = transcriptRef.current
+    if (!current) return
+    nearBottomRef.current = false
+    current.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  function jumpToBottom() {
+    const current = transcriptRef.current
+    if (!current) return
+    nearBottomRef.current = true
+    current.scrollTo({ top: current.scrollHeight, behavior: "smooth" })
+  }
+
   return (
-    <div
-      className="uw-transcript"
-      role="log"
-      aria-label="Conversation transcript"
-      ref={transcriptRef}
-      onWheel={(event) => {
-        if (event.deltaY < 0) nearBottomRef.current = false
-      }}
-      onScroll={(event) => {
-        const element = event.currentTarget
-        if (scrollFrameRef.current !== undefined) return
-        scrollFrameRef.current = window.requestAnimationFrame(() => {
-          scrollFrameRef.current = undefined
-          nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
-        })
-      }}
-    >
-      {loading || !ready ? (
-        <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading conversation…</strong></div>
-      ) : (
-        <>
-          {hasMore ? (
-            <div className="uw-history-loader">
-              <button type="button" className="uw-button uw-button-ghost" disabled={loadingOlder} onClick={() => void loadOlder()}>
-                {loadingOlder ? <LoadingIcon size={15} /> : null}
-                {loadingOlder ? "Loading older messages…" : "Load older messages"}
-              </button>
-            </div>
+    <div className="uw-transcript-shell">
+      <div
+        className="uw-transcript"
+        role="log"
+        aria-label="Conversation transcript"
+        ref={transcriptRef}
+        onWheel={(event) => {
+          if (event.deltaY < 0) nearBottomRef.current = false
+        }}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          if (scrollFrameRef.current !== undefined) return
+          scrollFrameRef.current = window.requestAnimationFrame(() => {
+            scrollFrameRef.current = undefined
+            nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
+            refreshJumpAffordances(element)
+          })
+        }}
+      >
+        {loading || !ready ? (
+          <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading conversation…</strong></div>
+        ) : (
+          <>
+            {hasMore ? (
+              <div className="uw-history-loader">
+                <button type="button" className="uw-button uw-button-ghost" disabled={loadingOlder} onClick={() => void loadOlder()}>
+                  {loadingOlder ? <LoadingIcon size={15} /> : null}
+                  {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                </button>
+              </div>
+            ) : null}
+            {messages.length === 0 && !waiting ? (
+              <div className="uw-empty-panel"><ChatIcon size={24} /><strong>{emptyText}</strong></div>
+            ) : renderMessage
+              ? messages.map((message) => renderMessage(message))
+              : messages.map((message) => (
+                  <MessageBubble key={message.info.id} message={message} agentLabel={agentLabel} />
+                ))}
+          </>
+        )}
+        {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
+      </div>
+
+      {jumpAffordances.top || jumpAffordances.bottom ? (
+        <div className="uw-transcript-jumps" aria-label="Conversation navigation">
+          {jumpAffordances.top ? (
+            <button type="button" className="uw-transcript-jump" onClick={jumpToTop} title="Jump to top" aria-label="Jump to top">
+              <JumpToTopIcon size={18} />
+            </button>
           ) : null}
-          {messages.length === 0 && !waiting ? (
-            <div className="uw-empty-panel"><ChatIcon size={24} /><strong>{emptyText}</strong></div>
-          ) : renderMessage
-            ? messages.map((message) => renderMessage(message))
-            : messages.map((message) => (
-                <MessageBubble key={message.info.id} message={message} agentLabel={agentLabel} />
-              ))}
-        </>
-      )}
-      {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
+          {jumpAffordances.bottom ? (
+            <button type="button" className="uw-transcript-jump" onClick={jumpToBottom} title="Jump to bottom" aria-label="Jump to bottom">
+              <JumpToBottomIcon size={18} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 }, transcriptPropsEqual)
