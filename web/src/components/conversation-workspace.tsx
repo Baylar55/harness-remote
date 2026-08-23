@@ -243,6 +243,10 @@ function NewConversationModal({
       return
     }
     const current = ++generation.current
+    // Never leave the previous harness's model selected while the next catalog is still loading.
+    // Starting during discovery intentionally omits `model`, which means use the harness-native default.
+    setModels([])
+    setModelKey("")
     setModelsLoading(true)
     setError(null)
     void taskClient.listAgentModels(runtime.machine.config, agentID).then((catalog) => {
@@ -264,7 +268,9 @@ function NewConversationModal({
   const project = runtime?.projects.find((candidate) => candidate.id === projectID)
   const agent = runtime?.agents.find((candidate) => candidate.id === agentID)
   const selectedModel = models.find((model) => modelOptionKey(model) === modelKey)
-  const canStart = Boolean(runtime && project && agent && prompt.trim()) && !starting && !modelsLoading
+  // Model discovery enriches the launch but is not an acceptance prerequisite. If it is still
+  // warming, the backend starts the Conversation with the harness-native default model.
+  const canStart = Boolean(runtime && project && agent && prompt.trim()) && !starting
 
   async function start() {
     if (!runtime || !project || !agent || !canStart) return
