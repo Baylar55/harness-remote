@@ -40,11 +40,8 @@ test("configures a non-OMP ACP adapter command and arguments", () => {
 test("selects PI defaults for the ACP backend", () => {
   assert.deepEqual(parseConfig(["--backend", "pi"], {}).backend, "pi")
   assert.equal(parseConfig(["--backend", "pi"], {}).acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
-  // The adapter must run on Node: @victor-software-house/pi-acp declares engines.bun and
-  // shells out to `bun`, which this project does not depend on. The version is pinned because
-  // an unpinned default failed with `notarget` when a release outran its own tarball.
-  assert.deepEqual(parseConfig(["--backend", "pi"], {}).acpArgs, ["-y", "@automatalabs/pi-acp@0.2.5"])
-  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "pi" }).acpArgs, ["-y", "@automatalabs/pi-acp@0.2.5"])
+  assert.deepEqual(parseConfig(["--backend", "pi"], {}).acpArgs, ["-y", "@automatalabs/pi-acp@0.5.0"])
+  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "pi" }).acpArgs, ["-y", "@automatalabs/pi-acp@0.5.0"])
   assert.match(parseConfig(["--backend", "pi"], {}).acpArgs[1], /@\d+\.\d+\.\d+$/, "the adapter version must stay pinned")
 })
 
