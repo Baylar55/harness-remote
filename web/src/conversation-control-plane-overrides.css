@@ -97,6 +97,39 @@
   50% { opacity: 1; transform: scale(1.06); }
 }
 
+/* A machine the client already knows is unreachable must say so where the user is working. On a
+   phone the health pill, the Machines rail and the harness list are all hidden, so this banner is
+   the only place that state is visible at all. */
+.hr-offline-banner {
+  width: calc(100% - 20px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 10px 0;
+  padding: 9px 11px;
+  border: 1px solid var(--td3-red-border);
+  border-radius: 11px;
+  color: inherit;
+  background: var(--td3-red-soft);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+.hr-offline-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--td3-red-text);
+}
+
+.hr-offline-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.hr-offline-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td3-red-text); font-size: 11.5px; }
+.hr-offline-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td3-text-3); font-size: 10px; }
+.hr-offline-banner b { flex: none; color: var(--td3-red-text); font-size: 10px; font-weight: 750; }
+
 /* The mobile shell is intentionally closer to a native chat app than to a squeezed desktop layout. */
 .hr-mobile-nav,
 .hr-mobile-settings-page {

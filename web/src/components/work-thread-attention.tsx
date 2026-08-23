@@ -80,7 +80,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
   }
 
   return (
-    <section className="tdw-attention" aria-label="Agent needs your input">
+    <section className="tdw-attention" aria-label="Agent needs your input" aria-live="polite">
       <div className="tdw-attention-heading"><span>Needs your input</span><strong>The coding agent is waiting for a decision.</strong></div>
 
       {questions.map((request) => (
@@ -98,6 +98,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
                       <button
                         type="button"
                         className={selected.includes(option.label) ? "selected" : ""}
+                        aria-pressed={selected.includes(option.label)}
                         onClick={() => toggleOption(request.id, index, option.label, Boolean(question.multiple))}
                         key={option.label}
                       >
@@ -112,6 +113,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
                     value={custom[key] || ""}
                     onChange={(event) => setCustom((current) => ({ ...current, [key]: event.target.value }))}
                     placeholder="Type another answer..."
+                    aria-label={`Custom answer for ${question.header || question.question || "this question"}`}
                   />
                 ) : null}
               </fieldset>

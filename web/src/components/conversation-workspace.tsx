@@ -570,6 +570,10 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
     || (selectedMachineID !== "all" ? runtimes.find((runtime) => runtime.machine.id === selectedMachineID)?.machine.name : undefined)
     || "All projects"
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
+  // On a phone the machine-health pill, the Machines rail and the harness list are all hidden, so a
+  // disconnected machine was completely invisible until a message failed to send. #287 reports
+  // exactly that symptom from Android. The banner states the known connection state everywhere.
+  const offlineRuntimes = loaded ? runtimes.filter((runtime) => runtime.state === "offline") : []
   const shownRuntimes = selectedMachineID === "all" ? runtimes : runtimes.filter((runtime) => runtime.machine.id === selectedMachineID)
   const shownHarnesses = shownRuntimes.flatMap((runtime) => (runtime.snapshot?.agents ?? []).map((agent) => ({ runtime, agent })))
   const statusCounts = {
@@ -764,7 +768,21 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
 
         <section className="tdw-thread-column hr-conversation-column">
           <div className="tdw-column-heading tdw-task-drawer-heading"><div><span>{drawerEyebrow}</span><h2>Conversations <strong className="tdw-task-drawer-count">{visibleConversations.length}</strong></h2></div><button type="button" className="tdw-sidebar-collapse tdw-task-drawer-close" onClick={() => setConversationDrawerOpen(false)} aria-label="Close conversation list" title="Close conversation list">×</button></div>
-          <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations..." /></div>
+          {offlineRuntimes.length ? (
+            <button type="button" className="hr-offline-banner" role="status" onClick={onManageMachines}>
+              <span className="hr-offline-dot" aria-hidden="true" />
+              <span className="hr-offline-copy">
+                <strong>{offlineRuntimes.length === 1
+                  ? `${offlineRuntimes[0].snapshot?.machine.name || offlineRuntimes[0].machine.name} is offline`
+                  : `${offlineRuntimes.length} machines are offline`}</strong>
+                <small>{offlineRuntimes.length === 1
+                  ? offlineRuntimes[0].error || "Its conversations cannot continue until it reconnects."
+                  : "Their conversations cannot continue until they reconnect."}</small>
+              </span>
+              <b>Machines</b>
+            </button>
+          ) : null}
+          <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations..." aria-label="Search conversations" /></div>
           <div className="tdw-thread-list">
             {!loaded && conversations.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Connecting your workspace...</strong><span>Discovering machines, projects and coding agents.</span></div> : visibleConversations.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No conversations here</strong><span>Start one with any available coding agent.</span><button type="button" className="tdw-button primary" onClick={() => setNewConversationOpen(true)}><PlusIcon size={14} /> New conversation</button></div> : visibleConversations.map((record) => {
               const state = conversationState(record.conversation)
