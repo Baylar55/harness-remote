@@ -25,7 +25,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   #resetSettings = () => {
-    for (const key of this.props.resetKeys) localStorage.removeItem(key)
+    for (const key of this.props.resetKeys) {
+      try {
+        localStorage.removeItem(key)
+      } catch {
+        // Recovery must keep going even if one key cannot be removed.
+      }
+    }
     location.reload()
   }
 
@@ -36,13 +42,14 @@ export class ErrorBoundary extends Component<Props, State> {
       <div className="crash-screen" role="alert">
         <h1>Harness Remote could not start</h1>
         <p>
-          Something went wrong while loading the app. Resetting the server settings clears the saved
-          configuration and reloads; your language and theme are kept.
+          Something went wrong while loading the app. Resetting clears the saved workspace
+          configuration, including your configured machines, and reloads. Your language and theme
+          are kept, and nothing on your machines is changed.
         </p>
         <pre>{error.message}</pre>
         <div className="crash-actions">
           <button type="button" className="btn-primary" onClick={this.#resetSettings}>
-            Reset server settings
+            Reset app configuration
           </button>
           <button type="button" className="btn-secondary" onClick={() => location.reload()}>
             Reload
