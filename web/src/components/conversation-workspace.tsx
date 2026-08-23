@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react"
 import {
   isThemePreference,
   loadLanguage,
@@ -72,6 +72,13 @@ const WORKSPACE_COLLAPSED_KEY = "harness-remote.v3.workspace-collapsed"
 const WORKSPACE_SECTIONS_COLLAPSED_KEY = "harness-remote.v3.workspace-sections-collapsed"
 const CONVERSATION_PANE_WIDTH_KEY = "harness-remote.v3.conversation-pane-width"
 const CONVERSATION_DRAWER_OPEN_KEY = "harness-remote.v3.conversation-drawer-open"
+const MIN_CONVERSATION_PANE_WIDTH = 280
+const MAX_CONVERSATION_PANE_WIDTH = 500
+const DEFAULT_CONVERSATION_PANE_WIDTH = 350
+
+function clampPaneWidth(value: number): number {
+  return Math.max(MIN_CONVERSATION_PANE_WIDTH, Math.min(MAX_CONVERSATION_PANE_WIDTH, Math.round(value)))
+}
 
 /** A phone keyboard opening over the machine/project/agent selectors is worse than no autofocus. */
 function coarsePointer(): boolean {
@@ -257,6 +264,20 @@ function NewConversationModal({
   onCreated: (runtime: Runtime, conversation: MachineTask) => void
 }) {
   const online = runtimes.filter((runtime) => runtime.state === "online" && runtime.projects.length > 0 && runtime.agents.length > 0)
+  // "No coding machine is ready" on its own is a dead end. Every configured machine is listed with
+  // the specific reason it cannot host a Conversation right now.
+  const blockers = runtimes
+    .filter((runtime) => !online.includes(runtime))
+    .map((runtime) => ({
+      name: runtime.snapshot?.machine.name || runtime.machine.name,
+      reason: runtime.state === "loading"
+        ? "Still connecting..."
+        : runtime.state === "offline"
+          ? runtime.error || "Machine offline"
+          : runtime.projects.length === 0
+            ? "Connected, but no project is configured on this machine."
+            : "Connected, but no coding agent was discovered on this machine."
+    }))
   const initialProject = initialProjectKey.includes(":") ? initialProjectKey.split(":").slice(1).join(":") : ""
   const initialRuntime = online.find((runtime) => runtime.machine.id === initialMachineID) || online[0]
   const [machineID, setMachineID] = useState(initialRuntime?.machine.id || "")
@@ -354,7 +375,14 @@ function NewConversationModal({
       <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
         <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New conversation" ref={emptyDialogRef} onMouseDown={(event) => event.stopPropagation()}>
           <header><div><span>New conversation</span><h2>No coding machine is ready</h2></div><button type="button" onClick={onClose} aria-label="Close">×</button></header>
-          <div className="tdw-modal-body"><p>Connect a machine with at least one project and one available coding agent.</p></div>
+          <div className="tdw-modal-body">
+            <p>A Conversation needs a machine that is online and exposes at least one project and one coding agent.</p>
+            {blockers.length ? (
+              <ul className="tdw-blocker-list">
+                {blockers.map((blocker) => <li key={blocker.name}><strong>{blocker.name}</strong><span>{blocker.reason}</span></li>)}
+              </ul>
+            ) : <p>No machine is configured yet. Add one from Machines.</p>}
+          </div>
         </section>
       </div>
     )
@@ -411,8 +439,11 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
   const [collapsedSections, setCollapsedSections] = useState<Set<WorkspaceSection>>(loadCollapsedWorkspaceSections)
   const [conversationPaneWidth, setConversationPaneWidth] = useState(() => {
     const saved = Number(localStorage.getItem(CONVERSATION_PANE_WIDTH_KEY))
-    return Number.isFinite(saved) && saved >= 280 && saved <= 500 ? saved : 350
+    return Number.isFinite(saved) && saved >= MIN_CONVERSATION_PANE_WIDTH && saved <= MAX_CONVERSATION_PANE_WIDTH
+      ? saved
+      : DEFAULT_CONVERSATION_PANE_WIDTH
   })
+  const conversationPaneWidthRef = useRef(conversationPaneWidth)
   const refreshGeneration = useRef(0)
 
   useEffect(() => {
@@ -550,6 +581,9 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
   function selectMachine(id: string) {
     setSelectedConversationKey(null)
     setSelectedMachineID(id)
+    // New Conversation defaults to the active machine. Without this it kept offering the machine of
+    // the last opened Conversation even after the user had explicitly moved to another one.
+    if (id !== "all") onActiveMachineID(id)
     setSelectedProjectKey("all")
     setConversationFilter("all")
     setConversationDrawerOpen(true)
@@ -561,7 +595,10 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
     setSelectedProjectKey(key)
     if (key !== "all") {
       const record = projects.find((candidate) => candidate.key === key)
-      if (record) setSelectedMachineID(record.runtime.machine.id)
+      if (record) {
+        setSelectedMachineID(record.runtime.machine.id)
+        onActiveMachineID(record.runtime.machine.id)
+      }
     }
     setConversationFilter("all")
     setConversationDrawerOpen(true)
@@ -577,25 +614,51 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
     })
   }
 
+  function commitConversationPaneWidth(width: number) {
+    conversationPaneWidthRef.current = width
+    setConversationPaneWidth(width)
+    try {
+      localStorage.setItem(CONVERSATION_PANE_WIDTH_KEY, String(width))
+    } catch {
+      // The pane still resizes for this session if storage is unavailable.
+    }
+  }
+
   function beginConversationPaneResize(event: ReactPointerEvent<HTMLDivElement>) {
     if (window.innerWidth <= 900) return
     event.preventDefault()
     const startX = event.clientX
-    const startWidth = conversationPaneWidth
+    const startWidth = conversationPaneWidthRef.current
     const move = (pointer: PointerEvent) => {
-      const next = Math.max(280, Math.min(500, startWidth + pointer.clientX - startX))
+      const next = clampPaneWidth(startWidth + pointer.clientX - startX)
+      conversationPaneWidthRef.current = next
       setConversationPaneWidth(next)
     }
-    const up = () => {
+    const finish = () => {
       window.removeEventListener("pointermove", move)
-      window.removeEventListener("pointerup", up)
-      setConversationPaneWidth((value) => {
-        localStorage.setItem(CONVERSATION_PANE_WIDTH_KEY, String(value))
-        return value
-      })
+      window.removeEventListener("pointerup", finish)
+      // A cancelled pointer (a touch turning into a scroll, a lost capture) never fires pointerup.
+      // Without this the move listener stayed attached to the window and the pane kept following
+      // the cursor with no button held down.
+      window.removeEventListener("pointercancel", finish)
+      commitConversationPaneWidth(conversationPaneWidthRef.current)
     }
     window.addEventListener("pointermove", move)
-    window.addEventListener("pointerup", up, { once: true })
+    window.addEventListener("pointerup", finish)
+    window.addEventListener("pointercancel", finish)
+  }
+
+  /** A separator that only responds to a drag is unusable without a pointing device. */
+  function onConversationPaneKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const step = event.shiftKey ? 40 : 10
+    let next = conversationPaneWidthRef.current
+    if (event.key === "ArrowLeft") next -= step
+    else if (event.key === "ArrowRight") next += step
+    else if (event.key === "Home") next = MIN_CONVERSATION_PANE_WIDTH
+    else if (event.key === "End") next = MAX_CONVERSATION_PANE_WIDTH
+    else return
+    event.preventDefault()
+    commitConversationPaneWidth(clampPaneWidth(next))
   }
 
   function updateConversation(machineID: string, conversation: MachineTask) {
@@ -709,7 +772,18 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
               return <button type="button" className={`tdw-thread-card${selectedConversationKey === record.key ? " selected" : ""}`} onClick={() => { setSelectedConversationKey(record.key); setConversationDrawerOpen(false); setMobileDetailOpen(true) }} key={record.key}><span className={`tdw-thread-state ${state}`} /><span className="tdw-thread-card-main"><span className="tdw-thread-title"><strong>{conversationTitle(record.conversation)}</strong><time>{formatRelative(record.conversation.updatedAt || record.conversation.createdAt)}</time></span><span className="tdw-thread-project">{record.conversation.project?.name || record.conversation.projectId}</span><span className="tdw-thread-meta">{agent?.label || conversationAgentID(record.conversation)} · {modelLabel(record.conversation)}</span><span className={`tdw-thread-status ${state}`}>{conversationStateLabel(record.conversation)}</span></span></button>
             })}
           </div>
-          <div className="tdw-pane-resizer" role="separator" aria-orientation="vertical" aria-label="Resize conversation list" onPointerDown={beginConversationPaneResize} />
+          <div
+            className="tdw-pane-resizer"
+            role="separator"
+            tabIndex={0}
+            aria-orientation="vertical"
+            aria-label="Resize conversation list"
+            aria-valuenow={conversationPaneWidth}
+            aria-valuemin={MIN_CONVERSATION_PANE_WIDTH}
+            aria-valuemax={MAX_CONVERSATION_PANE_WIDTH}
+            onPointerDown={beginConversationPaneResize}
+            onKeyDown={onConversationPaneKeyDown}
+          />
         </section>
 
         <main className={`tdw-main${mobileDetailOpen ? " mobile-open" : ""}`}>

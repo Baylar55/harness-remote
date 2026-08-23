@@ -89,6 +89,9 @@
 .tdw-pane-resizer { position: absolute; z-index: 5; top: 0; right: -4px; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
 .tdw-pane-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; }
 .tdw-pane-resizer:hover::after { background: var(--td3-blue-border); }
+/* The separator is keyboard operable (arrows resize, Home/End snap), so it needs a visible focus. */
+.tdw-pane-resizer:focus-visible { outline: 0; }
+.tdw-pane-resizer:focus-visible::after { left: 2px; width: 3px; background: var(--td3-blue); }
 
 .tdw-thread-state.attention { background: var(--td3-red); }
 .tdw-thread-state.stopped { background: var(--td3-yellow); }
