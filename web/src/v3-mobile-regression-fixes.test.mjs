@@ -22,6 +22,11 @@ assert.match(css, /\.tdw-layout[\s\S]*grid-template-columns: minmax\(0, 1fr\) !i
 assert.match(css, /\.tdw-main\.mobile-open[\s\S]*display: flex !important/)
 assert.match(css, /\.uw-machine-manager[\s\S]*width: 100% !important/)
 assert.match(css, /\.tdw-model-popover[\s\S]*position: fixed !important/)
+assert.match(landscapeGrid, /\.tdw-thread-column[\s\S]*position: relative !important/)
+assert.match(landscapeGrid, /left: auto !important/)
+assert.match(landscapeGrid, /transform: none !important/)
+assert.match(landscapeGrid, /visibility: visible !important/)
+assert.match(landscapeGrid, /width: 100% !important/)
 assert.match(landscapeGrid, /\.tdw-main\.mobile-open[\s\S]*grid-column: 1 \/ -1 !important/)
 assert.match(landscapeGrid, /grid-row: 1 \/ -1 !important/)
 
