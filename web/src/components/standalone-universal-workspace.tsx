@@ -11,7 +11,7 @@ import {
 } from "../appPreferences"
 import { ChatIcon, ServerIcon, SettingsIcon } from "../Icons"
 import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
-import { discoverMachine } from "../machineClient"
+import { discoverMachine, machineAgentStateLabel } from "../machineClient"
 import type { MachineSnapshot } from "../types"
 import {
   createWorkspaceMachine,
@@ -79,9 +79,11 @@ function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps)
     <div className="uw-machine-editor">
       <div className="uw-machine-editor-grid">
         <label><span>Name</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="My workstation" /></label>
-        <label><span>Host</span><input value={host} onChange={(event) => setHost(event.target.value)} placeholder="192.168.1.20 or localhost" spellCheck={false} /></label>
+        {/* A phone keyboard capitalises the first letter by default, which silently turned `localhost`
+            into `Localhost` and a username into a different username. Neither field is prose. */}
+        <label><span>Host</span><input value={host} onChange={(event) => setHost(event.target.value)} placeholder="192.168.1.20 or localhost" spellCheck={false} autoCapitalize="none" autoCorrect="off" /></label>
         <label><span>Port</span><input value={port} onChange={(event) => setPort(event.target.value.replace(/\D/g, ""))} inputMode="numeric" /></label>
-        <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
+        <label><span>Username</span><input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" spellCheck={false} autoCapitalize="none" autoCorrect="off" /></label>
         <label className="uw-machine-editor-wide"><span>Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" /></label>
       </div>
       {testResult ? <div className={`uw-machine-test-result ${testResult.ok ? "ok" : "error"}`}>{testResult.text}</div> : null}
@@ -148,7 +150,7 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
                   <strong>{snapshot?.machine.name || machine.name}</strong>
                   <span>{machine.config.host}:{machine.config.port}</span>
                   <small>{snapshot === undefined ? "Checking coding agents..." : snapshot ? `${snapshot.agents.length} coding agent${snapshot.agents.length === 1 ? "" : "s"} detected` : "Machine unavailable"}</small>
-                  {snapshot?.agents.length ? <div className="uw-machine-harness-list">{snapshot.agents.map((agent) => <span className="uw-machine-harness" key={agent.id}><i className={agent.state} /><strong>{agent.label}</strong><small>{agent.state}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span>)}</div> : null}
+                  {snapshot?.agents.length ? <div className="uw-machine-harness-list">{snapshot.agents.map((agent) => <span className="uw-machine-harness" key={agent.id}><i className={agent.state} aria-hidden="true" /><strong>{agent.label}</strong><small>{machineAgentStateLabel(agent.state)}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span>)}</div> : null}
                 </div>
                 <div className="uw-machine-config-actions">
                   {confirmRemoveID === machine.id ? (

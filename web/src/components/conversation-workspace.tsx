@@ -8,7 +8,7 @@ import {
   type ThemePreference
 } from "../appPreferences"
 import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
-import { discoverMachine, selectableMachineAgents } from "../machineClient"
+import { discoverMachine, machineAgentStateLabel, selectableMachineAgents } from "../machineClient"
 import {
   taskClient,
   type MachineProject,
@@ -147,10 +147,7 @@ function harnessReady(agent: MachineAgentHost): boolean {
 }
 
 function harnessStateLabel(agent: MachineAgentHost): string {
-  if (agent.state === "available") return "Running"
-  if (agent.state === "configured") return "Ready"
-  if (agent.state === "unavailable") return "Unavailable"
-  return agent.state
+  return machineAgentStateLabel(agent.state)
 }
 
 /**
@@ -413,7 +410,7 @@ function NewConversationModal({
             <label><span>Coding agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{runtime.agents.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
             <div className="tdw-field"><span>Model</span><ModelPicker models={models} value={modelKey} onChange={setModelKey} disabled={starting} loading={modelsLoading} />{modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. The conversation starts on the harness default.</small> : null}</div>
           </div>
-          <label className="tdw-prompt-field"><span>First message</span><textarea data-autofocus value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (canStart) void start() } }} rows={7} placeholder="What do you want to build, fix or understand?" /></label>
+          <label className="tdw-prompt-field"><span>First message</span><textarea data-autofocus value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (canStart) void start() } }} rows={7} enterKeyHint="enter" placeholder="What do you want to build, fix or understand?" /></label>
           <div className="hr-workspace-note">
             <strong>Uses the real project workspace</strong>
             <span>No hidden worktree is created. You can continue this conversation with another coding agent at any time.</span>
@@ -718,7 +715,7 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
           <button type="button" className={`tdw-button secondary tdw-tasks-toggle${conversationDrawerOpen ? " active" : ""}`} onClick={() => setConversationDrawerOpen((value) => !value)} aria-expanded={conversationDrawerOpen}><ChatIcon size={15} /> Conversations <span>{visibleConversations.length}</span></button>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
           <button type="button" className="tdw-icon-button" onClick={() => setSettingsOpen(true)} title="Settings" aria-label="Settings"><SettingsIcon size={16} /></button>
-          <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label="Refresh" disabled={refreshing}><RefreshIcon size={16} /></button>
+          <button type="button" className="tdw-icon-button hr-refresh-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label={refreshing ? "Refreshing machines" : "Refresh"} aria-busy={refreshing} disabled={refreshing}><RefreshIcon size={16} /></button>
           <button type="button" className="tdw-button primary hr-new-conversation" onClick={() => setNewConversationOpen(true)}><PlusIcon size={15} /> New conversation</button>
         </div>
       </header>
@@ -814,7 +811,9 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
               <b>Machines</b>
             </button>
           ) : null}
-          <div className="tdw-thread-search"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations..." aria-label="Search conversations" /></div>
+          {/* `type="search"` is what gives a phone the inline clear affordance and a Search action key
+              instead of a newline key, and search terms are not sentences, so autocapitalise off. */}
+          <div className="tdw-thread-search"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search conversations..." aria-label="Search conversations" enterKeyHint="search" autoCapitalize="none" autoCorrect="off" spellCheck={false} /></div>
           <div className="tdw-thread-list">
             {!loaded && conversations.length === 0 ? <div className="tdw-empty"><LoadingIcon size={22} /><strong>Connecting your workspace...</strong><span>Discovering machines, projects and coding agents.</span></div> : visibleConversations.length === 0 ? <div className="tdw-empty"><ChatIcon size={22} /><strong>No conversations here</strong><span>Start one with any available coding agent.</span><button type="button" className="tdw-button primary" onClick={() => setNewConversationOpen(true)}><PlusIcon size={14} /> New conversation</button></div> : visibleConversations.map((record) => {
               const state = conversationState(record.conversation)
