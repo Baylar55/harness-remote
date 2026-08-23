@@ -86,10 +86,10 @@ export class AcpClient extends EventEmitter {
     }
   }
 
-  async start() {
+  async start(timeoutMs = START_TIMEOUT_MS) {
     if (this.#child) return
     if (this.#starting) return this.#starting
-    this.#starting = this.#start()
+    this.#starting = this.#start(timeoutMs)
     try {
       await this.#starting
     } finally {
@@ -97,7 +97,13 @@ export class AcpClient extends EventEmitter {
     }
   }
 
-  async #start() {
+  async #start(timeoutMs) {
+    const deadline = Date.now() + Math.max(1, timeoutMs)
+    const remaining = (phase) => {
+      const value = deadline - Date.now()
+      if (value <= 0) throw new Error(`ACP adapter startup timed out during ${phase}`)
+      return value
+    }
     const windowsCommand = process.platform === "win32" && this.#spawn === spawn && /\.(cmd|bat)$/i.test(this.#command)
       ? process.env.ComSpec ?? "cmd.exe"
       : this.#command
@@ -141,7 +147,7 @@ export class AcpClient extends EventEmitter {
         protocolVersion: 1,
         clientCapabilities: {},
         clientInfo: { name: "harness-remote-bridge", version: "0.1.7" }
-      }, START_TIMEOUT_MS)
+      }, remaining("initialize"))
       this.#agentInfo = initialized.agentInfo
       this.#promptCapabilities = initialized.agentCapabilities?.promptCapabilities ?? {}
       // The bridge always runs beside a harness the user already configured, so prefer a method
@@ -157,7 +163,7 @@ export class AcpClient extends EventEmitter {
       authMethod ??= authMethods.find((method) => method?.id === "agent")
         ?? authMethods.find((method) => method?.id && method.type !== "env_var")
         ?? authMethods.find((method) => method?.id)
-      if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, START_TIMEOUT_MS)
+      if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, remaining("authenticate"))
     } catch (error) {
       this.close()
       throw error
