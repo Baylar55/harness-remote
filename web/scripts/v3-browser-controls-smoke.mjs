@@ -200,14 +200,16 @@ async function insideViewport(page, locator, label) {
   assert.ok(box.y + box.height <= viewport.height + 1, `${label}: clipped vertically`)
 }
 
-async function waitForDrawerSettled(page, selector) {
-  await page.waitForFunction((target) => {
-    const element = document.querySelector(target)
-    if (!element) return false
-    const box = element.getBoundingClientRect()
-    const style = getComputedStyle(element)
-    return box.x >= -1 && Number(style.opacity) >= 0.999 && style.visibility === "visible"
-  }, selector)
+async function waitForDrawerSettled(page) {
+  await page.waitForFunction(() => {
+    const workspace = document.querySelector(".tdw-project-column")
+    const drawer = document.querySelector(".tdw-thread-column")
+    if (!workspace || !drawer) return false
+    const workspaceBox = workspace.getBoundingClientRect()
+    const drawerBox = drawer.getBoundingClientRect()
+    const style = getComputedStyle(drawer)
+    return drawerBox.left >= workspaceBox.right - 1 && Number(style.opacity) >= 0.999 && style.visibility === "visible"
+  })
 }
 
 async function noOverflow(page, label) {
@@ -326,7 +328,7 @@ async function runDesktop(browser) {
   const drawer = page.locator(".tdw-thread-column")
   await conversationsToggle.click()
   await drawer.waitFor({ state: "visible" })
-  await waitForDrawerSettled(page, ".tdw-thread-column")
+  await waitForDrawerSettled(page)
   const drawerGeometry = await page.evaluate(() => {
     const workspace = document.querySelector(".tdw-project-column")?.getBoundingClientRect()
     const drawer = document.querySelector(".tdw-thread-column")?.getBoundingClientRect()
