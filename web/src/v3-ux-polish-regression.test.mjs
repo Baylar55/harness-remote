@@ -53,7 +53,10 @@ assert.match(mobileParity, /:has\(\.tdw-main\.mobile-open\) \.hr-mobile-nav[\s\S
 assert.match(mobileParity, /\.hr-mobile-settings-group label:nth-of-type\(2\)[\s\S]*display: grid !important/)
 assert.match(mobileParity, /\.uw-machine-harness-list[\s\S]*display: flex !important/)
 assert.match(mobileParity, /\.uw-transcript-jumps/)
-assert.match(mobileParity, /orientation: portrait/)
+// A soft keyboard can change viewport aspect ratio without rotating the phone. Narrow width, not
+// CSS `orientation`, is the invariant that prevents the portrait modal from becoming two-column.
+assert.match(mobileParity, /@media \(pointer: coarse\) and \(max-width: 599px\) and \(max-height: 640px\)/)
+assert.match(mobileParity, /@media \(pointer: coarse\) and \(min-width: 600px\) and \(max-height: 640px\)/)
 assert.match(mobileParity, /\.hr-new-conversation-modal \.tdw-modal-body[\s\S]*display: flex !important/)
 
 // The differentiator has to be visible in normal conversation chrome, not hidden in documentation.
