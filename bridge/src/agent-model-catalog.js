@@ -5,6 +5,7 @@ import path from "node:path"
 // `npx` launch, authentication, and a technical session before they can expose config options.
 export const MODEL_CATALOG_TIMEOUT_MS = 8_000
 export const ACP_MODEL_CATALOG_TIMEOUT_MS = 90_000
+export const ACP_MODEL_CATALOG_TTL_MS = 5 * 60_000
 export const HTTP_MODEL_CATALOG_TTL_MS = 30_000
 
 function withTimeout(promise, timeoutMs, label) {
@@ -121,6 +122,21 @@ export function modelsFromProvidersResponse(payload) {
   return dedupeModels(models)
 }
 
+/**
+ * OpenCode exposes a runtime provider inventory separately from its configuration inventory.
+ * The runtime response names providers that Provider.list() can actually initialize in `connected`.
+ * Prefer that set for a picker whose promise is "models I can run", not "models mentioned in config".
+ */
+export function modelsFromRuntimeProvidersResponse(payload) {
+  const all = Array.isArray(payload?.all) ? payload.all : []
+  const hasConnectedInventory = Array.isArray(payload?.connected)
+  const connected = new Set(hasConnectedInventory ? payload.connected.filter((value) => typeof value === "string") : [])
+  const providers = hasConnectedInventory
+    ? all.filter((provider) => provider && typeof provider.id === "string" && connected.has(provider.id))
+    : all
+  return modelsFromProvidersResponse({ providers, default: payload?.default })
+}
+
 function sameModel(left, right) {
   return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant ?? "") === (right.variant ?? "")
 }
@@ -194,12 +210,21 @@ class CachedCatalog {
 }
 
 export class AcpAgentModelCatalog extends CachedCatalog {
-  constructor({ agent, agentID, directory, stateDirectory, timeoutMs = ACP_MODEL_CATALOG_TIMEOUT_MS, variantConfigIDs = [] }) {
+  constructor({
+    agent,
+    agentID,
+    directory,
+    stateDirectory,
+    timeoutMs = ACP_MODEL_CATALOG_TIMEOUT_MS,
+    ttlMs = ACP_MODEL_CATALOG_TTL_MS,
+    variantConfigIDs = []
+  }) {
     super()
     this.agent = agent
     this.agentID = agentID
     this.directory = directory
     this.timeoutMs = timeoutMs
+    this.ttlMs = ttlMs
     this.variantConfigIDs = [...new Set(variantConfigIDs.filter((value) => typeof value === "string" && value))]
     this.stateFile = path.join(stateDirectory, `model-catalog-${agentID}.json`)
     this.sessionID = undefined
@@ -207,6 +232,7 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     this.hiddenSessionIDs = new Set()
     this.onAgentExit = (error) => {
       this.lastError = error instanceof Error ? error.message : String(error ?? "adapter exited")
+      this.sessionID = undefined
       this.clear()
     }
     this.agent.on?.("exit", this.onAgentExit)
@@ -217,9 +243,13 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     this.stateLoaded = true
     try {
       const state = JSON.parse(await readFile(this.stateFile, "utf8"))
-      if (state?.version === 1 && typeof state.sessionID === "string" && state.sessionID) {
-        this.sessionID = state.sessionID
-        this.hiddenSessionIDs.add(state.sessionID)
+      const sessionIDs = state?.version === 2 && Array.isArray(state.sessionIDs)
+        ? state.sessionIDs
+        : state?.version === 1 && typeof state.sessionID === "string"
+          ? [state.sessionID]
+          : []
+      for (const sessionID of sessionIDs) {
+        if (typeof sessionID === "string" && sessionID) this.hiddenSessionIDs.add(sessionID)
       }
     } catch (error) {
       if (error?.code !== "ENOENT") throw error
@@ -233,7 +263,8 @@ export class AcpAgentModelCatalog extends CachedCatalog {
 
   async #saveState() {
     await mkdir(path.dirname(this.stateFile), { recursive: true })
-    await writeFile(this.stateFile, JSON.stringify({ version: 1, sessionID: this.sessionID, directory: this.directory }), { mode: 0o600 })
+    const sessionIDs = [...this.hiddenSessionIDs].slice(-64)
+    await writeFile(this.stateFile, JSON.stringify({ version: 2, sessionIDs, directory: this.directory }), { mode: 0o600 })
   }
 
   async #newCatalogSession() {
@@ -248,15 +279,11 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   async #refreshOptions() {
     await this.agent.start()
     await this.#loadState()
-    if (this.sessionID) {
-      try {
-        const loaded = await this.agent.request("session/load", { sessionId: this.sessionID, cwd: this.directory, mcpServers: [] }, this.timeoutMs)
-        return loaded?.configOptions
-      } catch {
-        this.hiddenSessionIDs.delete(this.sessionID)
-        this.sessionID = undefined
-      }
-    }
+    // A loaded historical ACP Session is allowed to preserve the configuration it was created with.
+    // That is useful for resuming a Conversation but wrong for discovery: removed provider models can
+    // remain in that Session's configOptions indefinitely. Every catalog refresh therefore starts a
+    // fresh prompt-less technical Session. Persisted ids are retained only so those sessions stay
+    // hidden from the user's Conversation list; they are never reused as a model source.
     return this.#newCatalogSession()
   }
 
@@ -343,12 +370,16 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     return this.remember(models)
   }
 
+  #fresh() {
+    const refreshed = Date.parse(this.refreshedAt ?? "")
+    return this.cache.length > 0 && Number.isFinite(refreshed) && Date.now() - refreshed < this.ttlMs
+  }
+
   async list({ allowStale = true, refresh = false } = {}) {
-    // ACP adapters commonly attach live listeners when a session is loaded. Re-loading the same
-    // prompt-less catalog session every time a model picker opens can therefore accumulate adapter
-    // listeners even though the advertised model set has not changed. Keep one in-memory catalog
-    // for the lifetime of this dedicated adapter process. Its `exit` event invalidates the cache.
-    if (!refresh && this.cache.length) return this.result(this.cache, false)
+    // Keep discovery warm, but never for the lifetime of the daemon. Provider catalogs change while
+    // the daemon is running; a bounded TTL plus a fresh technical Session prevents removed models
+    // from surviving forever while still avoiding a new ACP Session for every picker repaint.
+    if (!refresh && this.#fresh()) return this.result(this.cache, false)
     if (!this.inFlight) {
       const operation = this.#refreshCatalog()
       this.inFlight = operation.finally(() => {
@@ -369,9 +400,10 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   async validate(model) { await this.resolve(model) }
   diagnostics() {
     return {
-      ...this.diagnosticsBase("acp-config-options"),
+      ...this.diagnosticsBase("acp-fresh-session-config-options"),
       adapterProcess: this.agent.diagnostics?.() ?? { processID: this.agent.processID },
       technicalSessionPersisted: Boolean(this.sessionID),
+      ttlMs: this.ttlMs,
       variantConfigIDs: this.variantConfigIDs
     }
   }
@@ -390,6 +422,13 @@ export class HttpAgentModelCatalog extends CachedCatalog {
     this.timeoutMs = timeoutMs
     this.ttlMs = ttlMs
     this.hiddenSessionIDs = new Set()
+    this.source = "opencode-provider-runtime"
+  }
+
+  async #fetch(base, pathname, auth) {
+    return this.fetchImpl(`${base}${pathname}`, {
+      headers: { Accept: "application/json", ...(auth ? { Authorization: auth } : {}) }
+    })
   }
 
   async #refresh() {
@@ -398,12 +437,27 @@ export class HttpAgentModelCatalog extends CachedCatalog {
     const host = this.host.readinessHost ?? this.host.host ?? "127.0.0.1"
     const base = `http://${httpHost(host)}:${this.host.port}`
     const auth = authorization(this.host.username, this.host.password)
-    const response = await this.fetchImpl(`${base}/config/providers`, {
-      headers: { Accept: "application/json", ...(auth ? { Authorization: auth } : {}) }
-    })
+
+    // `/config/providers` describes configuration and can contain entries that the runtime later
+    // rejects as ModelUnavailable. OpenCode's own clients bootstrap from the provider inventory.
+    // Prefer that runtime source, supporting both the legacy and current v2 route names.
+    for (const pathname of ["/provider", "/api/provider"]) {
+      const response = await this.#fetch(base, pathname, auth)
+      if (response.status === 404 || response.status === 405) continue
+      if (!response.ok) throw new Error(`Refreshing ${this.agentID} models from ${pathname} failed with HTTP ${response.status}`)
+      const models = modelsFromRuntimeProvidersResponse(await response.json())
+      if (!models.length) throw new Error(`Agent ${this.agentID} did not advertise any connected runtime models`)
+      this.source = `opencode-runtime:${pathname}`
+      return this.remember(models)
+    }
+
+    // Compatibility only for OpenCode versions from before the runtime provider route. Do not use
+    // this when a runtime route exists: configuration inventory is intentionally weaker evidence.
+    const response = await this.#fetch(base, "/config/providers", auth)
     if (!response.ok) throw new Error(`Refreshing ${this.agentID} models failed with HTTP ${response.status}`)
     const models = modelsFromProvidersResponse(await response.json())
     if (!models.length) throw new Error(`Agent ${this.agentID} did not advertise any models`)
+    this.source = "opencode-config-providers-legacy"
     return this.remember(models)
   }
 
@@ -434,7 +488,7 @@ export class HttpAgentModelCatalog extends CachedCatalog {
   async validate(model) { await this.resolve(model) }
   diagnostics() {
     return {
-      ...this.diagnosticsBase("opencode-config-providers"),
+      ...this.diagnosticsBase(this.source),
       ttlMs: this.ttlMs,
       hostProcessID: this.host.processID
     }
