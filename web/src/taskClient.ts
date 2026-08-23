@@ -135,6 +135,11 @@ export type AgentModelCatalog = {
   source?: string
 }
 
+export type AgentModelScope = {
+  projectId?: string
+  workThreadId?: string
+}
+
 export type TaskContinueInput = {
   prompt: string
   agentId?: string
@@ -163,6 +168,19 @@ const pendingContinueRequests = new Map<string, PendingContinue>()
 
 function cacheKey(config: ServerConfig): string {
   return `${machineBaseUrl(config)}|${config.username || ""}`
+}
+
+function modelScopeKey(scope: AgentModelScope): string {
+  if (scope.workThreadId) return `conversation:${scope.workThreadId}`
+  if (scope.projectId) return `project:${scope.projectId}`
+  return "default"
+}
+
+function modelCatalogPath(agentId: string, scope: AgentModelScope): string {
+  const params = new URLSearchParams({ waitMs: "4000" })
+  if (scope.workThreadId) params.set("workThreadId", scope.workThreadId)
+  else if (scope.projectId) params.set("projectId", scope.projectId)
+  return `/v1/agents/${encodeURIComponent(agentId)}/models?${params.toString()}`
 }
 
 function pendingContinueKey(config: ServerConfig, taskId: string): string {
@@ -357,8 +375,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 }
 
-async function loadAgentModelCatalog(config: ServerConfig, agentId: string): Promise<AgentModelCatalog> {
-  const path = `/v1/agents/${encodeURIComponent(agentId)}/models?waitMs=4000`
+async function loadAgentModelCatalog(config: ServerConfig, agentId: string, scope: AgentModelScope): Promise<AgentModelCatalog> {
+  const path = modelCatalogPath(agentId, scope)
   const started = Date.now()
   while (true) {
     const catalog = requireModelCatalog(await machineRequest<unknown>(config, path), path)
@@ -428,11 +446,11 @@ export const taskClient = {
     return machineRequest<MachineTask>(config, `/v1/work-threads/${encodeURIComponent(taskId)}`, { method: "PATCH", body: { title } })
   },
 
-  async listAgentModels(config: ServerConfig, agentId: string): Promise<AgentModelCatalog> {
-    const key = `${cacheKey(config)}|${agentId}`
+  async listAgentModels(config: ServerConfig, agentId: string, scope: AgentModelScope = {}): Promise<AgentModelCatalog> {
+    const key = `${cacheKey(config)}|${agentId}|${modelScopeKey(scope)}`
     const existing = modelCatalogRequests.get(key)
     if (existing) return existing
-    const operation = loadAgentModelCatalog(config, agentId)
+    const operation = loadAgentModelCatalog(config, agentId, scope)
     let wrapped: Promise<AgentModelCatalog>
     wrapped = operation.finally(() => {
       if (modelCatalogRequests.get(key) === wrapped) modelCatalogRequests.delete(key)
