@@ -111,3 +111,19 @@ export async function discoverMachine(config: ServerConfig): Promise<MachineSnap
 export function selectableMachineAgents(machine: MachineSnapshot): MachineSnapshot["agents"] {
   return machine.agents.filter((agent) => agent.state === "available" || agent.state === "configured")
 }
+
+/**
+ * The one place that turns a daemon host state into words a user reads.
+ *
+ * `configured` is not a warning: the daemon registers a harness it knows how to launch and only
+ * flips it to `available` once the process is up, so a lazily started agent sits in `configured`
+ * while being perfectly usable. Calling it "Ready" is what keeps the machine list from implying a
+ * problem that does not exist, and having one definition keeps the machine list, the workspace rail
+ * and the harness pills from disagreeing about the same agent.
+ */
+export function machineAgentStateLabel(state: string): string {
+  if (state === "available") return "Running"
+  if (state === "configured") return "Ready"
+  if (state === "unavailable") return "Unavailable"
+  return state
+}

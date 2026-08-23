@@ -76,6 +76,42 @@
     height: calc(100dvh - var(--hr-mobile-nav-height)) !important;
   }
 
+  /* Mobile quietened the top bar by hiding every icon button in it, on the reasoning that the bottom
+     nav owns navigation. That holds for Settings, which the nav does own, but Refresh is not
+     navigation and the nav never replaced it: the phone was left with no way to re-probe machines at
+     all, only a ten-second poll and no way to ask sooner. Recovering from a machine that just came
+     back online should not require killing the app. */
+  .hr-control-plane .tdw-top-actions > .hr-refresh-button {
+    width: 42px !important;
+    min-width: 42px !important;
+    height: 42px !important;
+    min-height: 42px !important;
+    display: flex !important;
+    border-radius: 12px !important;
+    touch-action: manipulation;
+  }
+
+  .hr-control-plane .tdw-top-actions > .hr-refresh-button:disabled {
+    opacity: .45 !important;
+  }
+
+  .hr-control-plane .tdw-top-actions {
+    gap: 2px !important;
+  }
+
+  /* `type="search"` gives the field the WebView's own clear button, which on a phone is the only
+     comfortable way to empty a search. It is laid out inside the field, so leave it room and a
+     target big enough to hit rather than letting it crowd the text. */
+  .hr-control-plane .tdw-thread-search input {
+    padding-inline-end: 12px !important;
+  }
+
+  .hr-control-plane .tdw-thread-search input::-webkit-search-cancel-button {
+    width: 16px;
+    height: 16px;
+    margin-inline-start: 6px;
+  }
+
   /* Language is a real persisted preference and should not disappear just because this is mobile. */
   .hr-mobile-settings-group label:nth-of-type(2) {
     display: grid !important;
@@ -119,6 +155,13 @@
     background: var(--td3-raise-1) !important;
   }
 
+  /* A pill exists only because the daemon detected that harness, so detection is the signal the dot
+     carries — the same rule the desktop rail states in `taskdesk-workspace-navigation.css`. Yellow
+     here broke it twice over: `configured` is a harness that is ready and will spawn on first use,
+     which is the ordinary healthy state for a lazily started agent, and the identical agent was
+     already green in the workspace rail and on desktop. The same machine reporting green in one list
+     and amber in another reads as a warning about nothing. Running still differs from ready, by the
+     halo rather than by hue, and only a genuine failure is red. */
   .uw-machine-harness > i {
     width: 6px !important;
     height: 6px !important;
@@ -127,13 +170,13 @@
     background: var(--td3-muted) !important;
   }
 
-  .uw-machine-harness > i.available {
+  .uw-machine-harness > i.available,
+  .uw-machine-harness > i.configured {
     background: var(--td3-green) !important;
-    box-shadow: 0 0 0 2px var(--td3-green-soft) !important;
   }
 
-  .uw-machine-harness > i.configured {
-    background: var(--td3-yellow) !important;
+  .uw-machine-harness > i.available {
+    box-shadow: 0 0 0 2px var(--td3-green-soft) !important;
   }
 
   .uw-machine-harness > i.unavailable {
@@ -150,8 +193,31 @@
     font-weight: 650 !important;
   }
 
+  /* Clipped rather than `display: none`. The pills are too narrow to spell out "Ready" on every one,
+     but hiding the text outright left colour as the only carrier of state, which a screen reader
+     cannot read and a red-green colour-blind user cannot separate. Clipping keeps it in the
+     accessibility tree and out of the layout. */
   .uw-machine-harness > small {
-    display: none !important;
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip-path: inset(50%) !important;
+    white-space: nowrap !important;
+  }
+
+  /* A harness that is actually down is the one case worth spending a line of the pill on. */
+  .uw-machine-harness:has(> i.unavailable) > small {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    clip-path: none !important;
+    color: var(--td3-red-text) !important;
+    font-size: 9.5px !important;
   }
 
   .uw-transcript-jumps {
@@ -171,24 +237,22 @@
 
 /* Android resizes the WebView when the keyboard opens. The CSS `orientation` media feature can
    itself flip when the visual viewport becomes shorter than it is wide, even though the phone did
-   not rotate. Width is the stable discriminator: a keyboard-resized portrait phone remains narrow. */
+   not rotate. Width is the stable discriminator: a keyboard-resized portrait phone remains narrow.
+
+   This block is that one state, and it deliberately does not touch the backdrop or the sheet frame.
+   The keyboard-down layout is already a full-bleed sheet (`v3-mobile-regression-fixes.css`), so
+   inheriting it unchanged is what keeps the dialog still when the keyboard opens. Re-anchoring the
+   backdrop to `flex-start` with 5px of padding and a 13px radius, as this block used to, moved a
+   sheet that filled the screen up into a floating card: on a real phone that read as the whole
+   window being thrown to the top the moment the field was tapped.
+
+   What gives up height here is the chrome, never the field. The first message is the reason the
+   keyboard is open at all, so it absorbs whatever the selectors leave instead of being pinned to a
+   fixed 86px while a third of the sheet went unused. */
 @media (pointer: coarse) and (max-width: 599px) and (max-height: 640px) {
-  .tdw-modal-backdrop {
-    align-items: flex-start !important;
-    padding: 5px !important;
-  }
-
-  .hr-new-conversation-modal {
-    width: calc(100vw - 10px) !important;
-    max-width: none !important;
-    max-height: calc(100dvh - 10px) !important;
-    margin: 0 !important;
-    border-radius: 13px !important;
-  }
-
   .hr-new-conversation-modal > header {
-    min-height: 44px !important;
-    padding: 7px 11px !important;
+    min-height: 40px !important;
+    padding: 5px 11px !important;
   }
 
   .hr-new-conversation-modal > header h2 {
@@ -213,42 +277,79 @@
   .hr-new-conversation-modal .tdw-form-row:nth-child(2) {
     grid-column: auto !important;
     grid-row: auto !important;
+    flex: none !important;
     display: grid !important;
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 7px !important;
   }
 
+  /* `flex-basis: 0` with grow is what makes this take the leftover height instead of its content
+     height. The min-height is the floor for the case where the selectors genuinely need every row,
+     and the body above stays scrollable, so the field can never squeeze the form out of reach. */
   .hr-new-conversation-modal .tdw-prompt-field {
     grid-column: auto !important;
     grid-row: auto !important;
     width: 100% !important;
     min-width: 0 !important;
+    min-height: 96px !important;
+    flex: 1 1 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
   }
 
   .hr-new-conversation-modal .tdw-prompt-field textarea {
     width: 100% !important;
     min-width: 0 !important;
-    height: 86px !important;
-    min-height: 86px !important;
-    max-height: 104px !important;
+    height: auto !important;
+    min-height: 76px !important;
+    max-height: none !important;
+    flex: 1 1 auto !important;
     resize: none !important;
   }
 
+  /* 16px is load-bearing, not a taste call: a smaller font makes the WebView zoom the page on focus,
+     which is its own layout jump on top of the keyboard's. The old 13px did exactly that. */
   .hr-new-conversation-modal select,
   .hr-new-conversation-modal input,
   .hr-new-conversation-modal .tdw-model-trigger {
-    height: 36px !important;
-    min-height: 36px !important;
-    font-size: 13px !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    font-size: 16px !important;
   }
 
   .hr-new-conversation-modal > footer {
     min-height: 44px !important;
-    padding: 5px 9px !important;
+    padding: 5px 9px max(5px, env(safe-area-inset-bottom)) !important;
   }
 
   .hr-new-conversation-modal > footer .tdw-button {
-    min-height: 34px !important;
+    min-height: 38px !important;
+  }
+
+  /* Typing in a conversation runs into the same shortened viewport, and the chat carries three
+     stacked bars of chrome above the transcript. Trimming their heights hands roughly thirty pixels
+     back to the transcript so context stays visible while composing.
+
+     Heights only. The landscape sheet used to reach this state too and also dropped transcript type
+     to 12.5px and capped the composer, so focusing the field restyled the whole conversation and
+     shrank the field being typed in — the two things that made this feel broken. Type sizes and the
+     composer are deliberately left exactly as they are with the keyboard down. */
+  .hr-control-plane .tdw-thread-header {
+    height: 44px !important;
+    min-height: 44px !important;
+    padding-top: max(4px, env(safe-area-inset-top)) !important;
+    padding-bottom: 4px !important;
+  }
+
+  .hr-control-plane .tdw-detail-tabs,
+  .hr-control-plane .tdw-detail-tabs button {
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+
+  .hr-control-plane .tdw-conversation-toolbar {
+    min-height: 38px !important;
   }
 }
 

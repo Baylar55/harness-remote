@@ -371,7 +371,10 @@ export function TaskDeskConversation({
 
       <div className="uw-composer-shell">
         {/* A placeholder is not a label: it disappears as soon as the field has content, which left
-            the product's primary input unnamed for a screen reader. */}
+            the product's primary input unnamed for a screen reader.
+
+            `enterKeyHint` labels the soft keyboard's action key. Enter inserts a newline on a touch
+            device here, so promising "send" would name a behaviour that key does not have. */}
         <textarea
           ref={composerRef}
           value={draft}
@@ -379,6 +382,7 @@ export function TaskDeskConversation({
           onKeyDown={onComposerKeyDown}
           placeholder={waiting ? `${agentLabel} is working…` : placeholder || `Continue with ${agentLabel}…`}
           rows={3}
+          enterKeyHint={touchFirst ? "enter" : "send"}
           disabled={!ready}
           aria-label={`Message ${agentLabel}`}
           aria-describedby="uw-composer-hint"
