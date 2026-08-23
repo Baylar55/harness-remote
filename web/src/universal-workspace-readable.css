@@ -376,6 +376,14 @@
   gap: 8px;
 }
 
+/* Inline removal confirmation, in place of a native window.confirm the Android WebView renders as
+   an unstyled system alert on top of the app. */
+.uw-machine-confirm {
+  color: var(--td3-red-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .uw-manager-button {
   min-height: 38px;
   padding: 0 12px;

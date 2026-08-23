@@ -16,6 +16,7 @@ import {
 } from "../taskClient"
 import type { MachineAgentHost, MachineSnapshot, ModelOption } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
+import { useDialogDismiss } from "../useDialogDismiss"
 import { fingerprint, mergeRecords, reuseList } from "../workspace-runtime-merge"
 import {
   ChatIcon,
@@ -71,6 +72,11 @@ const WORKSPACE_COLLAPSED_KEY = "harness-remote.v3.workspace-collapsed"
 const WORKSPACE_SECTIONS_COLLAPSED_KEY = "harness-remote.v3.workspace-sections-collapsed"
 const CONVERSATION_PANE_WIDTH_KEY = "harness-remote.v3.conversation-pane-width"
 const CONVERSATION_DRAWER_OPEN_KEY = "harness-remote.v3.conversation-drawer-open"
+
+/** A phone keyboard opening over the machine/project/agent selectors is worse than no autofocus. */
+function coarsePointer(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -189,6 +195,8 @@ function ConversationSettingsModal({ onClose }: { onClose: () => void }) {
   const [language, setLanguage] = useState<LanguageCode>(loadLanguage)
   const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
   const t = useMemo(() => createTranslator(language), [language])
+  const dialogRef = useRef<HTMLElement>(null)
+  useDialogDismiss(dialogRef, onClose)
 
   function changeLanguage(value: string) {
     const next = languageOptions.find((option) => option.code === value)?.code
@@ -205,7 +213,7 @@ function ConversationSettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="tdw-modal tdw-settings-modal hr-settings-modal" role="dialog" aria-modal="true" aria-label={t("nav.settings")} onMouseDown={(event) => event.stopPropagation()}>
+      <section className="tdw-modal tdw-settings-modal hr-settings-modal" role="dialog" aria-modal="true" aria-label={t("nav.settings")} ref={dialogRef} onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div><span>Harness Remote</span><h2>{t("nav.settings")}</h2></div>
           <button type="button" onClick={onClose} aria-label={t("action.close")}>×</button>
@@ -263,10 +271,16 @@ function NewConversationModal({
   const [prompt, setPrompt] = useState("")
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLElement>(null)
+  const emptyDialogRef = useRef<HTMLElement>(null)
   // Model discovery is explicitly not an acceptance prerequisite, so a catalog failure is reported
   // beside the Model field and never as the modal's blocking error.
   const [modelError, setModelError] = useState<string | null>(null)
   const generation = useRef(0)
+  // Autofocus only where a keyboard is already present. On a phone, focusing the first field raises
+  // the on-screen keyboard over the machine, project, agent and model selectors.
+  useDialogDismiss(dialogRef, onClose, { autoFocus: !coarsePointer() })
+  useDialogDismiss(emptyDialogRef, onClose)
 
   useEffect(() => {
     if (!runtime) return
@@ -338,8 +352,8 @@ function NewConversationModal({
   if (!runtime) {
     return (
       <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
-        <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New conversation" onMouseDown={(event) => event.stopPropagation()}>
-          <header><div><span>New conversation</span><h2>No coding machine is ready</h2></div><button type="button" onClick={onClose}>×</button></header>
+        <section className="tdw-modal" role="dialog" aria-modal="true" aria-label="New conversation" ref={emptyDialogRef} onMouseDown={(event) => event.stopPropagation()}>
+          <header><div><span>New conversation</span><h2>No coding machine is ready</h2></div><button type="button" onClick={onClose} aria-label="Close">×</button></header>
           <div className="tdw-modal-body"><p>Connect a machine with at least one project and one available coding agent.</p></div>
         </section>
       </div>
@@ -348,7 +362,7 @@ function NewConversationModal({
 
   return (
     <div className="tdw-modal-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="tdw-modal hr-new-conversation-modal" role="dialog" aria-modal="true" aria-label="New conversation" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="tdw-modal hr-new-conversation-modal" role="dialog" aria-modal="true" aria-label="New conversation" ref={dialogRef} onMouseDown={(event) => event.stopPropagation()}>
         <header>
           <div><span>New conversation</span><h2>Start with the best agent for this work</h2></div>
           <button type="button" onClick={onClose} aria-label="Close">×</button>
@@ -362,7 +376,7 @@ function NewConversationModal({
             <label><span>Coding agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{runtime.agents.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
             <div className="tdw-field"><span>Model</span><ModelPicker models={models} value={modelKey} onChange={setModelKey} disabled={starting} loading={modelsLoading} />{modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. The conversation starts on the harness default.</small> : null}</div>
           </div>
-          <label className="tdw-prompt-field"><span>First message</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} autoFocus placeholder="What do you want to build, fix or understand?" /></label>
+          <label className="tdw-prompt-field"><span>First message</span><textarea data-autofocus value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (canStart) void start() } }} rows={7} placeholder="What do you want to build, fix or understand?" /></label>
           <div className="hr-workspace-note">
             <strong>Uses the real project workspace</strong>
             <span>No hidden worktree is created. You can continue this conversation with another coding agent at any time.</span>
@@ -370,6 +384,7 @@ function NewConversationModal({
           {error ? <div className="tdw-inline-error" role="alert">{error}</div> : null}
         </div>
         <footer>
+          <small className="tdw-modal-hint">{coarsePointer() ? "Fill in the first message, then tap Start conversation." : "Ctrl/Cmd+Enter starts the conversation."}</small>
           <button type="button" className="tdw-button secondary" onClick={onClose}>Cancel</button>
           <button type="button" className="tdw-button primary" disabled={!canStart} onClick={() => void start()}>{starting ? <><LoadingIcon size={15} /> Starting...</> : <><PlusIcon size={15} /> Start conversation</>}</button>
         </footer>
@@ -468,7 +483,9 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
   useEffect(() => {
     if (!conversationDrawerOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setConversationDrawerOpen(false)
+      // A dialog on top owns Escape. Otherwise dismissing a modal also collapsed the list behind it.
+      if (event.key !== "Escape" || document.querySelector(".tdw-modal-backdrop, .uw-manager-backdrop, .hr-mobile-settings-page")) return
+      setConversationDrawerOpen(false)
     }
     document.addEventListener("keydown", onKeyDown)
     return () => document.removeEventListener("keydown", onKeyDown)

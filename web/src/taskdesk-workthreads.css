@@ -277,6 +277,7 @@
 .tdw-modal textarea { padding: 10px; resize: vertical; line-height: 1.55; }
 .tdw-modal select:focus, .tdw-modal textarea:focus { border-color: var(--td3-blue-border); box-shadow: 0 0 0 3px var(--td3-blue-soft); }
 .tdw-safety-note { margin: 0; color: var(--tdw-muted); font-size: 9px; }
+.tdw-modal-hint { margin-right: auto; color: var(--tdw-muted); font-size: 9px; }
 .tdw-inline-error { padding: 9px 10px; border: 1px solid var(--td3-red-border); border-radius: 8px; color: var(--td3-red-text); background: var(--td3-red-soft); font-size: 10px; }
 
 .tdw-advanced-host, .tdw-classic-host { min-height: 100vh; background: var(--td3-bg); }

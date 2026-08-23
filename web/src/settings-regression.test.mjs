@@ -23,7 +23,11 @@ assert.match(standalone, /discoverMachine\(nextMachine\(\)\.config\)/, 'Test con
 assert.match(standalone, /Connected to \$\{snapshot\.machine\.name\}/, 'successful discovery must identify the connected machine')
 assert.match(standalone, /onPersist\(\[\.\.\.machines, machine\]\)/, 'adding a machine must persist it in the machine collection')
 assert.match(standalone, /onPersist\(machines\.map/, 'editing a machine must replace that machine without rebuilding profiles')
-assert.match(standalone, /Remove \"\$\{machine\.name\}\" from Harness Remote\?/, 'machine removal must ask for confirmation')
+// The confirmation is now inline instead of a native window.confirm the Android WebView renders as
+// a bare system alert on top of the app. It must still be an explicit two-step action.
+assert.match(standalone, /confirmRemoveID === machine\.id/, 'machine removal must ask for confirmation')
+assert.match(standalone, /Remove \{machine\.name\}\?/, 'the confirmation must name the machine being removed')
+assert.match(standalone, /onClick=\{\(\) => setConfirmRemoveID\(machine\.id\)\}/, 'the first Remove click must only arm the confirmation')
 
 // Machine configuration keeps the existing connection fields and a bounded numeric port.
 assert.match(standalone, /placeholder="192\.168\.1\.20 or localhost"/)

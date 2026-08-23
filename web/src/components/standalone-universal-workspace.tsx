@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import { Capacitor } from "@capacitor/core"
 import {
@@ -17,6 +17,7 @@ import {
   createWorkspaceMachine,
   type WorkspaceMachine
 } from "../workspaceMachines"
+import { useDialogDismiss } from "../useDialogDismiss"
 import { ConversationWorkspace } from "./conversation-workspace"
 
 type Props = {
@@ -95,7 +96,9 @@ function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps)
 
 function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceMachine[]; onClose: () => void; onPersist: (machines: WorkspaceMachine[]) => void }) {
   const [editingID, setEditingID] = useState<string | null>(machines.length === 0 ? "new" : null)
+  const [confirmRemoveID, setConfirmRemoveID] = useState<string | null>(null)
   const [snapshots, setSnapshots] = useState<Record<string, MachineSnapshot | null | undefined>>({})
+  const dialogRef = useRef<HTMLElement>(null)
   const draft = useMemo(() => editingID === "new" ? createWorkspaceMachine() : machines.find((machine) => machine.id === editingID) || null, [editingID, machines])
 
   useEffect(() => {
@@ -110,15 +113,19 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
     return () => { cancelled = true }
   }, [machines])
 
+  useDialogDismiss(dialogRef, onClose)
+
   const save = (machine: WorkspaceMachine) => {
     if (editingID === "new") onPersist([...machines, machine])
     else onPersist(machines.map((candidate) => candidate.id === machine.id ? machine : candidate))
     setEditingID(null)
   }
 
+  // window.confirm is a blocking native dialog that the Android WebView renders as a bare,
+  // unstyled system alert on top of the app. An inline confirmation stays inside the product.
   const remove = (machine: WorkspaceMachine) => {
-    if (!window.confirm(`Remove "${machine.name}" from Harness Remote?`)) return
     onPersist(machines.filter((candidate) => candidate.id !== machine.id))
+    setConfirmRemoveID(null)
     if (editingID === machine.id) setEditingID(null)
   }
 
@@ -126,7 +133,7 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
 
   return (
     <div className="uw-manager-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="uw-machine-manager" role="dialog" aria-modal="true" aria-label="Machines" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="uw-machine-manager" role="dialog" aria-modal="true" aria-label="Machines" ref={dialogRef} onMouseDown={(event) => event.stopPropagation()}>
         <header className="uw-machine-manager-header">
           <div><h2>Machines</h2><p>Connect the computers where your repositories, coding agents, credentials and model access already live.</p></div>
           <button type="button" className="uw-manager-close" onClick={onClose} aria-label="Close">×</button>
@@ -143,7 +150,20 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
                   <small>{snapshot === undefined ? "Checking coding agents..." : snapshot ? `${snapshot.agents.length} coding agent${snapshot.agents.length === 1 ? "" : "s"} detected` : "Machine unavailable"}</small>
                   {snapshot?.agents.length ? <div className="uw-machine-harness-list">{snapshot.agents.map((agent) => <span className="uw-machine-harness" key={agent.id}><i className={agent.state} /><strong>{agent.label}</strong><small>{agent.state}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span>)}</div> : null}
                 </div>
-                <div className="uw-machine-config-actions"><button type="button" className="uw-manager-button" onClick={() => setEditingID(machine.id)}>Edit</button><button type="button" className="uw-manager-button danger" onClick={() => remove(machine)}>Remove</button></div>
+                <div className="uw-machine-config-actions">
+                  {confirmRemoveID === machine.id ? (
+                    <>
+                      <span className="uw-machine-confirm" role="alert">Remove {machine.name}?</span>
+                      <button type="button" className="uw-manager-button" onClick={() => setConfirmRemoveID(null)}>Keep</button>
+                      <button type="button" className="uw-manager-button danger" data-autofocus onClick={() => remove(machine)}>Remove</button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="uw-manager-button" onClick={() => setEditingID(machine.id)}>Edit</button>
+                      <button type="button" className="uw-manager-button danger" onClick={() => setConfirmRemoveID(machine.id)}>Remove</button>
+                    </>
+                  )}
+                </div>
               </div>
             )
           })}
@@ -159,6 +179,8 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
   const [language, setLanguage] = useState<LanguageCode>(loadLanguage)
   const [theme, setTheme] = useState<ThemePreference>(loadThemePreference)
   const t = useMemo(() => createTranslator(language), [language])
+  const pageRef = useRef<HTMLElement>(null)
+  useDialogDismiss(pageRef, onClose, { autoFocus: false })
 
   function changeLanguage(value: string) {
     const next = languageOptions.find((option) => option.code === value)?.code
@@ -174,7 +196,7 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <section className="hr-mobile-settings-page" aria-label={t("nav.settings")}>
+    <section className="hr-mobile-settings-page" aria-label={t("nav.settings")} ref={pageRef}>
       <header>
         <div><span>Harness Remote</span><h2>{t("nav.settings")}</h2></div>
         <button type="button" onClick={onClose} aria-label={t("action.close")}>×</button>
