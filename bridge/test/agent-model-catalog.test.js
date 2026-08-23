@@ -128,7 +128,7 @@ test("ACP variants are emitted only from model-specific config options advertise
     )
     assert.equal(result.models.filter((model) => model.variant).every((model) => model.variantConfigId === "thinking"), true)
     assert.equal(result.models.some((model) => model.variantConfigId === "invented-option"), false)
-    assert.equal(currentModel, "provider/one", "catalog probing must restore the technical session model")
+    assert.equal(currentModel, "provider/two", "the hidden technical Session may remain on the last probed model")
     const selected = await catalog.resolve({ providerID: "provider", modelID: "two", variant: "high" })
     assert.equal(selected.variantConfigId, "thinking")
   } finally {
