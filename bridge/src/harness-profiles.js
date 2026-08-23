@@ -26,9 +26,6 @@ export const HARNESS_PROFILES = {
     args: ["acp"],
     permissionMode: "allow",
     historyLoader: createOmpHistoryLoader(),
-    // OMP's native picker and --list-models are the membership authority. ACP still provides
-    // metadata and model-specific config options, but cannot re-introduce models the harness hides.
-    nativeModelList: { command: "omp", args: ["--list-models"] },
     // OMP exposes thinking as a real ACP config option. We probe only ids the running adapter
     // actually advertises; this list is a routing hint, never a source of invented variants.
     modelVariantConfigIDs: ["thinking"],
@@ -46,17 +43,15 @@ export const HARNESS_PROFILES = {
   pi: {
     id: "pi",
     label: "PI",
-    // @automatalabs/pi-acp embeds PI through its published SDK and runs on Node.
-    // @victor-software-house/pi-acp declares engines.bun and shells out to `bun`, which this
-    // project deliberately does not depend on. Pin a known published release so npx startup is
-    // reproducible while native PI still remains the final authority for model membership.
+    // @automatalabs/pi-acp embeds PI through its published SDK and runs on Node. Version 0.5.0
+    // advertises PI's credential- and provider-filter-aware model catalog directly over ACP, so
+    // Harness Remote must not launch a second native `pi` process just to filter membership.
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     args: ["-y", "@automatalabs/pi-acp@0.5.0"],
     adapterCommand: "pi-acp",
     permissionMode: "allow",
     historyLoader: createPiHistoryLoader(),
     preserveListedTimestamps: true,
-    nativeModelList: { command: "pi", args: ["--list-models"] },
     // PI journals are authoritative for transcript and title metadata. session/load is a live-session
     // operation and cannot be used as a refresh primitive because PI rejects a second open.
     reloadOnHistoryRefresh: false,
