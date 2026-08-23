@@ -234,6 +234,7 @@ async function newConversationAudit(page, label) {
   const start = dialog.getByRole("button", { name: /Start conversation/ })
   for (const [locator, name] of [[machine, "Machine"], [project, "Project"], [agent, "Coding agent"], [prompt, "First message"], [cancel, "Cancel"], [start, "Start conversation"]]) {
     await locator.waitFor({ state: "visible" })
+    await locator.scrollIntoViewIfNeeded()
     await insideViewport(page, locator, `${label} ${name}`)
   }
 
