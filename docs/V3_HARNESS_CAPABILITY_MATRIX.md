@@ -17,37 +17,28 @@ Harness Remote must not flatten harness-specific capabilities into a fake univer
 | Harness | Protocol / control | Live events | Tool representation | Model source | Catalog scope | Model controls | Session authority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | OpenCode | HTTP JSON | daemon-owned SSE fanout | OpenCode message parts | runtime `/provider` or `/api/provider`; `/config/providers` compatibility fallback | machine | provider-advertised variants | OpenCode |
-| OMP | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical ACP Session `configOptions` | Project / cwd | `thinking` only when advertised | OMP |
-| PI | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical `pi-acp` Session `configOptions` | Project / cwd | `thinkingLevel`, compatible runtime aliases only when advertised | PI |
-| Codex | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical ACP Session `configOptions` | Project / cwd | `reasoning_effort` only when advertised | Codex |
-| Claude | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical ACP Session `configOptions` | Project / cwd | runtime-advertised controls only; no fabricated reasoning levels | Claude |
+| OMP | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical ACP Session `configOptions` | machine | `thinking` only when advertised | OMP |
+| PI | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical `pi-acp` Session `configOptions` | machine | `thinkingLevel`, compatible runtime aliases only when advertised | PI |
+| Codex | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical ACP Session `configOptions` | machine | `reasoning_effort` only when advertised | Codex |
+| Claude | ACP over stdio JSON-RPC | ACP Session updates | ACP Session updates | fresh prompt-less technical ACP Session `configOptions` | machine | runtime-advertised controls only; no fabricated reasoning levels | Claude |
 
 ## Model discovery scope
 
-ACP harness configuration can depend on the Project directory. Harness Remote therefore treats ACP model discovery as scoped by:
+The promotion candidate deliberately keeps ACP model discovery **machine-scoped**:
 
 ```text
-machine + harness + Project/cwd
+machine + harness
 ```
 
-The browser or Android client does not send an arbitrary filesystem path to the model endpoint. It sends either:
+This is the ownership model that was previously exercised successfully on real machines. A project/cwd-scoped ACP experiment was implemented during the parallel capability audit, but real Windows testing of the integrated candidate showed that PI, Codex and Claude all lost their model catalogs, including in newly created Conversations. The experiment was therefore rolled back from the promotion candidate rather than patched speculatively.
 
-- `projectId` for New Conversation; or
-- `workThreadId` for an existing Conversation.
+The web/Android client may still include `projectId` or `workThreadId` hints in model requests. They are compatibility metadata for a future project-aware implementation; they are **not model-catalog authority in this candidate**. The daemon does not accept a raw client cwd as model authority.
 
-The daemon resolves that identifier to an already-authorized Project or persisted Conversation workspace and only then passes the directory to the catalog.
+For ACP harnesses, one daemon-owned prompt-less technical Session per harness adapter lifetime supplies the current `configOptions` model catalog. Discovery remains single-flight and bounded. Historical technical Session ids remain hidden but are not reloaded as current membership authority after daemon restart.
 
-Each authorized ACP directory has its own:
+OpenCode is also machine-scoped because its runtime provider inventory comes from the managed OpenCode host rather than an ACP Session.
 
-- cached model catalog;
-- single-flight discovery operation;
-- prompt-less technical Session;
-- refresh/error state;
-- variant-probe state.
-
-Those scopes share the same model-discovery ACP adapter process. Harness Remote does not spawn a second PI or OMP CLI as a competing model authority.
-
-OpenCode remains machine-scoped because its runtime provider inventory is obtained from the managed OpenCode host rather than from a Project-scoped ACP Session.
+Project-aware ACP discovery remains a follow-up. It must not return to the release line until PI, Codex, Claude and OMP all pass real-harness tests on the exact implementation, including Windows where practical.
 
 ## Lifecycle contract
 
@@ -84,7 +75,7 @@ The structured runtime contract currently describes the intended routing semanti
 - Stop: native abort/cancel path;
 - reconnect: daemon transport reconciliation rather than blindly replaying a prompt.
 
-Exact real-machine behavior is still part of the 3.0 release gate. This matrix documents the contract and implementation path; it does not replace validation against installed OpenCode, OMP, PI, Codex and Claude builds.
+Exact real-machine behavior remains part of the 3.0 release gate. This matrix documents the contract and implementation path; it does not replace validation against installed OpenCode, OMP, PI, Codex and Claude builds.
 
 ## Transport notes
 
@@ -112,12 +103,11 @@ A base model remains usable if optional variant enrichment is slow or incomplete
 
 The 3.0 backend exposes diagnostics for model discovery and lifecycle investigation, including:
 
-- catalog source and cache scope;
+- catalog source and machine cache scope;
 - cached model count and age;
 - in-flight discovery state;
 - ACP discovery phase;
 - variant-probe completeness;
-- scoped Project/cwd catalog state;
 - active/queued Sessions;
 - pending ACP requests;
 - event stream and reconnect counters;
@@ -130,7 +120,7 @@ Diagnostics must not expose prompt bodies, credentials or generated authenticati
 Before 3.0 promotion, validate the contract with real installed harnesses on one exact candidate SHA:
 
 1. discover/start each harness;
-2. load models in at least two Projects where practical;
+2. load its live model catalog;
 3. create a Conversation;
 4. continue across multiple turns;
 5. run a long reasoning/tool turn;
