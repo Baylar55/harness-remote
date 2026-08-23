@@ -300,8 +300,8 @@ function NewConversationModal({
   const generation = useRef(0)
   // Autofocus only where a keyboard is already present. On a phone, focusing the first field raises
   // the on-screen keyboard over the machine, project, agent and model selectors.
-  useDialogDismiss(dialogRef, onClose, { autoFocus: !coarsePointer() })
-  useDialogDismiss(emptyDialogRef, onClose)
+  useDialogDismiss(dialogRef, onClose, { autoFocus: !coarsePointer(), enabled: Boolean(runtime) })
+  useDialogDismiss(emptyDialogRef, onClose, { enabled: !runtime })
 
   useEffect(() => {
     if (!runtime) return

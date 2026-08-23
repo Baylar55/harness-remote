@@ -26,17 +26,22 @@ function focusable(container: HTMLElement): HTMLElement[] {
 export function useDialogDismiss(
   ref: RefObject<HTMLElement | null>,
   onClose: () => void,
-  options: { autoFocus?: boolean } = {}
+  options: { autoFocus?: boolean; enabled?: boolean } = {}
 ): void {
-  const { autoFocus = true } = options
+  const { autoFocus = true, enabled = true } = options
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
   useEffect(() => {
     const container = ref.current
+    // A component that renders one of two dialogs calls this hook twice, and the branch that is not
+    // rendered has a null ref. Without this guard that unused instance still registered a document
+    // Escape listener with no container, so it closed the dialog even when an open popover inside
+    // the rendered one should have consumed the key first.
+    if (!enabled || !container) return
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
 
-    if (autoFocus && container && !container.contains(document.activeElement)) {
+    if (autoFocus && !container.contains(document.activeElement)) {
       const target = container.querySelector<HTMLElement>("[data-autofocus]") || focusable(container)[0] || container
       target.focus?.()
     }
@@ -45,11 +50,11 @@ export function useDialogDismiss(
       if (event.key === "Escape") {
         // An open popover inside the dialog owns Escape first. Without this, dismissing the model
         // picker also threw away the New Conversation form the user had just filled in.
-        if (container?.querySelector(".tdw-model-picker.open")) return
+        if (container.querySelector(".tdw-model-picker.open")) return
         closeRef.current()
         return
       }
-      if (event.key !== "Tab" || !container) return
+      if (event.key !== "Tab") return
       const items = focusable(container)
       if (items.length === 0) return
       const first = items[0]
@@ -76,5 +81,5 @@ export function useDialogDismiss(
       // from restarting at the top of the workspace every time a dialog is dismissed.
       if (previouslyFocused?.isConnected) previouslyFocused.focus()
     }
-  }, [ref, autoFocus])
+  }, [ref, autoFocus, enabled])
 }

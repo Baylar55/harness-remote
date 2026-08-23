@@ -86,7 +86,8 @@ Severity is user impact, not effort. **Fixed** findings link to the commit that 
 | A6 | Medium | The attention surface (questions and permissions) was not announced, and its option buttons — which behave as radios and checkboxes — reported no pressed state. | Fixed `bea15d9` |
 | A7 | Low | The conversation search field and the custom-answer field were unnamed. | Fixed `bea15d9` |
 | A8 | Low | A running activity was relabelled with `font-size: 0` plus a `content: "Working"` pseudo-element, so user-facing copy lived in CSS and the raw protocol word "running" stayed as the element's real text. | Fixed `4ccaa8b` |
-| A9 | Low | Escape ownership was undefined: dismissing the model picker also threw away the filled-in New Conversation form behind it, and closing a modal also collapsed the conversation list. | Fixed `b5c217c` |
+| A9 | Low | Escape ownership was undefined: dismissing the model picker also threw away the filled-in New Conversation form behind it, and closing a modal also collapsed the conversation list. | Fixed `b5c217c`, completed below |
+| A10 | Medium | The first Escape-ownership fix did not actually work, and only a keyboard walkthrough in the browser showed it. `NewConversationModal` renders one of two dialogs and so calls the dismiss hook twice; the branch that is not rendered has a null ref, and that unused instance still registered a document Escape listener with no container to check — so it closed the dialog anyway. Verified after the fix: Enter on the launcher opens and focuses the first field, **0 of 24 tab presses escape the dialog**, Escape returns focus to the button that opened it, and Escape on an open model picker closes only the picker with the draft intact. | Fixed `4fc274c` |
 
 ### Mobile
 
