@@ -41,7 +41,11 @@
 .tdw-topbar {
   height: 62px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 520px) minmax(360px, 1fr);
+  /* The action group is content-sized. Sizing it minmax(360px, 1fr) while .tdw-top-actions carries
+     min-width: 0 let a wider button row overflow its own grid area to the left and draw on top of
+     the breadcrumb: at 1440px the machine-health pill sat across "Conversations". The <=1180px rule
+     below already used auto for this column. */
+  grid-template-columns: minmax(200px, 1fr) minmax(0, 1fr) auto;
   gap: 18px;
   align-items: center;
   padding: 0 16px;
@@ -70,6 +74,7 @@
 
 .tdw-context-path {
   min-width: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
