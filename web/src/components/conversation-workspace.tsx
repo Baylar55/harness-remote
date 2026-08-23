@@ -322,7 +322,7 @@ function NewConversationModal({
     setModelKey("")
     setModelsLoading(true)
     setModelError(null)
-    void taskClient.listAgentModels(runtime.machine.config, agentID).then((catalog) => {
+    void taskClient.listAgentModels(runtime.machine.config, agentID, { projectId: projectID }).then((catalog) => {
       if (generation.current !== current) return
       setModels(catalog.models)
       const selected = catalog.models.find((model) => model.isDefault) || catalog.models[0]
@@ -336,7 +336,7 @@ function NewConversationModal({
     }).finally(() => {
       if (generation.current === current) setModelsLoading(false)
     })
-  }, [runtime?.machine.id, agentID])
+  }, [runtime?.machine.id, agentID, projectID])
 
   const project = runtime?.projects.find((candidate) => candidate.id === projectID)
   const agent = runtime?.agents.find((candidate) => candidate.id === agentID)
