@@ -152,12 +152,6 @@ function catalogAge(refreshedAt) {
   return Number.isFinite(value) ? Math.max(0, Date.now() - value) : null
 }
 
-function laterTimestamp(values) {
-  const candidates = values.filter((value) => typeof value === "string" && Number.isFinite(Date.parse(value)))
-  if (!candidates.length) return null
-  return candidates.sort((left, right) => Date.parse(right) - Date.parse(left))[0]
-}
-
 class CachedCatalog {
   cache = []
   refreshedAt = null
@@ -212,20 +206,6 @@ class CachedCatalog {
   }
 }
 
-function newAcpScope(directory) {
-  return {
-    directory,
-    cache: [],
-    refreshedAt: null,
-    lastAttemptAt: null,
-    lastError: null,
-    inFlight: null,
-    sessionID: undefined,
-    phase: "idle",
-    variantProbe: { total: 0, completed: 0, incomplete: false, lastError: null }
-  }
-}
-
 export class AcpAgentModelCatalog extends CachedCatalog {
   constructor({ agent, agentID, directory, stateDirectory, timeoutMs = ACP_MODEL_CATALOG_TIMEOUT_MS, variantConfigIDs = [] }) {
     super()
@@ -235,68 +215,18 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     this.timeoutMs = timeoutMs
     this.variantConfigIDs = [...new Set(variantConfigIDs.filter((value) => typeof value === "string" && value))]
     this.stateFile = path.join(stateDirectory, `model-catalog-${agentID}.json`)
+    this.sessionID = undefined
     this.stateLoaded = false
     this.hiddenSessionIDs = new Set()
-    this.scopes = new Map()
+    this.phase = "idle"
+    this.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
     this.onAgentExit = (error) => {
-      const message = error instanceof Error ? error.message : String(error ?? "adapter exited")
-      for (const scope of this.scopes.values()) {
-        scope.lastError = message
-        scope.sessionID = undefined
-        scope.phase = "stopped"
-        scope.cache = []
-        scope.refreshedAt = null
-      }
+      this.lastError = error instanceof Error ? error.message : String(error ?? "adapter exited")
+      this.sessionID = undefined
+      this.phase = "stopped"
+      this.clear()
     }
     this.agent.on?.("exit", this.onAgentExit)
-  }
-
-  #scope(directory) {
-    // Project paths and persisted Conversation workspaces are resolved and authorized by the
-    // daemon before reaching the catalog. Keep that native path verbatim so a Windows daemon does
-    // not reinterpret a trusted POSIX-style test/path string and so the cache key matches the
-    // exact cwd sent to the harness.
-    const resolved = typeof directory === "string" && directory ? directory : this.directory
-    let scope = this.scopes.get(resolved)
-    if (!scope) {
-      scope = newAcpScope(resolved)
-      this.scopes.set(resolved, scope)
-    }
-    return scope
-  }
-
-  #result(scope, models, stale = false, error) {
-    return {
-      models,
-      stale,
-      refreshedAt: scope.refreshedAt,
-      ...(error ? { error } : {})
-    }
-  }
-
-  #remember(scope, models) {
-    scope.cache = models
-    scope.refreshedAt = new Date().toISOString()
-    scope.lastError = null
-    return this.#result(scope, models, false)
-  }
-
-  #stale(scope, error) {
-    scope.lastError = error instanceof Error ? error.message : String(error)
-    if (!scope.cache.length) throw error
-    return this.#result(scope, scope.cache, true, scope.lastError)
-  }
-
-  #resolveResult(result, model) {
-    if (!model) return null
-    const candidate = result.models.find((item) => sameModel(item, model))
-    if (!candidate) {
-      const suffix = model.variant ? ` (${model.variant})` : ""
-      const error = new Error(`Selected model is no longer available: ${model.providerID}/${model.modelID}${suffix}`)
-      error.code = "model_unavailable"
-      throw error
-    }
-    return candidate
   }
 
   #remaining(deadline, phase) {
@@ -312,7 +242,7 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     this.stateLoaded = true
     try {
       const state = JSON.parse(await readFile(this.stateFile, "utf8"))
-      const sessionIDs = (state?.version === 3 || state?.version === 2) && Array.isArray(state.sessionIDs)
+      const sessionIDs = state?.version === 2 && Array.isArray(state.sessionIDs)
         ? state.sessionIDs
         : state?.version === 1 && typeof state.sessionID === "string"
           ? [state.sessionID]
@@ -333,42 +263,43 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   async #saveState() {
     await mkdir(path.dirname(this.stateFile), { recursive: true })
     await writeFile(this.stateFile, JSON.stringify({
-      version: 3,
+      version: 2,
       sessionIDs: [...this.hiddenSessionIDs],
-      directories: [...this.scopes.keys()]
+      directory: this.directory
     }), { mode: 0o600 })
   }
 
-  async #newCatalogSession(scope, deadline) {
+  async #newCatalogSession(deadline) {
     const created = await this.agent.request(
       "session/new",
-      { cwd: scope.directory, mcpServers: [] },
+      { cwd: this.directory, mcpServers: [] },
       this.#remaining(deadline, "technical Session creation")
     )
     if (!created?.sessionId) throw new Error(`Agent ${this.agentID} did not return a catalog session id`)
-    scope.sessionID = created.sessionId
+    this.sessionID = created.sessionId
     this.hiddenSessionIDs.add(created.sessionId)
     await this.#saveState()
     return created.configOptions
   }
 
-  async #refreshOptions(scope, deadline) {
-    scope.phase = "starting-adapter"
+  async #refreshOptions(deadline) {
+    this.phase = "starting-adapter"
     await this.agent.start(this.#remaining(deadline, "adapter startup"))
-    scope.phase = "loading-state"
+    this.phase = "loading-state"
     await this.#loadState()
-    // Historical technical Sessions remain hidden but are never loaded as model authority. Each
-    // authorized Project/cwd gets a fresh prompt-less technical Session for the current adapter
-    // lifetime, so one project's provider/config state cannot become another project's catalog.
-    scope.phase = "creating-session"
-    return this.#newCatalogSession(scope, deadline)
+    // A historical ACP Session can legitimately retain the model options it was created with.
+    // Reusing it across daemon restarts therefore turns removed models into a permanent catalog.
+    // Old ids are loaded only so those technical Sessions stay hidden. Discovery starts from one
+    // fresh prompt-less Session for the current adapter process.
+    this.phase = "creating-session"
+    return this.#newCatalogSession(deadline)
   }
 
-  async #probeVariants(scope, configOptions, catalogDeadline) {
+  async #probeVariants(configOptions, catalogDeadline) {
     const baseModels = modelsFromConfigOptions(configOptions, this.agentID)
     const modelOption = configOptions?.find((item) => item?.id === "model")
-    if (!baseModels.length || !this.variantConfigIDs.length || !scope.sessionID || !modelOption || !Array.isArray(modelOption.options)) {
-      scope.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
+    if (!baseModels.length || !this.variantConfigIDs.length || !this.sessionID || !modelOption || !Array.isArray(modelOption.options)) {
+      this.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
       return baseModels
     }
 
@@ -382,7 +313,7 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     const probeDeadline = Math.min(catalogDeadline, Date.now() + ACP_VARIANT_PROBE_BUDGET_MS)
     const variants = []
     let currentModel = originalModel
-    scope.variantProbe = { total: ordered.length, completed: 0, incomplete: false, lastError: null }
+    this.variantProbe = { total: ordered.length, completed: 0, incomplete: false, lastError: null }
 
     for (const rawModel of ordered) {
       const base = modelFromConfigCandidate(rawModel, modelOption, this.agentID)
@@ -391,21 +322,21 @@ export class AcpAgentModelCatalog extends CachedCatalog {
       if (rawModel.value !== currentModel) {
         const remaining = probeDeadline - Date.now()
         if (remaining <= 0) {
-          scope.variantProbe.incomplete = true
+          this.variantProbe.incomplete = true
           break
         }
         try {
           const changed = await this.agent.request("session/set_config_option", {
-            sessionId: scope.sessionID,
+            sessionId: this.sessionID,
             configId: "model",
             value: rawModel.value
           }, Math.max(1, Math.min(ACP_VARIANT_REQUEST_TIMEOUT_MS, remaining)))
           currentModel = rawModel.value
           if (Array.isArray(changed?.configOptions)) effectiveOptions = changed.configOptions
         } catch (error) {
-          scope.variantProbe.incomplete = true
-          scope.variantProbe.lastError = error instanceof Error ? error.message : String(error)
-          scope.variantProbe.completed += 1
+          this.variantProbe.incomplete = true
+          this.variantProbe.lastError = error instanceof Error ? error.message : String(error)
+          this.variantProbe.completed += 1
           continue
         }
       }
@@ -424,115 +355,69 @@ export class AcpAgentModelCatalog extends CachedCatalog {
           })
         }
       }
-      scope.variantProbe.completed += 1
+      this.variantProbe.completed += 1
     }
 
-    if (scope.variantProbe.completed < scope.variantProbe.total) scope.variantProbe.incomplete = true
+    if (this.variantProbe.completed < this.variantProbe.total) this.variantProbe.incomplete = true
+    // This Session exists only for catalog inspection. Restoring its original model would add more
+    // RPC latency without changing any user Session, so the probe deliberately stops here.
     return dedupeModels([...baseModels, ...variants])
   }
 
-  async #refreshCatalog(scope) {
-    scope.lastAttemptAt = new Date().toISOString()
+  async #refreshCatalog() {
+    this.lastAttemptAt = new Date().toISOString()
     const deadline = Date.now() + this.timeoutMs
-    scope.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
+    this.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
     try {
-      const options = await this.#refreshOptions(scope, deadline)
+      const options = await this.#refreshOptions(deadline)
       const baseModels = modelsFromConfigOptions(options, this.agentID)
       if (!baseModels.length) throw new Error(`Agent ${this.agentID} did not advertise any models`)
-      scope.phase = "probing-variants"
+      this.phase = "probing-variants"
       // Base membership is the required result. Variant enrichment is bounded and may stop early;
       // a slow optional reasoning control must never make an otherwise valid catalog unusable.
-      const models = await this.#probeVariants(scope, options, deadline)
-      scope.phase = "ready"
-      return this.#remember(scope, models)
+      const models = await this.#probeVariants(options, deadline)
+      this.phase = "ready"
+      return this.remember(models)
     } catch (error) {
-      scope.phase = "error"
+      this.phase = "error"
       throw error
     }
   }
 
-  async list({ allowStale = true, refresh = false, directory } = {}) {
-    const scope = this.#scope(directory)
-    if (!refresh && scope.cache.length) return this.#result(scope, scope.cache, false)
-    if (!scope.inFlight) {
-      const operation = this.#refreshCatalog(scope)
+  async list({ allowStale = true, refresh = false } = {}) {
+    // One fresh technical Session per adapter lifetime avoids stale cross-restart configOptions and
+    // unbounded Session creation on ordinary picker opens. Explicit diagnostics may request refresh.
+    if (!refresh && this.cache.length) return this.result(this.cache, false)
+    if (!this.inFlight) {
+      const operation = this.#refreshCatalog()
       let wrapped
       wrapped = operation.finally(() => {
-        if (scope.inFlight === wrapped) scope.inFlight = null
+        if (this.inFlight === wrapped) this.inFlight = null
       })
-      scope.inFlight = wrapped
+      this.inFlight = wrapped
     }
     try {
-      return await scope.inFlight
+      return await this.inFlight
     } catch (error) {
-      if (allowStale) return this.#stale(scope, error)
-      scope.lastError = error instanceof Error ? error.message : String(error)
+      if (allowStale) return this.stale(error)
+      this.lastError = error instanceof Error ? error.message : String(error)
       throw error
     }
   }
 
-  async resolve(model, options = {}) {
-    return this.#resolveResult(await this.list({ ...options, allowStale: false }), model)
-  }
-
-  async validate(model, options = {}) {
-    await this.resolve(model, options)
-  }
-
-  #scopeDiagnostics(scope) {
+  async resolve(model) { return this.resolveResult(await this.list({ allowStale: false }), model) }
+  async validate(model) { await this.resolve(model) }
+  diagnostics() {
     return {
-      directory: scope.directory,
-      cachedModels: scope.cache.length,
-      refreshedAt: scope.refreshedAt,
-      ageMs: catalogAge(scope.refreshedAt),
-      inFlight: Boolean(scope.inFlight),
-      lastAttemptAt: scope.lastAttemptAt,
-      lastError: scope.lastError,
-      phase: scope.phase,
-      technicalSessionPersisted: Boolean(scope.sessionID),
-      variantProbe: { ...scope.variantProbe }
-    }
-  }
-
-  diagnostics({ directory } = {}) {
-    if (directory) {
-      const scope = this.#scope(directory)
-      return {
-        source: "acp-fresh-session-config-options",
-        cacheScope: "project-cwd",
-        ...this.#scopeDiagnostics(scope),
-        timeoutMs: this.timeoutMs,
-        adapterProcess: this.agent.diagnostics?.() ?? { processID: this.agent.processID },
-        variantConfigIDs: this.variantConfigIDs
-      }
-    }
-
-    const scopes = [...this.scopes.values()]
-    const defaultScope = this.#scope(this.directory)
-    const all = scopes.length ? scopes : [defaultScope]
-    const refreshedAt = laterTimestamp(all.map((scope) => scope.refreshedAt))
-    const lastAttemptAt = laterTimestamp(all.map((scope) => scope.lastAttemptAt))
-    const errorScope = [...all].sort((left, right) => Date.parse(right.lastAttemptAt || 0) - Date.parse(left.lastAttemptAt || 0)).find((scope) => scope.lastError)
-    return {
-      source: "acp-fresh-session-config-options",
-      cacheScope: "project-cwd",
-      scopeCount: all.length,
-      cachedModels: all.reduce((total, scope) => total + scope.cache.length, 0),
-      refreshedAt,
-      ageMs: catalogAge(refreshedAt),
-      inFlight: all.some((scope) => Boolean(scope.inFlight)),
-      lastAttemptAt,
-      lastError: errorScope?.lastError ?? null,
-      phase: defaultScope.phase,
+      ...this.diagnosticsBase("acp-fresh-session-config-options"),
+      phase: this.phase,
       timeoutMs: this.timeoutMs,
-      variantProbe: { ...defaultScope.variantProbe },
+      variantProbe: { ...this.variantProbe },
       adapterProcess: this.agent.diagnostics?.() ?? { processID: this.agent.processID },
-      technicalSessionPersisted: all.some((scope) => Boolean(scope.sessionID)),
-      variantConfigIDs: this.variantConfigIDs,
-      scopes: all.map((scope) => this.#scopeDiagnostics(scope))
+      technicalSessionPersisted: Boolean(this.sessionID),
+      variantConfigIDs: this.variantConfigIDs
     }
   }
-
   close() {
     this.agent.off?.("exit", this.onAgentExit)
     this.agent.close?.()
@@ -614,7 +499,6 @@ export class HttpAgentModelCatalog extends CachedCatalog {
   diagnostics() {
     return {
       ...this.diagnosticsBase(this.source),
-      cacheScope: "machine",
       timeoutMs: this.timeoutMs,
       ttlMs: this.ttlMs,
       hostProcessID: this.host.processID
