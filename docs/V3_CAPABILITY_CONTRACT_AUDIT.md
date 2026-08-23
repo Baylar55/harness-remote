@@ -1,6 +1,6 @@
 # Harness Remote 3.0 capability contract audit
 
-This branch is the backend/capability workstream for the final Harness Remote 3.0 pre-merge audit.
+This document records the backend/capability workstream and the integration finding that changed its promotion scope.
 
 Frozen shared baseline:
 
@@ -8,7 +8,7 @@ Frozen shared baseline:
 
 ## Goal
 
-Make the per-harness capability contract explicit and make discovery/cache identity correctly project-aware without disturbing the already-validated reliability fixes.
+Make the per-harness capability contract explicit without disturbing the already-validated reliability fixes.
 
 The normalized model list is only one part of the contract.
 
@@ -30,15 +30,23 @@ For OpenCode, Codex, Claude, PI and OMP, expose/document where observable:
 
 Do not invent capabilities a harness does not advertise or support.
 
-## Project/cwd-aware discovery
+## Integration finding: project/cwd ACP discovery is deferred
 
-Where model/provider configuration can be project-scoped, model/capability discovery and single-flight/cache identity must include validated project/cwd in addition to machine + harness.
+The audit originally implemented project/cwd-scoped ACP model catalogs, with independent caches, single-flight operations and technical Sessions per authorized Project directory.
 
-Carry the selected project/workspace directory end to end from the UI to the daemon.
+That design passed isolated tests with fake ACP adapters, but the integrated candidate failed the real-machine gate on Windows: PI, Codex and Claude all reported unavailable model catalogs, including in newly created Conversations. This is release-blocking evidence that the project/cwd experiment was not sufficiently validated for promotion.
 
-Do not accept arbitrary filesystem paths supplied by a client. Resolve/validate the requested directory against configured/discovered project roots and reject paths outside allowed roots.
+The promotion candidate therefore restores the previously real-machine-validated ACP model discovery behavior:
 
-New Conversation should use its selected Project path. Existing Conversation should use the authoritative Work Thread workspace path.
+```text
+machine + harness
+```
+
+One daemon-owned prompt-less technical Session per ACP harness adapter lifetime supplies current `configOptions`. Discovery remains bounded and single-flight. Historical technical Session ids stay hidden and are not reloaded as current membership authority after restart.
+
+The UI may continue to send `projectId` or `workThreadId` hints so a future compatible implementation does not require another client protocol change. In the promotion candidate those hints do not select ACP catalog authority. Raw client cwd is not accepted as model authority.
+
+Project-aware discovery remains a follow-up and must be reintroduced only after real PI, Codex, Claude and OMP validation on the exact implementation, including Windows where practical.
 
 ## Reliability constraints
 
@@ -54,18 +62,21 @@ Preserve the fixes in #287/#288:
 - Android reconnect behavior;
 - bounded diagnostics and listener/subscriber ownership.
 
-## Validation
+## Promotion-candidate validation
 
-Add regressions for at least:
+The candidate must now prove at least:
 
-- cache isolation between two project/cwd values for the same machine+harness;
-- concurrent same-scope requests joining one operation;
-- different-scope requests not sharing the wrong catalog;
-- invalid/out-of-root directory rejection;
-- capability snapshot/contract shape per harness profile;
-- first-selection loading/errors surfacing as capability/discovery state rather than generic disconnect where possible.
+- one ACP catalog single-flight operation per harness;
+- repeated callers cannot create unbounded technical catalog Sessions;
+- PI, Codex, Claude and OMP requests share the stable machine-scoped ownership model;
+- capability snapshot/contract reports the actual machine scope;
+- first-selection loading/errors surface as capability/discovery state rather than generic disconnect where possible;
+- all bridge tests pass on Linux, macOS and Windows;
+- the production web build passes the full regression suite;
+- a real Chromium smoke checks multi-machine navigation, portrait and phone-landscape layout, model controls and viewport containment;
+- Android debug APK builds and verifies only after those gates pass.
 
-Then run the existing bridge/web suites and real-harness validation from one exact final SHA.
+Real installed-harness acceptance remains the final proof for credentials, provider inventory and native Session behavior. Automated simulation is not a substitute for installed PI, Codex, Claude, OMP and OpenCode runtimes.
 
 ## Safety
 
