@@ -97,6 +97,9 @@
   50% { opacity: 1; transform: scale(1.06); }
 }
 
+/* Mobile equivalent of the sidebar's Conversation filters, which are display:none below 780px. */
+.hr-filter-chips { display: none; }
+
 /* A machine the client already knows is unreachable must say so where the user is working. On a
    phone the health pill, the Machines rail and the harness list are all hidden, so this banner is
    the only place that state is visible at all. */
@@ -199,6 +202,42 @@
   .uw-standalone-host:not(:has(.tdw-main.mobile-open)) .hr-control-plane .tdw-layout {
     height: calc(100dvh - 56px - var(--hr-mobile-nav-height)) !important;
   }
+
+  .hr-filter-chips {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .hr-filter-chips::-webkit-scrollbar { display: none; }
+
+  .hr-filter-chips button {
+    flex: none;
+    min-height: 34px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    border: 1px solid var(--td3-border);
+    border-radius: 999px;
+    color: var(--td3-text-2);
+    background: var(--td3-raise-1);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    touch-action: manipulation;
+    white-space: nowrap;
+  }
+
+  .hr-filter-chips button.active {
+    border-color: var(--td3-blue-border);
+    color: var(--td3-blue-text);
+    background: var(--td3-blue-soft-2);
+  }
+
+  .hr-filter-chips button b { font-size: 11px; font-weight: 750; }
 
   .hr-mobile-nav {
     position: fixed;

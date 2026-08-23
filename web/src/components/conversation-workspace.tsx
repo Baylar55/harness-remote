@@ -768,6 +768,26 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
 
         <section className="tdw-thread-column hr-conversation-column">
           <div className="tdw-column-heading tdw-task-drawer-heading"><div><span>{drawerEyebrow}</span><h2>Conversations <strong className="tdw-task-drawer-count">{visibleConversations.length}</strong></h2></div><button type="button" className="tdw-sidebar-collapse tdw-task-drawer-close" onClick={() => setConversationDrawerOpen(false)} aria-label="Close conversation list" title="Close conversation list">×</button></div>
+          {/* The sidebar filter section is display:none below 780px, which left a phone with no way
+              to reach conversations that need input. These chips are the mobile equivalent and are
+              hidden again where the sidebar filters are visible. */}
+          {statusCounts.attention > 0 || statusCounts.working > 0 || conversationFilter !== "all" ? (
+            <div className="hr-filter-chips" role="group" aria-label="Conversation filters">
+              {(["all", "working", "attention"] as ConversationFilter[]).map((filter) => (
+                <button
+                  type="button"
+                  key={filter}
+                  className={conversationFilter === filter ? "active" : ""}
+                  aria-pressed={conversationFilter === filter}
+                  onClick={() => setConversationFilter(filter)}
+                >
+                  <span className={`tdw-filter-dot ${filter}`} aria-hidden="true" />
+                  {filter === "all" ? "All" : filter === "working" ? "Working" : "Needs attention"}
+                  <b>{statusCounts[filter]}</b>
+                </button>
+              ))}
+            </div>
+          ) : null}
           {offlineRuntimes.length ? (
             <button type="button" className="hr-offline-banner" role="status" onClick={onManageMachines}>
               <span className="hr-offline-dot" aria-hidden="true" />

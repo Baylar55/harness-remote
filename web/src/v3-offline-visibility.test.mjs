@@ -44,3 +44,14 @@ test("the installed app no longer describes itself as an opencode remote", () =>
 test("the conversation search field is named", () => {
   assert.match(workspace, /aria-label="Search conversations"/)
 })
+
+test("a phone can reach conversations that need input", () => {
+  // The sidebar filter section is display:none below 780px, which left "Needs attention"
+  // unreachable on a phone: the only way to find one was scrolling and reading every card.
+  assert.match(workspace, /hr-filter-chips/)
+  assert.match(workspace, /aria-pressed=\{conversationFilter === filter\}/)
+  assert.match(workspace, /role="group" aria-label="Conversation filters"/)
+  // Hidden again where the sidebar filters are visible, so the desktop layout is unchanged.
+  assert.match(overrides, /\.hr-filter-chips \{ display: none; \}/)
+  assert.match(overrides, /\.hr-filter-chips \{\n\s*display: flex;/)
+})
