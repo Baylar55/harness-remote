@@ -10,6 +10,8 @@ type Props = {
   loading?: boolean
   placeholder?: string
   compact?: boolean
+  /** Shown instead of the placeholder when discovery finished without a usable catalog. */
+  unavailableHint?: string
 }
 
 type ModelGroup = {
@@ -94,7 +96,7 @@ function ModelBadges({ group }: { group: ModelGroup }) {
   )
 }
 
-export function ModelPicker({ models, value, onChange, disabled = false, loading = false, placeholder = "Choose model", compact = false }: Props) {
+export function ModelPicker({ models, value, onChange, disabled = false, loading = false, placeholder = "Choose model", compact = false, unavailableHint }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const rootRef = useRef<HTMLDivElement>(null)
@@ -144,12 +146,24 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
     setOpen(false)
   }
 
+  // A disabled control with a "Choose model" label reads as broken. When discovery finished and the
+  // catalog is empty the conversation still starts — on the harness-native default — so say that
+  // instead of leaving a dead dropdown with no explanation.
+  const empty = !loading && models.length === 0
+  const hint = unavailableHint || "No model catalog is available for this coding agent. The harness default will be used."
+  const triggerLabel = loading
+    ? "Loading models…"
+    : empty
+      ? "Harness default"
+      : selected?.modelName || selected?.modelID || placeholder
+
   return (
-    <div className={`tdw-model-picker${compact ? " compact" : ""}${open ? " open" : ""}`} ref={rootRef}>
-      <button type="button" className="tdw-model-trigger" disabled={disabled || loading || models.length === 0} onClick={() => setOpen((current) => !current)} aria-haspopup="listbox" aria-expanded={open}>
+    <div className={`tdw-model-picker${compact ? " compact" : ""}${open ? " open" : ""}${empty ? " unavailable" : ""}`} ref={rootRef}>
+      <button type="button" className="tdw-model-trigger" disabled={disabled || loading || empty} title={empty ? hint : undefined} onClick={() => setOpen((current) => !current)} aria-haspopup="listbox" aria-expanded={open}>
         <span className="tdw-model-trigger-copy">
-          <strong>{loading ? "Loading models…" : selected?.modelName || selected?.modelID || placeholder}</strong>
+          <strong>{triggerLabel}</strong>
           {!loading && selected ? <small>{selected.providerName || selected.providerID}{selected.variant ? ` · ${selected.variant}` : ""}</small> : null}
+          {empty ? <small>Chosen by the coding agent</small> : null}
         </span>
         <span className="tdw-model-chevron" aria-hidden="true">⌄</span>
       </button>

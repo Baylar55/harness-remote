@@ -658,8 +658,8 @@ export function WorkThreadConversation({
           </label>
           <label className="tdw-model-control">
             <span>Model</span>
-            <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} />
-            {modelError ? <small title={modelError}>Model catalog unavailable. The harness default will be used.</small> : null}
+            <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} unavailableHint={modelError || undefined} />
+            {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
           </label>
         </div>
         <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : task.run?.startedAt} />

@@ -32,6 +32,11 @@
 }
 
 .tdw-model-trigger:disabled { opacity: .48; cursor: default; }
+
+/* Discovery finished and the harness exposes no catalog. The conversation still runs, on the
+   harness-native default, so this reads as a resolved state rather than a broken control. */
+.tdw-model-picker.unavailable .tdw-model-trigger:disabled { opacity: 1; border-style: dashed; }
+.tdw-model-picker.unavailable .tdw-model-chevron { display: none; }
 .tdw-model-trigger-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .tdw-model-trigger-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; line-height: 1.25; }
 .tdw-model-trigger-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--td3-muted); font-size: 9px; }

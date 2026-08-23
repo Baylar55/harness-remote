@@ -263,6 +263,9 @@ function NewConversationModal({
   const [prompt, setPrompt] = useState("")
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Model discovery is explicitly not an acceptance prerequisite, so a catalog failure is reported
+  // beside the Model field and never as the modal's blocking error.
+  const [modelError, setModelError] = useState<string | null>(null)
   const generation = useRef(0)
 
   useEffect(() => {
@@ -283,7 +286,7 @@ function NewConversationModal({
     setModels([])
     setModelKey("")
     setModelsLoading(true)
-    setError(null)
+    setModelError(null)
     void taskClient.listAgentModels(runtime.machine.config, agentID).then((catalog) => {
       if (generation.current !== current) return
       setModels(catalog.models)
@@ -293,7 +296,7 @@ function NewConversationModal({
       if (generation.current === current) {
         setModels([])
         setModelKey("")
-        setError(errorText(reason))
+        setModelError(errorText(reason))
       }
     }).finally(() => {
       if (generation.current === current) setModelsLoading(false)
@@ -357,7 +360,7 @@ function NewConversationModal({
           </div>
           <div className="tdw-form-row">
             <label><span>Coding agent</span><select value={agentID} onChange={(event) => setAgentID(event.target.value)}>{runtime.agents.map((item) => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-            <label><span>Model</span><ModelPicker models={models} value={modelKey} onChange={setModelKey} disabled={starting} loading={modelsLoading} /></label>
+            <div className="tdw-field"><span>Model</span><ModelPicker models={models} value={modelKey} onChange={setModelKey} disabled={starting} loading={modelsLoading} />{modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. The conversation starts on the harness default.</small> : null}</div>
           </div>
           <label className="tdw-prompt-field"><span>First message</span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={7} autoFocus placeholder="What do you want to build, fix or understand?" /></label>
           <div className="hr-workspace-note">
