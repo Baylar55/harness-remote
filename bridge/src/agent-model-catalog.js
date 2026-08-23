@@ -252,7 +252,11 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   }
 
   #scope(directory) {
-    const resolved = path.resolve(typeof directory === "string" && directory ? directory : this.directory)
+    // Project paths and persisted Conversation workspaces are resolved and authorized by the
+    // daemon before reaching the catalog. Keep that native path verbatim so a Windows daemon does
+    // not reinterpret a trusted POSIX-style test/path string and so the cache key matches the
+    // exact cwd sent to the harness.
+    const resolved = typeof directory === "string" && directory ? directory : this.directory
     let scope = this.scopes.get(resolved)
     if (!scope) {
       scope = newAcpScope(resolved)
