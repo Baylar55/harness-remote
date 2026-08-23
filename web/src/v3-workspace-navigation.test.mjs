@@ -39,3 +39,16 @@ test("choosing a machine or project updates the machine New Conversation default
   assert.match(workspace, /if \(id !== "all"\) onActiveMachineID\(id\)/)
   assert.match(workspace, /onActiveMachineID\(record\.runtime\.machine\.id\)/)
 })
+
+test("a Conversation that was created but failed to launch is not lost", () => {
+  // createTask succeeded on the machine; only launch failed. Leaving the modal on a generic error
+  // hid a Conversation that already existed and turned up later, unexplained, in the list.
+  assert.match(workspace, /const created = await taskClient\.createTask/)
+  assert.match(workspace, /onCreated\(runtime, created\)/)
+  assert.match(workspace, /The conversation was created but could not be started/)
+})
+
+test("removing the last machine does not leave Refresh disabled forever", () => {
+  const guard = workspace.match(/if \(machines\.length === 0\) \{[\s\S]*?\n    \}/)?.[0] || ""
+  assert.match(guard, /setRefreshing\(false\)/)
+})

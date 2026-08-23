@@ -350,7 +350,7 @@ function NewConversationModal({
     setStarting(true)
     setError(null)
     try {
-      let conversation = await taskClient.createTask(runtime.machine.config, {
+      const created = await taskClient.createTask(runtime.machine.config, {
         projectId: project.id,
         agentId: agent.id,
         prompt: prompt.trim(),
@@ -360,7 +360,16 @@ function NewConversationModal({
           variant: selectedModel.variant
         } : undefined
       })
-      conversation = await taskClient.launch(runtime.machine.config, conversation.id)
+      let conversation = created
+      try {
+        conversation = await taskClient.launch(runtime.machine.config, created.id)
+      } catch (reason) {
+        // Creation succeeded and only the launch failed. Leaving the modal on an error hid a
+        // Conversation that already exists on the machine: it appeared later, unexplained, in the
+        // list. Put it in the workspace and say exactly what happened.
+        onCreated(runtime, created)
+        throw new Error(`The conversation was created but could not be started: ${errorText(reason)} It is now open in the workspace.`)
+      }
       onCreated(runtime, conversation)
       onClose()
     } catch (reason) {
@@ -452,6 +461,9 @@ export function ConversationWorkspace({ machines, activeMachineID, onActiveMachi
     if (machines.length === 0) {
       setRuntimes([])
       setLoaded(true)
+      // Removing the last machine while a discovery was in flight otherwise left Refresh disabled
+      // for the rest of the session.
+      setRefreshing(false)
       return
     }
     setRefreshing(true)
