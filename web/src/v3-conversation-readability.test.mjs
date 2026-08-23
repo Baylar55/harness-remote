@@ -41,11 +41,13 @@ test("every live stylesheet in the floor list still exists", () => {
 
 test("agent prose is capped to a readable measure without narrowing code or tables", () => {
   const css = read("taskdesk-conversation.css")
-  assert.match(css, /\.tdw-work-thread-conversation \.uw-markdown > p,/)
-  assert.match(css, /max-width: 76ch;/)
+  assert.match(css, /\.tdw-work-thread-conversation \.uw-message-agent \.uw-markdown > p,/)
+  assert.match(css, /max-width: 62ch;/)
   // Only block prose is listed: pre, table and the tool cards must keep the full width.
-  const rule = css.match(/\.tdw-work-thread-conversation \.uw-markdown > p,[\s\S]*?\n\}/)?.[0] || ""
+  const rule = css.match(/\.tdw-work-thread-conversation \.uw-message-agent \.uw-markdown > p,[\s\S]*?\n\}/)?.[0] || ""
   assert.doesNotMatch(rule, /> pre|> table/)
+  // A user message is framed by its own bubble and must not be capped.
+  assert.doesNotMatch(rule, /uw-message-user/)
 })
 
 test("the activity status label is component copy, not CSS content", () => {

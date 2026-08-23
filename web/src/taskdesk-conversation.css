@@ -64,17 +64,19 @@
   max-width: 100%;
 }
 
-/* Measured at 1440px: the message body gave agent prose a ~990px line, around 120 characters. The
-   comfortable range is 45-90. Only running prose is capped; tables, code blocks, diffs and tool
-   cards keep the full width, which is exactly what they need. */
-.tdw-work-thread-conversation .uw-markdown > p,
-.tdw-work-thread-conversation .uw-markdown > ul,
-.tdw-work-thread-conversation .uw-markdown > ol,
-.tdw-work-thread-conversation .uw-markdown > blockquote,
-.tdw-work-thread-conversation .uw-markdown > h1,
-.tdw-work-thread-conversation .uw-markdown > h2,
-.tdw-work-thread-conversation .uw-markdown > h3 {
-  max-width: 76ch;
+/* Measured at 1440px and 1920px: the message body gave agent prose a 991px line, ~146 average
+   characters, against a comfortable 45-90. 62ch of this face measures 611px, which lands at ~90.
+   Only agent block prose is capped: tables, code blocks, diffs and tool cards need the full width,
+   and a user message is short and framed by its own bubble, which would look unbalanced with the
+   text stopping short of the border. */
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > p,
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > ul,
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > ol,
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > blockquote,
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > h1,
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > h2,
+.tdw-work-thread-conversation .uw-message-agent .uw-markdown > h3 {
+  max-width: 62ch;
 }
 
 .tdw-work-thread-conversation .uw-message-body > header {

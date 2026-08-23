@@ -68,7 +68,7 @@ Severity is user impact, not effort. **Fixed** findings link to the commit that 
 | # | Sev | Finding | Status |
 |---|-----|---------|--------|
 | L1 | **High** | The top bar action group overflowed its own grid area and painted over the breadcrumb. `minmax(360px, 1fr)` plus `min-width: 0` on `.tdw-top-actions`, with `justify-content: flex-end`, pushed the overflow left. Measured: the machine-health pill overlapped the breadcrumb at **every width from 1200 to 1600** — the entire common laptop range. | Fixed `2232c55` |
-| L2 | Medium | Agent prose ran to a ~990px line at 1440px, about 120 characters against a comfortable 45–90. | Fixed `4ccaa8b` |
+| L2 | Medium | Agent prose ran to a 991px line at 1440px and 1920px, ~146 average characters against a comfortable 45–90. Capped to 62ch, measured at 611px / ~90 characters. | Fixed `4ccaa8b` |
 | L3 | Medium | Over a third of the visible desktop text rendered below 10px, including the daemon's own connection error at 8.5px. Contrast was already fine (7.4:1 – 16:1 in dark, 4.9:1 – 18:1 in light); the problem is purely size. | Fixed `4ccaa8b` |
 | L4 | Low | The mobile chat screen spends 331px of an 844px viewport on chrome (back bar 46, header 65, tabs 45, Continue-with toolbar 73, composer 102). At 667px — an iPhone SE — that is half the screen. See P4. | Open, proposed |
 | L5 | Low | An empty composer is 145px tall on desktop. | Open, proposed |
