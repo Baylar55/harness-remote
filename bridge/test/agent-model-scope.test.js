@@ -6,7 +6,7 @@ import path from "node:path"
 import test from "node:test"
 import { AcpAgentModelCatalog } from "../src/agent-model-catalog.js"
 
-class ScopedAcp extends EventEmitter {
+class SharedAcp extends EventEmitter {
   starts = 0
   newCalls = []
   async start() { this.starts += 1 }
@@ -15,22 +15,21 @@ class ScopedAcp extends EventEmitter {
     if (method !== "session/new") throw new Error(`unexpected method ${method}`)
     this.newCalls.push(params.cwd)
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const slug = params.cwd.endsWith("project-a") ? "alpha" : params.cwd.endsWith("project-b") ? "beta" : "default"
     return {
-      sessionId: `catalog-${slug}`,
+      sessionId: "catalog-machine",
       configOptions: [{
         id: "model",
-        currentValue: `provider/${slug}`,
-        options: [{ value: `provider/${slug}`, name: slug }]
+        currentValue: "provider/stable",
+        options: [{ value: "provider/stable", name: "stable" }]
       }]
     }
   }
 }
 
-test("ACP model catalogs isolate cache and single-flight by authorized project cwd while sharing one adapter", async () => {
-  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-scope-"))
+test("ACP model catalog stays one single-flight catalog per harness even when callers carry project directories", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-machine-scope-"))
   try {
-    const agent = new ScopedAcp()
+    const agent = new SharedAcp()
     const catalog = new AcpAgentModelCatalog({
       agent,
       agentID: "pi",
@@ -38,26 +37,23 @@ test("ACP model catalogs isolate cache and single-flight by authorized project c
       stateDirectory
     })
 
-    const [a1, a2, b] = await Promise.all([
-      catalog.list({ allowStale: false, directory: "/projects/project-a" }),
+    const [a, b] = await Promise.all([
       catalog.list({ allowStale: false, directory: "/projects/project-a" }),
       catalog.list({ allowStale: false, directory: "/projects/project-b" })
     ])
 
-    assert.deepEqual(a1.models.map((model) => model.modelID), ["alpha"])
-    assert.deepEqual(a2.models.map((model) => model.modelID), ["alpha"])
-    assert.deepEqual(b.models.map((model) => model.modelID), ["beta"])
-    assert.equal(agent.newCalls.filter((cwd) => cwd === "/projects/project-a").length, 1)
-    assert.equal(agent.newCalls.filter((cwd) => cwd === "/projects/project-b").length, 1)
+    assert.deepEqual(a.models.map((model) => model.modelID), ["stable"])
+    assert.deepEqual(b.models.map((model) => model.modelID), ["stable"])
+    assert.deepEqual(agent.newCalls, ["/projects/default"])
 
-    const cachedA = await catalog.list({ allowStale: false, directory: "/projects/project-a" })
-    assert.deepEqual(cachedA.models.map((model) => model.modelID), ["alpha"])
-    assert.equal(agent.newCalls.length, 2)
+    const cached = await catalog.list({ allowStale: false, directory: "/another/project" })
+    assert.deepEqual(cached.models.map((model) => model.modelID), ["stable"])
+    assert.equal(agent.newCalls.length, 1)
 
     const diagnostics = catalog.diagnostics()
-    assert.equal(diagnostics.cacheScope, "project-cwd")
-    assert.equal(diagnostics.scopeCount, 2)
-    assert.deepEqual(new Set(diagnostics.scopes.map((scope) => scope.directory)), new Set(["/projects/project-a", "/projects/project-b"]))
+    assert.equal(diagnostics.cachedModels, 1)
+    assert.equal(diagnostics.technicalSessionPersisted, true)
+    assert.equal(Object.prototype.hasOwnProperty.call(diagnostics, "scopes"), false)
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }
