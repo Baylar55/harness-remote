@@ -39,3 +39,27 @@ test("TaskDesk Session workspace uses live events as the primary refresh path", 
   assert.match(workspace, /if \(!pageIsVisible\(\)\) return/)
   assert.match(workspace, /<TaskDeskMessageContent message=\{message\} \/>/)
 })
+
+test("foregrounding the app immediately reconciles durable conversation state", () => {
+  const refresh = readFileSync(new URL("./taskdesk-session-live-refresh.ts", import.meta.url), "utf8")
+
+  // Android may keep the native SSE reader alive while WebView JavaScript is suspended, so events
+  // produced in the background cannot be the only way the renderer catches up on resume.
+  assert.match(refresh, /CapacitorApp\.addListener\("appStateChange"/)
+  assert.match(refresh, /if \(isActive\) reconcileAfterForeground\(\)/)
+  assert.match(refresh, /document\.addEventListener\("visibilitychange", onVisibilityChange\)/)
+  assert.match(refresh, /window\.addEventListener\("pageshow", onPageShow\)/)
+
+  // Resume must re-read both authoritative Conversation state and the selected transcript/attention
+  // surfaces. It must not resend a prompt or depend on a new live event arriving.
+  const foreground = refresh.match(/const reconcileAfterForeground = \(\) => \{[\s\S]*?\n  \}/)?.[0] || ""
+  assert.match(foreground, /onIndex\(\)/)
+  assert.match(foreground, /onMessage\(\)/)
+  assert.match(foreground, /onDetail\(\)/)
+  assert.doesNotMatch(foreground, /send|prompt|continueWorkThread/)
+
+  // Lifecycle listeners cannot accumulate as Conversations are opened and closed.
+  assert.match(refresh, /document\.removeEventListener\("visibilitychange", onVisibilityChange\)/)
+  assert.match(refresh, /window\.removeEventListener\("pageshow", onPageShow\)/)
+  assert.match(refresh, /appStateHandle.*remove\(\)/)
+})
