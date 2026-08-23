@@ -200,6 +200,16 @@ async function insideViewport(page, locator, label) {
   assert.ok(box.y + box.height <= viewport.height + 1, `${label}: clipped vertically`)
 }
 
+async function waitForDrawerSettled(page, selector) {
+  await page.waitForFunction((target) => {
+    const element = document.querySelector(target)
+    if (!element) return false
+    const box = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return box.x >= -1 && Number(style.opacity) >= 0.999 && style.visibility === "visible"
+  }, selector)
+}
+
 async function noOverflow(page, label) {
   const result = await page.evaluate(() => ({
     width: innerWidth,
@@ -313,10 +323,21 @@ async function runDesktop(browser) {
   await newConversationAudit(page, "desktop")
 
   const conversationsToggle = page.locator(".tdw-tasks-toggle")
+  const drawer = page.locator(".tdw-thread-column")
   await conversationsToggle.click()
-  await page.locator(".tdw-thread-column").waitFor({ state: "visible" })
+  await drawer.waitFor({ state: "visible" })
+  await waitForDrawerSettled(page, ".tdw-thread-column")
+  const drawerGeometry = await page.evaluate(() => {
+    const workspace = document.querySelector(".tdw-project-column")?.getBoundingClientRect()
+    const drawer = document.querySelector(".tdw-thread-column")?.getBoundingClientRect()
+    if (!workspace || !drawer) return null
+    return { workspaceRight: workspace.right, drawerLeft: drawer.left }
+  })
+  assert.ok(drawerGeometry, "desktop drawer geometry unavailable")
+  assert.ok(drawerGeometry.drawerLeft >= drawerGeometry.workspaceRight - 1, `desktop drawer overlaps workspace: ${drawerGeometry.drawerLeft} < ${drawerGeometry.workspaceRight}`)
   await shot(page, "desktop-drawer")
   await page.getByRole("button", { name: /Audit Windows UI/ }).click()
+  await drawer.waitFor({ state: "hidden" })
   await page.locator(".tdw-main").waitFor({ state: "visible" })
   await shot(page, "desktop-conversation")
   await noOverflow(page, "desktop conversation")
