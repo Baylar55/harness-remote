@@ -1,11 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"
 
-// HTTP providers are already running and should fail quickly. ACP adapters may need their first
-// `npx` launch, authentication, and a technical session before they can expose config options.
-export const MODEL_CATALOG_TIMEOUT_MS = 8_000
+// Managed OpenCode may need a lazy host start before its provider inventory is available. ACP
+// adapters may need a first npx launch, authentication and one technical Session.
+export const MODEL_CATALOG_TIMEOUT_MS = 30_000
 export const ACP_MODEL_CATALOG_TIMEOUT_MS = 90_000
 export const HTTP_MODEL_CATALOG_TTL_MS = 30_000
+const ACP_VARIANT_PROBE_BUDGET_MS = 10_000
+const ACP_VARIANT_REQUEST_TIMEOUT_MS = 2_000
 
 function withTimeout(promise, timeoutMs, label) {
   let timer
@@ -216,12 +218,23 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     this.sessionID = undefined
     this.stateLoaded = false
     this.hiddenSessionIDs = new Set()
+    this.phase = "idle"
+    this.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
     this.onAgentExit = (error) => {
       this.lastError = error instanceof Error ? error.message : String(error ?? "adapter exited")
       this.sessionID = undefined
+      this.phase = "stopped"
       this.clear()
     }
     this.agent.on?.("exit", this.onAgentExit)
+  }
+
+  #remaining(deadline, phase) {
+    const remaining = deadline - Date.now()
+    if (remaining > 0) return remaining
+    const error = new Error(`Agent ${this.agentID} model discovery timed out during ${phase} after ${this.timeoutMs}ms`)
+    error.code = "model_catalog_timeout"
+    throw error
   }
 
   async #loadState() {
@@ -256,8 +269,12 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     }), { mode: 0o600 })
   }
 
-  async #newCatalogSession() {
-    const created = await this.agent.request("session/new", { cwd: this.directory, mcpServers: [] }, this.timeoutMs)
+  async #newCatalogSession(deadline) {
+    const created = await this.agent.request(
+      "session/new",
+      { cwd: this.directory, mcpServers: [] },
+      this.#remaining(deadline, "technical Session creation")
+    )
     if (!created?.sessionId) throw new Error(`Agent ${this.agentID} did not return a catalog session id`)
     this.sessionID = created.sessionId
     this.hiddenSessionIDs.add(created.sessionId)
@@ -265,53 +282,68 @@ export class AcpAgentModelCatalog extends CachedCatalog {
     return created.configOptions
   }
 
-  async #refreshOptions() {
-    await this.agent.start()
+  async #refreshOptions(deadline) {
+    this.phase = "starting-adapter"
+    await this.agent.start(this.#remaining(deadline, "adapter startup"))
+    this.phase = "loading-state"
     await this.#loadState()
     // A historical ACP Session can legitimately retain the model options it was created with.
     // Reusing it across daemon restarts therefore turns removed models into a permanent catalog.
-    // Old ids are loaded only so those technical Sessions stay hidden. Discovery always starts from
-    // one fresh prompt-less Session for the current adapter process.
-    return this.#newCatalogSession()
+    // Old ids are loaded only so those technical Sessions stay hidden. Discovery starts from one
+    // fresh prompt-less Session for the current adapter process.
+    this.phase = "creating-session"
+    return this.#newCatalogSession(deadline)
   }
 
-  async #probeVariants(configOptions) {
+  async #probeVariants(configOptions, catalogDeadline) {
     const baseModels = modelsFromConfigOptions(configOptions, this.agentID)
-    if (!baseModels.length || !this.variantConfigIDs.length || !this.sessionID) return baseModels
     const modelOption = configOptions?.find((item) => item?.id === "model")
-    if (!modelOption || !Array.isArray(modelOption.options)) return baseModels
+    if (!baseModels.length || !this.variantConfigIDs.length || !this.sessionID || !modelOption || !Array.isArray(modelOption.options)) {
+      this.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
+      return baseModels
+    }
 
+    const candidates = modelOption.options.filter((candidate) => modelFromConfigCandidate(candidate, modelOption, this.agentID))
     const originalModel = modelOption.currentValue
-    const originalVariant = this.variantConfigIDs
-      .map((id) => configOptions.find((item) => item?.id === id))
-      .find((option) => typeof option?.currentValue === "string")
+    const ordered = [...candidates].sort((left, right) => {
+      if (left?.value === originalModel) return -1
+      if (right?.value === originalModel) return 1
+      return 0
+    })
+    const probeDeadline = Math.min(catalogDeadline, Date.now() + ACP_VARIANT_PROBE_BUDGET_MS)
     const variants = []
     let currentModel = originalModel
+    this.variantProbe = { total: ordered.length, completed: 0, incomplete: false, lastError: null }
 
-    try {
-      for (const rawModel of modelOption.options) {
-        const base = modelFromConfigCandidate(rawModel, modelOption, this.agentID)
-        if (!base) continue
-        let effectiveOptions = configOptions
-        if (rawModel.value !== currentModel) {
-          try {
-            const changed = await this.agent.request("session/set_config_option", {
-              sessionId: this.sessionID,
-              configId: "model",
-              value: rawModel.value
-            }, this.timeoutMs)
-            currentModel = rawModel.value
-            if (Array.isArray(changed?.configOptions)) effectiveOptions = changed.configOptions
-          } catch {
-            // The base model remains valid. A model-specific option that cannot be observed is not
-            // guessed or copied from a different model.
-            continue
-          }
+    for (const rawModel of ordered) {
+      const base = modelFromConfigCandidate(rawModel, modelOption, this.agentID)
+      if (!base) continue
+      let effectiveOptions = configOptions
+      if (rawModel.value !== currentModel) {
+        const remaining = probeDeadline - Date.now()
+        if (remaining <= 0) {
+          this.variantProbe.incomplete = true
+          break
         }
-        const variantOption = this.variantConfigIDs
-          .map((id) => effectiveOptions?.find((item) => item?.id === id))
-          .find((option) => option && Array.isArray(option.options))
-        if (!variantOption) continue
+        try {
+          const changed = await this.agent.request("session/set_config_option", {
+            sessionId: this.sessionID,
+            configId: "model",
+            value: rawModel.value
+          }, Math.max(1, Math.min(ACP_VARIANT_REQUEST_TIMEOUT_MS, remaining)))
+          currentModel = rawModel.value
+          if (Array.isArray(changed?.configOptions)) effectiveOptions = changed.configOptions
+        } catch (error) {
+          this.variantProbe.incomplete = true
+          this.variantProbe.lastError = error instanceof Error ? error.message : String(error)
+          this.variantProbe.completed += 1
+          continue
+        }
+      }
+      const variantOption = this.variantConfigIDs
+        .map((id) => effectiveOptions?.find((item) => item?.id === id))
+        .find((option) => option && Array.isArray(option.options))
+      if (variantOption) {
         for (const candidate of variantOption.options) {
           if (typeof candidate?.value !== "string" || !candidate.value || candidate.disabled === true) continue
           variants.push({
@@ -323,51 +355,46 @@ export class AcpAgentModelCatalog extends CachedCatalog {
           })
         }
       }
-    } finally {
-      if (typeof originalModel === "string" && originalModel && currentModel !== originalModel) {
-        try {
-          await this.agent.request("session/set_config_option", {
-            sessionId: this.sessionID,
-            configId: "model",
-            value: originalModel
-          }, this.timeoutMs)
-        } catch {}
-      }
-      if (originalVariant && typeof originalVariant.currentValue === "string" && originalVariant.currentValue) {
-        try {
-          await this.agent.request("session/set_config_option", {
-            sessionId: this.sessionID,
-            configId: originalVariant.id,
-            value: originalVariant.currentValue
-          }, this.timeoutMs)
-        } catch {}
-      }
+      this.variantProbe.completed += 1
     }
 
+    if (this.variantProbe.completed < this.variantProbe.total) this.variantProbe.incomplete = true
+    // This Session exists only for catalog inspection. Restoring its original model would add more
+    // RPC latency without changing any user Session, so the probe deliberately stops here.
     return dedupeModels([...baseModels, ...variants])
   }
 
   async #refreshCatalog() {
     this.lastAttemptAt = new Date().toISOString()
-    // AcpClient already applies bounded startup and request timeouts. Keeping this operation itself
-    // single-flight is more important than racing it with another timer: a timed-out HTTP caller
-    // must not spawn a second technical ACP session while the first one is still authenticating.
-    const options = await this.#refreshOptions()
-    const models = await this.#probeVariants(options)
-    if (!models.length) throw new Error(`Agent ${this.agentID} did not advertise any models`)
-    return this.remember(models)
+    const deadline = Date.now() + this.timeoutMs
+    this.variantProbe = { total: 0, completed: 0, incomplete: false, lastError: null }
+    try {
+      const options = await this.#refreshOptions(deadline)
+      const baseModels = modelsFromConfigOptions(options, this.agentID)
+      if (!baseModels.length) throw new Error(`Agent ${this.agentID} did not advertise any models`)
+      this.phase = "probing-variants"
+      // Base membership is the required result. Variant enrichment is bounded and may stop early;
+      // a slow optional reasoning control must never make an otherwise valid catalog unusable.
+      const models = await this.#probeVariants(options, deadline)
+      this.phase = "ready"
+      return this.remember(models)
+    } catch (error) {
+      this.phase = "error"
+      throw error
+    }
   }
 
   async list({ allowStale = true, refresh = false } = {}) {
-    // One fresh technical Session per adapter lifetime avoids both stale cross-restart configOptions
-    // and unbounded technical Session growth. An explicit refresh is still available for diagnostics.
+    // One fresh technical Session per adapter lifetime avoids stale cross-restart configOptions and
+    // unbounded Session creation on ordinary picker opens. Explicit diagnostics may request refresh.
     if (!refresh && this.cache.length) return this.result(this.cache, false)
     if (!this.inFlight) {
       const operation = this.#refreshCatalog()
-      this.inFlight = operation.finally(() => {
-        if (this.inFlight === operation || this.inFlight === wrapped) this.inFlight = null
+      let wrapped
+      wrapped = operation.finally(() => {
+        if (this.inFlight === wrapped) this.inFlight = null
       })
-      const wrapped = this.inFlight
+      this.inFlight = wrapped
     }
     try {
       return await this.inFlight
@@ -383,6 +410,9 @@ export class AcpAgentModelCatalog extends CachedCatalog {
   diagnostics() {
     return {
       ...this.diagnosticsBase("acp-fresh-session-config-options"),
+      phase: this.phase,
+      timeoutMs: this.timeoutMs,
+      variantProbe: { ...this.variantProbe },
       adapterProcess: this.agent.diagnostics?.() ?? { processID: this.agent.processID },
       technicalSessionPersisted: Boolean(this.sessionID),
       variantConfigIDs: this.variantConfigIDs
@@ -420,8 +450,7 @@ export class HttpAgentModelCatalog extends CachedCatalog {
     const auth = authorization(this.host.username, this.host.password)
 
     // `/config/providers` is configuration inventory and can retain entries that runtime resolution
-    // later rejects. OpenCode's native model command resolves the runtime Provider.list() inventory,
-    // exposed by `/provider` (legacy server) and `/api/provider` (v2 server).
+    // later rejects. OpenCode's runtime provider inventory is the picker authority.
     for (const pathname of ["/provider", "/api/provider"]) {
       const response = await this.#fetch(base, pathname, auth)
       if (response.status === 404 || response.status === 405) continue
@@ -450,10 +479,11 @@ export class HttpAgentModelCatalog extends CachedCatalog {
     if (!refresh && this.#fresh()) return this.result(this.cache, false)
     if (!this.inFlight) {
       const operation = withTimeout(this.#refresh(), this.timeoutMs, `${this.agentID} model catalog`)
-      this.inFlight = operation.finally(() => {
-        if (this.inFlight === operation || this.inFlight === wrapped) this.inFlight = null
+      let wrapped
+      wrapped = operation.finally(() => {
+        if (this.inFlight === wrapped) this.inFlight = null
       })
-      const wrapped = this.inFlight
+      this.inFlight = wrapped
     }
     try {
       return await this.inFlight
@@ -469,6 +499,7 @@ export class HttpAgentModelCatalog extends CachedCatalog {
   diagnostics() {
     return {
       ...this.diagnosticsBase(this.source),
+      timeoutMs: this.timeoutMs,
       ttlMs: this.ttlMs,
       hostProcessID: this.host.processID
     }
