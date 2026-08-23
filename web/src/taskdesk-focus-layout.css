@@ -27,13 +27,20 @@
     transform: translateX(calc(-100% - 14px));
     opacity: 0;
     pointer-events: none;
-    transition: transform 160ms ease, opacity 120ms ease;
+    /* opacity and pointer-events hide the drawer from the mouse but leave every control inside it
+       in the tab order and in the accessibility tree. On the default desktop screen that was 5 of
+       23 tab stops landing on an invisible panel. visibility removes them; delaying it by the
+       transition duration keeps the slide-out animation intact. */
+    visibility: hidden;
+    transition: transform 160ms ease, opacity 120ms ease, visibility 0s linear 160ms;
   }
 
   .tdw-shell.task-drawer-open .tdw-thread-column {
     transform: translateX(0);
     opacity: 1;
     pointer-events: auto;
+    visibility: visible;
+    transition: transform 160ms ease, opacity 120ms ease, visibility 0s;
   }
 
   .tdw-task-drawer-scrim {

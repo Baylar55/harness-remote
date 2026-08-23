@@ -24,3 +24,17 @@ test("the narrower breakpoints keep their content-sized action column", () => {
   assert.match(css, /minmax\(170px, 1fr\) minmax\(140px, 300px\) auto/)
   assert.match(css, /minmax\(160px, 1fr\) auto/)
 })
+
+test("the closed conversation drawer is out of the tab order", () => {
+  // opacity + pointer-events hide the drawer from the mouse only. Measured with Chromium at
+  // 1440x900: 5 of 23 tab stops on the default desktop screen landed on controls inside the
+  // invisible drawer (its close button, the offline banner, the search field, New conversation and
+  // the resizer). With visibility it is 0, and 5 again once the drawer is open.
+  const layout = readFileSync(new URL("./taskdesk-focus-layout.css", import.meta.url), "utf8")
+  const closed = layout.match(/\.tdw-thread-column \{[\s\S]*?\n  \}/)?.[0] || ""
+  const open = layout.match(/\.tdw-shell\.task-drawer-open \.tdw-thread-column \{[\s\S]*?\n  \}/)?.[0] || ""
+  assert.match(closed, /visibility: hidden;/)
+  assert.match(closed, /transition: transform 160ms ease, opacity 120ms ease, visibility 0s linear 160ms;/)
+  assert.match(open, /visibility: visible;/)
+  assert.match(open, /transition: transform 160ms ease, opacity 120ms ease, visibility 0s;/)
+})
