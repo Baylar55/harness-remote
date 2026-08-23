@@ -206,9 +206,9 @@ export class TaskLauncher {
     return entry
   }
 
-  async #resolvedModel(agentID, model) {
+  async #resolvedModel(agentID, model, directory) {
     if (!model || typeof this.daemon.resolveModel !== "function") return model
-    return this.daemon.resolveModel(agentID, model)
+    return this.daemon.resolveModel(agentID, model, directory ? { directory } : undefined)
   }
 
   async #applyAcpVariant(entry, sessionID, resolvedModel) {
@@ -220,11 +220,11 @@ export class TaskLauncher {
     })
   }
 
-  async validateModelSelection(agentID, model) {
+  async validateModelSelection(agentID, model, directory) {
     if (!model) return
     await this.#entry(agentID)
     if (typeof this.daemon.validateModel !== "function") return
-    await this.daemon.validateModel(agentID, model)
+    await this.daemon.validateModel(agentID, model, directory ? { directory } : undefined)
   }
 
   async #httpSessionMessages(task, run, agentID) {
@@ -290,8 +290,8 @@ export class TaskLauncher {
     const agentID = runAgentID(task)
     const model = runModel(task)
     const entry = await this.#entry(agentID)
-    const resolvedModel = entry.kind === "acp" ? await this.#resolvedModel(agentID, model) : model
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
+    const resolvedModel = entry.kind === "acp" ? await this.#resolvedModel(agentID, model, task.workspace.path) : model
     const title = taskSessionTitle(task)
 
     if (entry.kind === "acp") {
@@ -335,8 +335,8 @@ export class TaskLauncher {
     if (!previousRun?.sessionId) throw taskLaunchError("session_unavailable", "The previous Task session is unavailable")
     if (previousRun.agentId && previousRun.agentId !== agentID) throw taskLaunchError("session_unavailable", "A native Session can only be resumed by the harness that owns it")
     const entry = await this.#entry(agentID)
-    const resolvedModel = entry.kind === "acp" ? await this.#resolvedModel(agentID, model) : model
     if (!task.workspace?.path) throw taskLaunchError("workspace_required", "Task workspace is not prepared")
+    const resolvedModel = entry.kind === "acp" ? await this.#resolvedModel(agentID, model, task.workspace.path) : model
     const modelChanged = !sameModel(previousRun.model ?? null, model)
 
     if (entry.kind === "acp") {
