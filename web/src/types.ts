@@ -29,6 +29,31 @@ export type HarnessCapabilities = {
   attachments: boolean
 }
 
+export type HarnessCapabilityContract = {
+  version: number
+  protocol: string
+  transport: {
+    control: string
+    events: string
+  }
+  toolCalls: {
+    representation: string
+  }
+  models: {
+    source: string
+    cacheScope: string
+    variants: string
+    variantConfigIDs: string[]
+  }
+  lifecycle: {
+    sessionAuthority: string
+    create: string
+    resume: string
+    stop: string
+    reconnect: string
+  }
+}
+
 export type MachineAgentHost = {
   id: string
   label: string
@@ -37,6 +62,7 @@ export type MachineAgentHost = {
   managed: boolean
   state: "configured" | "available" | "unavailable" | string
   capabilities: Partial<HarnessCapabilities> & Record<string, unknown>
+  contract?: HarnessCapabilityContract
   processID?: number
 }
 
@@ -81,8 +107,8 @@ export type ModelOption = ModelSelection & {
   attachments?: boolean
   isDefault?: boolean
   /** Pricing metadata is optional because not every harness advertises it. Costs follow the
-   *  provider catalog's token-pricing units. `isFree` is set only when the catalog explicitly says
-   *  so or all advertised token costs are exactly zero; TaskDesk never guesses from a model name. */
+   * provider catalog's token-pricing units. `isFree` is set only when the catalog explicitly says
+   * so or all advertised token costs are exactly zero; Harness Remote never guesses from a model name. */
   isFree?: boolean
   inputCost?: number
   outputCost?: number
@@ -161,7 +187,7 @@ export type MessageEnvelope = {
       completed?: number
     }
     /** Present when the turn ended in a provider or harness failure instead of a reply. OpenCode
-     *  nests the readable sentence under `data.message`, often as a JSON string of its own. */
+     * nests the readable sentence under `data.message`, often as a JSON string of its own. */
     error?: { name?: string; message?: string; data?: { message?: string } }
   }
   parts: MessagePart[]
