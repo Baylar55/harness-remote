@@ -26,6 +26,7 @@ import "./v3-mobile-regression-fixes.css"
 import "./v3-mobile-landscape-grid-fix.css"
 import "./v3-mobile-workspace-switcher-polish.css"
 import "./v3-mobile-a11y-fix.css"
+import "./v3-mobile-product-parity.css"
 
 installAppPreferences()
 installCompletionAudioGuard()
