@@ -4,9 +4,11 @@ import {
   loadOlderNativeSessionFeed,
   refreshNativeSessionFeed
 } from './native-session-feed.ts'
+import { sendNativeSessionPrompt } from './native-session-prompt.ts'
 
 const target = {
   key: 'pi:s1',
+  machineID: 'machine-1',
   sessionID: 's1',
   directory: '/repo',
   title: 'Session',
@@ -178,5 +180,91 @@ await refreshNativeSessionFeed(target, initial, {
   }
 }, 200, true)
 assert.equal(refreshAuthority, false, 'claimed ACP tail refresh must remain on the mature v3 authority')
+
+// A cross-agent target must display inherited native history before its own Session. Polling an
+// unchanged target must keep the entire feed object and inherited message identities stable, or a
+// long handoff transcript would rerender while the user types into B.
+const historyEntry = {
+  ref: { machineID: 'machine-1', agentID: 'codex', sessionID: 'source-a', directory: '/repo' },
+  title: 'Source Session',
+  agentID: 'codex',
+  agentLabel: 'Codex CLI',
+  backend: 'codex',
+  messages: [
+    { ...message('source-u', 'SOURCE USER', 'user'), info: { ...message('source-u', 'SOURCE USER', 'user').info, sessionID: 'source-a' } },
+    { ...message('source-a', 'SOURCE ASSISTANT', 'assistant'), info: { ...message('source-a', 'SOURCE ASSISTANT', 'assistant').info, sessionID: 'source-a' } }
+  ]
+}
+const handoffTarget = { ...target, key: 'pi:target-b', sessionID: 'target-b', external: false, history: [historyEntry] }
+const targetPage = {
+  async loadMessagePage() {
+    return {
+      messages: [
+        { ...message('b-u', 'B USER', 'user'), info: { ...message('b-u', 'B USER', 'user').info, sessionID: 'target-b' } },
+        { ...message('b-a', 'B ASSISTANT', 'assistant'), info: { ...message('b-a', 'B ASSISTANT', 'assistant').info, sessionID: 'target-b' } }
+      ],
+      before: 'b-cursor',
+      hasMore: true
+    }
+  }
+}
+const linked = await loadNativeSessionFeed(handoffTarget, targetPage)
+assert.equal(linked.messages.length, 4)
+assert.deepEqual(linked.messages.map((item) => item.parts[0]?.text), ['SOURCE USER', 'SOURCE ASSISTANT', 'B USER', 'B ASSISTANT'])
+assert.equal(linked.messages[1].taskdesk.agentLabel, 'Codex CLI', 'inherited reply must retain its original harness metadata')
+const inheritedUser = linked.messages[0]
+const inheritedAssistant = linked.messages[1]
+const linkedUnchanged = await refreshNativeSessionFeed(handoffTarget, linked, targetPage)
+assert.equal(linkedUnchanged, linked, 'unchanged B refresh must retain the complete A -> B feed object')
+assert.equal(linkedUnchanged.messages[0], inheritedUser)
+assert.equal(linkedUnchanged.messages[1], inheritedAssistant)
+
+const linkedOlder = await loadOlderNativeSessionFeed(handoffTarget, linked, {
+  async loadMessagePage() {
+    return {
+      messages: [
+        { ...message('b-old-u', 'B OLDER USER', 'user'), info: { ...message('b-old-u', 'B OLDER USER', 'user').info, sessionID: 'target-b' } },
+        { ...message('b-old-a', 'B OLDER ASSISTANT', 'assistant'), info: { ...message('b-old-a', 'B OLDER ASSISTANT', 'assistant').info, sessionID: 'target-b' } }
+      ],
+      before: undefined,
+      hasMore: false
+    }
+  }
+})
+assert.deepEqual(linkedOlder.messages.map((item) => item.parts[0]?.text), [
+  'SOURCE USER', 'SOURCE ASSISTANT', 'B OLDER USER', 'B OLDER ASSISTANT', 'B USER', 'B ASSISTANT'
+], 'older B paging must stay after inherited A history')
+assert.equal(linkedOlder.messages[0], inheritedUser)
+assert.equal(linkedOlder.messages[1], inheritedAssistant)
+
+// The first prompt in B carries a bounded v3-style context packet on the wire, while durable pending
+// state retains the user's visible text separately. After acceptance the same target must not receive
+// the context packet again on its next prompt.
+const storage = new Map()
+globalThis.localStorage = {
+  getItem(key) { return storage.has(key) ? storage.get(key) : null },
+  setItem(key, value) { storage.set(key, String(value)) },
+  removeItem(key) { storage.delete(key) }
+}
+const sentBodies = []
+const originalFetch = globalThis.fetch
+globalThis.fetch = async (_url, options) => {
+  sentBodies.push(JSON.parse(options.body))
+  return { ok: true, status: 200, async text() { return JSON.stringify({ status: 'accepted' }) } }
+}
+try {
+  const first = await sendNativeSessionPrompt(handoffTarget, 'CONTINUE THE WORK', null)
+  assert.equal(first.status, 'accepted')
+  assert.equal(sentBodies.length, 1)
+  assert.ok(sentBodies[0].text.startsWith('You are taking over an existing TaskDesk task.'))
+  assert.ok(sentBodies[0].text.includes('SOURCE ASSISTANT'))
+  assert.ok(sentBodies[0].text.includes('USER INSTRUCTION\nCONTINUE THE WORK'))
+
+  await sendNativeSessionPrompt(handoffTarget, 'SECOND TARGET PROMPT', null)
+  assert.equal(sentBodies.length, 2)
+  assert.equal(sentBodies[1].text, 'SECOND TARGET PROMPT', 'handoff context must be transferred only on B first accepted prompt')
+} finally {
+  globalThis.fetch = originalFetch
+}
 
 console.log('native session feed tests passed')
