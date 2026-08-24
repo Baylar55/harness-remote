@@ -66,7 +66,32 @@ function mergeFragmentedPiSnapshot(messages) {
 }
 
 function messageSignature(message) {
-  return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
+  // Visible text only – reasoning/tool/file are ephemeral between live stream and persisted/replayed
+  // history. Including them made live vs replayed assistant turns with same answer diverge and get
+  // appended as duplicates on every refresh (see omp-session-history.js:69 fallback).
+  const visibleText = (message?.parts ?? [])
+    .filter((part) => part?.type === "text")
+    .map((part) => part?.text ?? "")
+    .join("")
+  const error = message?.info?.error?.message ? `\u0000${message.info.error.message}` : ""
+  return `${message?.info?.role ?? ""}\u0000${visibleText}${error}`
+}
+
+function isConsecutiveAssistantDuplicate(prev, next) {
+  return prev?.info?.role === "assistant"
+    && next?.info?.role === "assistant"
+    && messageSignature(prev) === messageSignature(next)
+}
+
+function healPoisonedSnapshot(messages) {
+  if (!Array.isArray(messages) || messages.length < 2) return messages
+  const healed = []
+  for (const msg of messages) {
+    const prev = healed.at(-1)
+    if (prev && isConsecutiveAssistantDuplicate(prev, msg)) continue
+    healed.push(msg)
+  }
+  return healed.length === messages.length ? messages : healed
 }
 function stableSemanticValue(value) {
   if (Array.isArray(value)) return value.map(stableSemanticValue)
@@ -113,6 +138,10 @@ function semanticHistorySignature(messages) {
 
 /** Exported for testing only. */
 export function mergeReplay(previous, replayed) {
+  // Heal poisoned snapshots – the zero-tie bug baked a trailing assistant duplicate into
+  // persisted snapshots (acp-service.js:841). Without healing, every future merge keeps it.
+  previous = healPoisonedSnapshot(previous)
+  replayed = healPoisonedSnapshot(replayed)
   if (previous.length === 0) return replayed
   if (replayed.length === 0) return previous
   const left = previous.map(messageSignature)
@@ -125,7 +154,8 @@ export function mergeReplay(previous, replayed) {
   }
 
   if (prefix === previous.length) {
-    return [...previous, ...replayed.slice(prefix)]
+    const appended = [...previous, ...replayed.slice(prefix)]
+    return healPoisonedSnapshot(appended)
   }
 
   const midLeft = left.slice(prefix)
@@ -159,12 +189,24 @@ export function mergeReplay(previous, replayed) {
       rightIndex += 1
     }
   }
-  return [
+  const tailPrev = midPrev.slice(leftIndex)
+  const tailRep = midRep.slice(rightIndex)
+  // Tail reconciliation: when the only divergence is a trailing assistant turn with same
+  // visible text but different ephemeral parts (reasoning/tool/time), the LCS tie-break at
+  // acp-service.js:154 would emit [...prefix, live, replay]. They are the same logical turn.
+  if (tailPrev.length === 1 && tailRep.length === 1 && isConsecutiveAssistantDuplicate(tailPrev[0], tailRep[0])) {
+    return [...previous.slice(0, prefix), ...midMerged, tailPrev[0]]
+  }
+  if (tailPrev.length === tailRep.length && tailPrev.length > 0 && tailPrev.every((m, i) => m.info.role === tailRep[i].info.role && messageSignature(m) === messageSignature(tailRep[i]))) {
+    return [...previous.slice(0, prefix), ...midMerged, ...tailPrev]
+  }
+  const merged = [
     ...previous.slice(0, prefix),
     ...midMerged,
-    ...midPrev.slice(leftIndex),
-    ...midRep.slice(rightIndex)
+    ...tailPrev,
+    ...tailRep
   ]
+  return healPoisonedSnapshot(merged)
 }
 export function mergeExternalHistory(persisted, cached) {
   const persistedIDs = new Set(persisted.map((message) => message.info.id))
@@ -829,7 +871,13 @@ export class AcpService {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
-      if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, mergeFragmentedPiSnapshot(snapshot.messages))
+      if (Array.isArray(snapshot.messages)) {
+        // Heal poisoned snapshots that already contain the trailing assistant duplicate
+        const healed = healPoisonedSnapshot(mergeFragmentedPiSnapshot(snapshot.messages))
+        this.#messages.set(sessionID, healed)
+        // Persist healed version lazily – next persist will overwrite poisoned file
+        if (healed.length !== snapshot.messages.length) this.#dirtySnapshots.add(sessionID)
+      }
       if (Array.isArray(snapshot.todos)) this.#todos.set(sessionID, snapshot.todos)
       if (!this.#preferListedTitles && typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
       if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
@@ -845,9 +893,13 @@ export class AcpService {
     const writing = (async () => {
       await mkdir(this.#snapshotDirectory, { recursive: true })
       while (this.#dirtySnapshots.delete(sessionID)) {
+        // Ensure we never persist the poisoned trailing duplicate
+        const rawMessages = this.#messages.get(sessionID) ?? []
+        const healedMessages = healPoisonedSnapshot(rawMessages)
+        if (healedMessages.length !== rawMessages.length) this.#messages.set(sessionID, healedMessages)
         const snapshot = JSON.stringify({
           version: 1,
-          messages: this.#messages.get(sessionID) ?? [],
+          messages: healedMessages,
           todos: this.#todos.get(sessionID) ?? [],
           title: this.#titleFor(sessionID),
           deleted: this.#deletedSessions.has(sessionID)

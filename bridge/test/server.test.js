@@ -237,6 +237,66 @@ class RealisticOmpAcp extends EventEmitter {
   notify() {}
 }
 
+/** A live turn streams agent_thought_chunk ahead of the answer, but session/load replays text only. */
+class ThoughtfulOmpAcp extends EventEmitter {
+  agentInfo = { version: "17.2.10" }
+  #sessions = []
+  #history = new Map()
+
+  async start() {}
+
+  async listSessions() {
+    return this.#sessions.map(({ sessionId, cwd, updatedAt }) => ({ sessionId, cwd, updatedAt }))
+  }
+
+  async request(method, params) {
+    if (method === "session/new") {
+      const sessionId = `omp-${this.#sessions.length + 1}`
+      this.#sessions.push({ sessionId, cwd: params.cwd, updatedAt: "2026-08-24T00:00:00.000Z" })
+      this.#history.set(sessionId, [])
+      return { sessionId, configOptions: [] }
+    }
+    if (method === "session/prompt") {
+      const history = this.#history.get(params.sessionId) ?? []
+      const index = history.length
+      const text = params.prompt.find((part) => part.type === "text")?.text ?? ""
+      history.push({ role: "user", id: `u${index}`, text })
+      const reply = { role: "assistant", id: `a${index}`, text: "Bridge reply" }
+      history.push(reply)
+      this.#history.set(params.sessionId, history)
+      this.#chunk(params.sessionId, {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: reply.id,
+        text: "Checking the transcript."
+      })
+      this.#chunk(params.sessionId, reply)
+      return { stopReason: "end_turn" }
+    }
+    if (method === "session/load") {
+      for (const message of this.#history.get(params.sessionId) ?? []) this.#chunk(params.sessionId, message)
+      return { configOptions: [] }
+    }
+    return {}
+  }
+
+  #chunk(sessionId, update) {
+    this.emit("notification", {
+      method: "session/update",
+      params: {
+        sessionId,
+        update: {
+          sessionUpdate: update.sessionUpdate
+            ?? (update.role === "assistant" ? "agent_message_chunk" : "user_message_chunk"),
+          messageId: update.messageId ?? update.id,
+          content: { type: "text", text: update.text }
+        }
+      }
+    })
+  }
+
+  notify() {}
+}
+
 /** Holds each turn open so a second prompt arrives while the first is still running. */
 class HeldTurnOmpAcp extends EventEmitter {
   agentInfo = { version: "17.1.3" }
@@ -509,6 +569,49 @@ test("keeps the submitted prompt in history when the session is reopened", async
 
     const reopenedAgain = conversation(await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`))
     assert.deepEqual(reopenedAgain, live)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("does not duplicate the last reply when reopening a session whose live turn carried a thought", async () => {
+  const bridge = await startServer({ acp: new ThoughtfulOmpAcp() })
+  try {
+    const created = await readJSON(bridge.baseURL, "/session", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({})
+    })
+    await readJSON(bridge.baseURL, `/session/${created.id}/prompt_async`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ parts: [{ type: "text", text: "What changed?" }] })
+    })
+    await waitForIdle(bridge.baseURL, created.id)
+
+    const visible = (messages) => messages.map((message) => ({
+      role: message.info.role,
+      text: message.parts.filter((part) => part.type === "text").map((part) => part.text).join("")
+    }))
+    const expected = [
+      { role: "user", text: "What changed?" },
+      { role: "assistant", text: "Bridge reply" }
+    ]
+
+    assert.deepEqual(visible(await readJSON(bridge.baseURL, `/session/${created.id}/message`)), expected)
+
+    // The live envelope carries the streamed thought; the replayed one does not. Reopening must
+    // reconcile them into one visible reply instead of appending a second copy of the answer.
+    const reopened = await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`)
+    assert.deepEqual(visible(reopened), expected, "reopening must not duplicate the reply")
+    const reply = reopened.find((message) => message.info.role === "assistant")
+    assert.ok(
+      reply.parts.some((part) => part.type === "reasoning"),
+      "the streamed thought must survive the reconciliation"
+    )
+
+    const reopenedAgain = await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`)
+    assert.deepEqual(visible(reopenedAgain), expected, "the transcript must stay stable across further reopens")
   } finally {
     await bridge.close()
   }
