@@ -101,6 +101,7 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
   const [query, setQuery] = useState("")
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const previousValueRef = useRef(value)
   const groups = useMemo(() => groupModels(models), [models])
   const selected = models.find((model) => modelOptionKey(model) === value)
 
@@ -141,13 +142,23 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
     if (!open) setQuery("")
   }, [open])
 
+  // `value` is controlled by the conversation controller. A touch selection can synchronously
+  // update the parent while the popover is still handling its click. Treat the committed controlled
+  // value as the final close signal too, so the model sheet can never remain above the composer after
+  // a successful selection and intercept the next Send tap.
+  useEffect(() => {
+    if (previousValueRef.current === value) return
+    previousValueRef.current = value
+    setOpen(false)
+  }, [value])
+
   function choose(next: ModelOption) {
     onChange(modelOptionKey(next))
     setOpen(false)
   }
 
   // A disabled control with a "Choose model" label reads as broken. When discovery finished and the
-  // catalog is empty the conversation still starts — on the harness-native default — so say that
+  // catalog is empty the conversation still starts - on the harness-native default - so say that
   // instead of leaving a dead dropdown with no explanation.
   const empty = !loading && models.length === 0
   const hint = unavailableHint || "No model catalog is available for this coding agent. The harness default will be used."
