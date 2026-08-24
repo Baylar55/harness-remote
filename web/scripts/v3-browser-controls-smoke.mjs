@@ -232,6 +232,30 @@ async function seed(page) {
   }, { key: STORAGE_KEY, fixtures, user: USER, password: PASSWORD })
 }
 
+async function assertSessionFirstHome(page, mobile) {
+  const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
+  await sessions.waitFor({ state: "visible" })
+  await sessions.getByText("Sessions", { exact: true }).first().waitFor({ state: "visible" })
+  if (mobile) {
+    const sessionsButton = page.locator(".hr-mobile-nav").getByRole("button", { name: /Sessions/ })
+    await sessionsButton.waitFor({ state: "visible" })
+    assert.equal(await sessionsButton.getAttribute("aria-current"), "page", "Sessions must be the mobile product entry")
+  }
+  await noOverflow(page, mobile ? "Session-first mobile home" : "Session-first desktop home")
+}
+
+async function enterCompatibilityConversations(page, mobile) {
+  const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
+  await assertSessionFirstHome(page, mobile)
+  if (mobile) {
+    await page.locator(".hr-mobile-nav").getByRole("button", { name: /Conversations/ }).click()
+  } else {
+    await sessions.locator(".tdw-top-actions").getByRole("button", { name: /Conversations/ }).click()
+  }
+  await sessions.waitFor({ state: "hidden" })
+  await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
+}
+
 async function newConversationAudit(page, label) {
   await page.locator(".hr-new-conversation").click()
   const dialog = page.getByRole("dialog", { name: "New conversation" })
@@ -278,6 +302,9 @@ async function runMobile(browser) {
   const page = await context.newPage()
   await seed(page)
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await assertSessionFirstHome(page, true)
+  await shot(page, "portrait-sessions-home")
+  await enterCompatibilityConversations(page, true)
   await page.locator(".hr-mobile-nav").waitFor({ state: "visible" })
   await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
   await shot(page, "portrait-list")
@@ -319,6 +346,9 @@ async function runDesktop(browser) {
   const page = await context.newPage()
   await seed(page)
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await assertSessionFirstHome(page, false)
+  await shot(page, "desktop-sessions-home")
+  await enterCompatibilityConversations(page, false)
   await page.locator(".tdw-topbar").waitFor({ state: "visible" })
   await shot(page, "desktop-list")
   await noOverflow(page, "desktop list")
@@ -355,12 +385,12 @@ try {
   vite = preview()
   await ready(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
-  console.log("v3 browser controls smoke: mobile controls audit start")
+  console.log("v3 browser controls smoke: Session-first mobile entry audit start")
   await runMobile(browser)
   console.log("v3 browser controls smoke: mobile controls audit passed")
   await runDesktop(browser)
   console.log("v3 browser controls smoke: desktop controls audit passed")
-  console.log("v3 browser controls smoke: controls, model catalogs and screenshots passed")
+  console.log("v3 browser controls smoke: Session-first entry, compatibility controls, model catalogs and screenshots passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(vite)
