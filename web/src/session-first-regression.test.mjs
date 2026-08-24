@@ -43,6 +43,7 @@ assert.equal(sessionHome.includes('Active now'), false, 'the Sessions browser mu
 assert.equal(sessionHome.includes('taskClient'), false, 'the Sessions home must not depend on Task/Conversation storage')
 
 assert.ok(sessionNavigation.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), 'mobile Session-first navigation must keep four bounded destinations')
+assert.ok(sessionNavigation.includes('(pointer: coarse) and (min-width: 600px) and (max-height: 640px)'), 'four-destination Session navigation must also apply to phone short-landscape')
 assert.ok(sessionNavigation.includes('box-sizing: border-box'), 'mobile navigation width must include safe-area padding and borders')
 assert.ok(sessionNavigation.includes('max-width: 100vw'), 'mobile navigation must never exceed the visual viewport')
 assert.ok(sessionNavigation.includes('.hr-mobile-nav > button'), 'Session-first navigation must bound each destination independently')
