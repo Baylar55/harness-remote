@@ -12,6 +12,7 @@ import {
 import { ChatIcon, ServerIcon, SettingsIcon } from "../Icons"
 import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine, machineAgentStateLabel } from "../machineClient"
+import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import type { MachineSnapshot } from "../types"
 import {
   createWorkspaceMachine,
@@ -19,6 +20,8 @@ import {
 } from "../workspaceMachines"
 import { useDialogDismiss } from "../useDialogDismiss"
 import { ConversationWorkspace } from "./conversation-workspace"
+import { NativeSessionHome } from "./native-session-home"
+import { NativeSessionObserver } from "./native-session-observer"
 
 type Props = {
   machines: WorkspaceMachine[]
@@ -215,12 +218,80 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
   )
 }
 
+function NativeSessionsWorkspace({
+  machines,
+  onBackToConversations,
+  onManageMachines
+}: {
+  machines: WorkspaceMachine[]
+  onBackToConversations: () => void
+  onManageMachines: () => void
+}) {
+  const [snapshots, setSnapshots] = useState<Record<string, MachineSnapshot | null>>({})
+  const [selected, setSelected] = useState<NativeSessionSurfaceTarget | null>(null)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all(machines.map(async (machine) => {
+      try { return [machine.id, await discoverMachine(machine.config)] as const }
+      catch { return [machine.id, null] as const }
+    })).then((entries) => {
+      if (!cancelled) setSnapshots(Object.fromEntries(entries))
+    })
+    return () => { cancelled = true }
+  }, [machines])
+
+  const sources = useMemo(() => machines.flatMap((machine) => {
+    const snapshot = snapshots[machine.id]
+    return snapshot ? [{ machine, snapshot }] : []
+  }), [machines, snapshots])
+
+  function openSession(target: NativeSessionSurfaceTarget) {
+    setSelected(target)
+    setMobileDetailOpen(true)
+  }
+
+  return (
+    <section className="tdw-shell hr-control-plane hr-native-workspace" aria-label="Sessions">
+      <header className="tdw-topbar hr-topbar">
+        <div className="tdw-brand hr-brand"><span className="tdw-logo hr-logo">H</span><div><strong>Harness Remote</strong><small>Any coding agent. One workspace.</small></div></div>
+        <div className="tdw-context-path" aria-label="Current workspace context"><span>All projects</span><b>/</b><strong>Sessions</strong>{selected ? <><b>/</b><em>{selected.title}</em></> : null}</div>
+        <div className="tdw-top-actions">
+          <button type="button" className="tdw-button secondary" onClick={onBackToConversations}><ChatIcon size={15} /> Conversations</button>
+          <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
+        </div>
+      </header>
+      <div className="hr-native-workspace-body">
+        <aside className="hr-native-workspace-list">
+          <NativeSessionHome sources={sources} onOpen={openSession} />
+        </aside>
+        <main className={`hr-native-workspace-detail${mobileDetailOpen ? " mobile-open" : ""}`}>
+          {selected ? (
+            <>
+              <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Sessions">← Sessions</button>
+              <header className="hr-native-workspace-session-header">
+                <div><span>{selected.agentLabel}</span><h1>{selected.title}</h1><small>{selected.external ? "Native Session started outside Harness Remote" : "Native Session"}</small></div>
+                <code title={selected.sessionID}>{selected.sessionID}</code>
+              </header>
+              <div className="hr-native-workspace-chat"><NativeSessionObserver key={selected.key} target={selected} /></div>
+            </>
+          ) : (
+            <div className="hr-native-workspace-empty"><ChatIcon size={28} /><strong>Open a native Session</strong><span>Observe an existing coding-agent Session, then continue that same Session when the harness allows it.</span></div>
+          )}
+        </main>
+      </div>
+    </section>
+  )
+}
+
 export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Props) {
   const [managerOpen, setManagerOpen] = useState(machines.length === 0)
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
+  const [primarySection, setPrimarySection] = useState<"conversations" | "sessions">("conversations")
   const [activeMachineID, setActiveMachineID] = useState(machines[0]?.id || "")
   const activeID = machines.some((machine) => machine.id === activeMachineID) ? activeMachineID : machines[0]?.id || ""
-  const mobileSection = managerOpen ? "machines" : mobileSettingsOpen ? "settings" : "conversations"
+  const mobileSection = managerOpen ? "machines" : mobileSettingsOpen ? "settings" : primarySection
 
   useEffect(() => {
     if (Capacitor.getPlatform() !== "android") return
@@ -260,6 +331,11 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
         return
       }
 
+      if (primarySection === "sessions") {
+        setPrimarySection("conversations")
+        return
+      }
+
       void CapacitorApp.exitApp()
     }).then((listener) => {
       if (disposed) void listener.remove()
@@ -269,11 +345,18 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       disposed = true
       if (handle) void handle.remove()
     }
-  }, [managerOpen, mobileSettingsOpen])
+  }, [managerOpen, mobileSettingsOpen, primarySection])
 
   function showConversations() {
     setManagerOpen(false)
     setMobileSettingsOpen(false)
+    setPrimarySection("conversations")
+  }
+
+  function showSessions() {
+    setManagerOpen(false)
+    setMobileSettingsOpen(false)
+    setPrimarySection("sessions")
   }
 
   function showMachines() {
@@ -294,6 +377,8 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
         onActiveMachineID={setActiveMachineID}
         onManageMachines={showMachines}
       />
+      {primarySection === "sessions" ? <NativeSessionsWorkspace machines={machines} onBackToConversations={showConversations} onManageMachines={showMachines} /> : null}
+      {primarySection === "conversations" && machines.length > 0 ? <button type="button" className="hr-session-launcher" onClick={showSessions}><ChatIcon size={16} /> Sessions</button> : null}
       {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={(nextMachines) => {
         onPersistMachines(nextMachines)
         if (!nextMachines.some((machine) => machine.id === activeID)) setActiveMachineID(nextMachines[0]?.id || "")
@@ -301,6 +386,7 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       {mobileSettingsOpen ? <MobileSettingsPage onClose={() => setMobileSettingsOpen(false)} /> : null}
       <nav className="hr-mobile-nav" aria-label="Main navigation">
         <button type="button" className={mobileSection === "conversations" ? "active" : ""} onClick={showConversations} aria-current={mobileSection === "conversations" ? "page" : undefined}><ChatIcon size={20} /><span>Conversations</span></button>
+        <button type="button" className={mobileSection === "sessions" ? "active" : ""} onClick={showSessions} aria-current={mobileSection === "sessions" ? "page" : undefined}><ChatIcon size={20} /><span>Sessions</span></button>
         <button type="button" className={mobileSection === "machines" ? "active" : ""} onClick={showMachines} aria-current={mobileSection === "machines" ? "page" : undefined}><ServerIcon size={20} /><span>Machines</span></button>
         <button type="button" className={mobileSection === "settings" ? "active" : ""} onClick={showSettings} aria-current={mobileSection === "settings" ? "page" : undefined}><SettingsIcon size={20} /><span>Settings</span></button>
       </nav>
