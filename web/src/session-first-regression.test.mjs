@@ -109,13 +109,19 @@ assert.ok(sessionNavigation.includes('box-sizing: border-box'), 'mobile navigati
 assert.ok(sessionNavigation.includes('max-width: 100vw'), 'mobile navigation must never exceed the visual viewport')
 assert.ok(sessionNavigation.includes('.hr-mobile-nav > button'), 'Session-first navigation must bound each destination independently')
 
-assert.ok(standalone.includes('<ConversationWorkspace'), 'the validated HR3 Conversation workspace must remain mounted')
-assert.ok(standalone.includes('primarySection === "sessions" ? <NativeSessionsWorkspace'), 'Sessions must be an additive section, not a replacement shell')
+assert.ok(standalone.includes('<ConversationWorkspace'), 'the validated HR3 Conversation workspace must remain mounted as temporary compatibility')
+assert.ok(standalone.includes('primarySection === "sessions" ? <NativeSessionsWorkspace'), 'the product shell must render the integrated native Sessions workspace')
+assert.ok(standalone.includes('useState<"conversations" | "sessions">("sessions")'), 'Session-first product entry must open native Sessions by default')
+assert.equal(standalone.includes('useState<"conversations" | "sessions">("conversations")'), false, 'legacy Conversations must never regain the default product entry')
+assert.equal(standalone.includes('if (primarySection === "sessions") {\n        setPrimarySection("conversations")'), false, 'Android Back from the Sessions home must not silently demote the user into legacy Conversations')
+const sessionsNavIndex = standalone.indexOf('<span>Sessions</span>')
+const conversationsNavIndex = standalone.lastIndexOf('<span>Conversations</span>')
+assert.ok(sessionsNavIndex >= 0 && conversationsNavIndex >= 0 && sessionsNavIndex < conversationsNavIndex, 'mobile primary navigation must lead with Sessions rather than legacy Conversations')
 assert.ok(standalone.includes('<NativeSessionObserver'), 'the integrated Sessions detail must reuse the native Session controller')
 assert.ok(standalone.includes('<NativeSessionHome'), 'the integrated workspace must expose native Sessions directly')
 assert.equal(standalone.includes('SessionFirstPreviewPage'), false, 'the product integration must not promote the isolated preview shell')
 
-assert.ok(main.includes('<StandaloneUniversalWorkspace'), 'the validated HR3 default workspace must remain the product entrypoint')
+assert.ok(main.includes('<StandaloneUniversalWorkspace'), 'the integrated HR3 host must remain the product entrypoint')
 assert.equal(main.includes('NativeSessionObserver'), false, 'main.tsx must not bypass the HR3 workspace host')
 
 console.log('session-first regression guards passed')
