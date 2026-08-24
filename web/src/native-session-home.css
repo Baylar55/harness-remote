@@ -9,6 +9,14 @@
   background: var(--tdw-bg, #0f1115);
 }
 
+/* ConversationWorkspace stays mounted during the Session-first migration so switching back keeps its
+   local state, but it must not remain a second interactive surface underneath Sessions. Some of its
+   desktop controls create their own stacking contexts, so z-index alone is not a sufficient boundary. */
+.uw-standalone-host:has(> .hr-native-workspace) > .hr-control-plane:not(.hr-native-workspace) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .hr-native-workspace-body {
   display: grid;
   grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
