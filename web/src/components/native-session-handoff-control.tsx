@@ -6,6 +6,7 @@ import {
   type NativeSessionSurfaceTarget
 } from "../native-session-discovery"
 import type { MachineAgentHost } from "../types"
+import "../native-session-handoff.css"
 
 type Props = {
   source: NativeSessionSurfaceTarget
