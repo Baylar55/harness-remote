@@ -199,7 +199,6 @@ function startFakeDaemon() {
         title: "PI v3-first regression session",
         directory: DIRECTORY,
         external: true,
-        writerOwned: claimed,
         time: { created: 1_000, updated: clock }
       }])
       return
@@ -485,11 +484,19 @@ async function assertSessionContract(browser, viewport, mobile) {
   const promptsBeforeReload = promptHttpBodies.length
   const dispatchesBeforeReload = nativePromptDispatches
   await page.reload({ waitUntil: "networkidle" })
-  await openSession(page, false)
-  await page.getByText(LOST_REPLY, { exact: true }).waitFor({ state: "visible" })
-  assert.equal(claimCount, 1, "reload must reuse daemon-owned PI writer identity instead of claiming twice")
+  await openSession(page, true)
+  assert.equal(claimCount, 1, "refresh itself must remain read-only and must not claim the PI Session")
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "refresh must never emit a native PI prompt")
   assert.equal(nativePromptDispatches, dispatchesBeforeReload, "refresh must never dispatch native PI work")
+  assert.equal(await page.locator(".uw-composer-shell").count(), 0, "metadata-only ACP discovery after refresh must return to observe-only")
+
+  await page.getByRole("button", { name: "Continue this Session" }).click()
+  await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible" })
+  await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
+  assert.equal(claimCount, 2, "explicit refresh recovery must cross the idempotent claim boundary exactly once")
+  assert.equal(promptHttpBodies.length, promptsBeforeReload, "reclaiming after refresh must not emit a native PI prompt")
+  assert.equal(nativePromptDispatches, dispatchesBeforeReload, "reclaiming after refresh must not dispatch native PI work")
+  await page.getByText(LOST_REPLY, { exact: true }).waitFor({ state: "visible" })
   for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, LOST_PROMPT, LOST_REPLY]) {
     assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `refresh duplicated transcript marker: ${marker}`)
   }
