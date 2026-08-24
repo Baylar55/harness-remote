@@ -4,6 +4,7 @@ import { MachineRegistry, trackAgentHostLifecycle } from "./machine-registry.js"
 import { trackManagedHostLifecycle } from "./opencode-host.js"
 import { discoverProjects } from "./project-catalog.js"
 import { createBridgeServer } from "./server.js"
+import { createSessionClaimServer } from "./session-claim-server.js"
 import { createTaskFinishServer } from "./task-finish-server.js"
 import { createTaskLaunchServer } from "./task-launch-server.js"
 import { TaskLauncher } from "./task-launcher.js"
@@ -12,6 +13,12 @@ import { TaskRunStore } from "./task-run-store.js"
 import { WorktreeManager } from "./worktree-manager.js"
 import { WorkThreadController } from "./work-thread-controller.js"
 import { createWorkThreadServer } from "./work-thread-server.js"
+
+function daemonError(code, message) {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
 
 export class MachineDaemon {
   constructor(identity, { registry = new MachineRegistry(identity) } = {}) {
@@ -113,6 +120,7 @@ export function createMachineDaemonServer({
   serviceOptions,
   createServer = createBridgeServer,
   createRouter = createAgentRoutingServer,
+  createClaimServer = createSessionClaimServer,
   createModelServer = createAgentModelServer,
   createLaunchServer = createTaskLaunchServer,
   createFinishServer = createTaskFinishServer,
@@ -151,6 +159,17 @@ export function createMachineDaemonServer({
     const server = agentID === primaryAgentID ? bridgeServer : acpBridgeServer(agentID)
     return server?.acpService
   }
+  const claimSession = async (agentID, sessionID) => {
+    const entry = daemon.hostEntry(agentID)
+    if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
+    if (entry.kind !== "acp") throw daemonError("unsupported_agent", `Agent ${agentID} does not require ACP Session claiming`)
+    const service = acpService(agentID)
+    if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
+    // Compatibility implementation: models() already forces the exact existing Session through the
+    // hardened ACP session/load path and propagates single-writer refusal. The HTTP/product contract
+    // is now Session-specific, so extracting AcpService.claimSession later will not touch clients.
+    await service.models(sessionID)
+  }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
   const threads = workThreadController ?? new WorkThreadController({ taskStore: tasks, taskRunController: runs })
@@ -171,7 +190,8 @@ export function createMachineDaemonServer({
       ].filter(([, value]) => value))
     })
   })
-  const launchServer = createLaunchServer({ innerServer, config, taskRunController: runs })
+  const claimServer = createClaimServer({ innerServer, config, claimSession })
+  const launchServer = createLaunchServer({ innerServer: claimServer, config, taskRunController: runs })
   const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks, projectCatalog: projects })
   const finishServer = createFinishServer({ innerServer: modelServer, config, taskStore: tasks, worktreeManager: worktrees, taskRunController: runs })
   return createWorkThreadServerFactory({ innerServer: finishServer, config, controller: threads })
