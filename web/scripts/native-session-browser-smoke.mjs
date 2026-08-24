@@ -11,6 +11,7 @@ const SESSION_ID = "native-codex-regression-1"
 const DIRECTORY = "/work/native-session-regression"
 const USER = "harness"
 const PASSWORD = "testpw"
+const PROMPT_TEXT = "MODEL-EFFORT-PROMPT"
 
 function message(id, role, text, created) {
   return {
@@ -43,6 +44,38 @@ function transcript(prefix) {
 const journalMessages = transcript("journal")
 const liveMessages = transcript("live")
 let claimCount = 0
+let modelCatalogReads = 0
+const promptBodies = []
+
+const MODEL_CATALOG = {
+  models: [
+    {
+      providerID: "openai",
+      providerName: "OpenAI",
+      modelID: "gpt-5.6-codex",
+      modelName: "GPT-5.6 Codex",
+      description: "Balanced coding effort",
+      isDefault: true,
+      tools: true,
+      contextLimit: 400000,
+      outputLimit: 128000
+    },
+    {
+      providerID: "openai",
+      providerName: "OpenAI",
+      modelID: "gpt-5.6-codex",
+      modelName: "GPT-5.6 Codex",
+      description: "Maximum reasoning effort",
+      variant: "high",
+      tools: true,
+      contextLimit: 400000,
+      outputLimit: 128000
+    }
+  ],
+  stale: false,
+  refreshedAt: new Date().toISOString(),
+  source: "native-session-smoke"
+}
 
 function corsHeaders() {
   return {
@@ -58,8 +91,15 @@ function json(response, status, value, extraHeaders = {}) {
   response.end(JSON.stringify(value))
 }
 
+async function requestJSON(request) {
+  const chunks = []
+  for await (const chunk of request) chunks.push(chunk)
+  const raw = Buffer.concat(chunks).toString("utf8")
+  return raw ? JSON.parse(raw) : null
+}
+
 function startFakeDaemon() {
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
       response.writeHead(204, corsHeaders())
       response.end()
@@ -114,6 +154,12 @@ function startFakeDaemon() {
       return
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/agents/codex/models") {
+      modelCatalogReads += 1
+      json(response, 200, MODEL_CATALOG)
+      return
+    }
+
     if (request.method === "GET" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/message`) {
       const refresh = url.searchParams.get("refresh") === "1"
       json(response, 200, refresh ? liveMessages : journalMessages, {
@@ -125,6 +171,13 @@ function startFakeDaemon() {
     if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/claim`) {
       claimCount += 1
       json(response, 200, { ok: true })
+      return
+    }
+
+    if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/prompt`) {
+      const body = await requestJSON(request)
+      promptBodies.push(body)
+      json(response, 200, { status: "accepted" })
       return
     }
 
@@ -193,6 +246,9 @@ async function seed(page) {
 }
 
 async function assertSessionContract(browser, viewport, mobile) {
+  const claimsBefore = claimCount
+  const catalogsBefore = modelCatalogReads
+  const promptsBefore = promptBodies.length
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
@@ -205,12 +261,15 @@ async function assertSessionContract(browser, viewport, mobile) {
   await page.getByRole("button", { name: /Codex CLI regression session/ }).click()
   await page.locator(".hr-native-session-observer").waitFor({ state: "visible" })
   await page.getByText("ASSISTANT-FIRST-MARKER", { exact: true }).waitFor({ state: "visible" })
+  await page.getByRole("button", { name: /Model.*GPT-5.6 Codex/ }).waitFor({ state: "visible" })
 
   assert.equal(await page.locator(".uw-composer-shell").isVisible(), false, "external ACP Session must begin observe-only")
+  assert.ok(modelCatalogReads > catalogsBefore, "opening a model-capable Session must load the read-only agent catalog")
+  assert.equal(claimCount, claimsBefore, "model discovery must not claim an external ACP Session")
 
   await page.getByRole("button", { name: "Continue this Session" }).click()
   await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
-  assert.equal(claimCount > 0, true, "Continue must cross the explicit ACP claim boundary")
+  assert.equal(claimCount, claimsBefore + 1, "Continue must cross the explicit ACP claim boundary exactly once")
 
   // Journal and ACP replay deliberately use different ids for the same semantic transcript in this
   // fixture. The UI must show one native response, never both authorities merged together.
@@ -228,6 +287,32 @@ async function assertSessionContract(browser, viewport, mobile) {
   })
   assert.ok(order.every((value) => value >= 0), `transcript markers missing: ${order.join(",")}`)
   assert.ok(order[0] < order[1] && order[1] < order[2] && order[2] < order[3], `native transcript order regressed: ${order.join(",")}`)
+
+  const modelButton = page.locator(".hr-native-session-context .context-chip")
+  await modelButton.click()
+  const modelDialog = page.getByRole("dialog", { name: "Model and effort" })
+  await modelDialog.waitFor({ state: "visible" })
+  await modelDialog.locator(".model-option").filter({ hasText: "Maximum reasoning effort" }).click()
+  await modelDialog.getByRole("button", { name: "Close" }).click()
+  await page.getByRole("button", { name: /Model.*GPT-5.6 Codex.*high/i }).waitFor({ state: "visible" })
+
+  const composerInput = page.getByRole("textbox", { name: "Message Codex CLI" })
+  await composerInput.fill(PROMPT_TEXT)
+  await page.getByRole("button", { name: "Send" }).click()
+  await page.waitForFunction((expected) => window.__nativeSessionSmokePromptCount >= expected, promptsBefore + 1).catch(async () => {
+    const deadline = Date.now() + 5000
+    while (promptBodies.length < promptsBefore + 1 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  })
+  assert.equal(promptBodies.length, promptsBefore + 1, "one Send action must create exactly one native prompt request")
+  const prompt = promptBodies[promptsBefore]
+  assert.equal(prompt.text, PROMPT_TEXT, "native prompt text changed before daemon dispatch")
+  assert.deepEqual(prompt.model, { providerID: "openai", modelID: "gpt-5.6-codex" }, "native prompt must preserve the selected model")
+  assert.equal(prompt.variant, "high", "native prompt must preserve the selected effort variant")
+  assert.equal(prompt.directory, DIRECTORY, "native prompt must retain the Session directory")
+  assert.equal(typeof prompt.clientRequestId, "string", "native prompt must carry its durable request id")
+  assert.ok(prompt.clientRequestId.length > 0, "native prompt request id must not be empty")
 
   const transcript = page.locator(".uw-transcript")
   const scroll = await transcript.evaluate((element) => ({
@@ -277,7 +362,7 @@ try {
   await assertSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native Session browser smoke: mobile")
   await assertSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native Session browser smoke: single reply, ordering, scrolling and composer containment passed")
+  console.log("native Session browser smoke: single reply, ordering, model effort prompt, scrolling and composer containment passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(preview)
