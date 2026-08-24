@@ -10,6 +10,9 @@ export type NativeSessionRecord = {
   stopCapability?: string
   abortSupported: boolean
   modelsSupported: boolean
+  /** True only when this UI record comes from a mutation that just created/claimed the Session through
+   * this daemon. Discovery itself deliberately leaves ownership unknown. */
+  writerOwned?: boolean
   session: Session
   status?: SessionStatus
 }
@@ -46,8 +49,9 @@ export type NativeSessionSurfaceTarget = {
   external: boolean
   modelsSupported: boolean
   model: ModelSelection | null
-  /** Lightweight ACP discovery cannot prove that this bridge owns the writer. Require a deliberate
-   * claim before exposing the composer even when the Session itself was originally created by HR. */
+  /** Lightweight ACP discovery cannot prove that this bridge owns the writer. A Session that was
+   * just created/claimed through this daemon can set writerOwned and must not make the user claim it
+   * a second time. */
   requiresExplicitClaim: boolean
   /** Stop is exposed only when both the coarse capability and the Session-first contract name a
    * native cancellation primitive we understand. Unknown adapter semantics stay hidden. */
@@ -92,10 +96,9 @@ export function nativeSessionConfig(base: ServerConfig, agent: MachineAgentHost)
  * This is a view-model conversion only. It never adopts, resumes or creates anything on the daemon.
  *
  * ACP discovery is intentionally conservative: `/experimental/session` is metadata-only and cannot
- * prove this process owns a native writer. Every ACP Session therefore starts observe-only until the
- * explicit claim operation succeeds. Managed HTTP harnesses such as OpenCode keep their native
- * server ownership semantics and only require a claim when the harness itself marks the Session
- * external.
+ * prove this process owns a native writer. Discovered ACP Sessions therefore start observe-only.
+ * A mutation-created record may explicitly carry `writerOwned: true`; in that case forcing another
+ * claim would be both redundant and a visible UX regression.
  */
 export function nativeSessionSurfaceTarget(
   machineID: string,
@@ -130,7 +133,7 @@ export function nativeSessionSurfaceTarget(
     external,
     modelsSupported: record.modelsSupported,
     model: sessionModel(record.session),
-    requiresExplicitClaim: record.transport === "acp" || external,
+    requiresExplicitClaim: external || (record.transport === "acp" && record.writerOwned !== true),
     canStop: record.abortSupported && supportedStopCapability(record.stopCapability)
   }
 }
