@@ -72,7 +72,7 @@ test("ACP native Session prompt resolves model and applies native variant config
   assert.deepEqual(prompts, [["native-acp-model", "Continue once", "openai/gpt-5.6"]])
 })
 
-test("OpenCode native Session prompt preserves the existing parts model agent variant wire contract", async () => {
+test("OpenCode native Session prompt preserves parts, model and variant without inventing an internal agent", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-http", name: "workstation" })
   const primaryAcp = new FakeAcp()
   const openCode = new FakeHttpHost()
@@ -113,7 +113,6 @@ test("OpenCode native Session prompt preserves the existing parts model agent va
   assert.deepEqual(JSON.parse(calls[0][1].body), {
     parts: [{ type: "text", text: "Continue once" }],
     model: { providerID: "openai", modelID: "gpt-5.6" },
-    agent: "opencode",
     variant: "high"
   })
 })
