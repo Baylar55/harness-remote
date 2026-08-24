@@ -243,15 +243,19 @@ async function assertSessionContract(browser, viewport, mobile) {
   assert.ok(composer && size, "composer geometry unavailable")
   assert.ok(composer.y >= -1 && composer.y + composer.height <= size.height + 1, `composer escaped the viewport: ${JSON.stringify({ composer, size })}`)
 
-  // TaskDeskConversation follows the bottom while the reader has not expressed scroll intent. The
-  // transcript also has CSS smooth scrolling, so make the position change instant after the upward
-  // gesture. This tests follow behavior rather than sampling an in-progress CSS scroll animation.
-  await transcript.evaluate((element) => {
+  // TaskDeskConversation follows the bottom while the reader has not expressed scroll intent. Keep
+  // CSS smooth scrolling disabled through the assertion so an already-running interpolation cannot
+  // masquerade as a follow-to-bottom regression, especially in the mobile emulation profile.
+  const previousScrollBehavior = await transcript.evaluate((element) => {
     element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }))
-    element.scrollTo({ top: 0, behavior: "instant" })
+    const previous = element.style.scrollBehavior
+    element.style.scrollBehavior = "auto"
+    element.scrollTop = 0
+    return previous
   })
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const top = await transcript.evaluate((element) => element.scrollTop)
+  await transcript.evaluate((element, previous) => { element.style.scrollBehavior = previous }, previousScrollBehavior)
   assert.equal(top, 0, "native transcript cannot scroll independently to the top after user scroll intent")
 
   await context.close()
