@@ -10,6 +10,24 @@ export type NativeSessionRecord = {
   status?: SessionStatus
 }
 
+/**
+ * This is the minimal input the existing HR3 chat surface needs in order to render one real native
+ * Session. It deliberately contains no Task/Conversation identity: discovery and observation must
+ * work for Sessions that were started entirely outside Harness Remote.
+ */
+export type NativeSessionSurfaceTarget = {
+  key: string
+  sessionID: string
+  directory: string
+  title: string
+  agentID: string
+  agentLabel: string
+  backend: BackendKind
+  config: ServerConfig
+  status?: SessionStatus
+  external: boolean
+}
+
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
   return value === "opencode" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
     ? value
@@ -27,6 +45,29 @@ export function nativeSessionConfig(base: ServerConfig, agent: MachineAgentHost)
     ...base,
     backend: supportedBackend(agent.backend || agent.id, base.backend),
     agentId: agent.id
+  }
+}
+
+/**
+ * Convert discovery data into the same primitive the HR3 transcript/composer can consume next.
+ * This is a view-model conversion only. It never adopts, resumes or creates anything on the daemon.
+ */
+export function nativeSessionSurfaceTarget(base: ServerConfig, record: NativeSessionRecord): NativeSessionSurfaceTarget {
+  return {
+    key: record.key,
+    sessionID: record.session.id,
+    directory: record.session.directory || "",
+    title: record.session.title?.trim() || "Untitled Session",
+    agentID: record.agentId,
+    agentLabel: record.agentLabel,
+    backend: record.backend,
+    config: {
+      ...base,
+      backend: record.backend,
+      agentId: record.agentId
+    },
+    status: record.status,
+    external: record.session.external === true
   }
 }
 
