@@ -2,12 +2,14 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
+import type { ModelSelection } from "./types"
 
 export type NativeSessionPromptStatus = "accepted" | "pending" | "uncertain"
 
 export type PendingNativeSessionPrompt = {
   clientRequestId: string
   text: string
+  model?: ModelSelection | null
   createdAt: number
 }
 
@@ -22,6 +24,22 @@ function requestID(): string {
   return `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+function normalizeModel(value: unknown): ModelSelection | null {
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Partial<ModelSelection>
+  const providerID = typeof candidate.providerID === "string" ? candidate.providerID.trim() : ""
+  const modelID = typeof candidate.modelID === "string" ? candidate.modelID.trim() : ""
+  if (!providerID || !modelID) return null
+  const variant = typeof candidate.variant === "string" && candidate.variant.trim() ? candidate.variant.trim() : undefined
+  return { providerID, modelID, ...(variant ? { variant } : {}) }
+}
+
+function sameModel(left?: ModelSelection | null, right?: ModelSelection | null): boolean {
+  if (!left && !right) return true
+  if (!left || !right) return false
+  return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
+}
+
 export function loadPendingNativeSessionPrompt(target: NativeSessionSurfaceTarget): PendingNativeSessionPrompt | null {
   try {
     const raw = localStorage.getItem(storageKey(target))
@@ -32,6 +50,7 @@ export function loadPendingNativeSessionPrompt(target: NativeSessionSurfaceTarge
     return {
       clientRequestId: parsed.clientRequestId,
       text: parsed.text,
+      model: normalizeModel(parsed.model),
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now()
     }
   } catch {
@@ -69,30 +88,39 @@ function errorDetail(body: unknown, status: number): string {
 /**
  * Send one prompt to the exact existing native Session with a durable client request id.
  *
- * The pending id is written on the client before network I/O. A retry of the same text therefore
- * converges on the daemon ledger even after a lost HTTP response or WebView reload. A different
- * prompt is blocked while delivery of the previous one is unresolved, preserving turn order rather
- * than guessing whether the harness accepted it.
+ * The pending id and its model selection are written on the client before network I/O. A retry of
+ * the same semantic prompt therefore converges on the daemon ledger even after a lost HTTP response
+ * or WebView reload. A changed prompt, model or effort is blocked while delivery is unresolved,
+ * preserving turn order rather than guessing what the harness accepted.
  */
 export async function sendNativeSessionPrompt(
   target: NativeSessionSurfaceTarget,
-  text: string
+  text: string,
+  model?: ModelSelection | null
 ): Promise<{ status: NativeSessionPromptStatus; clientRequestId: string }> {
   const normalized = text.trim()
   if (!normalized) throw new Error("A text prompt is required")
+  const requestedModel = normalizeModel(model)
 
   const existing = loadPendingNativeSessionPrompt(target)
-  if (existing && existing.text !== normalized) {
-    throw new Error("A previous prompt still has an unresolved delivery status. Retry that prompt before sending a different one.")
+  if (existing && (existing.text !== normalized || !sameModel(existing.model, requestedModel))) {
+    throw new Error("A previous prompt still has an unresolved delivery status. Retry that exact prompt and model selection before sending a different request.")
   }
-  const pending = existing ?? { clientRequestId: requestID(), text: normalized, createdAt: Date.now() }
+  const pending = existing ?? {
+    clientRequestId: requestID(),
+    text: normalized,
+    model: requestedModel,
+    createdAt: Date.now()
+  }
   persistPending(target, pending)
 
   const path = `/session/${encodeURIComponent(target.sessionID)}/prompt`
   const body = {
     clientRequestId: pending.clientRequestId,
     text: normalized,
-    directory: target.directory
+    directory: target.directory,
+    model: pending.model ? { providerID: pending.model.providerID, modelID: pending.model.modelID } : undefined,
+    variant: pending.model?.variant || undefined
   }
 
   let status: NativeSessionPromptStatus
