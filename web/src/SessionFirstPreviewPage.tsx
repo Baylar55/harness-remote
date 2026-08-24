@@ -29,8 +29,9 @@ function statusLabel(record: NativeSessionRecord): string {
 }
 
 function projectLabel(record: NativeSessionRecord): string {
+  const parts = record.session.directory.split(/[\\/]/).filter(Boolean)
   return record.session.project?.name?.trim()
-    || record.session.directory.split(/[\\/]/).filter(Boolean).at(-1)
+    || parts[parts.length - 1]
     || record.session.directory
     || "Unknown project"
 }
