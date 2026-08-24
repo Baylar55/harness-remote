@@ -27,7 +27,8 @@ assert.ok(feed.includes('prependOlderMessagePage'), 'native Session history pagi
 
 assert.ok(continuation.includes('client.claimSession(target.config, target.directory, target.sessionID)'), 'ACP continuation must claim the exact native Session through an explicit Session boundary')
 assert.equal(continuation.includes('listModels('), false, 'Session-first continuation must not expose model discovery as its ownership primitive')
-assert.ok(claim.includes('api.listModels(config, directory, sessionID)'), 'the temporary claim transport must preserve the hardened ACP session/load probe until the bridge exposes a dedicated claim route')
+assert.ok(claim.includes('`/session/${encodeURIComponent(sessionID)}/claim`'), 'claim transport must call the dedicated native Session claim endpoint')
+assert.equal(claim.includes('listModels('), false, 'native Session claiming must no longer use model discovery at the client boundary')
 assert.equal(claim.includes('createSession('), false, 'claim transport must never create a replacement Session')
 assert.equal(claim.includes('createTask('), false, 'claim transport must not synthesize a Task/Conversation')
 assert.equal(claim.includes('launch('), false, 'claim transport must not enter the Task launcher')
