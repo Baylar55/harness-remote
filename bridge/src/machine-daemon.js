@@ -5,6 +5,7 @@ import { trackManagedHostLifecycle } from "./opencode-host.js"
 import { discoverProjects } from "./project-catalog.js"
 import { createBridgeServer } from "./server.js"
 import { createSessionClaimServer } from "./session-claim-server.js"
+import { SessionLinkStore } from "./session-link-store.js"
 import { SessionOperationLedger } from "./session-operation-ledger.js"
 import { createTaskFinishServer } from "./task-finish-server.js"
 import { createTaskLaunchServer } from "./task-launch-server.js"
@@ -146,7 +147,8 @@ export function createMachineDaemonServer({
   taskLauncher,
   taskRunController,
   workThreadController,
-  sessionOperationLedger
+  sessionOperationLedger,
+  sessionLinkStore
 }) {
   const bridgeServer = createServer({ config, acp: primaryAcp, machineRegistry: daemon.registry, serviceOptions })
   const scopedAcpServers = new Map()
@@ -173,6 +175,7 @@ export function createMachineDaemonServer({
   const projects = projectCatalog ?? (() => discoverProjects({ machineID, roots }))
   const worktrees = worktreeManager ?? new WorktreeManager({ stateDirectory })
   const operations = sessionOperationLedger ?? new SessionOperationLedger({ machineID, stateDirectory })
+  const links = sessionLinkStore ?? new SessionLinkStore({ machineID, stateDirectory })
   const acpService = (agentID) => {
     const server = agentID === primaryAgentID ? bridgeServer : acpBridgeServer(agentID)
     return server?.acpService
@@ -290,6 +293,102 @@ export function createMachineDaemonServer({
       throw daemonError("session_stop_rejected", message)
     }
   }
+  const handoffSession = async (sourceAgentID, sourceSessionID, { targetAgentID, directory, model, variant, title }) => {
+    const sourceEntry = daemon.hostEntry(sourceAgentID)
+    if (!sourceEntry) throw daemonError("unknown_agent", `Unknown source agent: ${sourceAgentID}`)
+    const targetEntry = daemon.hostEntry(targetAgentID)
+    if (!targetEntry) throw daemonError("unknown_agent", `Unknown target agent: ${targetAgentID}`)
+    if (targetEntry.host?.capabilities?.sessions === false || daemon.registry.host(targetAgentID)?.capabilities?.sessions === false) {
+      throw daemonError("unsupported_agent", `Agent ${targetAgentID} does not support native Sessions`)
+    }
+
+    const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
+    const resolvedModel = requestedModel
+      ? await daemon.resolveModel(targetAgentID, requestedModel, { directory })
+      : null
+    const targetTitle = title || `Handoff from ${sourceAgentID}`
+    let targetSession
+    let nativeCreated = false
+
+    try {
+      if (targetEntry.kind === "acp") {
+        const service = acpService(targetAgentID)
+        if (!service || typeof service.createSession !== "function") {
+          throw daemonError("unsupported_agent", `Agent ${targetAgentID} cannot create native Sessions`)
+        }
+        try {
+          targetSession = await service.createSession({
+            directory,
+            title: targetTitle,
+            model: modelWireName(resolvedModel)
+          })
+        } catch (error) {
+          if (error && typeof error === "object") error.ambiguous = true
+          throw error
+        }
+        if (!targetSession?.id) throw daemonError("handoff_rejected", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
+        nativeCreated = true
+        if (resolvedModel?.variant && resolvedModel?.variantConfigId) {
+          await targetEntry.host.request("session/set_config_option", {
+            sessionId: targetSession.id,
+            configId: resolvedModel.variantConfigId,
+            value: resolvedModel.variant
+          })
+        }
+      } else {
+        const host = targetEntry.host
+        try {
+          await host.start?.()
+        } catch (error) {
+          throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${targetAgentID} is unavailable`)
+        }
+        const query = `?directory=${encodeURIComponent(directory)}`
+        const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session${query}`
+        const headers = { Accept: "application/json", "Content-Type": "application/json" }
+        const authorization = internalAuthorization(host)
+        if (authorization) headers.Authorization = authorization
+        let response
+        try {
+          response = await fetch(url, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              title: targetTitle,
+              model: resolvedModel ? {
+                providerID: resolvedModel.providerID,
+                id: resolvedModel.modelID,
+                variant: resolvedModel.variant || undefined
+              } : undefined
+            })
+          })
+        } catch {
+          throw daemonError("handoff_uncertain", `Creating ${targetAgentID} Session is uncertain`, { ambiguous: true })
+        }
+        if (!response.ok) {
+          let detail = ""
+          try { detail = await response.text() } catch {}
+          const message = detail || `Creating ${targetAgentID} Session returned HTTP ${response.status}`
+          if (response.status >= 500) throw daemonError("handoff_uncertain", message, { ambiguous: true })
+          throw daemonError("handoff_rejected", message)
+        }
+        try {
+          targetSession = await response.json()
+        } catch {
+          throw daemonError("handoff_uncertain", `Creating ${targetAgentID} Session returned an unreadable response`, { ambiguous: true })
+        }
+        if (!targetSession?.id) throw daemonError("handoff_uncertain", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
+        nativeCreated = true
+      }
+
+      const source = { machineID, agentID: sourceAgentID, sessionID: sourceSessionID, directory }
+      const target = { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory }
+      const link = await links.addHandoff({ source, target })
+      return { target, link }
+    } catch (error) {
+      if (nativeCreated && error && typeof error === "object") error.ambiguous = true
+      throw error
+    }
+  }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
   const threads = workThreadController ?? new WorkThreadController({ taskStore: tasks, taskRunController: runs })
@@ -316,6 +415,7 @@ export function createMachineDaemonServer({
     claimSession,
     promptSession,
     stopSession,
+    handoffSession,
     operationLedger: operations
   })
   const launchServer = createLaunchServer({ innerServer: claimServer, config, taskRunController: runs })
