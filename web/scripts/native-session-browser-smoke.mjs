@@ -13,10 +13,11 @@ const DIRECTORY = "/work/native-session-regression"
 const USER = "harness"
 const PASSWORD = "testpw"
 const PROMPT_TEXT = "MODEL-EFFORT-PROMPT"
+const HANDOFF_PROMPT_TEXT = "HANDOFF-CONTEXT-PROMPT"
 
-function message(id, role, text, created) {
+function message(id, role, text, created, sessionID = SESSION_ID) {
   return {
-    info: { id, role, sessionID: SESSION_ID, time: { created } },
+    info: { id, role, sessionID, time: { created } },
     parts: [{ id: `${id}-text`, type: "text", text }]
   }
 }
@@ -48,6 +49,8 @@ let claimCount = 0
 let modelCatalogReads = 0
 const promptBodies = []
 const handoffBodies = []
+const handoffPromptBodies = []
+let handoffMessages = []
 
 const MODEL_CATALOG = {
   models: [
@@ -193,7 +196,7 @@ function startFakeDaemon() {
     }
 
     if (request.method === "GET" && url.pathname === `/v1/agents/opencode/session/${HANDOFF_SESSION_ID}/message`) {
-      json(response, 200, [], { "X-Has-More": "0" })
+      json(response, 200, handoffMessages, { "X-Has-More": "0" })
       return
     }
 
@@ -206,6 +209,17 @@ function startFakeDaemon() {
     if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/prompt`) {
       const body = await requestJSON(request)
       promptBodies.push(body)
+      json(response, 200, { status: "accepted" })
+      return
+    }
+
+    if (request.method === "POST" && url.pathname === `/v1/agents/opencode/session/${HANDOFF_SESSION_ID}/prompt`) {
+      const body = await requestJSON(request)
+      handoffPromptBodies.push(body)
+      handoffMessages = [
+        message("handoff-user-1", "user", body.text, 9_000, HANDOFF_SESSION_ID),
+        message("handoff-assistant-1", "assistant", "HANDOFF-ASSISTANT-REPLY", 9_001, HANDOFF_SESSION_ID)
+      ]
       json(response, 200, { status: "accepted" })
       return
     }
@@ -233,8 +247,6 @@ function startFakeDaemon() {
       return
     }
 
-    // The observer may attempt to establish live refresh. A failed optional stream must not affect
-    // the authoritative transcript reads used by this regression smoke.
     if (request.method === "GET" && url.pathname.includes("/global/event")) {
       response.writeHead(204, corsHeaders())
       response.end()
@@ -297,16 +309,9 @@ async function seed(page) {
   }, { key: STORAGE_KEY, port: DAEMON_PORT, user: USER, password: PASSWORD })
 }
 
-async function waitForPromptCount(expected) {
+async function waitForCount(readCount, expected) {
   const deadline = Date.now() + 5000
-  while (promptBodies.length < expected && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-}
-
-async function waitForHandoffCount(expected) {
-  const deadline = Date.now() + 5000
-  while (handoffBodies.length < expected && Date.now() < deadline) {
+  while (readCount() < expected && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
 }
@@ -316,6 +321,8 @@ async function assertSessionContract(browser, viewport, mobile) {
   const catalogsBefore = modelCatalogReads
   const promptsBefore = promptBodies.length
   const handoffsBefore = handoffBodies.length
+  const handoffPromptsBefore = handoffPromptBodies.length
+  handoffMessages = []
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
@@ -338,8 +345,6 @@ async function assertSessionContract(browser, viewport, mobile) {
   await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
   assert.equal(claimCount, claimsBefore + 1, "Continue must cross the explicit ACP claim boundary exactly once")
 
-  // Journal and ACP replay deliberately use different ids for the same semantic transcript in this
-  // fixture. The UI must show one native response, never both authorities merged together.
   assert.equal(await page.getByText("ASSISTANT-FIRST-MARKER", { exact: true }).count(), 1, "first assistant response was duplicated after claim")
   assert.equal(await page.getByText("ASSISTANT-LAST-MARKER", { exact: true }).count(), 1, "last assistant response was duplicated after claim")
 
@@ -366,7 +371,7 @@ async function assertSessionContract(browser, viewport, mobile) {
   const composerInput = page.getByRole("textbox", { name: "Message Codex CLI" })
   await composerInput.fill(PROMPT_TEXT)
   await page.getByRole("button", { name: "Send" }).click()
-  await waitForPromptCount(promptsBefore + 1)
+  await waitForCount(() => promptBodies.length, promptsBefore + 1)
   assert.equal(promptBodies.length, promptsBefore + 1, "one Send action must create exactly one native prompt request")
   const prompt = promptBodies[promptsBefore]
   assert.equal(prompt.text, PROMPT_TEXT, "native prompt text changed before daemon dispatch")
@@ -390,10 +395,6 @@ async function assertSessionContract(browser, viewport, mobile) {
   assert.ok(composer && size, "composer geometry unavailable")
   assert.ok(composer.y >= -1 && composer.y + composer.height <= size.height + 1, `composer escaped the viewport: ${JSON.stringify({ composer, size })}`)
 
-  // `dispatchEvent` reaches React but does not perform a browser's native wheel/touch default action,
-  // so it cannot itself cancel a CSS smooth-scroll already heading to the bottom. First replace that
-  // animation with an instant no-op at the current position. The following upward intent + scrollTop
-  // change then isolates the invariant we care about: React must not schedule another follow-to-bottom.
   const previousScrollBehavior = await transcript.evaluate(async (element) => {
     const previous = element.style.scrollBehavior
     element.style.scrollBehavior = "auto"
@@ -413,7 +414,7 @@ async function assertSessionContract(browser, viewport, mobile) {
   await handoffPanel.waitFor({ state: "visible" })
   await handoffPanel.locator("select").selectOption("opencode")
   await handoffPanel.getByRole("button", { name: "Continue" }).click()
-  await waitForHandoffCount(handoffsBefore + 1)
+  await waitForCount(() => handoffBodies.length, handoffsBefore + 1)
   assert.equal(handoffBodies.length, handoffsBefore + 1, "one handoff action must create exactly one target native Session request")
   const handoff = handoffBodies[handoffsBefore]
   assert.equal(handoff.directory, DIRECTORY, "handoff must keep the source project directory")
@@ -422,11 +423,29 @@ async function assertSessionContract(browser, viewport, mobile) {
   assert.ok(handoff.clientRequestId.length > 0, "handoff request id must not be empty")
 
   await page.getByText("OpenCode", { exact: true }).first().waitFor({ state: "visible" })
-  await page.getByText(HANDOFF_SESSION_ID, { exact: true }).waitFor({ state: mobile ? "hidden" : "visible" }).catch(() => {})
   await page.locator(".hr-native-session-observer").waitFor({ state: "visible" })
   const targetComposer = page.getByRole("textbox", { name: "Message OpenCode" })
   await targetComposer.waitFor({ state: "visible" })
-  assert.equal(claimCount, claimsBefore + 1, "opening the HTTP target Session must not claim the source or target ACP writer")
+  assert.equal(claimCount, claimsBefore + 1, "opening the handoff target must not introduce another claim")
+  assert.equal(await page.getByRole("button", { name: "Continue this Session" }).count(), 0, "daemon-created handoff target must be writable immediately")
+  assert.equal(await page.getByText("ASSISTANT-FIRST-MARKER", { exact: true }).count(), 1, "handoff target must retain source history exactly once")
+  assert.equal(await page.getByText("ASSISTANT-LAST-MARKER", { exact: true }).count(), 1, "handoff target lost the latest source reply")
+
+  await targetComposer.fill(HANDOFF_PROMPT_TEXT)
+  await page.getByRole("button", { name: "Send" }).click()
+  await waitForCount(() => handoffPromptBodies.length, handoffPromptsBefore + 1)
+  assert.equal(handoffPromptBodies.length, handoffPromptsBefore + 1, "first target Send must create exactly one native prompt")
+  const targetPrompt = handoffPromptBodies[handoffPromptsBefore]
+  assert.ok(targetPrompt.text.startsWith("You are taking over an existing TaskDesk task."), "first target prompt must carry the mature v3 handoff packet")
+  assert.ok(targetPrompt.text.includes("ASSISTANT-LAST-MARKER"), "handoff packet must contain bounded source context")
+  assert.ok(targetPrompt.text.includes(`USER INSTRUCTION\n${HANDOFF_PROMPT_TEXT}`), "handoff packet must preserve the user's visible instruction")
+
+  await page.getByText(HANDOFF_PROMPT_TEXT, { exact: true }).waitFor({ state: "visible" })
+  await page.getByText("HANDOFF-ASSISTANT-REPLY", { exact: true }).waitFor({ state: "visible" })
+  assert.equal(await page.getByText("You are taking over an existing TaskDesk task.", { exact: false }).count(), 0, "technical handoff packet leaked into visible chat")
+  assert.equal(await page.getByText(HANDOFF_PROMPT_TEXT, { exact: true }).count(), 1, "target user instruction duplicated in chat")
+  assert.equal(await page.getByText("HANDOFF-ASSISTANT-REPLY", { exact: true }).count(), 1, "target assistant reply duplicated in chat")
+  assert.equal(await page.getByText("Codex CLI", { exact: true }).count() > 0, true, "source history must keep its original agent label")
 
   await context.close()
 }
@@ -444,7 +463,7 @@ try {
   await assertSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native Session browser smoke: mobile")
   await assertSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native Session browser smoke: single reply, ordering, model effort prompt, scrolling, composer containment and cross-agent handoff passed")
+  console.log("native Session browser smoke: same-Session continuation, model effort, scrolling and context-preserving cross-agent handoff passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(preview)
