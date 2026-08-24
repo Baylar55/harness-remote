@@ -243,13 +243,16 @@ async function assertSessionContract(browser, viewport, mobile) {
   assert.ok(composer && size, "composer geometry unavailable")
   assert.ok(composer.y >= -1 && composer.y + composer.height <= size.height + 1, `composer escaped the viewport: ${JSON.stringify({ composer, size })}`)
 
-  // TaskDeskConversation follows the bottom while the reader has not expressed scroll intent. Keep
-  // CSS smooth scrolling disabled through the assertion so an already-running interpolation cannot
-  // masquerade as a follow-to-bottom regression, especially in the mobile emulation profile.
-  const previousScrollBehavior = await transcript.evaluate((element) => {
-    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }))
+  // `dispatchEvent` reaches React but does not perform a browser's native wheel/touch default action,
+  // so it cannot itself cancel a CSS smooth-scroll already heading to the bottom. First replace that
+  // animation with an instant no-op at the current position. The following upward intent + scrollTop
+  // change then isolates the invariant we care about: React must not schedule another follow-to-bottom.
+  const previousScrollBehavior = await transcript.evaluate(async (element) => {
     const previous = element.style.scrollBehavior
     element.style.scrollBehavior = "auto"
+    element.scrollTo({ top: element.scrollTop, behavior: "auto" })
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }))
     element.scrollTop = 0
     return previous
   })
