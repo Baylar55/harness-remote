@@ -137,7 +137,8 @@ function projectedTask(entry: ProjectionEntry): MachineTask {
   const runs = sortedRuns(entry)
   const current = runs[runs.length - 1] ?? null
   const firstPrompt = runs.find((run) => run.prompt?.trim())?.prompt || ""
-  const projectName = entry.target.directory.split(/[\\/]/).filter(Boolean).at(-1) || entry.target.title || "Native Session"
+  const directoryParts = entry.target.directory.split(/[\\/]/).filter(Boolean)
+  const projectName = directoryParts[directoryParts.length - 1] || entry.target.title || "Native Session"
   return {
     id: projectionID(entry.target),
     machineId: entry.target.machineID,
@@ -262,7 +263,8 @@ function installAdapter(): void {
   taskClient.cancelWorkThread = async function patchedCancelWorkThread(config, taskId) {
     const entry = projections.get(taskId)
     if (!entry) return originalCancelWorkThread(config, taskId)
-    const latestRun = sortedRuns(entry).at(-1)
+    const projectionRuns = sortedRuns(entry)
+    const latestRun = projectionRuns[projectionRuns.length - 1]
     const operationToken = latestRun?.id || entry.target.sessionID
     const result = await stopNativeSession(entry.target, operationToken)
     if (result.status !== "accepted") {
