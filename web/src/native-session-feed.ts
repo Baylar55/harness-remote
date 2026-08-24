@@ -22,17 +22,20 @@ function asFeed(page: MessagePage): NativeSessionFeed {
 /**
  * Load the newest transcript page for one real native Session.
  *
- * `refreshHistory=true` deliberately bypasses an adapter's paged journal fast-path. Session-first
- * uses that when an ACP Session has just been claimed: before the claim the harness journal is the
- * safe read authority, while after the claim the ACP connection's replay/live cache is the writer
- * authority. Replacing the feed once at that boundary prevents one native reply from being rendered
- * twice merely because journal and live envelopes use different ids.
+ * Session-first deliberately follows the stabilized v3 Conversation controller here: the normal
+ * native message endpoint remains the transcript authority before and after writer acquisition.
+ * Switching a claimed ACP Session to a separate replay/cache authority caused real PI/Codex output
+ * to be merged repeatedly when replay envelope ids changed between refreshes.
+ *
+ * `refreshHistory` is retained in the public signature only for compatibility with callers created
+ * during the Session-first draft. It is intentionally ignored until an adapter can prove a stable,
+ * single-authority replacement path.
  */
 export async function loadNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
   client: NativeSessionFeedApi = api,
   limit = 200,
-  refreshHistory = false
+  _refreshHistory = false
 ): Promise<NativeSessionFeed> {
   return asFeed(await client.loadMessagePage(
     target.config,
@@ -40,24 +43,20 @@ export async function loadNativeSessionFeed(
     target.directory,
     undefined,
     limit,
-    refreshHistory
+    false
   ))
 }
 
 /**
  * Refresh only the newest page and preserve object identity for unchanged messages. This is the same
- * merge rule used by the current HR3 conversation controller, so Session-first observation cannot
- * reintroduce the long-transcript typing/render regressions fixed in v3.
- *
- * Claimed ACP Sessions pass `refreshHistory=true` so an idle refresh cannot silently switch the tail
- * back from live ACP envelopes to the harness journal, whose stable ids belong to a different source.
+ * read + merge rule used by the validated v3 WorkThreadConversation path.
  */
 export async function refreshNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
   current: NativeSessionFeed,
   client: NativeSessionFeedApi = api,
   limit = 200,
-  refreshHistory = false
+  _refreshHistory = false
 ): Promise<NativeSessionFeed> {
   const page = await client.loadMessagePage(
     target.config,
@@ -65,23 +64,20 @@ export async function refreshNativeSessionFeed(
     target.directory,
     undefined,
     limit,
-    refreshHistory
+    false
   )
   const messages = mergeLatestMessagePage(current.messages, page.messages)
   if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
   return { messages, before: page.before, hasMore: page.hasMore }
 }
 
-/**
- * Load one older page without disturbing the currently rendered tail or scroll identities.
- * Claimed ACP Sessions keep the same authority for older paging as for their live tail.
- */
+/** Load one older page using the same transcript authority as the live tail. */
 export async function loadOlderNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
   current: NativeSessionFeed,
   client: NativeSessionFeedApi = api,
   limit = 500,
-  refreshHistory = false
+  _refreshHistory = false
 ): Promise<NativeSessionFeed> {
   if (!current.hasMore || !current.before) return current
   const page = await client.loadMessagePage(
@@ -90,7 +86,7 @@ export async function loadOlderNativeSessionFeed(
     target.directory,
     current.before,
     limit,
-    refreshHistory
+    false
   )
   const messages = prependOlderMessagePage(current.messages, page.messages)
   if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
