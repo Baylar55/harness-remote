@@ -30,13 +30,13 @@ function sameModel(left: ModelSelection | null, right: ModelSelection): boolean 
 
 function formatLimit(value?: number): string {
   if (!value) return "-"
-  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`
-  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`
+  if (value >= 1_000_000) return `${Math.round(value / 1_000_000)}M`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K`
   return String(value)
 }
 
 /**
- * The HR3 model picker is shared by legacy conversation detail and Native Session detail. Harness
+ * This control preserves the mature HR3 model picker semantics for Native Session detail. Harness
  * adapters already expose variants as ModelOption rows, so effort stays part of the same selection
  * rather than becoming a Session-first-only control with different semantics.
  */
