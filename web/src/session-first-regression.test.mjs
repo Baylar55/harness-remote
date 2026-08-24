@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
+const machineClient = readFileSync(new URL('./machineClient.ts', import.meta.url), 'utf8')
 const discovery = readFileSync(new URL('./native-session-discovery.ts', import.meta.url), 'utf8')
 const feed = readFileSync(new URL('./native-session-feed.ts', import.meta.url), 'utf8')
 const claim = readFileSync(new URL('./native-session-claim.ts', import.meta.url), 'utf8')
@@ -12,6 +13,11 @@ const sessionHome = readFileSync(new URL('./components/native-session-home.tsx',
 const sessionNavigation = readFileSync(new URL('./session-first-navigation.css', import.meta.url), 'utf8')
 const standalone = readFileSync(new URL('./components/standalone-universal-workspace.tsx', import.meta.url), 'utf8')
 const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8')
+
+assert.ok(machineClient.includes('export async function listMachineProjects'), 'Session-first must read the daemon Project catalog through the machine client')
+assert.ok(machineClient.includes('path: "/v1/projects"'), 'desktop Project discovery must stay machine-scoped')
+assert.ok(machineClient.includes('machineBaseUrl(config)}/v1/projects'), 'browser/mobile Project discovery must stay machine-scoped')
+assert.ok(machineClient.includes('projectCache'), 'Project discovery should retain the same short transient-network grace as machine discovery')
 
 assert.ok(discovery.includes('listGlobalSessions(config).catch(() => client.listSessions(config))'), 'native discovery must retain global-list fallback')
 assert.ok(discovery.includes('listStatuses(config).catch'), 'status enrichment must remain non-fatal')
@@ -82,11 +88,15 @@ assert.equal(observer.includes('createTask('), false, 'same-Session continuation
 assert.equal(observer.includes('launch('), false, 'same-Session continuation must not use the Task launcher')
 
 assert.ok(sessionHome.includes('discoverMachineNativeSessions'), 'the Sessions home must use native discovery rather than Task data')
+assert.ok(sessionHome.includes('listMachineProjects(machine.config)'), 'the Sessions home must enrich native cwd data from the daemon Project catalog')
 assert.ok(sessionHome.includes('nativeSessionSurfaceTarget(item.machine.id, item.machine.config, item.record)'), 'opening a Session must carry its machine id into the controller')
 assert.ok(sessionHome.includes('SESSION_HOME_REFRESH_MS = 30_000'), 'native Session discovery must stay off the existing 10s Conversation workspace poll')
 assert.ok(sessionHome.includes('COLLAPSED_PROJECT_SESSION_COUNT = 5'), 'each Project must start with a bounded Session list like the reference harness workspace browser')
-assert.ok(sessionHome.includes('function projectGroups('), 'the Sessions browser must group native Sessions by Project/workspace rather than inventing dashboard buckets')
-assert.ok(sessionHome.includes('const key = `${item.machine.id}\\u0000${directory}`'), 'Project grouping must retain machine plus canonical Session directory identity')
+assert.ok(sessionHome.includes('function catalogProject('), 'Session cwd attribution must use one explicit ProjectCatalog matcher')
+assert.ok(sessionHome.includes('project.machineId === machineID && pathContains(project.path, directory)'), 'Project attribution must remain machine-scoped and path-based')
+assert.ok(sessionHome.includes('.sort((left, right) => normalizedPath(right.path).value.length'), 'nested Projects must choose the most specific catalog path')
+assert.ok(sessionHome.includes('`${item.machine.id}\\u0000project:${project.id}`'), 'catalogued Project groups must use the daemon stable Project id')
+assert.ok(sessionHome.includes('`${item.machine.id}\\u0000directory:${nativeDirectory}`'), 'uncatalogued Sessions must retain exact machine + native-directory fallback identity')
 assert.ok(sessionHome.includes('group.sessions.slice(0, COLLAPSED_PROJECT_SESSION_COUNT)'), 'collapsed Projects must keep older Sessions out of the initial navigation surface')
 assert.ok(sessionHome.includes('aria-expanded={expanded}'), 'Project Session expansion must expose its state accessibly')
 assert.ok(sessionHome.includes('className={`hr-native-session-row${working ? " active" : ""}`}'), 'Sessions must render as compact navigation rows')
