@@ -239,6 +239,30 @@ async function assertNoDocumentOverflow(page, label) {
   assert.ok(metrics.bodyScrollWidth <= metrics.width + 1, `${label}: body horizontal overflow ${metrics.bodyScrollWidth} > ${metrics.width}`)
 }
 
+async function assertSessionFirstHome(page, mobile) {
+  const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
+  await sessions.waitFor({ state: "visible" })
+  await sessions.getByText("Sessions", { exact: true }).first().waitFor({ state: "visible" })
+  if (mobile) {
+    const sessionsButton = page.locator(".hr-mobile-nav").getByRole("button", { name: /Sessions/ })
+    await sessionsButton.waitFor({ state: "visible" })
+    assert.equal(await sessionsButton.getAttribute("aria-current"), "page", "Sessions must be the mobile product entry")
+  }
+  await assertNoDocumentOverflow(page, mobile ? "Session-first mobile home" : "Session-first desktop home")
+}
+
+async function enterCompatibilityConversations(page, mobile) {
+  const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
+  await assertSessionFirstHome(page, mobile)
+  if (mobile) {
+    await page.locator(".hr-mobile-nav").getByRole("button", { name: /Conversations/ }).click()
+  } else {
+    await sessions.locator(".tdw-top-actions").getByRole("button", { name: /Conversations/ }).click()
+  }
+  await sessions.waitFor({ state: "hidden" })
+  await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
+}
+
 async function assertMobileList(page, label) {
   assert.equal(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), true, `${label}: expected coarse pointer`)
   await page.locator(".hr-mobile-nav").waitFor({ state: "visible" })
@@ -279,6 +303,7 @@ async function runMobileAudit(browser) {
   }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
 
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await enterCompatibilityConversations(page, true)
   await assertMobileList(page, "portrait")
 
   const linuxMachine = page.locator(".tdw-machine-section .tdw-side-row", { hasText: "Linux Test" })
@@ -343,6 +368,7 @@ async function runDesktopAudit(browser) {
     }))))
   }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await enterCompatibilityConversations(page, false)
   await page.locator(".tdw-topbar").waitFor({ state: "visible" })
   await boundingBoxInside(page, ".tdw-topbar", "desktop topbar")
   await boundingBoxInside(page, ".tdw-project-column", "desktop workspace")
@@ -386,7 +412,7 @@ try {
   console.log("v3 browser smoke: mobile audit passed")
   await runDesktopAudit(browser)
   console.log("v3 browser smoke: desktop audit passed")
-  console.log("v3 browser smoke: portrait, landscape, multi-machine, model toolbar and desktop geometry passed")
+  console.log("v3 browser smoke: Session-first entry, portrait, landscape, multi-machine, model toolbar and desktop geometry passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(preview)
