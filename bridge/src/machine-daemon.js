@@ -174,10 +174,14 @@ export function createMachineDaemonServer({
     if (entry.kind !== "acp") throw daemonError("unsupported_agent", `Agent ${agentID} does not require ACP Session claiming`)
     const service = acpService(agentID)
     if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
-    // Compatibility implementation: models() already forces the exact existing Session through the
-    // hardened ACP session/load path and propagates single-writer refusal. The HTTP/product contract
-    // is now Session-specific, so extracting AcpService.claimSession later will not touch clients.
+    // Compatibility implementation: models() forces the exact existing Session through the hardened
+    // ACP session/load path and propagates single-writer refusal. Once that load succeeds, retain the
+    // same Session as owned so the first real prompt cannot trigger a second writer-acquisition load.
+    // adoptTaskSession is an internal compatibility primitive here, not a user-facing Task concept;
+    // AcpService.claimSession will replace both calls in a later isolated core refactor.
     await service.models(sessionID)
+    const adopted = await service.adoptTaskSession(sessionID)
+    if (!adopted) throw daemonError("session_unavailable", `Native Session ${sessionID} disappeared during claim`)
   }
   const promptSession = async (agentID, sessionID, { text, directory }) => {
     const entry = daemon.hostEntry(agentID)
