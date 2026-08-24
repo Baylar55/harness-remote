@@ -239,7 +239,6 @@ export function createMachineDaemonServer({
         body: JSON.stringify({
           parts: [{ type: "text", text }],
           model: resolvedModel ? { providerID: resolvedModel.providerID, modelID: resolvedModel.modelID } : undefined,
-          agent: agentID,
           variant: resolvedModel?.variant || undefined
         })
       })
@@ -259,11 +258,11 @@ export function createMachineDaemonServer({
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
 
     if (entry.kind === "acp") {
-      if (!claimedAcpSessions.has(nativeSessionKey(agentID, sessionID))) {
-        throw daemonError("session_not_claimed", `Native Session ${sessionID} must be claimed before Harness Remote can stop it`)
-      }
       const service = acpService(agentID)
       if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot stop native Sessions`)
+      if (!claimedAcpSessions.has(nativeSessionKey(agentID, sessionID))) {
+        await claimSession(agentID, sessionID)
+      }
       await service.abort(sessionID)
       return
     }
