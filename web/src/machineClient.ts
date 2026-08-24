@@ -6,6 +6,16 @@ import type { MachineSnapshot, ServerConfig } from "./types"
 const BROWSER_DISCOVERY_TIMEOUT_MS = 12_000
 const DISCOVERY_STALE_GRACE_MS = 45_000
 const discoveryCache = new Map<string, { snapshot: MachineSnapshot; at: number }>()
+const projectCache = new Map<string, { projects: MachineProject[]; at: number }>()
+
+export type MachineProject = {
+  id: string
+  machineId: string
+  name: string
+  path: string
+  kind: "git" | "directory" | string
+  configured?: boolean
+}
 
 function headers(config: ServerConfig): Record<string, string> {
   const value: Record<string, string> = { Accept: "application/json" }
@@ -13,15 +23,14 @@ function headers(config: ServerConfig): Record<string, string> {
   return value
 }
 
+function parseJSONValue(value: unknown, label: string): unknown {
+  if (typeof value !== "string") return value
+  try { return JSON.parse(value) }
+  catch { throw new Error(`Invalid ${label} response`) }
+}
+
 function machineSnapshot(value: unknown): MachineSnapshot {
-  let parsed = value
-  if (typeof parsed === "string") {
-    try {
-      parsed = JSON.parse(parsed)
-    } catch {
-      throw new Error("Invalid machine discovery response")
-    }
-  }
+  const parsed = parseJSONValue(value, "machine discovery")
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("Invalid machine discovery response")
   }
@@ -30,6 +39,21 @@ function machineSnapshot(value: unknown): MachineSnapshot {
     throw new Error("Invalid machine discovery response")
   }
   return candidate as MachineSnapshot
+}
+
+function machineProjects(value: unknown): MachineProject[] {
+  const parsed = parseJSONValue(value, "Project catalog")
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid Project catalog response")
+  const projects = (parsed as { projects?: unknown }).projects
+  if (!Array.isArray(projects)) throw new Error("Invalid Project catalog response")
+  return projects.filter((project): project is MachineProject => Boolean(
+    project
+      && typeof project === "object"
+      && typeof (project as MachineProject).id === "string"
+      && typeof (project as MachineProject).machineId === "string"
+      && typeof (project as MachineProject).name === "string"
+      && typeof (project as MachineProject).path === "string"
+  ))
 }
 
 function cacheKey(config: ServerConfig): string {
@@ -45,6 +69,17 @@ function recentCachedSnapshot(config: ServerConfig): MachineSnapshot | null {
   const cached = discoveryCache.get(cacheKey(config))
   if (!cached || Date.now() - cached.at > DISCOVERY_STALE_GRACE_MS) return null
   return cached.snapshot
+}
+
+function rememberProjects(config: ServerConfig, projects: MachineProject[]): MachineProject[] {
+  projectCache.set(cacheKey(config), { projects, at: Date.now() })
+  return projects
+}
+
+function recentCachedProjects(config: ServerConfig): MachineProject[] | null {
+  const cached = projectCache.get(cacheKey(config))
+  if (!cached || Date.now() - cached.at > DISCOVERY_STALE_GRACE_MS) return null
+  return cached.projects
 }
 
 export function noMachineStatus(status: number | undefined): boolean {
@@ -106,6 +141,53 @@ export async function discoverMachine(config: ServerConfig): Promise<MachineSnap
   if (noMachineStatus(response.status)) return null
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return remember(config, machineSnapshot(await response.json()))
+}
+
+/** Read the daemon's canonical, machine-scoped Project catalog without depending on Task storage. */
+export async function listMachineProjects(config: ServerConfig): Promise<MachineProject[]> {
+  if (isDesktopPlatform()) {
+    const result = await desktopRequestResult(config, { path: "/v1/projects" })
+    if (!result.ok) {
+      if (result.error.code !== "http") {
+        const cached = recentCachedProjects(config)
+        if (cached) return cached
+      }
+      throw new Error(result.error.message)
+    }
+    return rememberProjects(config, machineProjects(result.response.data))
+  }
+
+  const target = `${machineBaseUrl(config)}/v1/projects`
+  if (Capacitor.isNativePlatform()) {
+    let response
+    try {
+      response = await CapacitorHttp.get({ url: target, headers: headers(config), connectTimeout: 12_000, readTimeout: 12_000 })
+    } catch {
+      const cached = recentCachedProjects(config)
+      if (cached) return cached
+      throw new Error(`Cannot reach ${config.host}:${config.port}.`)
+    }
+    if (response.status >= 400) throw new Error(`HTTP ${response.status}`)
+    return rememberProjects(config, machineProjects(response.data))
+  }
+
+  const controller = new AbortController()
+  const timer = globalThis.setTimeout(() => controller.abort(), BROWSER_DISCOVERY_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(target, { headers: headers(config), signal: controller.signal })
+  } catch (error) {
+    const cached = recentCachedProjects(config)
+    if (cached) return cached
+    if (controller.signal.aborted) {
+      throw new Error(`Project catalog at ${config.host}:${config.port} timed out after ${BROWSER_DISCOVERY_TIMEOUT_MS / 1000}s.`)
+    }
+    throw new Error(`Cannot reach ${config.host}:${config.port}.`)
+  } finally {
+    globalThis.clearTimeout(timer)
+  }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return rememberProjects(config, machineProjects(await response.json()))
 }
 
 export function selectableMachineAgents(machine: MachineSnapshot): MachineSnapshot["agents"] {
