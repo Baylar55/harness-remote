@@ -1,0 +1,6 @@
+@media (max-width: 780px) {
+  /* Preserve the validated HR3 mobile navigation styling and change only the number of top-level destinations. */
+  .hr-mobile-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
