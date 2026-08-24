@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { listMachineProjects, type MachineProject } from "../machineClient"
+import { createNativeSessionTarget } from "../native-session-create"
 import {
   discoverMachineNativeSessions,
   nativeSessionSurfaceTarget,
   type NativeSessionRecord,
   type NativeSessionSurfaceTarget
 } from "../native-session-discovery"
-import type { MachineSnapshot } from "../types"
+import type { MachineAgentHost, MachineSnapshot } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
-import { ChatIcon, LoadingIcon, RefreshIcon } from "../Icons"
+import { ChatIcon, LoadingIcon, PlusIcon, RefreshIcon } from "../Icons"
 import "../native-session-home.css"
 
 type Source = {
@@ -29,6 +30,13 @@ type ProjectGroup = {
   directory: string
   sessions: RecordWithMachine[]
   updatedAt: number
+}
+
+type CreateProject = {
+  key: string
+  machine: WorkspaceMachine
+  snapshot: MachineSnapshot
+  project: MachineProject
 }
 
 type Props = {
@@ -129,16 +137,28 @@ function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
   return [...groups.values()].sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
 }
 
+function piCreateAgents(snapshot: MachineSnapshot): MachineAgentHost[] {
+  return snapshot.agents.filter((agent) => agent.backend === "pi" && agent.transport === "acp" && agent.capabilities?.sessions !== false)
+}
+
 export function NativeSessionHome({ sources, onOpen }: Props) {
   const [records, setRecords] = useState<RecordWithMachine[]>([])
+  const [projectsByMachine, setProjectsByMachine] = useState<Record<string, MachineProject[]>>({})
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [revision, setRevision] = useState(0)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createProjectKey, setCreateProjectKey] = useState("")
+  const [createAgentID, setCreateAgentID] = useState("")
+  const [createTitle, setCreateTitle] = useState("")
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!sources.length) {
       setRecords([])
+      setProjectsByMachine({})
       setLoaded(true)
       setLoading(false)
       return
@@ -150,14 +170,19 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
         discoverMachineNativeSessions(machine.config, snapshot.agents),
         listMachineProjects(machine.config).catch(() => [] as MachineProject[])
       ])
-      return sessions.map((record) => ({
+      return {
         machine,
-        record,
-        project: catalogProject(record, projects, machine.id)
-      }))
-    })).then((groups) => {
+        projects,
+        records: sessions.map((record) => ({
+          machine,
+          record,
+          project: catalogProject(record, projects, machine.id)
+        }))
+      }
+    })).then((results) => {
       if (cancelled) return
-      setRecords(groups.flat().sort((left, right) => (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)))
+      setProjectsByMachine(Object.fromEntries(results.map((result) => [result.machine.id, result.projects])))
+      setRecords(results.flatMap((result) => result.records).sort((left, right) => (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)))
       setLoaded(true)
     }).catch(() => {
       // Session discovery is enrichment for the Home. A transient adapter failure must not replace
@@ -178,6 +203,28 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
   const groups = useMemo(() => projectGroups(records), [records])
   const activeCount = useMemo(() => records.filter(({ record }) => sessionWorking(record)).length, [records])
   const multipleMachines = sources.length > 1
+  const createProjects = useMemo<CreateProject[]>(() => sources.flatMap(({ machine, snapshot }) =>
+    (projectsByMachine[machine.id] || []).map((project) => ({
+      key: `${machine.id}:${project.id}`,
+      machine,
+      snapshot,
+      project
+    }))
+  ), [sources, projectsByMachine])
+  const selectedCreateProject = createProjects.find((choice) => choice.key === createProjectKey) || createProjects[0]
+  const createAgents = selectedCreateProject ? piCreateAgents(selectedCreateProject.snapshot) : []
+  const selectedCreateAgent = createAgents.find((agent) => agent.id === createAgentID) || createAgents[0]
+
+  useEffect(() => {
+    if (!createOpen) return
+    if (!createProjectKey && createProjects[0]) setCreateProjectKey(createProjects[0].key)
+  }, [createOpen, createProjectKey, createProjects])
+
+  useEffect(() => {
+    if (!createOpen) return
+    const available = selectedCreateProject ? piCreateAgents(selectedCreateProject.snapshot) : []
+    if (!available.some((agent) => agent.id === createAgentID)) setCreateAgentID(available[0]?.id || "")
+  }, [createOpen, createProjectKey, createAgentID, selectedCreateProject])
 
   function open(item: RecordWithMachine) {
     onOpen(nativeSessionSurfaceTarget(item.machine.id, item.machine.config, item.record))
@@ -192,6 +239,33 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
     })
   }
 
+  async function createSession() {
+    if (creating || !selectedCreateProject || !selectedCreateAgent) return
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const { target, record } = await createNativeSessionTarget({
+        machineID: selectedCreateProject.machine.id,
+        baseConfig: selectedCreateProject.machine.config,
+        agent: selectedCreateAgent,
+        directory: selectedCreateProject.project.path,
+        title: createTitle
+      })
+      setRecords((current) => [
+        { machine: selectedCreateProject.machine, record, project: selectedCreateProject.project },
+        ...current.filter((item) => !(item.machine.id === selectedCreateProject.machine.id && item.record.key === record.key))
+      ])
+      setCreateTitle("")
+      setCreateOpen(false)
+      onOpen(target)
+      setRevision((value) => value + 1)
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <section className="hr-native-home" aria-label="Sessions">
       <div className="hr-native-home-heading">
@@ -199,10 +273,50 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
           <h2>Sessions</h2>
           <span>{activeCount ? `${activeCount} active · ${records.length} total` : `${records.length} recent`}</span>
         </div>
-        <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} disabled={loading} aria-label="Refresh Sessions" title="Refresh Sessions">
-          {loading ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
-        </button>
+        <div className="hr-native-home-actions">
+          <button type="button" className="tdw-button primary hr-native-new-session" onClick={() => { setCreateError(null); setCreateOpen(true) }} aria-label="New Session">
+            <PlusIcon size={15} /> <span>New Session</span>
+          </button>
+          <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} disabled={loading} aria-label="Refresh Sessions" title="Refresh Sessions">
+            {loading ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
+          </button>
+        </div>
       </div>
+
+      {createOpen ? (
+        <div className="hr-native-create-panel" role="group" aria-label="Create native Session">
+          <div className="hr-native-create-heading">
+            <div><strong>New native Session</strong><small>Creates a real PI Session in the selected Project.</small></div>
+            <button type="button" className="tdw-icon-button" onClick={() => !creating && setCreateOpen(false)} disabled={creating} aria-label="Close New Session">×</button>
+          </div>
+          <label>
+            <span>Project</span>
+            <select value={selectedCreateProject?.key || ""} onChange={(event) => { setCreateProjectKey(event.target.value); setCreateError(null) }} disabled={creating || createProjects.length === 0}>
+              {createProjects.map((choice) => <option value={choice.key} key={choice.key}>{choice.project.name}{multipleMachines ? ` · ${choice.machine.name}` : ""}</option>)}
+            </select>
+          </label>
+          <label>
+            <span>Coding agent</span>
+            <select value={selectedCreateAgent?.id || ""} onChange={(event) => { setCreateAgentID(event.target.value); setCreateError(null) }} disabled={creating || createAgents.length === 0}>
+              {createAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label || "PI"}</option>)}
+            </select>
+          </label>
+          <label className="hr-native-create-title">
+            <span>Title <small>optional</small></span>
+            <input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} disabled={creating} placeholder="New PI Session" maxLength={200} />
+          </label>
+          {createProjects.length === 0 ? <div className="hr-native-create-error">No Project is available on the connected machines.</div> : null}
+          {selectedCreateProject && createAgents.length === 0 ? <div className="hr-native-create-error">PI is not available for native Session creation on this machine yet.</div> : null}
+          {createError ? <div className="hr-native-create-error" role="alert">{createError}</div> : null}
+          <div className="hr-native-create-actions">
+            <button type="button" className="tdw-button secondary" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</button>
+            <button type="button" className="tdw-button primary" onClick={() => void createSession()} disabled={creating || !selectedCreateProject || !selectedCreateAgent}>
+              {creating ? <LoadingIcon size={15} /> : <PlusIcon size={15} />}
+              {creating ? "Creating..." : "Create Session"}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {!loaded && loading ? <div className="hr-native-home-empty"><LoadingIcon size={18} /><span>Finding Sessions from your coding agents...</span></div> : null}
 
@@ -255,7 +369,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
       })}
 
       {loaded && !loading && records.length === 0 ? (
-        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No Sessions found yet. Start one in a coding agent and it will appear here.</span></div>
+        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No Sessions found yet. Create a native PI Session to start working in this Project.</span></div>
       ) : null}
     </section>
   )
