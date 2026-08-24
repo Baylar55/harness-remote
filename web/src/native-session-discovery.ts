@@ -6,6 +6,7 @@ export type NativeSessionRecord = {
   agentId: string
   agentLabel: string
   backend: BackendKind
+  transport: string
   session: Session
   status?: SessionStatus
 }
@@ -36,9 +37,13 @@ export type NativeSessionSurfaceTarget = {
   agentID: string
   agentLabel: string
   backend: BackendKind
+  transport: string
   config: ServerConfig
   status?: SessionStatus
   external: boolean
+  /** Lightweight ACP discovery cannot prove that this bridge owns the writer. Require a deliberate
+   * claim before exposing the composer even when the Session itself was originally created by HR. */
+  requiresExplicitClaim: boolean
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
@@ -64,6 +69,12 @@ export function nativeSessionConfig(base: ServerConfig, agent: MachineAgentHost)
 /**
  * Convert discovery data into the same primitive the HR3 transcript/composer can consume next.
  * This is a view-model conversion only. It never adopts, resumes or creates anything on the daemon.
+ *
+ * ACP discovery is intentionally conservative: `/experimental/session` is metadata-only and cannot
+ * prove this process owns a native writer. Every ACP Session therefore starts observe-only until the
+ * explicit claim operation succeeds. Managed HTTP harnesses such as OpenCode keep their native
+ * server ownership semantics and only require a claim when the harness itself marks the Session
+ * external.
  */
 export function nativeSessionSurfaceTarget(
   machineID: string,
@@ -77,6 +88,7 @@ export function nativeSessionSurfaceTarget(
     sessionID: record.session.id,
     directory
   }
+  const external = record.session.external === true
   return {
     key: `${machineID}:${record.key}`,
     ref,
@@ -87,13 +99,15 @@ export function nativeSessionSurfaceTarget(
     agentID: ref.agentID,
     agentLabel: record.agentLabel,
     backend: record.backend,
+    transport: record.transport,
     config: {
       ...base,
       backend: record.backend,
       agentId: record.agentId
     },
     status: record.status,
-    external: record.session.external === true
+    external,
+    requiresExplicitClaim: record.transport === "acp" || external
   }
 }
 
@@ -121,6 +135,7 @@ export async function discoverAgentNativeSessions(
     agentId: agent.id,
     agentLabel: agent.label || agent.id,
     backend: config.backend,
+    transport: agent.transport,
     session,
     status: statuses[session.id]
   }))
