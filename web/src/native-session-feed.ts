@@ -44,20 +44,28 @@ function historyMessages(target: NativeSessionSurfaceTarget): MessageEnvelope[] 
   return (target.history || []).flatMap((entry) => entry.messages.map((message) => historyMessage(entry, message)))
 }
 
-function withHistory(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
+function historyMessageCount(target: NativeSessionSurfaceTarget): number {
+  return (target.history || []).reduce((total, entry) => total + entry.messages.length, 0)
+}
+
+function currentMessages(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
+  const count = historyMessageCount(target)
+  return count ? messages.slice(count) : messages
+}
+
+function existingHistory(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
+  const count = historyMessageCount(target)
+  return count ? messages.slice(0, count) : []
+}
+
+function initialMessages(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
   const history = historyMessages(target)
   return history.length ? [...history, ...messages] : messages
 }
 
-function currentMessages(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
-  if (!target.history?.length) return messages
-  const historyCount = historyMessages(target).length
-  return messages.slice(historyCount)
-}
-
 function asFeed(target: NativeSessionSurfaceTarget, page: MessagePage): NativeSessionFeed {
   return {
-    messages: withHistory(target, normalizedMessages(page)),
+    messages: initialMessages(target, normalizedMessages(page)),
     before: page.before,
     hasMore: page.hasMore
   }
@@ -94,7 +102,8 @@ export async function loadNativeSessionFeed(
 /**
  * Refresh only the newest page and preserve object identity for unchanged logical turns. Earlier
  * linked native Sessions stay immutable at the front of the same feed, while only the current
- * Session tail is reconciled. This is the same multi-Session continuity shape used by mature v3.
+ * Session tail is reconciled. Keeping the inherited prefix object-identical is important on Android:
+ * polling B must not rerender a long A transcript while the user is typing.
  */
 export async function refreshNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
@@ -113,12 +122,16 @@ export async function refreshNativeSessionFeed(
   )
   const existingCurrent = currentMessages(target, current.messages)
   const mergedCurrent = mergeLatestMessagePage(existingCurrent, normalizedMessages(page))
-  const messages = withHistory(target, mergedCurrent)
-  if (messages.length === current.messages.length
-    && messages.every((message, index) => message === current.messages[index])
+  const unchanged = mergedCurrent === existingCurrent
     && page.before === current.before
-    && page.hasMore === current.hasMore) return current
-  return { messages, before: page.before, hasMore: page.hasMore }
+    && page.hasMore === current.hasMore
+  if (unchanged) return current
+  const history = existingHistory(target, current.messages)
+  return {
+    messages: history.length ? [...history, ...mergedCurrent] : mergedCurrent,
+    before: page.before,
+    hasMore: page.hasMore
+  }
 }
 
 /**
@@ -143,10 +156,14 @@ export async function loadOlderNativeSessionFeed(
   )
   const existingCurrent = currentMessages(target, current.messages)
   const mergedCurrent = prependOlderMessagePage(existingCurrent, normalizedMessages(page))
-  const messages = withHistory(target, mergedCurrent)
-  if (messages.length === current.messages.length
-    && messages.every((message, index) => message === current.messages[index])
+  const unchanged = mergedCurrent === existingCurrent
     && page.before === current.before
-    && page.hasMore === current.hasMore) return current
-  return { messages, before: page.before, hasMore: page.hasMore }
+    && page.hasMore === current.hasMore
+  if (unchanged) return current
+  const history = existingHistory(target, current.messages)
+  return {
+    messages: history.length ? [...history, ...mergedCurrent] : mergedCurrent,
+    before: page.before,
+    hasMore: page.hasMore
+  }
 }
