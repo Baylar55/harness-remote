@@ -31,6 +31,10 @@ function nativeSessionKey(agentID, sessionID) {
   return `${agentID}\u0000${sessionID}`
 }
 
+function modelWireName(model) {
+  return model ? `${model.providerID}/${model.modelID}` : undefined
+}
+
 export class MachineDaemon {
   constructor(identity, { registry = new MachineRegistry(identity) } = {}) {
     this.registry = registry
@@ -191,14 +195,25 @@ export function createMachineDaemonServer({
     }
     claimedAcpSessions.add(nativeSessionKey(agentID, sessionID))
   }
-  const promptSession = async (agentID, sessionID, { text, directory }) => {
+  const promptSession = async (agentID, sessionID, { text, directory, model, variant }) => {
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
+    const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
+    const resolvedModel = requestedModel
+      ? await daemon.resolveModel(agentID, requestedModel, directory ? { directory } : undefined)
+      : null
 
     if (entry.kind === "acp") {
       const service = acpService(agentID)
       if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
-      await service.prompt(sessionID, text)
+      if (resolvedModel?.variant && resolvedModel?.variantConfigId) {
+        await entry.host.request("session/set_config_option", {
+          sessionId: sessionID,
+          configId: resolvedModel.variantConfigId,
+          value: resolvedModel.variant
+        })
+      }
+      await service.prompt(sessionID, text, modelWireName(resolvedModel))
       return
     }
 
@@ -218,7 +233,12 @@ export function createMachineDaemonServer({
       response = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify({ parts: [{ type: "text", text }] })
+        body: JSON.stringify({
+          parts: [{ type: "text", text }],
+          model: resolvedModel ? { providerID: resolvedModel.providerID, modelID: resolvedModel.modelID } : undefined,
+          agent: agentID,
+          variant: resolvedModel?.variant || undefined
+        })
       })
     } catch {
       throw daemonError("session_prompt_uncertain", `OpenCode prompt delivery for Session ${sessionID} is uncertain`, { ambiguous: true })
