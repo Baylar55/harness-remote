@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { BackendKind, MachineAgentHost, ServerConfig, Session, SessionStatus } from "./types"
+import type { BackendKind, MachineAgentHost, ModelSelection, ServerConfig, Session, SessionStatus } from "./types"
 
 export type NativeSessionRecord = {
   key: string
@@ -9,6 +9,7 @@ export type NativeSessionRecord = {
   transport: string
   stopCapability?: string
   abortSupported: boolean
+  modelsSupported: boolean
   session: Session
   status?: SessionStatus
 }
@@ -43,6 +44,8 @@ export type NativeSessionSurfaceTarget = {
   config: ServerConfig
   status?: SessionStatus
   external: boolean
+  modelsSupported: boolean
+  model: ModelSelection | null
   /** Lightweight ACP discovery cannot prove that this bridge owns the writer. Require a deliberate
    * claim before exposing the composer even when the Session itself was originally created by HR. */
   requiresExplicitClaim: boolean
@@ -59,6 +62,15 @@ function supportedBackend(value: string, fallback: BackendKind): BackendKind {
 
 function supportedStopCapability(value: string | undefined): boolean {
   return value === "owned-session-native-cancel" || value === "native-abort"
+}
+
+function sessionModel(session: Session): ModelSelection | null {
+  if (!session.model?.providerID || !session.model.id) return null
+  return {
+    providerID: session.model.providerID,
+    modelID: session.model.id,
+    ...(session.model.variant ? { variant: session.model.variant } : {})
+  }
 }
 
 /**
@@ -116,6 +128,8 @@ export function nativeSessionSurfaceTarget(
     },
     status: record.status,
     external,
+    modelsSupported: record.modelsSupported,
+    model: sessionModel(record.session),
     requiresExplicitClaim: record.transport === "acp" || external,
     canStop: record.abortSupported && supportedStopCapability(record.stopCapability)
   }
@@ -148,6 +162,7 @@ export async function discoverAgentNativeSessions(
     transport: agent.transport,
     stopCapability: agent.contract?.sessions?.stop,
     abortSupported: agent.capabilities?.abort === true,
+    modelsSupported: agent.capabilities?.models === true,
     session,
     status: statuses[session.id]
   }))
