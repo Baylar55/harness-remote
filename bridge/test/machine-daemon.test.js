@@ -133,7 +133,7 @@ test("failed eager startup is isolated and reported in the machine snapshot", as
   assert.equal(daemon.snapshot().agents.find((host) => host.id === "codex").state, "configured")
 })
 
-test("machine server wires registry, routing, native Session claim, task lifecycle, finish, and Work Thread wrappers", () => {
+test("machine server wires registry, routing, native Session operations, task lifecycle, finish, and Work Thread wrappers", () => {
   const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
   const acp = new FakeAcp()
   const openCode = new FakeHttpHost()
@@ -147,19 +147,21 @@ test("machine server wires registry, routing, native Session claim, task lifecyc
   let modelOptions
   let finishOptions
   let workThreadOptions
-  const bridgeServer = { marker: "bridge", acpService: { async models() {} } }
+  const bridgeServer = { marker: "bridge", acpService: { async models() {}, async prompt() {} } }
   const routedServer = { marker: "router" }
   const claimServer = { marker: "session-claim" }
   const launchServer = { marker: "launch" }
   const modelServer = { marker: "models" }
   const finishServer = { marker: "finish" }
   const workThreadServer = { marker: "work-threads" }
+  const fakeLedger = { marker: "operation-ledger" }
   const value = createMachineDaemonServer({
     daemon,
     config: { backend: "pi", port: 4097 },
     primaryAcp: acp,
     primaryAgentID: "pi",
     serviceOptions: { snapshotDirectory: "/tmp/test" },
+    sessionOperationLedger: fakeLedger,
     createServer: (options) => { bridgeOptions = options; return bridgeServer },
     createRouter: (options) => { routerOptions = options; return routedServer },
     createClaimServer: (options) => { claimOptions = options; return claimServer },
@@ -177,6 +179,8 @@ test("machine server wires registry, routing, native Session claim, task lifecyc
   assert.equal(routerOptions.primaryAgentID, "pi")
   assert.equal(claimOptions.innerServer, routedServer)
   assert.equal(typeof claimOptions.claimSession, "function")
+  assert.equal(typeof claimOptions.promptSession, "function")
+  assert.equal(claimOptions.operationLedger, fakeLedger)
   assert.equal(launchOptions.innerServer, claimServer)
   assert.equal(typeof launchOptions.taskRunController.launch, "function")
   assert.equal(modelOptions.innerServer, launchServer)
@@ -191,7 +195,7 @@ test("machine server wires registry, routing, native Session claim, task lifecyc
   assert.deepEqual(bridgeOptions.machineRegistry.snapshot().agents.map((host) => host.id), ["pi", "opencode"])
 })
 
-test("machine Session claim uses the scoped ACP bridge and rejects non-ACP agents", async () => {
+test("machine Session operations use the scoped ACP service and reject unknown agents", async () => {
   const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
   const codex = new FakeAcp()
   const pi = new FakeAcp()
@@ -206,8 +210,12 @@ test("machine Session claim uses the scoped ACP bridge and rejects non-ACP agent
     daemon,
     config: { backend: "codex", port: 4097 },
     primaryAcp: codex,
+    sessionOperationLedger: { marker: "ledger" },
     createServer: (options) => ({
-      acpService: { async models(sessionID) { calls.push([options.config.backend, sessionID]) } },
+      acpService: {
+        async models(sessionID) { calls.push(["claim", options.config.backend, sessionID]) },
+        async prompt(sessionID, text) { calls.push(["prompt", options.config.backend, sessionID, text]) }
+      },
       emit() {}
     }),
     createRouter: () => ({ marker: "router" }),
@@ -219,9 +227,13 @@ test("machine Session claim uses the scoped ACP bridge and rejects non-ACP agent
   })
 
   await claimOptions.claimSession("pi", "native-pi-1")
-  assert.deepEqual(calls, [["pi", "native-pi-1"]])
+  await claimOptions.promptSession("pi", "native-pi-1", { text: "Continue once", directory: "/repo" })
+  assert.deepEqual(calls, [
+    ["claim", "pi", "native-pi-1"],
+    ["prompt", "pi", "native-pi-1", "Continue once"]
+  ])
   await assert.rejects(() => claimOptions.claimSession("opencode", "native-http-1"), (error) => error.code === "unsupported_agent")
-  await assert.rejects(() => claimOptions.claimSession("missing", "native-1"), (error) => error.code === "unknown_agent")
+  await assert.rejects(() => claimOptions.promptSession("missing", "native-1", { text: "x", directory: "/repo" }), (error) => error.code === "unknown_agent")
 })
 
 test("machine server creates an isolated bridge service for every registered ACP harness", () => {
@@ -236,8 +248,9 @@ test("machine server creates an isolated bridge service for every registered ACP
     daemon,
     config: { backend: "codex", port: 4097 },
     primaryAcp: codex,
+    sessionOperationLedger: { marker: "ledger" },
     createServer: (options) => {
-      const server = { options, acpService: { async models() {} }, emit() {} }
+      const server = { options, acpService: { async models() {}, async prompt() {} }, emit() {} }
       created.push(server)
       return server
     },
