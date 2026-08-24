@@ -212,7 +212,7 @@ test("definite pre-accept rejection removes the ledger entry so the same request
   const port = await listen(server)
   try {
     const rejected = await postPrompt(port)
-    assert.equal(rejected.status, 500)
+    assert.equal(rejected.status, 409)
     const retry = await postPrompt(port)
     assert.equal(retry.status, 200)
     assert.equal((await retry.json()).status, "accepted")
