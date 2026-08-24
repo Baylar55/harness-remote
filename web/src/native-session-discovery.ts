@@ -65,6 +65,10 @@ export type NativeSessionSurfaceTarget = {
   /** Earlier linked native Sessions shown before this Session, preserving the mature v3 continuity
    * experience without introducing a new Conversation identity. */
   history?: NativeSessionHistoryEntry[]
+  /** A freshly created cross-agent target has not received its first user instruction yet. The
+   * client uses the inherited history to build one bounded v3-style context packet for that first
+   * prompt only. */
+  handoffContextPending?: boolean
   /** Lightweight ACP discovery cannot prove that this bridge owns the writer. A Session that was
    * just created/claimed through this daemon can set writerOwned and must not make the user claim it
    * a second time. */
