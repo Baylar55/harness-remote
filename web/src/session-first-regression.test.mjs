@@ -36,8 +36,11 @@ assert.equal(observer.includes('launch('), false, 'same-Session continuation mus
 
 assert.ok(sessionHome.includes('discoverMachineNativeSessions'), 'the Sessions home must use native discovery rather than Task data')
 assert.ok(sessionHome.includes('SESSION_HOME_REFRESH_MS = 30_000'), 'native Session discovery must stay off the existing 10s Conversation workspace poll')
+assert.ok(sessionHome.includes('COLLAPSED_PROJECT_SESSION_COUNT = 5'), 'each Project must start with a bounded Session list like the reference harness workspace browser')
 assert.ok(sessionHome.includes('function projectGroups('), 'the Sessions browser must group native Sessions by Project/workspace rather than inventing dashboard buckets')
 assert.ok(sessionHome.includes('const key = `${item.machine.id}\\u0000${directory}`'), 'Project grouping must retain machine plus canonical Session directory identity')
+assert.ok(sessionHome.includes('group.sessions.slice(0, COLLAPSED_PROJECT_SESSION_COUNT)'), 'collapsed Projects must keep older Sessions out of the initial navigation surface')
+assert.ok(sessionHome.includes('aria-expanded={expanded}'), 'Project Session expansion must expose its state accessibly')
 assert.ok(sessionHome.includes('className={`hr-native-session-row${working ? " active" : ""}`}'), 'Sessions must render as compact navigation rows')
 assert.equal(sessionHome.includes('Active now'), false, 'the Sessions browser must not split the same Project into synthetic Active/Recent dashboard sections')
 assert.equal(sessionHome.includes('taskClient'), false, 'the Sessions home must not depend on Task/Conversation storage')
