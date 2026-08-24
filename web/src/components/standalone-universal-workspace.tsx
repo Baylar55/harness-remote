@@ -258,8 +258,8 @@ function NativeSessionsWorkspace({
         <div className="tdw-brand hr-brand"><span className="tdw-logo hr-logo">H</span><div><strong>Harness Remote</strong><small>Any coding agent. One workspace.</small></div></div>
         <div className="tdw-context-path" aria-label="Current workspace context"><span>All projects</span><b>/</b><strong>Sessions</strong>{selected ? <><b>/</b><em>{selected.title}</em></> : null}</div>
         <div className="tdw-top-actions">
-          <button type="button" className="tdw-button secondary" onClick={onBackToConversations}><ChatIcon size={15} /> Conversations</button>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
+          <button type="button" className="tdw-button secondary" onClick={onBackToConversations}><ChatIcon size={15} /> Conversations</button>
         </div>
       </header>
       <div className="hr-native-workspace-body">
@@ -288,7 +288,7 @@ function NativeSessionsWorkspace({
 export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Props) {
   const [managerOpen, setManagerOpen] = useState(machines.length === 0)
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
-  const [primarySection, setPrimarySection] = useState<"conversations" | "sessions">("conversations")
+  const [primarySection, setPrimarySection] = useState<"conversations" | "sessions">("sessions")
   const [activeMachineID, setActiveMachineID] = useState(machines[0]?.id || "")
   const activeID = machines.some((machine) => machine.id === activeMachineID) ? activeMachineID : machines[0]?.id || ""
   const mobileSection = managerOpen ? "machines" : mobileSettingsOpen ? "settings" : primarySection
@@ -328,11 +328,6 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       const mobileBack = document.querySelector<HTMLButtonElement>(".tdw-mobile-back")
       if (mobileBack && mobileBack.getClientRects().length > 0) {
         mobileBack.click()
-        return
-      }
-
-      if (primarySection === "sessions") {
-        setPrimarySection("conversations")
         return
       }
 
@@ -385,10 +380,10 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       }} /> : null}
       {mobileSettingsOpen ? <MobileSettingsPage onClose={() => setMobileSettingsOpen(false)} /> : null}
       <nav className="hr-mobile-nav" aria-label="Main navigation">
-        <button type="button" className={mobileSection === "conversations" ? "active" : ""} onClick={showConversations} aria-current={mobileSection === "conversations" ? "page" : undefined}><ChatIcon size={20} /><span>Conversations</span></button>
         <button type="button" className={mobileSection === "sessions" ? "active" : ""} onClick={showSessions} aria-current={mobileSection === "sessions" ? "page" : undefined}><ChatIcon size={20} /><span>Sessions</span></button>
         <button type="button" className={mobileSection === "machines" ? "active" : ""} onClick={showMachines} aria-current={mobileSection === "machines" ? "page" : undefined}><ServerIcon size={20} /><span>Machines</span></button>
         <button type="button" className={mobileSection === "settings" ? "active" : ""} onClick={showSettings} aria-current={mobileSection === "settings" ? "page" : undefined}><SettingsIcon size={20} /><span>Settings</span></button>
+        <button type="button" className={mobileSection === "conversations" ? "active" : ""} onClick={showConversations} aria-current={mobileSection === "conversations" ? "page" : undefined}><ChatIcon size={20} /><span>Conversations</span></button>
       </nav>
     </div>
   )
