@@ -51,7 +51,9 @@ export function SessionFirstPreviewPage({ machines }: Props) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const activeMachine = machines.find((machine) => machine.id === activeMachineID) || machines[0]
   const selected = state.sessions.find((record) => record.key === selectedKey) || null
-  const target = useMemo(() => activeMachine && selected ? nativeSessionSurfaceTarget(activeMachine.config, selected) : null, [activeMachine, selected])
+  const target = useMemo(() => activeMachine && selected
+    ? nativeSessionSurfaceTarget(activeMachine.id, activeMachine.config, selected)
+    : null, [activeMachine, selected])
 
   async function refresh() {
     if (!activeMachine) return
