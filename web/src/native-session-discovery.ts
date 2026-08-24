@@ -7,6 +7,8 @@ export type NativeSessionRecord = {
   agentLabel: string
   backend: BackendKind
   transport: string
+  stopCapability?: string
+  abortSupported: boolean
   session: Session
   status?: SessionStatus
 }
@@ -44,12 +46,19 @@ export type NativeSessionSurfaceTarget = {
   /** Lightweight ACP discovery cannot prove that this bridge owns the writer. Require a deliberate
    * claim before exposing the composer even when the Session itself was originally created by HR. */
   requiresExplicitClaim: boolean
+  /** Stop is exposed only when both the coarse capability and the Session-first contract name a
+   * native cancellation primitive we understand. Unknown adapter semantics stay hidden. */
+  canStop: boolean
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
   return value === "opencode" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
     ? value
     : fallback
+}
+
+function supportedStopCapability(value: string | undefined): boolean {
+  return value === "owned-session-native-cancel" || value === "native-abort"
 }
 
 /**
@@ -107,7 +116,8 @@ export function nativeSessionSurfaceTarget(
     },
     status: record.status,
     external,
-    requiresExplicitClaim: record.transport === "acp" || external
+    requiresExplicitClaim: record.transport === "acp" || external,
+    canStop: record.abortSupported && supportedStopCapability(record.stopCapability)
   }
 }
 
@@ -136,6 +146,8 @@ export async function discoverAgentNativeSessions(
     agentLabel: agent.label || agent.id,
     backend: config.backend,
     transport: agent.transport,
+    stopCapability: agent.contract?.sessions?.stop,
+    abortSupported: agent.capabilities?.abort === true,
     session,
     status: statuses[session.id]
   }))
