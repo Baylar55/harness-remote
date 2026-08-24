@@ -196,7 +196,7 @@ test("machine server wires registry, routing, native Session operations, task li
   assert.deepEqual(bridgeOptions.machineRegistry.snapshot().agents.map((host) => host.id), ["pi", "opencode"])
 })
 
-test("machine Session operations retain ownership after claim before prompting or stopping the same native Session", async () => {
+test("machine Session mutations acquire ACP ownership lazily and reuse it", async () => {
   const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
   const codex = new FakeAcp()
   const pi = new FakeAcp()
@@ -228,15 +228,12 @@ test("machine Session operations retain ownership after claim before prompting o
     createWorkThreadServerFactory: ({ innerServer }) => innerServer
   })
 
-  await assert.rejects(
-    () => claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" }),
-    (error) => error.code === "session_not_claimed"
-  )
-  await claimOptions.claimSession("pi", "native-pi-1")
+  await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   await claimOptions.promptSession("pi", "native-pi-1", { text: "Continue once", directory: "/repo" })
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   assert.deepEqual(calls, [
     ["claim", "pi", "native-pi-1"],
+    ["stop", "pi", "native-pi-1"],
     ["prompt", "pi", "native-pi-1", "Continue once"],
     ["stop", "pi", "native-pi-1"]
   ])
