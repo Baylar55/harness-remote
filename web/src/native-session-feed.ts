@@ -1,15 +1,13 @@
 import { api, type MessagePage } from "./api"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "./message-pages"
 import { normalizeNativeSessionTurns } from "./native-session-turns"
-import type { MessageEnvelope } from "./types"
+import type { MessageEnvelope, MessagePart } from "./types"
 import type { NativeSessionHistoryEntry, NativeSessionSurfaceTarget } from "./native-session-discovery"
 
 export type NativeSessionFeed = {
   messages: MessageEnvelope[]
   before?: string
   hasMore: boolean
-  /** Prefix owned by earlier linked native Sessions. Paging applies only to the current Session tail. */
-  historyCount?: number
 }
 
 export type NativeSessionFeedApi = Pick<typeof api, "loadMessagePage">
@@ -18,31 +16,50 @@ function normalizedMessages(page: MessagePage): MessageEnvelope[] {
   return normalizeNativeSessionTurns(page.messages)
 }
 
-function historyMessages(entries: NativeSessionHistoryEntry[] | undefined): MessageEnvelope[] {
-  return (entries || []).flatMap((entry) => entry.messages.map((message) => {
-    // Message ids are only guaranteed inside their native Session. Prefix inherited ids so the v3
-    // merge helpers cannot confuse an older Session message with a coincidentally equal target id.
-    const id = `linked:${entry.ref.sessionID}:${message.info.id}`
-    return {
-      ...message,
-      info: { ...message.info, id },
-      parts: message.parts.map((part) => ({
-        ...part,
-        id: `linked:${entry.ref.sessionID}:${part.id}`,
-        messageID: id
-      }))
-    }
+function historyMessage(entry: NativeSessionHistoryEntry, message: MessageEnvelope): MessageEnvelope {
+  const id = `history:${entry.ref.agentID}:${entry.ref.sessionID}:${message.info.id}`
+  const parts: MessagePart[] = (message.parts || []).map((part) => ({
+    ...part,
+    id: `history:${entry.ref.sessionID}:${part.id}`,
+    messageID: id
   }))
+  return {
+    ...message,
+    info: {
+      ...message.info,
+      id,
+      sessionID: entry.ref.sessionID
+    },
+    parts,
+    taskdesk: {
+      kind: "native",
+      agentId: entry.agentID,
+      agentLabel: entry.agentLabel,
+      agentBackend: entry.backend
+    }
+  } as MessageEnvelope
+}
+
+function historyMessages(target: NativeSessionSurfaceTarget): MessageEnvelope[] {
+  return (target.history || []).flatMap((entry) => entry.messages.map((message) => historyMessage(entry, message)))
+}
+
+function withHistory(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
+  const history = historyMessages(target)
+  return history.length ? [...history, ...messages] : messages
+}
+
+function currentMessages(target: NativeSessionSurfaceTarget, messages: MessageEnvelope[]): MessageEnvelope[] {
+  if (!target.history?.length) return messages
+  const historyCount = historyMessages(target).length
+  return messages.slice(historyCount)
 }
 
 function asFeed(target: NativeSessionSurfaceTarget, page: MessagePage): NativeSessionFeed {
-  const history = historyMessages(target.history)
-  const current = normalizedMessages(page)
   return {
-    messages: history.length ? [...history, ...current] : current,
+    messages: withHistory(target, normalizedMessages(page)),
     before: page.before,
-    hasMore: page.hasMore,
-    historyCount: history.length
+    hasMore: page.hasMore
   }
 }
 
@@ -75,8 +92,9 @@ export async function loadNativeSessionFeed(
 }
 
 /**
- * Refresh only the newest page and preserve object identity for unchanged logical turns. Inherited
- * linked history is already in `current` and the v3 identity merge leaves that prefix untouched.
+ * Refresh only the newest page and preserve object identity for unchanged logical turns. Earlier
+ * linked native Sessions stay immutable at the front of the same feed, while only the current
+ * Session tail is reconciled. This is the same multi-Session continuity shape used by mature v3.
  */
 export async function refreshNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
@@ -93,14 +111,19 @@ export async function refreshNativeSessionFeed(
     limit,
     false
   )
-  const messages = mergeLatestMessagePage(current.messages, normalizedMessages(page))
-  if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
-  return { messages, before: page.before, hasMore: page.hasMore, historyCount: current.historyCount || 0 }
+  const existingCurrent = currentMessages(target, current.messages)
+  const mergedCurrent = mergeLatestMessagePage(existingCurrent, normalizedMessages(page))
+  const messages = withHistory(target, mergedCurrent)
+  if (messages.length === current.messages.length
+    && messages.every((message, index) => message === current.messages[index])
+    && page.before === current.before
+    && page.hasMore === current.hasMore) return current
+  return { messages, before: page.before, hasMore: page.hasMore }
 }
 
 /**
- * Load one older logical-turn page for the current Session. Earlier linked Sessions remain before the
- * target Session instead of being pushed after newly loaded target history.
+ * Load one older page for the current Session. Older B messages are inserted after inherited A
+ * history, never before it, so paging cannot scramble the cross-agent conversation chronology.
  */
 export async function loadOlderNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
@@ -118,13 +141,12 @@ export async function loadOlderNativeSessionFeed(
     limit,
     false
   )
-  const historyCount = current.historyCount || 0
-  const history = historyCount ? current.messages.slice(0, historyCount) : []
-  const targetMessages = historyCount ? current.messages.slice(historyCount) : current.messages
-  const nextTargetMessages = prependOlderMessagePage(targetMessages, normalizedMessages(page))
-  const messages = nextTargetMessages === targetMessages
-    ? current.messages
-    : history.length ? [...history, ...nextTargetMessages] : nextTargetMessages
-  if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
-  return { messages, before: page.before, hasMore: page.hasMore, historyCount }
+  const existingCurrent = currentMessages(target, current.messages)
+  const mergedCurrent = prependOlderMessagePage(existingCurrent, normalizedMessages(page))
+  const messages = withHistory(target, mergedCurrent)
+  if (messages.length === current.messages.length
+    && messages.every((message, index) => message === current.messages[index])
+    && page.before === current.before
+    && page.hasMore === current.hasMore) return current
+  return { messages, before: page.before, hasMore: page.hasMore }
 }
