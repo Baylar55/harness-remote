@@ -31,7 +31,9 @@ import "./v3-mobile-product-parity.css"
 installAppPreferences()
 installCompletionAudioGuard()
 
-const conversationTestMode = import.meta.env.DEV && new URLSearchParams(window.location.search).get("taskdesk-test") === "1"
+const searchParams = new URLSearchParams(window.location.search)
+const conversationTestMode = import.meta.env.DEV && searchParams.get("taskdesk-test") === "1"
+const sessionFirstPreviewMode = import.meta.env.DEV && searchParams.get("session-first-preview") === "1"
 
 function HarnessRemoteBoundary() {
   const [revision, setRevision] = useState(0)
@@ -55,6 +57,9 @@ async function renderApp() {
   if (conversationTestMode) {
     const { TaskDeskTestPage } = await import("./TaskDeskTestPage")
     content = <TaskDeskTestPage />
+  } else if (sessionFirstPreviewMode) {
+    const { SessionFirstPreviewPage } = await import("./SessionFirstPreviewPage")
+    content = <SessionFirstPreviewPage machines={loadWorkspaceMachines()} />
   }
 
   ReactDOM.createRoot(document.getElementById("root")!).render(
