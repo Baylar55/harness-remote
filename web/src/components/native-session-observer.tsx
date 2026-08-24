@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { api } from "../api"
 import {
   loadNativeSessionFeed,
   loadOlderNativeSessionFeed,
@@ -8,6 +7,7 @@ import {
 } from "../native-session-feed"
 import { probeNativeSessionContinuation } from "../native-session-continuation"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
+import { loadPendingNativeSessionPrompt, sendNativeSessionPrompt } from "../native-session-prompt"
 import { startTaskDeskSessionLiveRefresh } from "../taskdesk-session-live-refresh"
 import { LoadingIcon } from "../Icons"
 import { TaskDeskConversation } from "./taskdesk-conversation"
@@ -33,8 +33,8 @@ type Props = {
  *
  * External Sessions start in observe mode. "Continue this Session" performs a safe resume probe
  * first; only after that succeeds does the normal HR3 composer appear. Sending then targets the
- * exact same native session id through the existing prompt_async path. No Task, Run or replacement
- * Session is created as part of continuation.
+ * exact same native session id through the daemon's idempotent native Session operation path. No
+ * Task, Run or replacement Session is created as part of continuation.
  */
 export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const [feed, setFeed] = useState<NativeSessionFeed | null>(null)
@@ -73,7 +73,10 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     setLoading(true)
     setError(null)
     setResumeError(null)
-    setDraft("")
+    // If an HTTP response was lost, keep exactly the text and clientRequestId that may already have
+    // been accepted. Retrying after a WebView reload then converges on the daemon ledger instead of
+    // creating a second native prompt.
+    setDraft(loadPendingNativeSessionPrompt(target)?.text ?? "")
     setWriteState(target.external ? "observe" : "ready")
     setFeed(null)
     feedRef.current = null
@@ -139,8 +142,12 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     setSending(true)
     setError(null)
     try {
-      await api.sendPrompt(target.config, target.sessionID, text, target.directory)
-      setDraft("")
+      const result = await sendNativeSessionPrompt(target, text)
+      if (result.status === "accepted") {
+        setDraft("")
+      } else {
+        setError(`Prompt delivery is ${result.status}. Harness Remote will not send it again with a new request id; refresh the transcript or retry the same prompt to reconcile safely.`)
+      }
       onSessionRefresh?.()
       await refreshTail(false)
     } catch (reason) {
