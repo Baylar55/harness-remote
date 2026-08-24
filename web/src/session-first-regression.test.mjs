@@ -6,6 +6,7 @@ const feed = readFileSync(new URL('./native-session-feed.ts', import.meta.url), 
 const continuation = readFileSync(new URL('./native-session-continuation.ts', import.meta.url), 'utf8')
 const observer = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
 const sessionHome = readFileSync(new URL('./components/native-session-home.tsx', import.meta.url), 'utf8')
+const sessionNavigation = readFileSync(new URL('./session-first-navigation.css', import.meta.url), 'utf8')
 const standalone = readFileSync(new URL('./components/standalone-universal-workspace.tsx', import.meta.url), 'utf8')
 const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8')
 
@@ -35,7 +36,16 @@ assert.equal(observer.includes('launch('), false, 'same-Session continuation mus
 
 assert.ok(sessionHome.includes('discoverMachineNativeSessions'), 'the Sessions home must use native discovery rather than Task data')
 assert.ok(sessionHome.includes('SESSION_HOME_REFRESH_MS = 30_000'), 'native Session discovery must stay off the existing 10s Conversation workspace poll')
+assert.ok(sessionHome.includes('function projectGroups('), 'the Sessions browser must group native Sessions by Project/workspace rather than inventing dashboard buckets')
+assert.ok(sessionHome.includes('const key = `${item.machine.id}\\u0000${directory}`'), 'Project grouping must retain machine plus canonical Session directory identity')
+assert.ok(sessionHome.includes('className={`hr-native-session-row${working ? " active" : ""}`}'), 'Sessions must render as compact navigation rows')
+assert.equal(sessionHome.includes('Active now'), false, 'the Sessions browser must not split the same Project into synthetic Active/Recent dashboard sections')
 assert.equal(sessionHome.includes('taskClient'), false, 'the Sessions home must not depend on Task/Conversation storage')
+
+assert.ok(sessionNavigation.includes('grid-template-columns: repeat(4, minmax(0, 1fr))'), 'mobile Session-first navigation must keep four bounded destinations')
+assert.ok(sessionNavigation.includes('box-sizing: border-box'), 'mobile navigation width must include safe-area padding and borders')
+assert.ok(sessionNavigation.includes('max-width: 100vw'), 'mobile navigation must never exceed the visual viewport')
+assert.ok(sessionNavigation.includes('.hr-mobile-nav > button'), 'Session-first navigation must bound each destination independently')
 
 assert.ok(standalone.includes('<ConversationWorkspace'), 'the validated HR3 Conversation workspace must remain mounted')
 assert.ok(standalone.includes('primarySection === "sessions" ? <NativeSessionsWorkspace'), 'Sessions must be an additive section, not a replacement shell')
