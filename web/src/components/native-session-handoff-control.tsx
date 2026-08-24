@@ -1,11 +1,13 @@
 import { useMemo, useState } from "react"
+import { loadNativeSessionFeed } from "../native-session-feed"
 import { handoffNativeSession } from "../native-session-handoff"
 import {
   nativeSessionSurfaceTarget,
+  type NativeSessionHistoryEntry,
   type NativeSessionRecord,
   type NativeSessionSurfaceTarget
 } from "../native-session-discovery"
-import type { MachineAgentHost } from "../types"
+import type { BackendKind, MachineAgentHost } from "../types"
 import "../native-session-handoff.css"
 
 type Props = {
@@ -16,6 +18,12 @@ type Props = {
 
 function canHostSessions(agent: MachineAgentHost): boolean {
   return agent.capabilities?.sessions !== false
+}
+
+function supportedBackend(value: string, fallback: BackendKind): BackendKind {
+  return value === "opencode" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
+    ? value
+    : fallback
 }
 
 export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
@@ -36,6 +44,23 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
     setWorking(true)
     setError("")
     try {
+      // Capture the same normalized transcript the mature v3 chat is showing before creating the
+      // target. That prevents an accepted handoff from visually erasing the conversation simply
+      // because the new native Session has not received its first prompt yet.
+      const sourceFeed = await loadNativeSessionFeed(source)
+      const sourceHistory: NativeSessionHistoryEntry = {
+        ref: source.ref,
+        title: source.title,
+        agentID: source.agentID,
+        agentLabel: source.agentLabel,
+        backend: source.backend,
+        messages: sourceFeed.messages
+      }
+      const inheritedHistory = [
+        ...(source.history || []),
+        sourceHistory
+      ]
+
       const title = `${source.title} · ${targetAgent.label || targetAgent.id}`
       const response = await handoffNativeSession(source, targetAgent.id, title)
       if (response.status !== "accepted" || !response.result?.target?.sessionID) {
@@ -50,9 +75,7 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
         key: `${targetAgent.id}:${response.result.target.sessionID}`,
         agentId: targetAgent.id,
         agentLabel: targetAgent.label || targetAgent.id,
-        backend: targetAgent.backend === "opencode" || targetAgent.backend === "omp" || targetAgent.backend === "pi" || targetAgent.backend === "claude" || targetAgent.backend === "codex"
-          ? targetAgent.backend
-          : source.backend,
+        backend: supportedBackend(targetAgent.backend, source.backend),
         transport: targetAgent.transport,
         stopCapability: targetAgent.contract?.sessions?.stop,
         abortSupported: targetAgent.capabilities?.abort === true,
@@ -70,7 +93,8 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
         },
         status: { type: "idle" }
       }
-      onOpen(nativeSessionSurfaceTarget(source.machineID, { ...source.config, agentId: undefined }, record))
+      const next = nativeSessionSurfaceTarget(source.machineID, { ...source.config, agentId: undefined }, record)
+      onOpen({ ...next, history: inheritedHistory })
       setOpen(false)
       setTargetAgentID("")
     } catch (cause) {
@@ -102,7 +126,7 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
             </select>
           </label>
           <button type="button" className="tdw-button primary" disabled={!targetAgentID || working} onClick={() => void continueWithAgent()}>
-            {working ? "Creating Session..." : "Continue"}
+            {working ? "Preparing handoff..." : "Continue"}
           </button>
           {error ? <p className="hr-native-handoff-error" role="alert">{error}</p> : null}
         </div>
