@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { listMachineProjects, type MachineProject } from "../machineClient"
 import {
   discoverMachineNativeSessions,
   nativeSessionSurfaceTarget,
@@ -18,6 +19,7 @@ type Source = {
 type RecordWithMachine = {
   machine: WorkspaceMachine
   record: NativeSessionRecord
+  project?: MachineProject
 }
 
 type ProjectGroup = {
@@ -51,20 +53,54 @@ function relativeTime(timestamp: number): string {
   return `${Math.round(delta / 86_400_000)}d`
 }
 
-function projectName(record: NativeSessionRecord): string {
+function fallbackProjectName(record: NativeSessionRecord): string {
   const explicit = record.session.project?.name?.trim()
   if (explicit) return explicit
   const parts = record.session.directory.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] || record.session.directory || "Ungrouped"
 }
 
+function normalizedPath(value: string): { value: string; caseInsensitive: boolean } {
+  let normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+  if (!normalized) normalized = "/"
+  const caseInsensitive = /^[A-Za-z]:\//.test(normalized)
+  if (caseInsensitive) normalized = normalized.toLowerCase()
+  return { value: normalized, caseInsensitive }
+}
+
+function pathContains(projectPath: string, sessionDirectory: string): boolean {
+  if (!projectPath || !sessionDirectory) return false
+  const project = normalizedPath(projectPath)
+  const session = normalizedPath(sessionDirectory)
+  let root = project.value
+  let candidate = session.value
+  if (project.caseInsensitive || session.caseInsensitive) {
+    root = root.toLowerCase()
+    candidate = candidate.toLowerCase()
+  }
+  return candidate === root || candidate.startsWith(root === "/" ? "/" : `${root}/`)
+}
+
+function catalogProject(record: NativeSessionRecord, projects: MachineProject[], machineID: string): MachineProject | undefined {
+  const directory = record.session.directory || ""
+  if (!directory) return undefined
+  return projects
+    .filter((project) => project.machineId === machineID && pathContains(project.path, directory))
+    .sort((left, right) => normalizedPath(right.path).value.length - normalizedPath(left.path).value.length)[0]
+}
+
 function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>()
   for (const item of records) {
-    // The canonical directory stays in the identity. A basename is display copy only: two machines
-    // or two different paths named "app" must never collapse into one Project in the Session list.
-    const directory = item.record.session.directory || ""
-    const key = `${item.machine.id}\u0000${directory}`
+    const nativeDirectory = item.record.session.directory || ""
+    const project = item.project
+    // ProjectCatalog is authoritative when it can attribute the native cwd. Its id is already stable
+    // for machine + canonical realpath. Uncatalogued Sessions keep the exact native directory as a
+    // conservative fallback, so an unreadable catalog never hides or incorrectly merges Sessions.
+    const directory = project?.path || nativeDirectory
+    const key = project
+      ? `${item.machine.id}\u0000project:${project.id}`
+      : `${item.machine.id}\u0000directory:${nativeDirectory}`
     const updatedAt = item.record.session.time?.updated || 0
     const existing = groups.get(key)
     if (existing) {
@@ -75,7 +111,7 @@ function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
     groups.set(key, {
       key,
       machine: item.machine,
-      name: projectName(item.record),
+      name: project?.name || fallbackProjectName(item.record),
       directory,
       sessions: [item],
       updatedAt
@@ -110,8 +146,15 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
     let cancelled = false
     setLoading(true)
     void Promise.all(sources.map(async ({ machine, snapshot }) => {
-      const sessions = await discoverMachineNativeSessions(machine.config, snapshot.agents)
-      return sessions.map((record) => ({ machine, record }))
+      const [sessions, projects] = await Promise.all([
+        discoverMachineNativeSessions(machine.config, snapshot.agents),
+        listMachineProjects(machine.config).catch(() => [] as MachineProject[])
+      ])
+      return sessions.map((record) => ({
+        machine,
+        record,
+        project: catalogProject(record, projects, machine.id)
+      }))
     })).then((groups) => {
       if (cancelled) return
       setRecords(groups.flat().sort((left, right) => (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)))
