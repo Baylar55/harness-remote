@@ -5,6 +5,7 @@ import { trackManagedHostLifecycle } from "./opencode-host.js"
 import { discoverProjects } from "./project-catalog.js"
 import { createBridgeServer } from "./server.js"
 import { createSessionClaimServer } from "./session-claim-server.js"
+import { SessionOperationLedger } from "./session-operation-ledger.js"
 import { createTaskFinishServer } from "./task-finish-server.js"
 import { createTaskLaunchServer } from "./task-launch-server.js"
 import { TaskLauncher } from "./task-launcher.js"
@@ -14,10 +15,16 @@ import { WorktreeManager } from "./worktree-manager.js"
 import { WorkThreadController } from "./work-thread-controller.js"
 import { createWorkThreadServer } from "./work-thread-server.js"
 
-function daemonError(code, message) {
+function daemonError(code, message, options = {}) {
   const error = new Error(message)
   error.code = code
+  Object.assign(error, options)
   return error
+}
+
+function internalAuthorization(host) {
+  if (!host.username && !host.password) return undefined
+  return `Basic ${Buffer.from(`${host.username ?? ""}:${host.password ?? ""}`, "utf8").toString("base64")}`
 }
 
 export class MachineDaemon {
@@ -130,7 +137,8 @@ export function createMachineDaemonServer({
   worktreeManager,
   taskLauncher,
   taskRunController,
-  workThreadController
+  workThreadController,
+  sessionOperationLedger
 }) {
   const bridgeServer = createServer({ config, acp: primaryAcp, machineRegistry: daemon.registry, serviceOptions })
   const scopedAcpServers = new Map()
@@ -155,6 +163,7 @@ export function createMachineDaemonServer({
   const tasks = taskStore ?? new TaskRunStore({ machineID, stateDirectory })
   const projects = projectCatalog ?? (() => discoverProjects({ machineID, roots }))
   const worktrees = worktreeManager ?? new WorktreeManager({ stateDirectory })
+  const operations = sessionOperationLedger ?? new SessionOperationLedger({ machineID, stateDirectory })
   const acpService = (agentID) => {
     const server = agentID === primaryAgentID ? bridgeServer : acpBridgeServer(agentID)
     return server?.acpService
@@ -169,6 +178,46 @@ export function createMachineDaemonServer({
     // hardened ACP session/load path and propagates single-writer refusal. The HTTP/product contract
     // is now Session-specific, so extracting AcpService.claimSession later will not touch clients.
     await service.models(sessionID)
+  }
+  const promptSession = async (agentID, sessionID, { text, directory }) => {
+    const entry = daemon.hostEntry(agentID)
+    if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
+
+    if (entry.kind === "acp") {
+      const service = acpService(agentID)
+      if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
+      await service.prompt(sessionID, text)
+      return
+    }
+
+    const host = entry.host
+    try {
+      await host.start?.()
+    } catch (error) {
+      throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${agentID} is unavailable`)
+    }
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : ""
+    const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session/${encodeURIComponent(sessionID)}/prompt_async${query}`
+    const headers = { Accept: "application/json", "Content-Type": "application/json" }
+    const authorization = internalAuthorization(host)
+    if (authorization) headers.Authorization = authorization
+    let response
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ parts: [{ type: "text", text }] })
+      })
+    } catch {
+      throw daemonError("session_prompt_uncertain", `OpenCode prompt delivery for Session ${sessionID} is uncertain`, { ambiguous: true })
+    }
+    if (!response.ok) {
+      let detail = ""
+      try { detail = await response.text() } catch {}
+      const message = detail || `OpenCode returned HTTP ${response.status}`
+      if (response.status >= 500) throw daemonError("session_prompt_uncertain", message, { ambiguous: true })
+      throw daemonError("session_prompt_rejected", message)
+    }
   }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
@@ -190,7 +239,13 @@ export function createMachineDaemonServer({
       ].filter(([, value]) => value))
     })
   })
-  const claimServer = createClaimServer({ innerServer, config, claimSession })
+  const claimServer = createClaimServer({
+    innerServer,
+    config,
+    claimSession,
+    promptSession,
+    operationLedger: operations
+  })
   const launchServer = createLaunchServer({ innerServer: claimServer, config, taskRunController: runs })
   const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks, projectCatalog: projects })
   const finishServer = createFinishServer({ innerServer: modelServer, config, taskStore: tasks, worktreeManager: worktrees, taskRunController: runs })
