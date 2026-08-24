@@ -245,6 +245,13 @@ async function seed(page) {
   }, { key: STORAGE_KEY, port: DAEMON_PORT, user: USER, password: PASSWORD })
 }
 
+async function waitForPromptCount(expected) {
+  const deadline = Date.now() + 5000
+  while (promptBodies.length < expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
 async function assertSessionContract(browser, viewport, mobile) {
   const claimsBefore = claimCount
   const catalogsBefore = modelCatalogReads
@@ -299,12 +306,7 @@ async function assertSessionContract(browser, viewport, mobile) {
   const composerInput = page.getByRole("textbox", { name: "Message Codex CLI" })
   await composerInput.fill(PROMPT_TEXT)
   await page.getByRole("button", { name: "Send" }).click()
-  await page.waitForFunction((expected) => window.__nativeSessionSmokePromptCount >= expected, promptsBefore + 1).catch(async () => {
-    const deadline = Date.now() + 5000
-    while (promptBodies.length < promptsBefore + 1 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-  })
+  await waitForPromptCount(promptsBefore + 1)
   assert.equal(promptBodies.length, promptsBefore + 1, "one Send action must create exactly one native prompt request")
   const prompt = promptBodies[promptsBefore]
   assert.equal(prompt.text, PROMPT_TEXT, "native prompt text changed before daemon dispatch")
