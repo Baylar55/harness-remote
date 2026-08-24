@@ -1,6 +1,38 @@
 .hr-native-session-observer {
+  min-width: 0;
   min-height: 0;
   height: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* TaskDeskConversation owns the actual scroll mechanics. Session-first only has to preserve the
+   same bounded flex chain the HR3 work-thread detail gives it, otherwise the transcript expands to
+   content height and pushes the existing composer below the viewport. */
+.hr-native-session-observer > .uw-conversation-core {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.hr-native-session-observer .uw-transcript-shell {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.hr-native-session-observer .uw-transcript {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* Observation deliberately reuses the HR3 conversation surface. Until a harness confirms the
@@ -11,6 +43,7 @@
 }
 
 .hr-native-session-continuation {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -33,6 +66,11 @@
 }
 
 .hr-native-session-continuation button {
+  flex: 0 0 auto;
+}
+
+.hr-native-session-observer-error,
+.hr-native-session-observer > .tdw-field-note {
   flex: 0 0 auto;
 }
 
