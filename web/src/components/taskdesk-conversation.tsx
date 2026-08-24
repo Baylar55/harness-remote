@@ -236,6 +236,10 @@ const ConversationTranscript = memo(function ConversationTranscript({
               window.cancelAnimationFrame(followFrameRef.current)
               followFrameRef.current = undefined
             }
+            if (scrollFrameRef.current !== undefined) {
+              window.cancelAnimationFrame(scrollFrameRef.current)
+              scrollFrameRef.current = undefined
+            }
           }
         }}
         onScroll={(event) => {
