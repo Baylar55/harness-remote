@@ -35,6 +35,7 @@ type Props = {
 }
 
 const SESSION_HOME_REFRESH_MS = 30_000
+const COLLAPSED_PROJECT_SESSION_COUNT = 5
 
 function sessionWorking(record: NativeSessionRecord): boolean {
   const value = record.status?.type?.trim().toLowerCase() || ""
@@ -97,6 +98,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [revision, setRevision] = useState(0)
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     if (!sources.length) {
@@ -138,6 +140,15 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
     onOpen(nativeSessionSurfaceTarget(item.machine.config, item.record))
   }
 
+  function toggleProject(groupKey: string) {
+    setExpandedProjects((current) => {
+      const next = new Set(current)
+      if (next.has(groupKey)) next.delete(groupKey)
+      else next.add(groupKey)
+      return next
+    })
+  }
+
   return (
     <section className="hr-native-home" aria-label="Sessions">
       <div className="hr-native-home-heading">
@@ -152,38 +163,53 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
 
       {!loaded && loading ? <div className="hr-native-home-empty"><LoadingIcon size={18} /><span>Finding Sessions from your coding agents...</span></div> : null}
 
-      {groups.map((group) => (
-        <section className="hr-native-project-group" key={group.key} aria-label={`${group.name} Sessions`}>
-          <div className="hr-native-project-heading">
-            <div>
-              <strong>{group.name}</strong>
-              <small title={group.directory}>{group.directory || "No working directory"}</small>
+      {groups.map((group) => {
+        const expanded = expandedProjects.has(group.key)
+        const visibleSessions = expanded ? group.sessions : group.sessions.slice(0, COLLAPSED_PROJECT_SESSION_COUNT)
+        const hiddenCount = Math.max(0, group.sessions.length - COLLAPSED_PROJECT_SESSION_COUNT)
+        return (
+          <section className="hr-native-project-group" key={group.key} aria-label={`${group.name} Sessions`}>
+            <div className="hr-native-project-heading">
+              <div>
+                <strong>{group.name}</strong>
+                <small title={group.directory}>{group.directory || "No working directory"}</small>
+              </div>
+              {multipleMachines ? <span title={group.machine.config.host}>{group.machine.name}</span> : null}
             </div>
-            {multipleMachines ? <span title={group.machine.config.host}>{group.machine.name}</span> : null}
-          </div>
-          <div className="hr-native-home-list">
-            {group.sessions.map((item) => {
-              const working = sessionWorking(item.record)
-              return (
-                <button
-                  type="button"
-                  className={`hr-native-session-row${working ? " active" : ""}`}
-                  key={`${item.machine.id}:${item.record.key}`}
-                  onClick={() => open(item)}
-                  aria-label={`Open ${item.record.session.title || "Untitled Session"} in ${item.record.agentLabel}`}
-                >
-                  <span className="hr-native-session-state" data-state={working ? "active" : "idle"} aria-hidden="true" />
-                  <span className="hr-native-session-copy">
-                    <strong>{item.record.session.title || "Untitled Session"}</strong>
-                    <small>{item.record.agentLabel}{item.record.session.external === true ? " · started outside Harness Remote" : ""}</small>
-                  </span>
-                  <span className="hr-native-session-time">{relativeTime(item.record.session.time?.updated || 0)}</span>
-                </button>
-              )
-            })}
-          </div>
-        </section>
-      ))}
+            <div className="hr-native-home-list">
+              {visibleSessions.map((item) => {
+                const working = sessionWorking(item.record)
+                return (
+                  <button
+                    type="button"
+                    className={`hr-native-session-row${working ? " active" : ""}`}
+                    key={`${item.machine.id}:${item.record.key}`}
+                    onClick={() => open(item)}
+                    aria-label={`Open ${item.record.session.title || "Untitled Session"} in ${item.record.agentLabel}`}
+                  >
+                    <span className="hr-native-session-state" data-state={working ? "active" : "idle"} aria-hidden="true" />
+                    <span className="hr-native-session-copy">
+                      <strong>{item.record.session.title || "Untitled Session"}</strong>
+                      <small>{item.record.agentLabel}{item.record.session.external === true ? " · started outside Harness Remote" : ""}</small>
+                    </span>
+                    <span className="hr-native-session-time">{relativeTime(item.record.session.time?.updated || 0)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {hiddenCount > 0 ? (
+              <button
+                type="button"
+                className="hr-native-project-more"
+                onClick={() => toggleProject(group.key)}
+                aria-expanded={expanded}
+              >
+                {expanded ? "Show less" : `Show ${hiddenCount} more`}
+              </button>
+            ) : null}
+          </section>
+        )
+      })}
 
       {loaded && !loading && records.length === 0 ? (
         <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No Sessions found yet. Start one in a coding agent and it will appear here.</span></div>
