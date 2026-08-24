@@ -20,6 +20,15 @@ type RecordWithMachine = {
   record: NativeSessionRecord
 }
 
+type ProjectGroup = {
+  key: string
+  machine: WorkspaceMachine
+  name: string
+  directory: string
+  sessions: RecordWithMachine[]
+  updatedAt: number
+}
+
 type Props = {
   sources: Source[]
   onOpen: (target: NativeSessionSurfaceTarget) => void
@@ -45,7 +54,42 @@ function projectName(record: NativeSessionRecord): string {
   const explicit = record.session.project?.name?.trim()
   if (explicit) return explicit
   const parts = record.session.directory.split(/[\\/]/).filter(Boolean)
-  return parts[parts.length - 1] || record.session.directory || "Project"
+  return parts[parts.length - 1] || record.session.directory || "Ungrouped"
+}
+
+function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>()
+  for (const item of records) {
+    // The canonical directory stays in the identity. A basename is display copy only: two machines
+    // or two different paths named "app" must never collapse into one Project in the Session list.
+    const directory = item.record.session.directory || ""
+    const key = `${item.machine.id}\u0000${directory}`
+    const updatedAt = item.record.session.time?.updated || 0
+    const existing = groups.get(key)
+    if (existing) {
+      existing.sessions.push(item)
+      existing.updatedAt = Math.max(existing.updatedAt, updatedAt)
+      continue
+    }
+    groups.set(key, {
+      key,
+      machine: item.machine,
+      name: projectName(item.record),
+      directory,
+      sessions: [item],
+      updatedAt
+    })
+  }
+
+  for (const group of groups.values()) {
+    group.sessions.sort((left, right) => {
+      const workingDelta = Number(sessionWorking(right.record)) - Number(sessionWorking(left.record))
+      if (workingDelta) return workingDelta
+      return (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)
+    })
+  }
+
+  return [...groups.values()].sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
 }
 
 export function NativeSessionHome({ sources, onOpen }: Props) {
@@ -72,7 +116,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
       setLoaded(true)
     }).catch(() => {
       // Session discovery is enrichment for the Home. A transient adapter failure must not replace
-      // the already-loaded Home or make Conversations unusable.
+      // the already-loaded Home or make the rest of Harness Remote unusable.
       if (!cancelled) setLoaded(true)
     }).finally(() => {
       if (!cancelled) setLoading(false)
@@ -86,17 +130,21 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
     return () => window.clearInterval(timer)
   }, [loaded])
 
-  const active = useMemo(() => records.filter(({ record }) => sessionWorking(record)), [records])
-  const recent = useMemo(() => records.filter(({ record }) => !sessionWorking(record)).slice(0, 8), [records])
+  const groups = useMemo(() => projectGroups(records), [records])
+  const activeCount = useMemo(() => records.filter(({ record }) => sessionWorking(record)).length, [records])
+  const multipleMachines = sources.length > 1
 
   function open(item: RecordWithMachine) {
     onOpen(nativeSessionSurfaceTarget(item.machine.config, item.record))
   }
 
   return (
-    <section className="hr-native-home" aria-label="Native Sessions">
+    <section className="hr-native-home" aria-label="Sessions">
       <div className="hr-native-home-heading">
-        <div><span>Native Sessions</span><h2>Continue what is already running</h2></div>
+        <div>
+          <h2>Sessions</h2>
+          <span>{activeCount ? `${activeCount} active · ${records.length} total` : `${records.length} recent`}</span>
+        </div>
         <button type="button" className="tdw-icon-button" onClick={() => setRevision((value) => value + 1)} disabled={loading} aria-label="Refresh Sessions" title="Refresh Sessions">
           {loading ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
         </button>
@@ -104,38 +152,41 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
 
       {!loaded && loading ? <div className="hr-native-home-empty"><LoadingIcon size={18} /><span>Finding Sessions from your coding agents...</span></div> : null}
 
-      {active.length ? (
-        <div className="hr-native-home-group">
-          <div className="hr-native-home-label"><strong>Active now</strong><span>{active.length}</span></div>
-          <div className="hr-native-home-list">
-            {active.map((item) => (
-              <button type="button" className="hr-native-session-card active" key={`${item.machine.id}:${item.record.key}`} onClick={() => open(item)}>
-                <span className="hr-native-session-state" aria-hidden="true" />
-                <span className="hr-native-session-copy"><strong>{item.record.session.title || "Untitled Session"}</strong><small>{projectName(item.record)} · {item.record.agentLabel}</small></span>
-                <span className="hr-native-session-side"><small>{item.machine.name}</small><b>Open</b></span>
-              </button>
-            ))}
+      {groups.map((group) => (
+        <section className="hr-native-project-group" key={group.key} aria-label={`${group.name} Sessions`}>
+          <div className="hr-native-project-heading">
+            <div>
+              <strong>{group.name}</strong>
+              <small title={group.directory}>{group.directory || "No working directory"}</small>
+            </div>
+            {multipleMachines ? <span title={group.machine.config.host}>{group.machine.name}</span> : null}
           </div>
-        </div>
-      ) : null}
-
-      {recent.length ? (
-        <div className="hr-native-home-group">
-          <div className="hr-native-home-label"><strong>Recent Sessions</strong><span>{recent.length}</span></div>
           <div className="hr-native-home-list">
-            {recent.map((item) => (
-              <button type="button" className="hr-native-session-card" key={`${item.machine.id}:${item.record.key}`} onClick={() => open(item)}>
-                <span className="hr-native-session-icon"><ChatIcon size={15} /></span>
-                <span className="hr-native-session-copy"><strong>{item.record.session.title || "Untitled Session"}</strong><small>{projectName(item.record)} · {item.record.agentLabel}</small></span>
-                <span className="hr-native-session-side"><small>{relativeTime(item.record.session.time?.updated || 0)}</small><b>Open</b></span>
-              </button>
-            ))}
+            {group.sessions.map((item) => {
+              const working = sessionWorking(item.record)
+              return (
+                <button
+                  type="button"
+                  className={`hr-native-session-row${working ? " active" : ""}`}
+                  key={`${item.machine.id}:${item.record.key}`}
+                  onClick={() => open(item)}
+                  aria-label={`Open ${item.record.session.title || "Untitled Session"} in ${item.record.agentLabel}`}
+                >
+                  <span className="hr-native-session-state" data-state={working ? "active" : "idle"} aria-hidden="true" />
+                  <span className="hr-native-session-copy">
+                    <strong>{item.record.session.title || "Untitled Session"}</strong>
+                    <small>{item.record.agentLabel}{item.record.session.external === true ? " · started outside Harness Remote" : ""}</small>
+                  </span>
+                  <span className="hr-native-session-time">{relativeTime(item.record.session.time?.updated || 0)}</span>
+                </button>
+              )
+            })}
           </div>
-        </div>
-      ) : null}
+        </section>
+      ))}
 
       {loaded && !loading && records.length === 0 ? (
-        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No native Sessions found yet. Start one in a coding agent or create work from Harness Remote.</span></div>
+        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No Sessions found yet. Start one in a coding agent and it will appear here.</span></div>
       ) : null}
     </section>
   )
