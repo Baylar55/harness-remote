@@ -87,90 +87,134 @@
   font-size: 18px;
 }
 
+/* Keep the Sessions browser close to the coding-harness convention: projects/workspaces are section
+   headers and Sessions are compact rows. It is navigation, not a dashboard of action cards. */
 .hr-native-home {
-  padding: 18px;
-}
-
-.hr-native-home-heading,
-.hr-native-home-label,
-.hr-native-session-card {
-  display: flex;
-  align-items: center;
+  padding: 14px 10px 20px;
 }
 
 .hr-native-home-heading {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
+  padding: 2px 4px 12px;
 }
 
-.hr-native-home-heading span,
-.hr-native-home-label,
-.hr-native-session-card small {
-  color: var(--tdw-muted, #9299a8);
+.hr-native-home-heading > div {
+  min-width: 0;
 }
 
 .hr-native-home-heading h2 {
-  margin: 2px 0 0;
-  font-size: 17px;
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.25;
 }
 
-.hr-native-home-group + .hr-native-home-group {
-  margin-top: 20px;
+.hr-native-home-heading span {
+  display: block;
+  margin-top: 3px;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 11px;
 }
 
-.hr-native-home-label {
+.hr-native-project-group + .hr-native-project-group {
+  margin-top: 16px;
+}
+
+.hr-native-project-heading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .05em;
+  gap: 10px;
+  padding: 0 6px 6px;
+}
+
+.hr-native-project-heading > div {
+  min-width: 0;
+}
+
+.hr-native-project-heading strong,
+.hr-native-project-heading small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hr-native-project-heading strong {
+  color: var(--tdw-text, #f5f6f8);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.hr-native-project-heading small {
+  max-width: 260px;
+  margin-top: 2px;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 9.5px;
+}
+
+.hr-native-project-heading > span {
+  max-width: 100px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 9.5px;
 }
 
 .hr-native-home-list {
   display: grid;
-  gap: 7px;
+  gap: 2px;
 }
 
-.hr-native-session-card {
+.hr-native-session-row {
   width: 100%;
-  gap: 10px;
-  padding: 11px 12px;
-  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.22));
-  border-radius: 10px;
-  background: var(--tdw-card, rgba(255, 255, 255, 0.035));
+  min-width: 0;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
   color: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.hr-native-session-card:hover,
-.hr-native-session-card:focus-visible {
-  border-color: var(--tdw-accent, #6d8cff);
+.hr-native-session-row:hover,
+.hr-native-session-row:focus-visible {
+  border-color: var(--tdw-border, rgba(127, 127, 127, 0.22));
+  background: var(--tdw-card, rgba(255, 255, 255, 0.035));
+  outline: 0;
+}
+
+.hr-native-session-row.active {
+  background: color-mix(in srgb, var(--tdw-card, rgba(255, 255, 255, 0.035)) 78%, transparent);
 }
 
 .hr-native-session-state {
-  width: 9px;
-  height: 9px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #42c77a;
-  box-shadow: 0 0 0 4px rgba(66, 199, 122, .12);
-  flex: 0 0 auto;
+  background: var(--tdw-muted, #9299a8);
+  opacity: .58;
 }
 
-.hr-native-session-icon {
-  display: grid;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  border-radius: 7px;
-  background: rgba(127, 127, 127, .1);
-  flex: 0 0 auto;
+.hr-native-session-state[data-state="active"] {
+  background: #42c77a;
+  box-shadow: 0 0 0 3px rgba(66, 199, 122, .12);
+  opacity: 1;
 }
 
 .hr-native-session-copy {
   min-width: 0;
-  flex: 1;
 }
 
 .hr-native-session-copy strong,
@@ -182,35 +226,36 @@
 }
 
 .hr-native-session-copy strong {
-  font-size: 13px;
+  color: var(--tdw-text, #f5f6f8);
+  font-size: 12.5px;
+  font-weight: 620;
+  line-height: 1.3;
 }
 
 .hr-native-session-copy small {
-  margin-top: 3px;
+  margin-top: 2px;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 10px;
 }
 
-.hr-native-session-side {
-  display: grid;
-  justify-items: end;
-  gap: 3px;
-  flex: 0 0 auto;
-}
-
-.hr-native-session-side b {
-  font-size: 11px;
-  color: var(--tdw-accent, #6d8cff);
+.hr-native-session-time {
+  min-width: 24px;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 10px;
+  text-align: right;
 }
 
 .hr-native-home-empty {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px;
-  border: 1px dashed var(--tdw-border, rgba(127, 127, 127, 0.22));
-  border-radius: 10px;
+  margin: 4px;
+  padding: 14px 10px;
   color: var(--tdw-muted, #9299a8);
+  font-size: 11px;
 }
 
+/* Compatibility escape hatch while Conversation remains mounted during Session-first migration. */
 .hr-session-launcher {
   position: fixed;
   right: 18px;
@@ -242,5 +287,7 @@
   .hr-native-workspace-detail.mobile-open { transform: translateX(0); }
   .hr-native-workspace-session-header { padding: 10px 12px; }
   .hr-native-workspace-session-header code { display: none; }
-  .hr-native-home { padding: 14px 12px 84px; }
+  .hr-native-home { padding: 12px 8px 84px; }
+  .hr-native-project-heading small { max-width: 70vw; }
+  .hr-native-session-row { min-height: 52px; padding-block: 8px; }
 }
