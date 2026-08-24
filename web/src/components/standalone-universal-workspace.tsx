@@ -20,6 +20,7 @@ import {
 } from "../workspaceMachines"
 import { useDialogDismiss } from "../useDialogDismiss"
 import { ConversationWorkspace } from "./conversation-workspace"
+import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
 import { NativeSessionObserver } from "./native-session-observer"
 
@@ -272,7 +273,10 @@ function NativeSessionsWorkspace({
               <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Sessions">← Sessions</button>
               <header className="hr-native-workspace-session-header">
                 <div><span>{selected.agentLabel}</span><h1>{selected.title}</h1><small>{selected.external ? "Native Session started outside Harness Remote" : "Native Session"}</small></div>
-                <code title={selected.sessionID}>{selected.sessionID}</code>
+                <div className="hr-native-workspace-session-actions">
+                  <NativeSessionHandoffControl source={selected} agents={snapshots[selected.machineID]?.agents || []} onOpen={openSession} />
+                  <code title={selected.sessionID}>{selected.sessionID}</code>
+                </div>
               </header>
               <div className="hr-native-workspace-chat"><NativeSessionObserver key={selected.key} target={selected} /></div>
             </>
