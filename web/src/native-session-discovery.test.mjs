@@ -21,7 +21,7 @@ const codex = {
   transport: 'acp',
   managed: true,
   state: 'available',
-  capabilities: { sessions: true, abort: true },
+  capabilities: { sessions: true, abort: true, models: true },
   contract: { sessions: { stop: 'owned-session-native-cancel' } }
 }
 
@@ -35,7 +35,14 @@ const calls = []
 const client = {
   async listGlobalSessions(config) {
     calls.push(['global', config.backend, config.agentId])
-    return [{ id: 's1', title: 'Native Codex', directory: '/repo', time: { created: 1, updated: 20 }, external: true }]
+    return [{
+      id: 's1',
+      title: 'Native Codex',
+      directory: '/repo',
+      time: { created: 1, updated: 20 },
+      external: true,
+      model: { providerID: 'openai', id: 'gpt-5.6', variant: 'high' }
+    }]
   },
   async listSessions(config) {
     calls.push(['stable', config.backend, config.agentId])
@@ -55,6 +62,7 @@ assert.equal(codexSessions[0].backend, 'codex')
 assert.equal(codexSessions[0].transport, 'acp')
 assert.equal(codexSessions[0].stopCapability, 'owned-session-native-cancel')
 assert.equal(codexSessions[0].abortSupported, true)
+assert.equal(codexSessions[0].modelsSupported, true)
 assert.equal(codexSessions[0].session.external, true)
 assert.equal(codexSessions[0].status.type, 'busy')
 assert.deepEqual(calls, [
@@ -81,6 +89,8 @@ assert.deepEqual(nativeSessionSurfaceTarget('machine-1', base, codexSessions[0])
   config: { ...base, backend: 'codex', agentId: 'codex' },
   status: { type: 'busy' },
   external: true,
+  modelsSupported: true,
+  model: { providerID: 'openai', modelID: 'gpt-5.6', variant: 'high' },
   requiresExplicitClaim: true,
   canStop: true
 })
