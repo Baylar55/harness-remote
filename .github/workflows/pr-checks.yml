@@ -68,6 +68,10 @@ jobs:
           npm run test:native-response
           node src/v3-mobile-regression-fixes.test.mjs
           node src/session-first-regression.test.mjs
+          node --experimental-strip-types src/native-session-discovery.test.mjs
+          node --experimental-strip-types src/native-session-feed.test.mjs
+          node src/native-session-observer.test.mjs
+          node --experimental-strip-types src/native-session-continuation.test.mjs
         working-directory: web
 
       - name: Run bridge tests
