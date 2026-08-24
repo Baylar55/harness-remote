@@ -8,38 +8,12 @@
   overflow: hidden;
 }
 
-/* TaskDeskConversation owns the actual scroll mechanics. Session-first only has to preserve the
-   same bounded flex chain the HR3 work-thread detail gives it, otherwise the transcript expands to
-   content height and pushes the existing composer below the viewport. */
-.hr-native-session-observer > .uw-conversation-core {
+/* Session-first owns only the outer identity/claim boundary. Once writable, the mature v3
+   WorkThreadConversation owns transcript, composer and scrolling styles unchanged. */
+.hr-native-session-observer > .tdw-work-thread-conversation {
   min-width: 0;
   min-height: 0;
   flex: 1;
-}
-
-.hr-native-session-observer .uw-transcript-shell {
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  position: relative;
-}
-
-.hr-native-session-observer .uw-transcript {
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-/* Observation deliberately reuses the HR3 conversation surface. Until a harness confirms the
-   native Session can be resumed safely, hide only the existing composer instead of creating a
-   second chat. Once continuation succeeds, the same composer is revealed in place. */
-.hr-native-session-observer.observe-only .uw-composer-shell {
-  display: none;
 }
 
 .hr-native-session-continuation {
@@ -67,15 +41,6 @@
 
 .hr-native-session-continuation button {
   flex: 0 0 auto;
-}
-
-.hr-native-session-observer-error,
-.hr-native-session-observer > .tdw-field-note {
-  flex: 0 0 auto;
-}
-
-.hr-native-session-observer-error {
-  margin: 0 0 8px;
 }
 
 @media (max-width: 640px) {
