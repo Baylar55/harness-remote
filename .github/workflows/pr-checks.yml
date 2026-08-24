@@ -1,5 +1,11 @@
 name: PR checks
 
+# The regression suites only ran on `main`, inside the Pages deploy, so a pull request was merged
+# blind and a red suite was discovered after the fact, by which point the deploy that gates the
+# hosted app had already failed. The same gap hid the APK: it is built on `main` and on tags, so a
+# change to the app could not be installed on a phone until after it landed. Both run here instead,
+# on the pull request, which is where the answer is still cheap to act on.
+
 "on":
   workflow_dispatch: {}
   pull_request:
@@ -9,155 +15,17 @@ name: PR checks
       - '.github/workflows/pr-checks.yml'
 
 permissions:
-  contents: write
+  contents: read
 
+# A pull request that is pushed to twice in a minute does not need the first Android build to
+# finish: it takes the longest and its APK is already stale.
 concurrency:
   group: pr-checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  parity-autofix:
-    if: github.event_name == 'pull_request' && github.head_ref == 'feature/v3-session-first-read-path'
-    name: Apply one-shot v3 parity patch
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout head branch
-        uses: actions/checkout@v7
-        with:
-          ref: feature/v3-session-first-read-path
-          fetch-depth: 2
-
-      - name: Apply exact source patches
-        shell: python
-        run: |
-          from pathlib import Path
-
-          def replace(path, old, new):
-              p = Path(path)
-              text = p.read_text()
-              if old not in text:
-                  raise SystemExit(f"expected block not found in {path}")
-              p.write_text(text.replace(old, new, 1))
-
-          replace(
-              "web/src/components/standalone-universal-workspace.tsx",
-              '''      <ConversationWorkspace
-        machines={machines}
-        activeMachineID={activeID}
-        onActiveMachineID={setActiveMachineID}
-        onManageMachines={showMachines}
-      />
-      {primarySection === "sessions" ? <NativeSessionsWorkspace machines={machines} onBackToConversations={showConversations} onManageMachines={showMachines} /> : null}''',
-              '''      {primarySection === "conversations" ? (
-        <ConversationWorkspace
-          machines={machines}
-          activeMachineID={activeID}
-          onActiveMachineID={setActiveMachineID}
-          onManageMachines={showMachines}
-        />
-      ) : (
-        <NativeSessionsWorkspace machines={machines} onBackToConversations={showConversations} onManageMachines={showMachines} />
-      )}'''
-          )
-
-          replace(
-              "web/src/components/work-thread-conversation.tsx",
-              'const WorkThreadBubble = memo(function WorkThreadBubble',
-              'export const WorkThreadBubble = memo(function WorkThreadBubble'
-          )
-
-          p = Path("web/src/components/native-session-observer.tsx")
-          text = p.read_text()
-          text = text.replace(
-              'import { TaskDeskConversation } from "./taskdesk-conversation"',
-              'import { TaskDeskConversation } from "./taskdesk-conversation"\nimport { WorkThreadBubble } from "./work-thread-conversation"\nimport type { WorkThreadMessage } from "../work-thread-timeline"',
-              1
-          )
-          text = text.replace(
-              '  const working = nativeSessionIsWorking(statusType)\n  const writable = writeState === "ready"\n  const attention = useMemo(() => latestConversationAttention(feed?.messages || [], { active: working }), [feed?.messages, working])',
-              '  const working = nativeSessionIsWorking(statusType)\n  const writable = writeState === "ready"\n  const currentSessionMessages = useMemo(() => (feed?.messages || []).filter((message) => message.info.sessionID === target.sessionID), [feed?.messages, target.sessionID])\n  const displayMessages = useMemo(() => (feed?.messages || []).map((message) => {\n    const existing = message as WorkThreadMessage\n    if (existing.taskdesk) return existing\n    return { ...message, taskdesk: { kind: "native", agentId: target.agentID, agentLabel: target.agentLabel, agentBackend: target.backend } } as WorkThreadMessage\n  }), [feed?.messages, target.agentID, target.agentLabel, target.backend])\n  const attention = useMemo(() => latestConversationAttention(currentSessionMessages, { active: working }), [currentSessionMessages, working])',
-              1
-          )
-          text = text.replace(
-              '    const messages = feed?.messages || []',
-              '    const messages = currentSessionMessages',
-              1
-          )
-          text = text.replace(
-              '  }, [feed?.messages, target.sessionID])',
-              '  }, [currentSessionMessages, target.sessionID])',
-              1
-          )
-          text = text.replace(
-              '          messages={feed?.messages || []}',
-              '          messages={displayMessages}',
-              1
-          )
-          text = text.replace(
-              '          footerHint={writable ? "Continue the same native Session." : "Observe only until the harness confirms this Session can be resumed safely."}',
-              '          footerHint={writable ? "Continue the same native Session." : "Observe only until the harness confirms this Session can be resumed safely."}\n          renderMessage={(message) => <WorkThreadBubble key={message.info.id} message={message as WorkThreadMessage} />}',
-              1
-          )
-          p.write_text(text)
-
-          replace(
-              "web/src/components/native-session-handoff-control.tsx",
-              'const sourceFeed = await loadNativeSessionFeed(source)',
-              'const sourceFeed = await loadNativeSessionFeed({ ...source, history: undefined })'
-          )
-
-          p = Path("web/scripts/native-session-browser-smoke.mjs")
-          text = p.read_text()
-          text = text.replace(
-              'const PROMPT_TEXT = "MODEL-EFFORT-PROMPT"',
-              'const PROMPT_TEXT = "MODEL-EFFORT-PROMPT"\nconst HANDOFF_PROMPT_TEXT = "HANDOFF-CONTEXT-PROMPT"',
-              1
-          )
-          text = text.replace(
-              'const handoffBodies = []',
-              'const handoffBodies = []\nconst handoffPromptBodies = []\nlet handoffMessages = []',
-              1
-          )
-          text = text.replace(
-              '    if (request.method === "GET" && url.pathname === `/v1/agents/opencode/session/${HANDOFF_SESSION_ID}/message`) {\n      json(response, 200, [], { "X-Has-More": "0" })\n      return\n    }',
-              '    if (request.method === "GET" && url.pathname === `/v1/agents/opencode/session/${HANDOFF_SESSION_ID}/message`) {\n      json(response, 200, handoffMessages, { "X-Has-More": "0" })\n      return\n    }',
-              1
-          )
-          insertion = '''\n    if (request.method === "POST" && url.pathname === `/v1/agents/opencode/session/${HANDOFF_SESSION_ID}/prompt`) {\n      const body = await requestJSON(request)\n      handoffPromptBodies.push(body)\n      handoffMessages = [\n        { info: { id: "handoff-user-1", role: "user", sessionID: HANDOFF_SESSION_ID, time: { created: 9000 } }, parts: [{ id: "handoff-user-text", type: "text", text: body.text }] },\n        { info: { id: "handoff-assistant-1", role: "assistant", sessionID: HANDOFF_SESSION_ID, time: { created: 9001 } }, parts: [{ id: "handoff-assistant-text", type: "text", text: "HANDOFF-ASSISTANT-REPLY" }] }\n      ]\n      json(response, 200, { status: "accepted" })\n      return\n    }\n'''
-          marker = '    if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/handoff`) {'
-          if marker not in text:
-              raise SystemExit("handoff route marker missing")
-          text = text.replace(marker, insertion + '\n' + marker, 1)
-          text = text.replace(
-              '  const handoffsBefore = handoffBodies.length',
-              '  const handoffsBefore = handoffBodies.length\n  const handoffPromptsBefore = handoffPromptBodies.length',
-              1
-          )
-          old = '''  const targetComposer = page.getByRole("textbox", { name: "Message OpenCode" })\n  await targetComposer.waitFor({ state: "visible" })\n  assert.equal(claimCount, claimsBefore + 1, "opening the HTTP target Session must not claim the source or target ACP writer")\n\n  await context.close()'''
-          new = '''  const targetComposer = page.getByRole("textbox", { name: "Message OpenCode" })\n  await targetComposer.waitFor({ state: "visible" })\n  assert.equal(claimCount, claimsBefore + 1, "opening the HTTP target Session must not claim the source or target ACP writer")\n  assert.equal(await page.getByRole("button", { name: "Continue this Session" }).count(), 0, "handoff target must not require a second Continue this Session claim")\n  assert.equal(await page.getByText("ASSISTANT-FIRST-MARKER", { exact: true }).count(), 1, "handoff target must retain source history exactly once")\n  assert.equal(await page.getByText("ASSISTANT-LAST-MARKER", { exact: true }).count(), 1, "handoff target lost the latest source response")\n\n  await targetComposer.fill(HANDOFF_PROMPT_TEXT)\n  await page.getByRole("button", { name: "Send" }).click()\n  const handoffPromptDeadline = Date.now() + 5000\n  while (handoffPromptBodies.length < handoffPromptsBefore + 1 && Date.now() < handoffPromptDeadline) {\n    await new Promise((resolve) => setTimeout(resolve, 50))\n  }\n  assert.equal(handoffPromptBodies.length, handoffPromptsBefore + 1, "first target Send must create one prompt")\n  const targetPrompt = handoffPromptBodies[handoffPromptsBefore]\n  assert.ok(targetPrompt.text.startsWith("You are taking over an existing TaskDesk task."), "first target prompt must carry the mature v3 handoff packet")\n  assert.ok(targetPrompt.text.includes("ASSISTANT-LAST-MARKER"), "handoff packet must contain bounded source context")\n  assert.ok(targetPrompt.text.includes(`USER INSTRUCTION\\n${HANDOFF_PROMPT_TEXT}`), "handoff packet must preserve the visible user instruction")\n  await page.getByText(HANDOFF_PROMPT_TEXT, { exact: true }).waitFor({ state: "visible" })\n  await page.getByText("HANDOFF-ASSISTANT-REPLY", { exact: true }).waitFor({ state: "visible" })\n  assert.equal(await page.getByText("You are taking over an existing TaskDesk task.", { exact: false }).count(), 0, "technical handoff packet leaked into visible chat")\n  assert.equal(await page.getByText(HANDOFF_PROMPT_TEXT, { exact: true }).count(), 1, "target user instruction duplicated in chat")\n  assert.equal(await page.getByText("HANDOFF-ASSISTANT-REPLY", { exact: true }).count(), 1, "target assistant reply duplicated in chat")\n\n  await context.close()'''
-          if old not in text:
-              raise SystemExit("browser handoff assertion block missing")
-          p.write_text(text.replace(old, new, 1))
-
-          # Restore the normal PR workflow and remove the abandoned standalone helper workflow.
-          import subprocess
-          original = subprocess.check_output(["git", "show", "HEAD^:.github/workflows/pr-checks.yml"], text=True)
-          Path(".github/workflows/pr-checks.yml").write_text(original)
-          helper = Path(".github/workflows/session-first-v3-parity-patch.yml")
-          if helper.exists(): helper.unlink()
-
-      - name: Commit source patch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add web/src/components/standalone-universal-workspace.tsx web/src/components/work-thread-conversation.tsx web/src/components/native-session-observer.tsx web/src/components/native-session-handoff-control.tsx web/scripts/native-session-browser-smoke.mjs .github/workflows/pr-checks.yml .github/workflows/session-first-v3-parity-patch.yml
-          git commit -m "fix: restore v3 chat parity for Session handoff"
-          git push origin HEAD:feature/v3-session-first-read-path
-
   tests:
     name: Type-check and regressions
-    needs: parity-autofix
-    if: always() && needs.parity-autofix.result != 'failure'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -210,8 +78,6 @@ jobs:
 
   bridge-platforms:
     name: Bridge tests (${{ matrix.os }})
-    needs: parity-autofix
-    if: always() && needs.parity-autofix.result != 'failure'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -230,6 +96,11 @@ jobs:
         run: npm test
         working-directory: bridge
 
+  # Source-level CSS assertions are useful but cannot tell us whether a control is actually clipped
+  # after the cascade. This job drives the production build in real Chromium with touch viewports,
+  # two fake machines and all five harnesses, then rotates the phone to landscape. It also opens a
+  # real Session-first detail with journal/live transcript ids that differ, then checks single-render
+  # semantics, chronological ordering, scrolling and composer containment before the controls pass.
   browser-smoke:
     name: Chromium product smoke
     needs: tests
