@@ -138,7 +138,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
 }: TranscriptProps) {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
-  const followEnabledRef = useRef(true)
   const preservingOlderRef = useRef(false)
   const loadOlderRef = useRef(onLoadOlder)
   const followFrameRef = useRef<number | undefined>(undefined)
@@ -163,18 +162,14 @@ const ConversationTranscript = memo(function ConversationTranscript({
     previousSendingRef.current = sending
     if (!transcript || loading || !ready || preservingOlderRef.current) return
 
-    // A deliberate send re-enters follow mode. Once the reader scrolls away, merely observing the
-    // DOM at the bottom must not silently re-enable follow: delayed programmatic scroll events can
-    // otherwise fight a real upward gesture. Jump-to-bottom and the next send opt in explicitly.
-    if (startedSend) {
-      followEnabledRef.current = true
-      nearBottomRef.current = true
-    }
-    if (!followEnabledRef.current || !nearBottomRef.current || followFrameRef.current !== undefined) return
+    // A deliberate send re-enters follow mode. After that, the user's scroll position wins. Status
+    // changes such as Working -> Needs attention never move the transcript by themselves.
+    if (startedSend) nearBottomRef.current = true
+    if (!nearBottomRef.current || followFrameRef.current !== undefined) return
     followFrameRef.current = window.requestAnimationFrame(() => {
       followFrameRef.current = undefined
       const current = transcriptRef.current
-      if (!current || preservingOlderRef.current || !followEnabledRef.current || !nearBottomRef.current) return
+      if (!current || preservingOlderRef.current || !nearBottomRef.current) return
       current.scrollTop = current.scrollHeight
       refreshJumpAffordances(current)
     })
@@ -216,7 +211,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
   function jumpToTop() {
     const current = transcriptRef.current
     if (!current) return
-    followEnabledRef.current = false
     nearBottomRef.current = false
     current.scrollTo({ top: 0, behavior: "smooth" })
   }
@@ -224,7 +218,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
   function jumpToBottom() {
     const current = transcriptRef.current
     if (!current) return
-    followEnabledRef.current = true
     nearBottomRef.current = true
     current.scrollTo({ top: current.scrollHeight, behavior: "smooth" })
   }
@@ -237,27 +230,14 @@ const ConversationTranscript = memo(function ConversationTranscript({
         aria-label="Conversation transcript"
         ref={transcriptRef}
         onWheel={(event) => {
-          if (event.deltaY < 0) {
-            followEnabledRef.current = false
-            nearBottomRef.current = false
-            if (followFrameRef.current !== undefined) {
-              window.cancelAnimationFrame(followFrameRef.current)
-              followFrameRef.current = undefined
-            }
-            if (scrollFrameRef.current !== undefined) {
-              window.cancelAnimationFrame(scrollFrameRef.current)
-              scrollFrameRef.current = undefined
-            }
-          }
+          if (event.deltaY < 0) nearBottomRef.current = false
         }}
         onScroll={(event) => {
           const element = event.currentTarget
           if (scrollFrameRef.current !== undefined) return
           scrollFrameRef.current = window.requestAnimationFrame(() => {
             scrollFrameRef.current = undefined
-            const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
-            nearBottomRef.current = nearBottom
-            if (!nearBottom) followEnabledRef.current = false
+            nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
             refreshJumpAffordances(element)
           })
         }}
