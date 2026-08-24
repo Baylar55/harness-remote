@@ -19,8 +19,10 @@ function operationKey(agentID, sessionID, clientRequestId) {
  * Durable idempotency ledger for user-visible native Session mutations.
  *
  * Pending is persisted before a mutation is dispatched. Accepted is persisted before the HTTP
- * success is returned. After a daemon restart a pending/uncertain entry is deliberately not replayed:
- * it is safer to ask the client to reconcile the native Session than to repeat coding work or a
+ * success is returned. Accepted entries may also retain a small JSON result, which lets mutations
+ * that create a native resource return that exact resource again after the client loses the first
+ * HTTP response. After a daemon restart a pending/uncertain entry is deliberately not replayed: it
+ * is safer to ask the client to reconcile the native Session than to repeat coding work or a
  * lifecycle mutation whose first delivery may already have succeeded.
  */
 export class SessionOperationLedger {
@@ -93,7 +95,7 @@ export class SessionOperationLedger {
         if (existing.signature !== signature) {
           throw ledgerError("idempotency_conflict", "clientRequestId was already used for a different native Session operation")
         }
-        return { duplicate: true, state: existing.state, entry: { ...existing } }
+        return { duplicate: true, state: existing.state, entry: structuredClone(existing) }
       }
       const now = new Date().toISOString()
       const entry = {
@@ -107,20 +109,21 @@ export class SessionOperationLedger {
       }
       this.#operations.set(key, entry)
       await this.#persist()
-      return { duplicate: false, state: entry.state, entry: { ...entry } }
+      return { duplicate: false, state: entry.state, entry: structuredClone(entry) }
     })
   }
 
-  async accept({ agentID, sessionID, clientRequestId }) {
+  async accept({ agentID, sessionID, clientRequestId, result }) {
     return this.#serial(async () => {
       await this.#load()
       const key = operationKey(agentID, sessionID, clientRequestId)
       const entry = this.#operations.get(key)
       if (!entry) throw ledgerError("operation_missing", "Native Session operation is missing")
       entry.state = "accepted"
+      if (result !== undefined) entry.result = structuredClone(result)
       entry.updatedAt = new Date().toISOString()
       await this.#persist()
-      return { ...entry }
+      return structuredClone(entry)
     })
   }
 
@@ -143,6 +146,6 @@ export class SessionOperationLedger {
   async get({ agentID, sessionID, clientRequestId }) {
     await this.#load()
     const entry = this.#operations.get(operationKey(agentID, sessionID, clientRequestId))
-    return entry ? { ...entry } : undefined
+    return entry ? structuredClone(entry) : undefined
   }
 }
