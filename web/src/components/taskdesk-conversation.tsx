@@ -10,13 +10,6 @@ const COMPOSER_MAX_HEIGHT_PX = 180
 const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
 const JUMP_AFFORDANCE_MIN_RANGE = 240
 
-type MessageAgentMeta = {
-  taskdesk?: {
-    agentLabel?: string
-    agentBackend?: string
-  }
-}
-
 type Props = {
   messages: MessageEnvelope[]
   agentLabel: string
@@ -70,16 +63,14 @@ function jumpAffordancesFor(element: HTMLElement): JumpAffordances {
 
 const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
   const isUser = message.info.role === "user"
-  const originalAgent = (message as MessageEnvelope & MessageAgentMeta).taskdesk?.agentLabel
-  const visibleAgentLabel = originalAgent || agentLabel
   return (
     <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
       <div className={`uw-avatar ${isUser ? "uw-avatar-user" : "uw-avatar-agent"}`} aria-hidden="true">
-        {isUser ? "You" : visibleAgentLabel.slice(0, 2).toUpperCase()}
+        {isUser ? "You" : agentLabel.slice(0, 2).toUpperCase()}
       </div>
       <div className="uw-message-body">
         <header>
-          <strong>{isUser ? "You" : visibleAgentLabel}</strong>
+          <strong>{isUser ? "You" : agentLabel}</strong>
           <time>{formatClock(message.info.time.created)}</time>
         </header>
         <TaskDeskMessageContent message={message} />
@@ -147,7 +138,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
 }: TranscriptProps) {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
-  const lastScrollTopRef = useRef(0)
   const preservingOlderRef = useRef(false)
   const loadOlderRef = useRef(onLoadOlder)
   const followFrameRef = useRef<number | undefined>(undefined)
@@ -159,14 +149,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
   function refreshJumpAffordances(element: HTMLElement) {
     const next = jumpAffordancesFor(element)
     setJumpAffordances((current) => current.top === next.top && current.bottom === next.bottom ? current : next)
-  }
-
-  function stopFollowingUpwardScroll() {
-    nearBottomRef.current = false
-    if (followFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(followFrameRef.current)
-      followFrameRef.current = undefined
-    }
   }
 
   useEffect(() => () => {
@@ -189,7 +171,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
       const current = transcriptRef.current
       if (!current || preservingOlderRef.current || !nearBottomRef.current) return
       current.scrollTop = current.scrollHeight
-      lastScrollTopRef.current = current.scrollTop
       refreshJumpAffordances(current)
     })
   }, [messages, loading, ready, sending])
@@ -217,7 +198,6 @@ const ConversationTranscript = memo(function ConversationTranscript({
         const current = transcriptRef.current
         if (current) {
           current.scrollTop = previousTop + (current.scrollHeight - previousHeight)
-          lastScrollTopRef.current = current.scrollTop
           refreshJumpAffordances(current)
         }
         preservingOlderRef.current = false
@@ -231,7 +211,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
   function jumpToTop() {
     const current = transcriptRef.current
     if (!current) return
-    stopFollowingUpwardScroll()
+    nearBottomRef.current = false
     current.scrollTo({ top: 0, behavior: "smooth" })
   }
 
@@ -250,20 +230,14 @@ const ConversationTranscript = memo(function ConversationTranscript({
         aria-label="Conversation transcript"
         ref={transcriptRef}
         onWheel={(event) => {
-          if (event.deltaY < 0) stopFollowingUpwardScroll()
+          if (event.deltaY < 0) nearBottomRef.current = false
         }}
-        onTouchMove={() => stopFollowingUpwardScroll()}
         onScroll={(event) => {
           const element = event.currentTarget
-          const currentTop = element.scrollTop
-          const movingUp = currentTop < lastScrollTopRef.current
-          lastScrollTopRef.current = currentTop
-          if (movingUp) stopFollowingUpwardScroll()
-          else nearBottomRef.current = element.scrollHeight - currentTop - element.clientHeight <= NEAR_BOTTOM_PX
-
           if (scrollFrameRef.current !== undefined) return
           scrollFrameRef.current = window.requestAnimationFrame(() => {
             scrollFrameRef.current = undefined
+            nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
             refreshJumpAffordances(element)
           })
         }}
