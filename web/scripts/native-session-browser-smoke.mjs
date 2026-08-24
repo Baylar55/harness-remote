@@ -325,14 +325,9 @@ async function waitFor(predicate, description, timeout = 12_000) {
 
 async function waitForReady(page) {
   await page.locator(".tdw-conversation-state.ready").waitFor({ state: "visible", timeout: 12_000 })
-  const send = page.getByRole("button", { name: "Send" })
-  await send.waitFor({ state: "visible", timeout: 12_000 })
-  const deadline = Date.now() + 12_000
-  while (Date.now() < deadline) {
-    if (!(await send.isDisabled())) return
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
-  throw new Error("Timed out waiting for enabled v3 Send control")
+  const composer = page.getByRole("textbox", { name: "Message PI" })
+  await composer.waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await composer.isDisabled(), false, "v3 composer must be enabled when the Session is ready")
 }
 
 async function openSession(page, expectClaim) {
@@ -350,7 +345,16 @@ async function openSession(page, expectClaim) {
 async function sendPrompt(page, text) {
   const composer = page.getByRole("textbox", { name: "Message PI" })
   await composer.fill(text)
-  await page.getByRole("button", { name: "Send" }).click()
+  const send = page.getByRole("button", { name: "Send" })
+  const deadline = Date.now() + 12_000
+  while (Date.now() < deadline) {
+    if (!(await send.isDisabled())) {
+      await send.click()
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error(`Timed out waiting for v3 Send after filling ${text}`)
 }
 
 async function assertSessionContract(browser, viewport, mobile) {
@@ -435,7 +439,7 @@ async function assertSessionContract(browser, viewport, mobile) {
   await page.getByText(/Prompt delivery is uncertain/).waitFor({ state: "visible", timeout: 10_000 })
   assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), LOST_PROMPT, "uncertain prompt must be restored for explicit reconciliation")
 
-  await page.getByRole("button", { name: "Send" }).click()
+  await sendPrompt(page, LOST_PROMPT)
   await waitFor(() => promptHttpBodies.length >= lostHttpBefore + 2, "PI reconciliation retry")
   assert.equal(promptHttpBodies.length, lostHttpBefore + 2, "explicit reconciliation must issue exactly one retry HTTP attempt")
   assert.equal(nativePromptDispatches, lostDispatchBefore + 1, "retry must not dispatch native PI work twice")
