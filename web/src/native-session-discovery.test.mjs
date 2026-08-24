@@ -21,7 +21,8 @@ const codex = {
   transport: 'acp',
   managed: true,
   state: 'available',
-  capabilities: { sessions: true }
+  capabilities: { sessions: true, abort: true },
+  contract: { sessions: { stop: 'owned-session-native-cancel' } }
 }
 
 assert.deepEqual(nativeSessionConfig(base, codex), {
@@ -51,6 +52,9 @@ assert.equal(codexSessions.length, 1)
 assert.equal(codexSessions[0].key, 'codex:s1')
 assert.equal(codexSessions[0].agentLabel, 'Codex')
 assert.equal(codexSessions[0].backend, 'codex')
+assert.equal(codexSessions[0].transport, 'acp')
+assert.equal(codexSessions[0].stopCapability, 'owned-session-native-cancel')
+assert.equal(codexSessions[0].abortSupported, true)
 assert.equal(codexSessions[0].session.external, true)
 assert.equal(codexSessions[0].status.type, 'busy')
 assert.deepEqual(calls, [
@@ -58,18 +62,37 @@ assert.deepEqual(calls, [
   ['status', 'codex', 'codex']
 ])
 
-assert.deepEqual(nativeSessionSurfaceTarget(base, codexSessions[0]), {
-  key: 'codex:s1',
+assert.deepEqual(nativeSessionSurfaceTarget('machine-1', base, codexSessions[0]), {
+  key: 'machine-1:codex:s1',
+  ref: {
+    machineID: 'machine-1',
+    agentID: 'codex',
+    sessionID: 's1',
+    directory: '/repo'
+  },
+  machineID: 'machine-1',
   sessionID: 's1',
   directory: '/repo',
   title: 'Native Codex',
   agentID: 'codex',
   agentLabel: 'Codex',
   backend: 'codex',
+  transport: 'acp',
   config: { ...base, backend: 'codex', agentId: 'codex' },
   status: { type: 'busy' },
-  external: true
+  external: true,
+  requiresExplicitClaim: true,
+  canStop: true
 })
+
+// Lightweight ACP discovery may omit `external`. That must never be interpreted as proof that this
+// bridge owns the writer; the surface remains observe-only until an explicit claim succeeds.
+const missingOwnershipMetadata = nativeSessionSurfaceTarget('machine-1', base, {
+  ...codexSessions[0],
+  session: { ...codexSessions[0].session, external: undefined }
+})
+assert.equal(missingOwnershipMetadata.external, false)
+assert.equal(missingOwnershipMetadata.requiresExplicitClaim, true)
 
 const fallbackCalls = []
 const fallbackClient = {
