@@ -36,7 +36,7 @@ test("ACP catalog passes one shrinking total budget through startup and Session 
     stateDirectory: "/state",
     timeoutMs: 25
   })
-  await assert.rejects(() => catalog.list({ allowStale: false }), /timed out after/)
+  await assert.rejects(() => catalog.list({ allowStale: false }), /timed out(?: during .*?)? after/)
   assert.ok(startupBudget > 0 && startupBudget <= 25)
   assert.equal(seen[0]?.method, "session/new")
   assert.ok(seen[0]?.timeoutMs > 0 && seen[0]?.timeoutMs <= startupBudget)
