@@ -137,7 +137,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
   const multipleMachines = sources.length > 1
 
   function open(item: RecordWithMachine) {
-    onOpen(nativeSessionSurfaceTarget(item.machine.config, item.record))
+    onOpen(nativeSessionSurfaceTarget(item.machine.id, item.machine.config, item.record))
   }
 
   function toggleProject(groupKey: string) {
