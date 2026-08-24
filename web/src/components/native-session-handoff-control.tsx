@@ -44,10 +44,9 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
     setWorking(true)
     setError("")
     try {
-      // Capture the same normalized transcript the mature v3 chat is showing before creating the
-      // target. That prevents an accepted handoff from visually erasing the conversation simply
-      // because the new native Session has not received its first prompt yet.
-      const sourceFeed = await loadNativeSessionFeed(source)
+      // Capture only this Session's normalized transcript. Earlier linked Sessions are already in
+      // source.history and must not be copied into the source entry again on A -> B -> C handoffs.
+      const sourceFeed = await loadNativeSessionFeed({ ...source, history: undefined })
       const sourceHistory: NativeSessionHistoryEntry = {
         ref: source.ref,
         title: source.title,
