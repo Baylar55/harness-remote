@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { api } from "../api"
 import {
   loadNativeSessionFeed,
   loadOlderNativeSessionFeed,
   refreshNativeSessionFeed,
   type NativeSessionFeed
 } from "../native-session-feed"
+import { probeNativeSessionContinuation } from "../native-session-continuation"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { startTaskDeskSessionLiveRefresh } from "../taskdesk-session-live-refresh"
 import { LoadingIcon } from "../Icons"
@@ -12,6 +14,8 @@ import { TaskDeskConversation } from "./taskdesk-conversation"
 import "../native-session-observer.css"
 
 const IDLE_RECONCILE_MS = 30_000
+
+type WriteState = "observe" | "probing" | "ready"
 
 export function nativeSessionIsWorking(status?: string): boolean {
   const value = status?.trim().toLowerCase() || ""
@@ -24,21 +28,28 @@ type Props = {
 }
 
 /**
- * Read-only controller for a real native Session. The visual surface is intentionally the existing
- * HR3 TaskDeskConversation component: Session-first changes what feeds the chat, not the chat UI.
+ * Controller for one real native Session. It deliberately renders the existing HR3 chat component:
+ * Session-first changes what feeds the chat, not the chat UI.
  *
- * Write/resume is deliberately not enabled here yet. Some harnesses have a single-writer lock and
- * must distinguish observing an externally-owned Session from acquiring it for continuation.
+ * External Sessions start in observe mode. "Continue this Session" performs a safe resume probe
+ * first; only after that succeeds does the normal HR3 composer appear. Sending then targets the
+ * exact same native session id through the existing prompt_async path. No Task, Run or replacement
+ * Session is created as part of continuation.
  */
 export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const [feed, setFeed] = useState<NativeSessionFeed | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [draft, setDraft] = useState("")
+  const [sending, setSending] = useState(false)
+  const [writeState, setWriteState] = useState<WriteState>(target.external ? "observe" : "ready")
+  const [resumeError, setResumeError] = useState<string | null>(null)
   const feedRef = useRef<NativeSessionFeed | null>(null)
   feedRef.current = feed
 
   const working = nativeSessionIsWorking(target.status?.type)
+  const writable = writeState === "ready"
   const profile = useMemo(() => ({
     id: target.key,
     name: target.agentLabel,
@@ -61,6 +72,9 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setResumeError(null)
+    setDraft("")
+    setWriteState(target.external ? "observe" : "ready")
     setFeed(null)
     feedRef.current = null
     void loadNativeSessionFeed(target).then((next) => {
@@ -106,9 +120,56 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     }
   }
 
+  async function enableContinuation() {
+    if (working || writeState !== "observe") return
+    setWriteState("probing")
+    setResumeError(null)
+    const result = await probeNativeSessionContinuation(target)
+    if (result.writable) {
+      setWriteState("ready")
+      return
+    }
+    setWriteState("observe")
+    setResumeError(result.reason || `${target.agentLabel} did not allow this Session to be resumed.`)
+  }
+
+  async function send() {
+    const text = draft.trim()
+    if (!text || !writable || working || sending) return
+    setSending(true)
+    setError(null)
+    try {
+      await api.sendPrompt(target.config, target.sessionID, text, target.directory)
+      setDraft("")
+      onSessionRefresh?.()
+      await refreshTail(false)
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason)
+      setError(message)
+      if (target.external && /session|load|writer|locked|busy|owned/i.test(message)) {
+        setWriteState("observe")
+        setResumeError(message)
+      }
+    } finally {
+      setSending(false)
+    }
+  }
+
   return (
-    <div className="hr-native-session-observer">
-      {error ? <div className="tdw-field-note hr-native-session-observer-error" role="status">Showing the last known Session transcript. Refresh failed: {error}</div> : null}
+    <div className={`hr-native-session-observer${writable ? " writable" : " observe-only"}`}>
+      {error ? <div className="tdw-field-note hr-native-session-observer-error" role="status">Showing the last known Session transcript. Request failed: {error}</div> : null}
+      {!writable && !working ? (
+        <div className="hr-native-session-continuation" role="status">
+          <div>
+            <strong>Observing this native Session</strong>
+            <span>{resumeError || "Continue here when you want Harness Remote to use this same Session."}</span>
+          </div>
+          <button type="button" className="uw-button uw-button-primary" disabled={writeState === "probing"} onClick={() => void enableContinuation()}>
+            {writeState === "probing" ? <LoadingIcon size={15} /> : null}
+            {writeState === "probing" ? "Checking…" : "Continue this Session"}
+          </button>
+        </div>
+      ) : null}
       {loading && !feed ? (
         <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session…</div>
       ) : (
@@ -122,15 +183,16 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
           hasMore={feed?.hasMore || false}
           loadingOlder={loadingOlder}
           onLoadOlder={loadOlder}
-          draft=""
-          onDraftChange={() => undefined}
-          onSend={() => undefined}
-          sendDisabled={true}
+          draft={draft}
+          onDraftChange={setDraft}
+          onSend={send}
+          sending={sending}
+          sendDisabled={!writable}
           workingLabel={`${target.agentLabel} is working`}
-          placeholder="Observe only"
+          placeholder={writable ? `Continue this ${target.agentLabel} Session…` : "Observe only"}
           emptyText="This Session has no messages yet."
           directory={target.directory}
-          footerHint="Observe only. Continuation is enabled only after the harness confirms this Session can be resumed safely."
+          footerHint={writable ? "Continue the same native Session." : "Observe only until the harness confirms this Session can be resumed safely."}
         />
       )}
     </div>
