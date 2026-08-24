@@ -1,0 +1,14 @@
+.hr-native-session-observer {
+  min-height: 0;
+  height: 100%;
+}
+
+/* Observation deliberately reuses the HR3 conversation surface. Until a harness confirms the
+   native Session can be resumed safely, hide only the composer instead of creating a second chat. */
+.hr-native-session-observer .uw-composer-shell {
+  display: none;
+}
+
+.hr-native-session-observer-error {
+  margin: 0 0 8px;
+}
