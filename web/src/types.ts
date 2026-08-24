@@ -45,6 +45,18 @@ export type HarnessCapabilityContract = {
     variants: string
     variantConfigIDs: string[]
   }
+  /** Session-first capability dimensions are deliberately separate: listing a native Session does
+   * not imply that opening it is lock-free, and reading its transcript does not imply that Harness
+   * Remote may take over its writer. Values are descriptive adapter contracts, not UI labels. */
+  sessions?: {
+    authority: string
+    discovery: string
+    transcript: string
+    externalWriterObservation: string
+    continuation: string
+    writerOwnership: string
+    stop: string
+  }
   lifecycle: {
     sessionAuthority: string
     create: string
