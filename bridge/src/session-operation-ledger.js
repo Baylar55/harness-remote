@@ -18,9 +18,10 @@ function operationKey(agentID, sessionID, clientRequestId) {
 /**
  * Durable idempotency ledger for user-visible native Session mutations.
  *
- * Pending is persisted before a prompt is dispatched. Accepted is persisted before the HTTP success
- * is returned. After a daemon restart a pending/uncertain entry is deliberately not replayed: it is
- * safer to ask the client to reconcile the native transcript than to run the same coding prompt twice.
+ * Pending is persisted before a mutation is dispatched. Accepted is persisted before the HTTP
+ * success is returned. After a daemon restart a pending/uncertain entry is deliberately not replayed:
+ * it is safer to ask the client to reconcile the native Session than to repeat coding work or a
+ * lifecycle mutation whose first delivery may already have succeeded.
  */
 export class SessionOperationLedger {
   #machineID
@@ -90,7 +91,7 @@ export class SessionOperationLedger {
       const existing = this.#operations.get(key)
       if (existing) {
         if (existing.signature !== signature) {
-          throw ledgerError("idempotency_conflict", "clientRequestId was already used for a different native Session prompt")
+          throw ledgerError("idempotency_conflict", "clientRequestId was already used for a different native Session operation")
         }
         return { duplicate: true, state: existing.state, entry: { ...existing } }
       }
