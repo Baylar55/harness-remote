@@ -2,10 +2,76 @@ function uniqueStrings(values = []) {
   return [...new Set(values.filter((value) => typeof value === "string" && value))]
 }
 
+/**
+ * Session-first needs a more precise contract than `capabilities.sessions = true`.
+ * Discovery, transcript observation and writer acquisition are independent properties: Codex can
+ * read a rollout while its desktop/CLI writer owns the native thread, PI treats its journal as the
+ * transcript authority, while Claude currently has no out-of-band history reader and therefore
+ * reaches the native Session through ACP session/load.
+ *
+ * Keep uncertain behavior explicit. "unverified" is intentional here: the UI must not turn the
+ * existence of a Session list or history loader into a promise that a second client can safely take
+ * ownership of the Session.
+ */
+function acpSessionContract(profile) {
+  switch (profile?.id) {
+    case "codex":
+      return {
+        authority: "native-harness",
+        discovery: "native-list",
+        transcript: "native-journal",
+        externalWriterObservation: "supported-via-journal",
+        continuation: "session-load",
+        writerOwnership: "single-writer",
+        stop: "owned-session-native-cancel"
+      }
+    case "pi":
+      return {
+        authority: "native-harness",
+        discovery: "native-list",
+        transcript: "native-journal-authoritative",
+        externalWriterObservation: "supported-via-journal",
+        continuation: "session-load",
+        writerOwnership: "claim-on-session-load",
+        stop: "owned-session-native-cancel"
+      }
+    case "omp":
+      return {
+        authority: "native-harness",
+        discovery: "native-list",
+        transcript: "native-journal",
+        externalWriterObservation: "unverified-via-journal",
+        continuation: "session-load",
+        writerOwnership: "adapter-defined",
+        stop: "owned-session-native-cancel"
+      }
+    case "claude":
+      return {
+        authority: "native-harness",
+        discovery: "native-list",
+        transcript: "session-load",
+        externalWriterObservation: "unverified-session-load",
+        continuation: "session-load",
+        writerOwnership: "adapter-defined",
+        stop: "owned-session-native-cancel"
+      }
+    default:
+      return {
+        authority: "native-harness",
+        discovery: "native-list",
+        transcript: profile?.historyLoader ? "native-journal" : "session-load",
+        externalWriterObservation: "unverified",
+        continuation: "session-load",
+        writerOwnership: "adapter-defined",
+        stop: "owned-session-native-cancel"
+      }
+  }
+}
+
 export function acpHarnessCapabilityContract(profile) {
   const variantConfigIDs = uniqueStrings(profile?.modelVariantConfigIDs)
   return {
-    version: 1,
+    version: 2,
     protocol: "acp",
     transport: {
       control: "stdio-json-rpc",
@@ -24,7 +90,10 @@ export function acpHarnessCapabilityContract(profile) {
       variants: variantConfigIDs.length ? "runtime-advertised-config-options" : "runtime-advertised-only",
       variantConfigIDs
     },
+    sessions: acpSessionContract(profile),
     lifecycle: {
+      // Retain the v1 lifecycle shape for compatibility while Session-first consumers migrate to
+      // the more precise `sessions` contract above.
       sessionAuthority: "native-harness",
       create: "native-session",
       resume: "native-session-when-supported",
@@ -36,7 +105,7 @@ export function acpHarnessCapabilityContract(profile) {
 
 export function openCodeCapabilityContract() {
   return {
-    version: 1,
+    version: 2,
     protocol: "opencode-http",
     transport: {
       control: "http-json",
@@ -50,6 +119,15 @@ export function openCodeCapabilityContract() {
       cacheScope: "machine",
       variants: "provider-advertised",
       variantConfigIDs: []
+    },
+    sessions: {
+      authority: "native-harness",
+      discovery: "native-http",
+      transcript: "native-http",
+      externalWriterObservation: "native-http-server",
+      continuation: "native-session-id",
+      writerOwnership: "native-http-server",
+      stop: "native-abort"
     },
     lifecycle: {
       sessionAuthority: "native-harness",
