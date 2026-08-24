@@ -3,18 +3,14 @@ import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { copyToClipboard } from "../clipboard"
 import { activityLabel, groupConversationParts, type ConversationPartGroup } from "../conversation-parts"
+import { assistantTurnAttention, isInternalProtocolPart } from "../conversation-turn-state"
 import { CheckIcon, CopyIcon } from "../Icons"
 import type { MessageEnvelope, MessagePart } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
-const INTERNAL_PROTOCOL_PARTS = new Set(["step-start", "step-finish", "snapshot", "patch"])
 type ActivityGroupValue = Extract<ConversationPartGroup, { kind: "activity" }>
 type ContentGroupValue = Extract<ConversationPartGroup, { kind: "content" }>
 type TaskDeskEnvelope = MessageEnvelope & { taskdesk?: { active?: boolean } }
-
-function isInternalProtocolPart(part: MessagePart): boolean {
-  return INTERNAL_PROTOCOL_PARTS.has(part.type)
-}
 
 /** Reads the source text back out of a rendered subtree, so a copy carries what the agent wrote
  *  rather than what Markdown turned it into. Walking the hast node avoids reaching into React
@@ -73,19 +69,6 @@ const MARKDOWN_COMPONENTS: Components = {
       </div>
     )
   }
-}
-
-function hasTerminalAssistantText(parts: MessagePart[]): boolean {
-  for (let index = parts.length - 1; index >= 0; index -= 1) {
-    const part = parts[index]
-    if (isInternalProtocolPart(part)) continue
-    if (part.type === "text") {
-      if (typeof part.text === "string" && part.text.trim()) return true
-      continue
-    }
-    if (part.type === "reasoning" || part.type === "tool") return false
-  }
-  return false
 }
 
 function ToolPartCard({ part }: { part: MessagePart }) {
@@ -221,36 +204,6 @@ function ActivityGroup({ group }: { group: ActivityGroupValue }) {
   )
 }
 
-function readableErrorValue(value: unknown, depth = 0): string {
-  if (depth > 4 || value == null) return ""
-  if (typeof value === "string") {
-    const text = value.trim()
-    if (!text) return ""
-    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
-      try {
-        const nested = readableErrorValue(JSON.parse(text), depth + 1)
-        if (nested) return nested
-      } catch {
-        // A provider error is often plain text that happens to begin with punctuation.
-      }
-    }
-    return text
-  }
-  if (typeof value !== "object") return ""
-  const record = value as Record<string, unknown>
-  for (const key of ["message", "error", "detail", "data"]) {
-    const text = readableErrorValue(record[key], depth + 1)
-    if (text) return text
-  }
-  return ""
-}
-
-function messageErrorText(message: MessageEnvelope): string {
-  const error = message.info.error
-  if (!error) return ""
-  return readableErrorValue(error.data?.message) || readableErrorValue(error.message) || error.name || "The coding agent failed to complete this turn."
-}
-
 /**
  * Render one logical conversation turn. Transport-level text chunks are joined into one Markdown
  * body, while reasoning, tools and working narration remain inside Activity. Internal OpenCode
@@ -265,14 +218,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
     forceActivity: liveAssistant,
     forceRunning: liveAssistant
   })
-  const hasFinalText = hasTerminalAssistantText(message.parts)
-  const turnError = liveAssistant || hasFinalText ? "" : messageErrorText(message)
-  const hasActivity = visibleParts.some((part) => part.type === "reasoning" || part.type === "tool")
-  const interruptedWithoutFinal = message.info.role === "assistant"
-    && !liveAssistant
-    && !turnError
-    && hasActivity
-    && !hasFinalText
+  const attention = assistantTurnAttention(message, { active: liveAssistant })
 
   return (
     <div className="uw-message-parts">
@@ -281,8 +227,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
         if (group.kind === "content") return <ContentGroup group={group} key={key} />
         return <ActivityGroup group={group} key={key} />
       })}
-      {turnError ? <div className="uw-message-turn-error" role="alert"><strong>Turn failed</strong><span>{turnError}</span></div> : null}
-      {interruptedWithoutFinal ? <div className="uw-message-turn-error" role="alert"><strong>Response interrupted</strong><span>The coding agent stopped before producing a final answer.</span></div> : null}
+      {attention ? <div className="uw-message-turn-error" role="alert"><strong>{attention.title}</strong><span>{attention.message}</span></div> : null}
     </div>
   )
 }
