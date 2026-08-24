@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 const discovery = readFileSync(new URL('./native-session-discovery.ts', import.meta.url), 'utf8')
 const continuation = readFileSync(new URL('./native-session-continuation.ts', import.meta.url), 'utf8')
@@ -63,6 +63,18 @@ assert.equal(conversation.includes('MessageAgentMeta'), false, 'Session-first mu
 assert.equal(messageContent.includes('conversation-turn-state'), false, 'Session-first must not replace mature v3 reasoning/error semantics')
 assert.ok(messageContent.includes('hasTerminalAssistantText'), 'mature v3 assistant terminal-state semantics must remain intact')
 assert.ok(messageContent.includes('messageErrorText'), 'mature v3 error rendering must remain intact')
+
+for (const retiredPath of [
+  './native-session-feed.ts',
+  './native-session-feed.test.mjs',
+  './native-session-turns.ts',
+  './conversation-turn-state.ts',
+  './conversation-turn-state.test.mjs',
+  './components/model-selection-control.tsx',
+  './native-session-handoff.css'
+]) {
+  assert.equal(existsSync(new URL(retiredPath, import.meta.url)), false, `${retiredPath} must not return as a parallel Session-first chat path`)
+}
 
 assert.match(handoff, /export function NativeSessionHandoffControl\(_props: Props\)\s*\{\s*return null\s*\}/, 'cross-agent handoff UI must remain disabled during single-Session stabilization')
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
