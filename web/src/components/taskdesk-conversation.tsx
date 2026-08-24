@@ -10,6 +10,13 @@ const COMPOSER_MAX_HEIGHT_PX = 180
 const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
 const JUMP_AFFORDANCE_MIN_RANGE = 240
 
+type MessageAgentMeta = {
+  taskdesk?: {
+    agentLabel?: string
+    agentBackend?: string
+  }
+}
+
 type Props = {
   messages: MessageEnvelope[]
   agentLabel: string
@@ -63,14 +70,16 @@ function jumpAffordancesFor(element: HTMLElement): JumpAffordances {
 
 const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
   const isUser = message.info.role === "user"
+  const originalAgent = (message as MessageEnvelope & MessageAgentMeta).taskdesk?.agentLabel
+  const visibleAgentLabel = originalAgent || agentLabel
   return (
     <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
       <div className={`uw-avatar ${isUser ? "uw-avatar-user" : "uw-avatar-agent"}`} aria-hidden="true">
-        {isUser ? "You" : agentLabel.slice(0, 2).toUpperCase()}
+        {isUser ? "You" : visibleAgentLabel.slice(0, 2).toUpperCase()}
       </div>
       <div className="uw-message-body">
         <header>
-          <strong>{isUser ? "You" : agentLabel}</strong>
+          <strong>{isUser ? "You" : visibleAgentLabel}</strong>
           <time>{formatClock(message.info.time.created)}</time>
         </header>
         <TaskDeskMessageContent message={message} />
