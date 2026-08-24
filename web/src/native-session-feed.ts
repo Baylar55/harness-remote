@@ -2,12 +2,14 @@ import { api, type MessagePage } from "./api"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "./message-pages"
 import { normalizeNativeSessionTurns } from "./native-session-turns"
 import type { MessageEnvelope } from "./types"
-import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
+import type { NativeSessionHistoryEntry, NativeSessionSurfaceTarget } from "./native-session-discovery"
 
 export type NativeSessionFeed = {
   messages: MessageEnvelope[]
   before?: string
   hasMore: boolean
+  /** Prefix owned by earlier linked native Sessions. Paging applies only to the current Session tail. */
+  historyCount?: number
 }
 
 export type NativeSessionFeedApi = Pick<typeof api, "loadMessagePage">
@@ -16,11 +18,31 @@ function normalizedMessages(page: MessagePage): MessageEnvelope[] {
   return normalizeNativeSessionTurns(page.messages)
 }
 
-function asFeed(page: MessagePage): NativeSessionFeed {
+function historyMessages(entries: NativeSessionHistoryEntry[] | undefined): MessageEnvelope[] {
+  return (entries || []).flatMap((entry) => entry.messages.map((message) => {
+    // Message ids are only guaranteed inside their native Session. Prefix inherited ids so the v3
+    // merge helpers cannot confuse an older Session message with a coincidentally equal target id.
+    const id = `linked:${entry.ref.sessionID}:${message.info.id}`
+    return {
+      ...message,
+      info: { ...message.info, id },
+      parts: message.parts.map((part) => ({
+        ...part,
+        id: `linked:${entry.ref.sessionID}:${part.id}`,
+        messageID: id
+      }))
+    }
+  }))
+}
+
+function asFeed(target: NativeSessionSurfaceTarget, page: MessagePage): NativeSessionFeed {
+  const history = historyMessages(target.history)
+  const current = normalizedMessages(page)
   return {
-    messages: normalizedMessages(page),
+    messages: history.length ? [...history, ...current] : current,
     before: page.before,
-    hasMore: page.hasMore
+    hasMore: page.hasMore,
+    historyCount: history.length
   }
 }
 
@@ -42,7 +64,7 @@ export async function loadNativeSessionFeed(
   limit = 200,
   _refreshHistory = false
 ): Promise<NativeSessionFeed> {
-  return asFeed(await client.loadMessagePage(
+  return asFeed(target, await client.loadMessagePage(
     target.config,
     target.sessionID,
     target.directory,
@@ -53,9 +75,8 @@ export async function loadNativeSessionFeed(
 }
 
 /**
- * Refresh only the newest page and preserve object identity for unchanged logical turns. The page is
- * normalized before merging, matching the mature v3 rule that multiple assistant protocol envelopes
- * inside one native user turn are one visible assistant turn.
+ * Refresh only the newest page and preserve object identity for unchanged logical turns. Inherited
+ * linked history is already in `current` and the v3 identity merge leaves that prefix untouched.
  */
 export async function refreshNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
@@ -74,10 +95,13 @@ export async function refreshNativeSessionFeed(
   )
   const messages = mergeLatestMessagePage(current.messages, normalizedMessages(page))
   if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
-  return { messages, before: page.before, hasMore: page.hasMore }
+  return { messages, before: page.before, hasMore: page.hasMore, historyCount: current.historyCount || 0 }
 }
 
-/** Load one older logical-turn page using the same transcript authority as the live tail. */
+/**
+ * Load one older logical-turn page for the current Session. Earlier linked Sessions remain before the
+ * target Session instead of being pushed after newly loaded target history.
+ */
 export async function loadOlderNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
   current: NativeSessionFeed,
@@ -94,7 +118,13 @@ export async function loadOlderNativeSessionFeed(
     limit,
     false
   )
-  const messages = prependOlderMessagePage(current.messages, normalizedMessages(page))
+  const historyCount = current.historyCount || 0
+  const history = historyCount ? current.messages.slice(0, historyCount) : []
+  const targetMessages = historyCount ? current.messages.slice(historyCount) : current.messages
+  const nextTargetMessages = prependOlderMessagePage(targetMessages, normalizedMessages(page))
+  const messages = nextTargetMessages === targetMessages
+    ? current.messages
+    : history.length ? [...history, ...nextTargetMessages] : nextTargetMessages
   if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
-  return { messages, before: page.before, hasMore: page.hasMore }
+  return { messages, before: page.before, hasMore: page.hasMore, historyCount }
 }
