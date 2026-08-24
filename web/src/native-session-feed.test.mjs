@@ -6,81 +6,111 @@ import {
 } from './native-session-feed.ts'
 
 const target = {
-  key: 'codex:s1',
+  key: 'pi:s1',
   sessionID: 's1',
   directory: '/repo',
   title: 'Session',
-  agentID: 'codex',
-  agentLabel: 'Codex',
-  backend: 'codex',
+  agentID: 'pi',
+  agentLabel: 'PI',
+  backend: 'pi',
   transport: 'acp',
   config: {
-    backend: 'codex',
+    backend: 'pi',
     host: '192.168.1.72',
     port: 4099,
     username: 'harness',
     password: 'secret',
-    agentId: 'codex'
+    agentId: 'pi'
   },
   external: true
 }
 
-function message(id, text, role = 'assistant') {
+function message(id, text, role = 'assistant', extra = {}) {
   return {
-    info: { id, role, time: { created: Number(id.replace(/\D/g, '')) || 1 } },
-    parts: [{ id: `p-${id}`, type: 'text', text }]
+    info: {
+      id,
+      role,
+      sessionID: 's1',
+      time: { created: Number(id.replace(/\D/g, '')) || 1 },
+      ...(extra.error ? { error: extra.error } : {})
+    },
+    parts: text === undefined ? [] : [{ id: `p-${id}`, messageID: id, type: 'text', text }]
   }
+}
+
+function turn(userID, prompt, assistantID, answer) {
+  return [
+    message(userID, prompt, 'user'),
+    message(assistantID, answer, 'assistant')
+  ]
 }
 
 const calls = []
 const initialClient = {
   async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
     calls.push({ config, sessionID, directory, before, limit, refreshHistory })
-    return { messages: [message('m1', 'one'), message('m2', 'two')], before: 'cursor-1', hasMore: true }
+    return { messages: turn('u1', 'hello', 'a1', 'one'), before: 'cursor-1', hasMore: true }
   }
 }
 
 const initial = await loadNativeSessionFeed(target, initialClient)
 assert.equal(initial.messages.length, 2)
+assert.equal(initial.messages[0].info.id, 'u1')
+assert.equal(initial.messages[1].info.role, 'assistant')
+assert.equal(initial.messages[1].parts[0].text, 'one')
 assert.equal(initial.before, 'cursor-1')
 assert.equal(initial.hasMore, true)
-assert.equal(calls[0].config.agentId, 'codex')
+assert.equal(calls[0].config.agentId, 'pi')
 assert.equal(calls[0].sessionID, 's1')
 assert.equal(calls[0].directory, '/repo')
 assert.equal(calls[0].limit, 200)
 assert.equal(calls[0].refreshHistory, false)
 
-const originalFirst = initial.messages[0]
+const originalUser = initial.messages[0]
+const originalAssistant = initial.messages[1]
 const unchangedClient = {
   async loadMessagePage() {
-    return { messages: [message('m1', 'one'), message('m2', 'two')], before: 'cursor-1', hasMore: true }
+    return { messages: turn('u1', 'hello', 'a1', 'one'), before: 'cursor-1', hasMore: true }
   }
 }
 const unchanged = await refreshNativeSessionFeed(target, initial, unchangedClient)
-assert.equal(unchanged, initial, 'unchanged tail should preserve the feed object')
-assert.equal(unchanged.messages[0], originalFirst, 'unchanged message identity should be preserved')
+assert.equal(unchanged, initial, 'unchanged logical tail should preserve the feed object')
+assert.equal(unchanged.messages[0], originalUser, 'unchanged user identity should be preserved')
+assert.equal(unchanged.messages[1], originalAssistant, 'unchanged logical assistant identity should be preserved')
 
 const changedClient = {
   async loadMessagePage() {
-    return { messages: [message('m1', 'one'), message('m2', 'two updated'), message('m3', 'three')], before: 'cursor-1', hasMore: true }
+    return {
+      messages: [
+        ...turn('u1', 'hello', 'a1', 'one updated'),
+        ...turn('u2', 'next', 'a2', 'two')
+      ],
+      before: 'cursor-1',
+      hasMore: true
+    }
   }
 }
 const changed = await refreshNativeSessionFeed(target, initial, changedClient)
 assert.notEqual(changed, initial)
-assert.equal(changed.messages[0], originalFirst, 'unchanged messages should retain identity during a tail refresh')
-assert.equal(changed.messages[1].parts[0].text, 'two updated')
-assert.equal(changed.messages[2].info.id, 'm3')
+assert.equal(changed.messages[0], originalUser, 'unchanged user turn should retain identity during tail refresh')
+assert.equal(changed.messages.length, 4)
+assert.equal(changed.messages[1].parts[0].text, 'one updated')
+assert.equal(changed.messages[2].info.id, 'u2')
+assert.equal(changed.messages[3].parts[0].text, 'two')
 
 const olderClient = {
-  async loadMessagePage(config, sessionID, directory, before, limit) {
+  async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
     assert.equal(before, 'cursor-1')
     assert.equal(limit, 500)
-    return { messages: [message('m0', 'zero'), message('m1', 'duplicate')], before: undefined, hasMore: false }
+    assert.equal(refreshHistory, false)
+    return { messages: turn('u0', 'older prompt', 'a0', 'older reply'), before: undefined, hasMore: false }
   }
 }
 const older = await loadOlderNativeSessionFeed(target, initial, olderClient)
-assert.deepEqual(older.messages.map((item) => item.info.id), ['m0', 'm1', 'm2'])
-assert.equal(older.messages[1], originalFirst, 'loading history must preserve the already-rendered tail objects')
+assert.equal(older.messages.length, 4)
+assert.deepEqual(older.messages.map((item) => item.info.role), ['user', 'assistant', 'user', 'assistant'])
+assert.equal(older.messages[2], originalUser, 'loading history must preserve the already-rendered tail objects')
+assert.equal(older.messages[3], originalAssistant)
 assert.equal(older.hasMore, false)
 
 const noMore = await loadOlderNativeSessionFeed(target, { ...older, hasMore: false }, {
@@ -88,72 +118,65 @@ const noMore = await loadOlderNativeSessionFeed(target, { ...older, hasMore: fal
 })
 assert.equal(noMore.hasMore, false)
 
-// Codex exposes an external session through its rollout journal first, then ACP session/load gives HR
-// a different set of envelope ids after the writer is claimed. That transition must replace the
-// visible page, not merge two authorities and show the same native assistant reply twice.
-const authorityCalls = []
-const authorityClient = {
-  async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
-    authorityCalls.push({ before, limit, refreshHistory })
-    if (!refreshHistory) {
-      return {
-        messages: [
-          message('journal-user-101', 'hello', 'user'),
-          message('journal-assistant-202', 'one native reply')
-        ],
-        before: '8192',
-        hasMore: true
-      }
+// Real ACP adapters can emit several assistant envelopes inside one native user turn: progress,
+// repeated error state and tool updates. v3 rendered those as one logical assistant turn. Session-first
+// must do the same rather than painting each transport envelope as another chat response.
+const piReplayClient = {
+  async loadMessagePage() {
+    const toolPending = {
+      info: { id: 'pi-a2', role: 'assistant', sessionID: 's1', time: { created: 12 } },
+      parts: [{
+        id: 'tool-pending', messageID: 'pi-a2', type: 'tool', tool: 'read', callID: 'call-1',
+        state: { status: 'running', input: { path: 'x.ts' } }
+      }]
+    }
+    const toolDone = {
+      info: { id: 'pi-a3', role: 'assistant', sessionID: 's1', time: { created: 13 }, error: { name: 'ProviderError', message: 'latest visible failure' } },
+      parts: [{
+        id: 'tool-done', messageID: 'pi-a3', type: 'tool', tool: 'read', callID: 'call-1',
+        state: { status: 'completed', output: 'done' }
+      }, { id: 'pi-answer', messageID: 'pi-a3', type: 'text', text: 'PI FINAL ANSWER' }]
     }
     return {
       messages: [
-        message('live-user-1', 'hello', 'user'),
-        message('live-assistant-2', 'one native reply')
+        message('pi-u1', 'PI USER MESSAGE', 'user'),
+        message('pi-a1', undefined, 'assistant', { error: { name: 'ProviderError', message: 'older failure' } }),
+        toolPending,
+        toolDone
       ],
       before: undefined,
       hasMore: false
     }
   }
 }
-const journalFeed = await loadNativeSessionFeed(target, authorityClient)
-assert.deepEqual(journalFeed.messages.map((item) => item.info.id), ['journal-user-101', 'journal-assistant-202'])
-const claimedFeed = await loadNativeSessionFeed(target, authorityClient, 200, true)
-assert.deepEqual(
-  claimedFeed.messages.map((item) => item.info.id),
-  ['live-user-1', 'live-assistant-2'],
-  'claim authority handoff must replace journal ids instead of merging a duplicate assistant reply'
-)
-assert.equal(claimedFeed.messages.filter((item) => item.info.role === 'assistant').length, 1)
-assert.equal(authorityCalls[0].refreshHistory, false)
-assert.equal(authorityCalls[1].refreshHistory, true)
+const piFeed = await loadNativeSessionFeed(target, piReplayClient)
+assert.equal(piFeed.messages.filter((item) => item.info.role === 'user').length, 1, 'one native PI user turn must render once')
+assert.equal(piFeed.messages.filter((item) => item.info.role === 'assistant').length, 1, 'PI assistant update envelopes must become one logical reply')
+const piAssistant = piFeed.messages.find((item) => item.info.role === 'assistant')
+assert.equal(piAssistant.info.error.message, 'latest visible failure', 'one logical turn exposes only the latest native error')
+assert.equal(piAssistant.parts.filter((part) => part.type === 'tool' && part.callID === 'call-1').length, 1, 'tool updates with one callID must occupy one visible position')
+assert.equal(piAssistant.parts.find((part) => part.type === 'tool' && part.callID === 'call-1').state.status, 'completed')
+assert.equal(piAssistant.parts.filter((part) => part.type === 'text' && part.text === 'PI FINAL ANSWER').length, 1)
 
-let ownedTailRefreshFlag = false
-await refreshNativeSessionFeed(target, claimedFeed, {
+// The Session-first draft switched claimed ACP reads to refreshHistory=true, creating a second replay
+// authority. The mature v3 path never does that. Even legacy callers that pass true must stay on the
+// normal message authority now.
+let requestedAuthority
+await loadNativeSessionFeed(target, {
   async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
-    ownedTailRefreshFlag = refreshHistory
-    return {
-      messages: [
-        message('live-user-1', 'hello', 'user'),
-        message('live-assistant-2', 'one native reply')
-      ],
-      before: 'live-user-1',
-      hasMore: true
-    }
+    requestedAuthority = refreshHistory
+    return { messages: turn('u-authority', 'hello', 'a-authority', 'one reply'), before: undefined, hasMore: false }
   }
 }, 200, true)
-assert.equal(ownedTailRefreshFlag, true, 'claimed ACP tail refresh must be able to bypass journal paging')
+assert.equal(requestedAuthority, false, 'claim must not switch transcript authority away from the mature v3 message path')
 
-let ownedOlderRefreshFlag = false
-await loadOlderNativeSessionFeed(target, {
-  ...claimedFeed,
-  before: 'live-user-1',
-  hasMore: true
-}, {
+let refreshAuthority
+await refreshNativeSessionFeed(target, initial, {
   async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
-    ownedOlderRefreshFlag = refreshHistory
-    return { messages: [message('live-older-0', 'older', 'user')], before: undefined, hasMore: false }
+    refreshAuthority = refreshHistory
+    return { messages: turn('u1', 'hello', 'a1', 'one'), before: 'cursor-1', hasMore: true }
   }
-}, 500, true)
-assert.equal(ownedOlderRefreshFlag, true, 'claimed ACP older paging must stay on the owned transcript authority')
+}, 200, true)
+assert.equal(refreshAuthority, false, 'claimed ACP tail refresh must remain on the mature v3 authority')
 
 console.log('native session feed tests passed')
