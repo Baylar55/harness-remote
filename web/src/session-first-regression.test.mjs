@@ -116,8 +116,10 @@ assert.ok(sessionNavigation.includes('box-sizing: border-box'), 'mobile navigati
 assert.ok(sessionNavigation.includes('max-width: 100vw'), 'mobile navigation must never exceed the visual viewport')
 assert.ok(sessionNavigation.includes('.hr-mobile-nav > button'), 'Session-first navigation must bound each destination independently')
 
-assert.ok(standalone.includes('<ConversationWorkspace'), 'the validated HR3 Conversation workspace must remain mounted as temporary compatibility')
-assert.ok(standalone.includes('primarySection === "sessions" ? <NativeSessionsWorkspace'), 'the product shell must render the integrated native Sessions workspace')
+assert.ok(standalone.includes('primarySection === "conversations" ? ('), 'legacy HR3 Conversations must remain available only as an explicit compatibility destination')
+assert.ok(standalone.includes('<ConversationWorkspace'), 'the validated HR3 Conversation workspace must remain available as temporary compatibility')
+assert.ok(standalone.includes('<NativeSessionsWorkspace machines={machines}'), 'the product shell must render the integrated native Sessions workspace')
+assert.equal(standalone.includes('<ConversationWorkspace\n        machines={machines}'), false, 'Session-first mode must not keep a second Conversation workspace mounted underneath')
 assert.ok(standalone.includes('useState<"conversations" | "sessions">("sessions")'), 'Session-first product entry must open native Sessions by default')
 assert.equal(standalone.includes('useState<"conversations" | "sessions">("conversations")'), false, 'legacy Conversations must never regain the default product entry')
 assert.equal(standalone.includes('if (primarySection === "sessions") {\n        setPrimarySection("conversations")'), false, 'Android Back from the Sessions home must not silently demote the user into legacy Conversations')
