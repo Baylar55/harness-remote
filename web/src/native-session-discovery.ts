@@ -1,5 +1,5 @@
 import { api } from "./api"
-import type { BackendKind, MachineAgentHost, ModelSelection, ServerConfig, Session, SessionStatus } from "./types"
+import type { BackendKind, MachineAgentHost, MessageEnvelope, ModelSelection, ServerConfig, Session, SessionStatus } from "./types"
 
 export type NativeSessionRecord = {
   key: string
@@ -26,6 +26,19 @@ export type NativeSessionRef = {
 }
 
 /**
+ * Visible history inherited from an earlier native Session in an explicit cross-agent handoff.
+ * This is presentation/context data only: the Session ids remain the real lifecycle identities.
+ */
+export type NativeSessionHistoryEntry = {
+  ref: NativeSessionRef
+  title: string
+  agentID: string
+  agentLabel: string
+  backend: BackendKind
+  messages: MessageEnvelope[]
+}
+
+/**
  * This is the minimal input the existing HR3 chat surface needs in order to render one real native
  * Session. It deliberately contains no Task/Conversation identity: discovery and observation must
  * work for Sessions that were started entirely outside Harness Remote.
@@ -49,6 +62,9 @@ export type NativeSessionSurfaceTarget = {
   external: boolean
   modelsSupported: boolean
   model: ModelSelection | null
+  /** Earlier linked native Sessions shown before this Session, preserving the mature v3 continuity
+   * experience without introducing a new Conversation identity. */
+  history?: NativeSessionHistoryEntry[]
   /** Lightweight ACP discovery cannot prove that this bridge owns the writer. A Session that was
    * just created/claimed through this daemon can set writerOwned and must not make the user claim it
    * a second time. */
