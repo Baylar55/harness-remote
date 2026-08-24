@@ -2,21 +2,30 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
-import type { ModelSelection } from "./types"
+import type { MessageEnvelope, ModelSelection } from "./types"
 
 export type NativeSessionPromptStatus = "accepted" | "pending" | "uncertain"
 
 export type PendingNativeSessionPrompt = {
   clientRequestId: string
   text: string
+  wireText?: string
   model?: ModelSelection | null
   createdAt: number
 }
 
 const STORAGE_PREFIX = "harness-remote.native-session-prompt.v1"
+const HANDOFF_SENT_PREFIX = "harness-remote.native-session-handoff-context.v1"
+const HANDOFF_CONTEXT_MAX_CHARS = 12_000
+const HANDOFF_MESSAGE_MAX_CHARS = 1_500
+const HANDOFF_MESSAGE_LIMIT = 16
 
 function storageKey(target: NativeSessionSurfaceTarget): string {
   return `${STORAGE_PREFIX}:${encodeURIComponent(target.machineID)}:${encodeURIComponent(target.agentID)}:${encodeURIComponent(target.sessionID)}`
+}
+
+function handoffSentKey(target: NativeSessionSurfaceTarget): string {
+  return `${HANDOFF_SENT_PREFIX}:${encodeURIComponent(target.machineID)}:${encodeURIComponent(target.agentID)}:${encodeURIComponent(target.sessionID)}`
 }
 
 function requestID(): string {
@@ -40,6 +49,57 @@ function sameModel(left?: ModelSelection | null, right?: ModelSelection | null):
   return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
 }
 
+function messageText(message: MessageEnvelope): string {
+  return (message.parts || [])
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n")
+    .trim()
+}
+
+function handoffAlreadySent(target: NativeSessionSurfaceTarget): boolean {
+  try { return localStorage.getItem(handoffSentKey(target)) === "1" } catch { return false }
+}
+
+function markHandoffSent(target: NativeSessionSurfaceTarget) {
+  try { localStorage.setItem(handoffSentKey(target), "1") } catch {}
+}
+
+function transferredContext(target: NativeSessionSurfaceTarget): string {
+  const history = target.history || []
+  if (!history.length) return ""
+  const lines: string[] = []
+  for (const entry of history) {
+    for (const message of entry.messages) {
+      const text = messageText(message)
+      if (!text) continue
+      const label = message.info.role === "user" ? "User" : entry.agentLabel
+      const clipped = text.length > HANDOFF_MESSAGE_MAX_CHARS ? `${text.slice(0, HANDOFF_MESSAGE_MAX_CHARS)}…` : text
+      lines.push(`${label}: ${clipped}`)
+    }
+  }
+  return lines.slice(-HANDOFF_MESSAGE_LIMIT).join("\n\n").slice(-HANDOFF_CONTEXT_MAX_CHARS)
+}
+
+function wirePrompt(target: NativeSessionSurfaceTarget, visibleText: string): string {
+  if (!target.history?.length || handoffAlreadySent(target)) return visibleText
+  const context = transferredContext(target)
+  if (!context) return visibleText
+  // Keep the mature v3 packet markers. native-session-turns strips this technical envelope back to
+  // USER INSTRUCTION for display, so the harness gets context while the user sees only what they wrote.
+  return [
+    "You are taking over an existing TaskDesk task.",
+    "",
+    "TRANSFERRED TASK CONTEXT",
+    context,
+    "",
+    "USER INSTRUCTION",
+    visibleText,
+    "",
+    "Continue from the shared workspace and the transferred Task Context."
+  ].join("\n")
+}
+
 export function loadPendingNativeSessionPrompt(target: NativeSessionSurfaceTarget): PendingNativeSessionPrompt | null {
   try {
     const raw = localStorage.getItem(storageKey(target))
@@ -50,6 +110,7 @@ export function loadPendingNativeSessionPrompt(target: NativeSessionSurfaceTarge
     return {
       clientRequestId: parsed.clientRequestId,
       text: parsed.text,
+      wireText: typeof parsed.wireText === "string" && parsed.wireText.trim() ? parsed.wireText : undefined,
       model: normalizeModel(parsed.model),
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now()
     }
@@ -88,10 +149,10 @@ function errorDetail(body: unknown, status: number): string {
 /**
  * Send one prompt to the exact existing native Session with a durable client request id.
  *
- * The pending id and its model selection are written on the client before network I/O. A retry of
- * the same semantic prompt therefore converges on the daemon ledger even after a lost HTTP response
- * or WebView reload. A changed prompt, model or effort is blocked while delivery is unresolved,
- * preserving turn order rather than guessing what the harness accepted.
+ * The pending id, visible text, wire text and model selection are written before network I/O. A retry
+ * therefore converges on the daemon ledger even after a lost HTTP response. For the first prompt of
+ * an explicit cross-agent handoff, wireText carries bounded v3-style context while text remains the
+ * user's actual instruction for draft recovery and UI fidelity.
  */
 export async function sendNativeSessionPrompt(
   target: NativeSessionSurfaceTarget,
@@ -109,6 +170,7 @@ export async function sendNativeSessionPrompt(
   const pending = existing ?? {
     clientRequestId: requestID(),
     text: normalized,
+    wireText: wirePrompt(target, normalized),
     model: requestedModel,
     createdAt: Date.now()
   }
@@ -117,7 +179,7 @@ export async function sendNativeSessionPrompt(
   const path = `/session/${encodeURIComponent(target.sessionID)}/prompt`
   const body = {
     clientRequestId: pending.clientRequestId,
-    text: normalized,
+    text: pending.wireText || pending.text,
     directory: target.directory,
     model: pending.model ? { providerID: pending.model.providerID, modelID: pending.model.modelID } : undefined,
     variant: pending.model?.variant || undefined
@@ -170,6 +232,9 @@ export async function sendNativeSessionPrompt(
     }
   }
 
-  if (status === "accepted") clearPendingNativeSessionPrompt(target)
+  if (status === "accepted") {
+    if (pending.wireText && pending.wireText !== pending.text) markHandoffSent(target)
+    clearPendingNativeSessionPrompt(target)
+  }
   return { status, clientRequestId: pending.clientRequestId }
 }
