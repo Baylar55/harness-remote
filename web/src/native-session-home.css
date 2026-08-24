@@ -321,3 +321,13 @@
   .hr-native-session-row { min-height: 52px; padding-block: 8px; }
   .hr-native-project-more { min-height: 40px; }
 }
+
+/* On phone and short touch-landscape the bottom navigation owns the final strip of the viewport.
+   The native Session detail is an absolute surface, so unlike the older Conversation detail it did
+   not inherit the shell's nav-height reservation. Reserve that strip here: the shared composer and
+   its Send/Stop controls then remain fully visible and tappable instead of sitting underneath nav. */
+@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
+  .hr-native-workspace-detail {
+    inset: 57px 0 var(--hr-mobile-nav-height);
+  }
+}
