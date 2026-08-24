@@ -41,14 +41,15 @@ test("mobile project selection remains visible after responsive row styling", ()
   assert.match(mobilePolish, /background: var\(--td3-blue-soft\) !important/)
 })
 
-test("mobile has explicit Conversations Sessions Machines and Settings destinations", () => {
+test("mobile has explicit Sessions Machines Settings and compatibility Conversations destinations", () => {
   assert.match(standalone, /<nav className="hr-mobile-nav" aria-label="Main navigation">/)
-  assert.match(standalone, /const \[primarySection, setPrimarySection\] = useState<"conversations" \| "sessions">\("conversations"\)/)
+  assert.match(standalone, /const \[primarySection, setPrimarySection\] = useState<"conversations" \| "sessions">\("sessions"\)/)
   assert.match(standalone, /const mobileSection = managerOpen \? "machines" : mobileSettingsOpen \? "settings" : primarySection/)
   assert.match(standalone, />Conversations<\/span>/)
   assert.match(standalone, />Sessions<\/span>/)
   assert.match(standalone, />Machines<\/span>/)
   assert.match(standalone, />Settings<\/span>/)
+  assert.ok(standalone.indexOf('>Sessions</span>') < standalone.lastIndexOf('>Conversations</span>'), "Sessions must lead the primary navigation")
   assert.match(standalone, /function MobileSettingsPage/)
   assert.match(controlPlane, /\.hr-mobile-nav \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/, "validated HR3 mobile navigation styling must remain intact")
   assert.match(sessionFirstNavigation, /\.hr-mobile-nav \{[\s\S]*?grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/, "Session-first may override only the destination count")
@@ -110,7 +111,7 @@ test("short mobile transport drops keep last-known machine projects and conversa
   assert.match(taskClient, /const cached = readRecent\(taskListCache, key\)/)
 })
 
-test("Android back unwinds mobile pages and conversation UI before app exit", () => {
+test("Android back unwinds Session-first mobile UI before app exit", () => {
   assert.match(standalone, /CapacitorApp\.addListener\("backButton"/)
   assert.match(standalone, /if \(mobileSettingsOpen\)[\s\S]*?setMobileSettingsOpen\(false\)/)
   assert.match(standalone, /if \(managerOpen\)[\s\S]*?setManagerOpen\(false\)/)
@@ -123,8 +124,8 @@ test("Android back unwinds mobile pages and conversation UI before app exit", ()
   assert.match(standalone, /drawerScrim\.click\(\)/)
   assert.match(standalone, /\.tdw-mobile-back/)
   assert.match(standalone, /mobileBack\.getClientRects\(\)\.length > 0/)
-  assert.match(standalone, /if \(primarySection === "sessions"\)[\s\S]*?setPrimarySection\("conversations"\)/)
-  assert.ok(standalone.indexOf('if (primarySection === "sessions")') < standalone.indexOf("CapacitorApp.exitApp()"), "Sessions should unwind to Conversations before Android exits")
+  assert.doesNotMatch(standalone, /if \(primarySection === "sessions"\)[\s\S]*?setPrimarySection\("conversations"\)/)
+  assert.ok(standalone.indexOf("mobileBack") < standalone.indexOf("CapacitorApp.exitApp()"), "Session detail must unwind before Android exits")
   assert.match(standalone, /CapacitorApp\.exitApp\(\)/)
   assert.doesNotMatch(standalone, /tdw-more-menu/)
   assert.doesNotMatch(standalone, /tdw-advanced-host/)
