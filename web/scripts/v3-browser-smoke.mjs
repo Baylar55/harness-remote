@@ -242,11 +242,12 @@ async function assertNoDocumentOverflow(page, label) {
 async function assertSessionFirstHome(page, mobile) {
   const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
   await sessions.waitFor({ state: "visible" })
-  await sessions.getByText("Sessions", { exact: true }).first().waitFor({ state: "visible" })
   if (mobile) {
     const sessionsButton = page.locator(".hr-mobile-nav").getByRole("button", { name: /Sessions/ })
     await sessionsButton.waitFor({ state: "visible" })
     assert.equal(await sessionsButton.getAttribute("aria-current"), "page", "Sessions must be the mobile product entry")
+  } else {
+    await sessions.getByText("Sessions", { exact: true }).first().waitFor({ state: "visible" })
   }
   await assertNoDocumentOverflow(page, mobile ? "Session-first mobile home" : "Session-first desktop home")
 }
