@@ -349,6 +349,30 @@ export class AcpService {
   }
 
   /**
+   * Explicitly acquire the writer for one exact existing native ACP Session.
+   *
+   * Reading a journal-backed Session must not imply ownership. A Session that this ACP connection
+   * already opened successfully can be claimed without loading it twice; a compatibility-adopted
+   * Task Session is deliberately excluded because adoption never proved native writer ownership.
+   * Otherwise force the hardened session/load path and mark ownership only after it succeeds.
+   */
+  async claimSession(sessionID) {
+    await this.#requireSession(sessionID)
+    if (this.#ownedSessions.has(sessionID) && !this.#adoptedSessions.has(sessionID)) return true
+    if (this.#acpOpenSessions.has(sessionID) && !this.#adoptedSessions.has(sessionID)) {
+      this.#ownedSessions.add(sessionID)
+      this.#persistSnapshot(sessionID)
+      return true
+    }
+
+    await this.#load(sessionID, true, true)
+    this.#ownedSessions.add(sessionID)
+    this.#adoptedSessions.delete(sessionID)
+    this.#persistSnapshot(sessionID)
+    return true
+  }
+
+  /**
    * Adopt a task session created by an older daemon so PI can open it without session/load.
    *
    * Ownership here only means "this bridge may prompt it directly"; it does not mean the transcript
