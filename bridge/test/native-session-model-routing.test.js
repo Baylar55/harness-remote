@@ -18,13 +18,14 @@ class FakeHttpHost extends EventEmitter {
   stop() { return true }
 }
 
-function passthroughServerOptions(daemon, primaryAcp, service) {
+function passthroughServerOptions(daemon, primaryAcp, service, sessionLinkStore = { async addHandoff({ source, target }) { return { type: "handoff", source, target, createdAt: "test" } } }) {
   let claimOptions
   createMachineDaemonServer({
     daemon,
     config: { backend: "codex", port: 4097 },
     primaryAcp,
     sessionOperationLedger: { marker: "ledger" },
+    sessionLinkStore,
     createServer: () => ({ acpService: service, emit() {} }),
     createRouter: () => ({ marker: "router" }),
     createClaimServer: (options) => { claimOptions = options; return { marker: "claim" } },
@@ -115,4 +116,110 @@ test("OpenCode native Session prompt preserves the existing parts model agent va
     agent: "opencode",
     variant: "high"
   })
+})
+
+test("ACP cross-agent handoff creates one real target Session, applies effort, and stores only a native Session link", async () => {
+  const daemon = new MachineDaemon({ id: "machine-handoff-acp", name: "workstation" })
+  const codex = new FakeAcp()
+  const pi = new FakeAcp()
+  daemon.registerAcpHost({ id: "codex", agent: codex })
+  daemon.registerAcpHost({
+    id: "pi",
+    agent: pi,
+    modelCatalog: {
+      async resolve(model) { return { ...model, variantConfigId: "effort" } }
+    }
+  })
+  const created = []
+  const links = []
+  const service = {
+    async createSession(input) {
+      created.push(input)
+      return { id: "pi-native-new" }
+    },
+    async claimSession() {},
+    async prompt() {},
+    async abort() {}
+  }
+  const claimOptions = passthroughServerOptions(daemon, codex, service, {
+    async addHandoff(value) {
+      links.push(value)
+      return { type: "handoff", ...value, createdAt: "test" }
+    }
+  })
+
+  const result = await claimOptions.handoffSession("codex", "codex-native-source", {
+    targetAgentID: "pi",
+    directory: "/repo",
+    model: { providerID: "openai", modelID: "gpt-5.6" },
+    variant: "high",
+    title: "Continue in PI"
+  })
+
+  assert.deepEqual(created, [{ directory: "/repo", title: "Continue in PI", model: "openai/gpt-5.6" }])
+  assert.deepEqual(pi.configCalls, [["session/set_config_option", {
+    sessionId: "pi-native-new",
+    configId: "effort",
+    value: "high"
+  }]])
+  assert.deepEqual(links, [{
+    source: { machineID: "machine-handoff-acp", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
+    target: { machineID: "machine-handoff-acp", agentID: "pi", sessionID: "pi-native-new", directory: "/repo" }
+  }])
+  assert.equal(result.target.sessionID, "pi-native-new")
+})
+
+test("OpenCode cross-agent handoff uses native Session creation with model and variant and stores the link", async () => {
+  const daemon = new MachineDaemon({ id: "machine-handoff-http", name: "workstation" })
+  const codex = new FakeAcp()
+  const openCode = new FakeHttpHost()
+  daemon.registerAcpHost({ id: "codex", agent: codex })
+  daemon.registerManagedHttpHost({
+    id: "opencode",
+    host: openCode,
+    eager: false,
+    modelCatalog: { async resolve(model) { return model } }
+  })
+  const links = []
+  const claimOptions = passthroughServerOptions(daemon, codex, {
+    async claimSession() {},
+    async prompt() {},
+    async abort() {}
+  }, {
+    async addHandoff(value) {
+      links.push(value)
+      return { type: "handoff", ...value, createdAt: "test" }
+    }
+  })
+
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, options) => {
+    calls.push([String(url), options])
+    return new Response(JSON.stringify({ id: "opencode-native-new" }), { status: 200, headers: { "Content-Type": "application/json" } })
+  }
+  let result
+  try {
+    result = await claimOptions.handoffSession("codex", "codex-native-source", {
+      targetAgentID: "opencode",
+      directory: "/repo",
+      model: { providerID: "openai", modelID: "gpt-5.6" },
+      variant: "high",
+      title: "Continue in OpenCode"
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(calls.length, 1)
+  assert.match(calls[0][0], /\/session\?directory=%2Frepo$/)
+  assert.deepEqual(JSON.parse(calls[0][1].body), {
+    title: "Continue in OpenCode",
+    model: { providerID: "openai", id: "gpt-5.6", variant: "high" }
+  })
+  assert.deepEqual(links, [{
+    source: { machineID: "machine-handoff-http", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
+    target: { machineID: "machine-handoff-http", agentID: "opencode", sessionID: "opencode-native-new", directory: "/repo" }
+  }])
+  assert.equal(result.target.sessionID, "opencode-native-new")
 })
