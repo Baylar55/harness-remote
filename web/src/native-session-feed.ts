@@ -1,5 +1,6 @@
 import { api, type MessagePage } from "./api"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "./message-pages"
+import { normalizeNativeSessionTurns } from "./native-session-turns"
 import type { MessageEnvelope } from "./types"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 
@@ -11,9 +12,13 @@ export type NativeSessionFeed = {
 
 export type NativeSessionFeedApi = Pick<typeof api, "loadMessagePage">
 
+function normalizedMessages(page: MessagePage): MessageEnvelope[] {
+  return normalizeNativeSessionTurns(page.messages)
+}
+
 function asFeed(page: MessagePage): NativeSessionFeed {
   return {
-    messages: page.messages,
+    messages: normalizedMessages(page),
     before: page.before,
     hasMore: page.hasMore
   }
@@ -48,8 +53,9 @@ export async function loadNativeSessionFeed(
 }
 
 /**
- * Refresh only the newest page and preserve object identity for unchanged messages. This is the same
- * read + merge rule used by the validated v3 WorkThreadConversation path.
+ * Refresh only the newest page and preserve object identity for unchanged logical turns. The page is
+ * normalized before merging, matching the mature v3 rule that multiple assistant protocol envelopes
+ * inside one native user turn are one visible assistant turn.
  */
 export async function refreshNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
@@ -66,12 +72,12 @@ export async function refreshNativeSessionFeed(
     limit,
     false
   )
-  const messages = mergeLatestMessagePage(current.messages, page.messages)
+  const messages = mergeLatestMessagePage(current.messages, normalizedMessages(page))
   if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
   return { messages, before: page.before, hasMore: page.hasMore }
 }
 
-/** Load one older page using the same transcript authority as the live tail. */
+/** Load one older logical-turn page using the same transcript authority as the live tail. */
 export async function loadOlderNativeSessionFeed(
   target: NativeSessionSurfaceTarget,
   current: NativeSessionFeed,
@@ -88,7 +94,7 @@ export async function loadOlderNativeSessionFeed(
     limit,
     false
   )
-  const messages = prependOlderMessagePage(current.messages, page.messages)
+  const messages = prependOlderMessagePage(current.messages, normalizedMessages(page))
   if (messages === current.messages && page.before === current.before && page.hasMore === current.hasMore) return current
   return { messages, before: page.before, hasMore: page.hasMore }
 }
