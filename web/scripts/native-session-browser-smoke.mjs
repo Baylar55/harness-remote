@@ -479,10 +479,11 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(await activity.locator(".uw-tool-card").count(), 1, "PI tool updates with different message ids must converge by call identity")
   assert.equal(await page.getByText("PI working note before tool", { exact: true }).count(), 1, "PI working note duplicated")
 
-  const ordered = await page.locator(".uw-transcript").evaluate((element) => {
+  const orderedMarkers = [SUCCESS_PROMPT, "PI reasoning marker", "PI working note before tool", "PI tool", SUCCESS_REPLY]
+  const ordered = await page.locator(".uw-transcript").evaluate((element, markers) => {
     const text = element.textContent || ""
-    return [SUCCESS_PROMPT, "PI reasoning marker", "PI working note before tool", "PI tool", SUCCESS_REPLY].map((value) => text.indexOf(value))
-  })
+    return markers.map((value) => text.indexOf(value))
+  }, orderedMarkers)
   assert.ok(ordered.every((value) => value >= 0) && ordered.every((value, index) => index === 0 || ordered[index - 1] <= value), `PI activity order regressed: ${ordered.join(",")}`)
 
   await waitForReady(page)
