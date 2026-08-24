@@ -31,10 +31,10 @@ type Props = {
  * Controller for one real native Session. It deliberately renders the existing HR3 chat component:
  * Session-first changes what feeds the chat, not the chat UI.
  *
- * External Sessions start in observe mode. "Continue this Session" performs a safe resume probe
- * first; only after that succeeds does the normal HR3 composer appear. Sending then targets the
- * exact same native session id through the daemon's idempotent native Session operation path. No
- * Task, Run or replacement Session is created as part of continuation.
+ * Sessions whose discovery transport cannot prove writer ownership start in observe mode.
+ * "Continue this Session" performs a safe claim first; only after that succeeds does the normal HR3
+ * composer appear. Sending then targets the exact same native session id through the daemon's
+ * idempotent native Session operation path. No Task, Run or replacement Session is created.
  */
 export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const [feed, setFeed] = useState<NativeSessionFeed | null>(null)
@@ -43,7 +43,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
   const [sending, setSending] = useState(false)
-  const [writeState, setWriteState] = useState<WriteState>(target.external ? "observe" : "ready")
+  const [writeState, setWriteState] = useState<WriteState>(target.requiresExplicitClaim ? "observe" : "ready")
   const [resumeError, setResumeError] = useState<string | null>(null)
   const feedRef = useRef<NativeSessionFeed | null>(null)
   feedRef.current = feed
@@ -77,7 +77,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     // been accepted. Retrying after a WebView reload then converges on the daemon ledger instead of
     // creating a second native prompt.
     setDraft(loadPendingNativeSessionPrompt(target)?.text ?? "")
-    setWriteState(target.external ? "observe" : "ready")
+    setWriteState(target.requiresExplicitClaim ? "observe" : "ready")
     setFeed(null)
     feedRef.current = null
     void loadNativeSessionFeed(target).then((next) => {
@@ -153,7 +153,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
       setError(message)
-      if (target.external && /session|load|writer|locked|busy|owned/i.test(message)) {
+      if (target.requiresExplicitClaim && /session|load|writer|locked|busy|owned/i.test(message)) {
         setWriteState("observe")
         setResumeError(message)
       }
