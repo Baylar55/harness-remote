@@ -243,13 +243,12 @@ async function assertSessionContract(browser, viewport, mobile) {
   assert.ok(composer && size, "composer geometry unavailable")
   assert.ok(composer.y >= -1 && composer.y + composer.height <= size.height + 1, `composer escaped the viewport: ${JSON.stringify({ composer, size })}`)
 
-  // TaskDeskConversation follows the bottom while the reader has not expressed scroll intent. A
-  // real upward gesture disables that follow mode before scrollTop changes, so exercise the same
-  // ordering here and wait through any already-scheduled follow frame. If it still snaps back down,
-  // the shared chat surface is genuinely fighting user scroll.
+  // TaskDeskConversation follows the bottom while the reader has not expressed scroll intent. The
+  // transcript also has CSS smooth scrolling, so make the position change instant after the upward
+  // gesture. This tests follow behavior rather than sampling an in-progress CSS scroll animation.
   await transcript.evaluate((element) => {
     element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }))
-    element.scrollTop = 0
+    element.scrollTo({ top: 0, behavior: "instant" })
   })
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const top = await transcript.evaluate((element) => element.scrollTop)
