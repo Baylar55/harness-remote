@@ -38,8 +38,25 @@ function promptBody(overrides = {}) {
   }
 }
 
+function stopBody(overrides = {}) {
+  return {
+    clientRequestId: "stop-request-1",
+    directory: "/repo",
+    operationToken: "turn-message-42",
+    ...overrides
+  }
+}
+
 async function postPrompt(port, body = promptBody()) {
   return fetch(`http://127.0.0.1:${port}/v1/agents/codex/session/native-123/prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })
+}
+
+async function postStop(port, body = stopBody()) {
+  return fetch(`http://127.0.0.1:${port}/v1/agents/codex/session/native-123/stop`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -158,7 +175,7 @@ test("same client request id with different prompt is rejected without redispatc
     assert.equal((await postPrompt(port)).status, 200)
     const conflict = await postPrompt(port, promptBody({ text: "A different prompt" }))
     assert.equal(conflict.status, 409)
-    assert.match((await conflict.json()).error, /already used for a different native Session prompt/)
+    assert.match((await conflict.json()).error, /already used for a different native Session operation/)
     assert.equal(dispatches, 1)
   } finally {
     await close(server)
@@ -222,6 +239,142 @@ test("definite pre-accept rejection removes the ledger entry so the same request
   }
 }))
 
+test("replaying one accepted Stop request dispatches one native cancel", async () => withLedger(async (operationLedger) => {
+  const calls = []
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async stopSession(agentID, sessionID, input) { calls.push([agentID, sessionID, input.directory, input.operationToken]) }
+  })
+  const port = await listen(server)
+  try {
+    const first = await postStop(port)
+    const replay = await postStop(port)
+    assert.equal(first.status, 200)
+    assert.equal(replay.status, 200)
+    assert.equal((await first.json()).status, "accepted")
+    assert.equal((await replay.json()).status, "accepted")
+    assert.deepEqual(calls, [["codex", "native-123", "/repo", "turn-message-42"]])
+  } finally {
+    await close(server)
+  }
+}))
+
+test("concurrent Stop retries converge before a second native cancel can start", async () => withLedger(async (operationLedger) => {
+  let dispatches = 0
+  let releaseDispatch
+  let markStarted
+  const dispatchStarted = new Promise((resolve) => { markStarted = resolve })
+  const dispatchGate = new Promise((resolve) => { releaseDispatch = resolve })
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async stopSession() {
+      dispatches += 1
+      markStarted()
+      await dispatchGate
+    }
+  })
+  const port = await listen(server)
+  try {
+    const firstPromise = postStop(port)
+    await dispatchStarted
+    const retry = await postStop(port)
+    assert.equal(retry.status, 202)
+    assert.equal((await retry.json()).status, "pending")
+    assert.equal(dispatches, 1)
+
+    releaseDispatch()
+    const first = await firstPromise
+    assert.equal(first.status, 200)
+    assert.equal((await first.json()).status, "accepted")
+    assert.equal(dispatches, 1)
+  } finally {
+    releaseDispatch?.()
+    await close(server)
+  }
+}))
+
+test("a Stop request id cannot be reused for a later turn token", async () => withLedger(async (operationLedger) => {
+  let dispatches = 0
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async stopSession() { dispatches += 1 }
+  })
+  const port = await listen(server)
+  try {
+    assert.equal((await postStop(port)).status, 200)
+    const conflict = await postStop(port, stopBody({ operationToken: "later-turn-message-99" }))
+    assert.equal(conflict.status, 409)
+    assert.match((await conflict.json()).error, /already used for a different native Session operation/)
+    assert.equal(dispatches, 1)
+  } finally {
+    await close(server)
+  }
+}))
+
+test("ambiguous Stop delivery is retained as uncertain and never replayed", async () => withLedger(async (operationLedger) => {
+  let dispatches = 0
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async stopSession() {
+      dispatches += 1
+      const error = new Error("cancel transport disconnected after dispatch")
+      error.ambiguous = true
+      throw error
+    }
+  })
+  const port = await listen(server)
+  try {
+    const first = await postStop(port)
+    assert.equal(first.status, 202)
+    assert.equal((await first.json()).status, "uncertain")
+    const replay = await postStop(port)
+    assert.equal(replay.status, 202)
+    assert.equal((await replay.json()).status, "uncertain")
+    assert.equal(dispatches, 1)
+  } finally {
+    await close(server)
+  }
+}))
+
+test("Stop before ACP claim is a conflict and never becomes accepted", async () => withLedger(async (operationLedger) => {
+  let dispatches = 0
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async stopSession() {
+      dispatches += 1
+      const error = new Error("native Session must be claimed before Stop")
+      error.code = "session_not_claimed"
+      throw error
+    }
+  })
+  const port = await listen(server)
+  try {
+    const rejected = await postStop(port)
+    assert.equal(rejected.status, 409)
+    assert.equal(dispatches, 1)
+    const retry = await postStop(port)
+    assert.equal(retry.status, 409)
+    assert.equal(dispatches, 2)
+  } finally {
+    await close(server)
+  }
+}))
+
 test("unknown agent maps to 404 and unrelated requests delegate unchanged", async () => {
   const innerServer = new EventEmitter()
   innerServer.on("request", (_request, response) => {
@@ -256,7 +409,7 @@ test("native Session operation routes accept POST only", async () => {
   })
   const port = await listen(server)
   try {
-    for (const action of ["claim", "prompt"]) {
+    for (const action of ["claim", "prompt", "stop"]) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/agents/pi/session/native-1/${action}`)
       assert.equal(response.status, 405)
       assert.equal(response.headers.get("allow"), "POST, OPTIONS")
