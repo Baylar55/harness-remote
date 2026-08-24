@@ -248,7 +248,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   }
 
   return (
-    <div className={`hr-native-session-observer${writable ? " writable" : " observe-only"}`}>
+    <div className={`hr-native-session-observer tdw-work-thread-conversation${writable ? " writable" : " observe-only"}`}>
       {error ? <div className="tdw-field-note hr-native-session-observer-error" role="status">Showing the last known Session transcript. Request failed: {error}</div> : null}
       {attention ? <div className="tdw-field-note" role="status"><strong>Needs attention.</strong> {attention.title}. Review the latest turn below before continuing.</div> : null}
       {!writable ? (
