@@ -1,4 +1,5 @@
 import { api, type MessagePage } from "./api"
+import { probeNativeSessionContinuation } from "./native-session-continuation"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { sendNativeSessionPrompt } from "./native-session-prompt"
 import { stopNativeSession } from "./native-session-stop"
@@ -28,6 +29,8 @@ type ProjectionEntry = {
   forcedStatus: "running" | "cancelled" | null
   currentModel: ModelSelection | null
   initialPageCaptured: boolean
+  writerReady: boolean
+  writerClaimInFlight: Promise<void> | null
   runs: Map<string, ProjectionRun>
   listeners: Set<(task: MachineTask) => void>
 }
@@ -215,6 +218,30 @@ async function refreshStatus(entry: ProjectionEntry): Promise<void> {
   }
 }
 
+/**
+ * ACP writer ownership is a transport detail, not a navigation step. Reading a Session never claims
+ * it. The first Send or Stop acquires the writer transparently and caches that fact for this open
+ * projection. OpenCode resolves immediately because it has no ACP single-writer claim boundary.
+ */
+async function ensureWriter(entry: ProjectionEntry): Promise<void> {
+  if (entry.writerReady) return
+  if (entry.writerClaimInFlight) return entry.writerClaimInFlight
+
+  const claim = (async () => {
+    const result = await probeNativeSessionContinuation(entry.target)
+    if (!result.writable) {
+      throw new Error(result.reason || `${entry.target.agentLabel} did not allow this Session to be resumed.`)
+    }
+    entry.writerReady = true
+  })()
+  entry.writerClaimInFlight = claim
+  try {
+    await claim
+  } finally {
+    if (entry.writerClaimInFlight === claim) entry.writerClaimInFlight = null
+  }
+}
+
 function installAdapter(): void {
   if (installed) return
   installed = true
@@ -251,6 +278,7 @@ function installAdapter(): void {
     if (body.agentId && body.agentId !== entry.target.agentID) {
       throw new Error("Cross-agent continuation is disabled until single-Session parity is validated")
     }
+    await ensureWriter(entry)
     const model = body.model === undefined ? entry.currentModel : body.model
     const result = await sendNativeSessionPrompt(entry.target, prompt, model)
     if (result.status !== "accepted") {
@@ -263,6 +291,7 @@ function installAdapter(): void {
   taskClient.cancelWorkThread = async function patchedCancelWorkThread(config, taskId) {
     const entry = projections.get(taskId)
     if (!entry) return originalCancelWorkThread(config, taskId)
+    await ensureWriter(entry)
     const projectionRuns = sortedRuns(entry)
     const latestRun = projectionRuns[projectionRuns.length - 1]
     const operationToken = latestRun?.id || entry.target.sessionID
@@ -294,6 +323,8 @@ export function registerNativeSessionV3Adapter(
       forcedStatus: null,
       currentModel: target.model,
       initialPageCaptured: false,
+      writerReady: !target.requiresExplicitClaim,
+      writerClaimInFlight: null,
       runs: new Map(),
       listeners: new Set()
     }
@@ -302,6 +333,7 @@ export function registerNativeSessionV3Adapter(
     entry.target = target
     entry.statusType = target.status?.type || entry.statusType
     entry.currentModel = target.model ?? entry.currentModel
+    if (!target.requiresExplicitClaim) entry.writerReady = true
   }
   entry.listeners.add(onTaskUpdate)
   return {
