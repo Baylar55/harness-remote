@@ -10,13 +10,26 @@ export type NativeSessionRecord = {
   status?: SessionStatus
 }
 
+/** Stable identity for one real native coding-agent Session across every configured machine. */
+export type NativeSessionRef = {
+  machineID: string
+  agentID: string
+  sessionID: string
+  directory: string
+}
+
 /**
  * This is the minimal input the existing HR3 chat surface needs in order to render one real native
  * Session. It deliberately contains no Task/Conversation identity: discovery and observation must
  * work for Sessions that were started entirely outside Harness Remote.
+ *
+ * `ref` is the operation identity. Native session ids are harness-owned and are not assumed to be
+ * globally unique across agents or machines, so every mutation keeps machine + agent + native id.
  */
 export type NativeSessionSurfaceTarget = {
   key: string
+  ref: NativeSessionRef
+  machineID: string
   sessionID: string
   directory: string
   title: string
@@ -52,13 +65,26 @@ export function nativeSessionConfig(base: ServerConfig, agent: MachineAgentHost)
  * Convert discovery data into the same primitive the HR3 transcript/composer can consume next.
  * This is a view-model conversion only. It never adopts, resumes or creates anything on the daemon.
  */
-export function nativeSessionSurfaceTarget(base: ServerConfig, record: NativeSessionRecord): NativeSessionSurfaceTarget {
-  return {
-    key: record.key,
-    sessionID: record.session.id,
-    directory: record.session.directory || "",
-    title: record.session.title?.trim() || "Untitled Session",
+export function nativeSessionSurfaceTarget(
+  machineID: string,
+  base: ServerConfig,
+  record: NativeSessionRecord
+): NativeSessionSurfaceTarget {
+  const directory = record.session.directory || ""
+  const ref: NativeSessionRef = {
+    machineID,
     agentID: record.agentId,
+    sessionID: record.session.id,
+    directory
+  }
+  return {
+    key: `${machineID}:${record.key}`,
+    ref,
+    machineID,
+    sessionID: ref.sessionID,
+    directory: ref.directory,
+    title: record.session.title?.trim() || "Untitled Session",
+    agentID: ref.agentID,
     agentLabel: record.agentLabel,
     backend: record.backend,
     config: {
