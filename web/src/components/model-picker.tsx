@@ -159,7 +159,18 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
 
   return (
     <div className={`tdw-model-picker${compact ? " compact" : ""}${open ? " open" : ""}${empty ? " unavailable" : ""}`} ref={rootRef}>
-      <button type="button" className="tdw-model-trigger" disabled={disabled || loading || empty} title={empty ? hint : undefined} onClick={() => setOpen((current) => !current)} aria-haspopup="listbox" aria-expanded={open}>
+      <button
+        type="button"
+        className="tdw-model-trigger"
+        disabled={disabled || loading || empty}
+        title={empty ? hint : undefined}
+        onClick={(event) => {
+          event.preventDefault()
+          setOpen((current) => !current)
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
         <span className="tdw-model-trigger-copy">
           <strong>{triggerLabel}</strong>
           {!loading && selected ? <small>{selected.providerName || selected.providerID}{selected.variant ? ` · ${selected.variant}` : ""}</small> : null}
@@ -183,7 +194,14 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
                   const baseSelected = selected && selected.providerID === group.providerID && selected.modelID === group.modelID && !selected.variant
                   return (
                     <div className={`tdw-model-row${selected && selected.providerID === group.providerID && selected.modelID === group.modelID ? " selected-family" : ""}`} key={group.id}>
-                      <button type="button" className={`tdw-model-main${baseSelected ? " selected" : ""}`} onClick={() => choose(group.base)}>
+                      <button
+                        type="button"
+                        className={`tdw-model-main${baseSelected ? " selected" : ""}`}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          choose(group.base)
+                        }}
+                      >
                         <span className="tdw-model-copy">
                           <span className="tdw-model-name"><strong>{group.modelName}</strong><code>{group.modelID}</code></span>
                           {group.description ? <small>{group.description}</small> : null}
@@ -195,7 +213,17 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
                         <div className="tdw-model-variants" aria-label={`${group.modelName} variants`}>
                           <span>Reasoning / variant</span>
                           {group.variants.map((variant) => (
-                            <button type="button" className={modelOptionKey(variant) === value ? "selected" : ""} onClick={() => choose(variant)} key={modelOptionKey(variant)}>{variant.variant}</button>
+                            <button
+                              type="button"
+                              className={modelOptionKey(variant) === value ? "selected" : ""}
+                              onClick={(event) => {
+                                event.preventDefault()
+                                choose(variant)
+                              }}
+                              key={modelOptionKey(variant)}
+                            >
+                              {variant.variant}
+                            </button>
                           ))}
                         </div>
                       ) : null}
