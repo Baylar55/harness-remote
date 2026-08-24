@@ -147,7 +147,7 @@ test("machine server wires registry, routing, native Session operations, task li
   let modelOptions
   let finishOptions
   let workThreadOptions
-  const bridgeServer = { marker: "bridge", acpService: { async models() {}, async adoptTaskSession() { return true }, async prompt() {} } }
+  const bridgeServer = { marker: "bridge", acpService: { async models() {}, async adoptTaskSession() { return true }, async prompt() {}, async abort() {} } }
   const routedServer = { marker: "router" }
   const claimServer = { marker: "session-claim" }
   const launchServer = { marker: "launch" }
@@ -180,6 +180,7 @@ test("machine server wires registry, routing, native Session operations, task li
   assert.equal(claimOptions.innerServer, routedServer)
   assert.equal(typeof claimOptions.claimSession, "function")
   assert.equal(typeof claimOptions.promptSession, "function")
+  assert.equal(typeof claimOptions.stopSession, "function")
   assert.equal(claimOptions.operationLedger, fakeLedger)
   assert.equal(launchOptions.innerServer, claimServer)
   assert.equal(typeof launchOptions.taskRunController.launch, "function")
@@ -195,7 +196,7 @@ test("machine server wires registry, routing, native Session operations, task li
   assert.deepEqual(bridgeOptions.machineRegistry.snapshot().agents.map((host) => host.id), ["pi", "opencode"])
 })
 
-test("machine Session operations retain ownership after claim before prompting the same native Session", async () => {
+test("machine Session operations retain ownership after claim before prompting or stopping the same native Session", async () => {
   const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
   const codex = new FakeAcp()
   const pi = new FakeAcp()
@@ -215,7 +216,8 @@ test("machine Session operations retain ownership after claim before prompting t
       acpService: {
         async models(sessionID) { calls.push(["claim-load", options.config.backend, sessionID]) },
         async adoptTaskSession(sessionID) { calls.push(["claim-owned", options.config.backend, sessionID]); return true },
-        async prompt(sessionID, text) { calls.push(["prompt", options.config.backend, sessionID, text]) }
+        async prompt(sessionID, text) { calls.push(["prompt", options.config.backend, sessionID, text]) },
+        async abort(sessionID) { calls.push(["stop", options.config.backend, sessionID]) }
       },
       emit() {}
     }),
@@ -227,12 +229,18 @@ test("machine Session operations retain ownership after claim before prompting t
     createWorkThreadServerFactory: ({ innerServer }) => innerServer
   })
 
+  await assert.rejects(
+    () => claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" }),
+    (error) => error.code === "session_not_claimed"
+  )
   await claimOptions.claimSession("pi", "native-pi-1")
   await claimOptions.promptSession("pi", "native-pi-1", { text: "Continue once", directory: "/repo" })
+  await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   assert.deepEqual(calls, [
     ["claim-load", "pi", "native-pi-1"],
     ["claim-owned", "pi", "native-pi-1"],
-    ["prompt", "pi", "native-pi-1", "Continue once"]
+    ["prompt", "pi", "native-pi-1", "Continue once"],
+    ["stop", "pi", "native-pi-1"]
   ])
   await assert.rejects(() => claimOptions.claimSession("opencode", "native-http-1"), (error) => error.code === "unsupported_agent")
   await assert.rejects(() => claimOptions.promptSession("missing", "native-1", { text: "x", directory: "/repo" }), (error) => error.code === "unknown_agent")
@@ -252,7 +260,8 @@ test("machine Session claim fails if the native Session disappears before owners
       acpService: {
         async models() {},
         async adoptTaskSession() { return false },
-        async prompt() {}
+        async prompt() {},
+        async abort() {}
       },
       emit() {}
     }),
@@ -284,7 +293,7 @@ test("machine server creates an isolated bridge service for every registered ACP
     primaryAcp: codex,
     sessionOperationLedger: { marker: "ledger" },
     createServer: (options) => {
-      const server = { options, acpService: { async models() {}, async adoptTaskSession() { return true }, async prompt() {} }, emit() {} }
+      const server = { options, acpService: { async models() {}, async adoptTaskSession() { return true }, async prompt() {}, async abort() {} }, emit() {} }
       created.push(server)
       return server
     },
