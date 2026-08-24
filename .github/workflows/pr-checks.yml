@@ -67,6 +67,7 @@ jobs:
           npm run test:completion-timing
           npm run test:native-response
           node src/v3-mobile-regression-fixes.test.mjs
+          node src/session-first-regression.test.mjs
         working-directory: web
 
       - name: Run bridge tests
