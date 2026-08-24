@@ -50,11 +50,22 @@ function operationIdentityInput(body) {
   return { clientRequestId, directory }
 }
 
+function promptModelInput(body) {
+  if (body.model === undefined || body.model === null) return null
+  if (!body.model || typeof body.model !== "object" || Array.isArray(body.model)) throw requestError("Prompt model must be an object")
+  const providerID = typeof body.model.providerID === "string" ? body.model.providerID.trim() : ""
+  const modelID = typeof body.model.modelID === "string" ? body.model.modelID.trim() : ""
+  if (!providerID || !modelID) throw requestError("Prompt model requires providerID and modelID")
+  return { providerID, modelID }
+}
+
 function promptInput(body) {
   const common = operationIdentityInput(body)
   const text = typeof body.text === "string" ? body.text.trim() : ""
+  const model = promptModelInput(body)
+  const variant = typeof body.variant === "string" && body.variant.trim() ? body.variant.trim() : undefined
   if (!text) throw requestError("A text prompt is required")
-  return { ...common, text }
+  return { ...common, text, model, variant }
 }
 
 function stopInput(body) {
@@ -136,7 +147,7 @@ export function createSessionClaimServer({
       const input = operation === "prompt" ? promptInput(await readJSONBody(request)) : stopInput(await readJSONBody(request))
       const identity = { agentID, sessionID, clientRequestId: input.clientRequestId }
       const signaturePayload = operation === "prompt"
-        ? { text: input.text, directory: input.directory }
+        ? { text: input.text, directory: input.directory, model: input.model, variant: input.variant ?? null }
         : { directory: input.directory, operationToken: input.operationToken }
       const result = await runIdempotentMutation({
         operationLedger,
