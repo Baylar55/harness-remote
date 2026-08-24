@@ -138,6 +138,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
 }: TranscriptProps) {
   const transcriptRef = useRef<HTMLDivElement>(null)
   const nearBottomRef = useRef(true)
+  const lastScrollTopRef = useRef(0)
   const preservingOlderRef = useRef(false)
   const loadOlderRef = useRef(onLoadOlder)
   const followFrameRef = useRef<number | undefined>(undefined)
@@ -149,6 +150,14 @@ const ConversationTranscript = memo(function ConversationTranscript({
   function refreshJumpAffordances(element: HTMLElement) {
     const next = jumpAffordancesFor(element)
     setJumpAffordances((current) => current.top === next.top && current.bottom === next.bottom ? current : next)
+  }
+
+  function stopFollowingUpwardScroll() {
+    nearBottomRef.current = false
+    if (followFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(followFrameRef.current)
+      followFrameRef.current = undefined
+    }
   }
 
   useEffect(() => () => {
@@ -171,6 +180,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
       const current = transcriptRef.current
       if (!current || preservingOlderRef.current || !nearBottomRef.current) return
       current.scrollTop = current.scrollHeight
+      lastScrollTopRef.current = current.scrollTop
       refreshJumpAffordances(current)
     })
   }, [messages, loading, ready, sending])
@@ -198,6 +208,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
         const current = transcriptRef.current
         if (current) {
           current.scrollTop = previousTop + (current.scrollHeight - previousHeight)
+          lastScrollTopRef.current = current.scrollTop
           refreshJumpAffordances(current)
         }
         preservingOlderRef.current = false
@@ -211,7 +222,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
   function jumpToTop() {
     const current = transcriptRef.current
     if (!current) return
-    nearBottomRef.current = false
+    stopFollowingUpwardScroll()
     current.scrollTo({ top: 0, behavior: "smooth" })
   }
 
@@ -230,14 +241,20 @@ const ConversationTranscript = memo(function ConversationTranscript({
         aria-label="Conversation transcript"
         ref={transcriptRef}
         onWheel={(event) => {
-          if (event.deltaY < 0) nearBottomRef.current = false
+          if (event.deltaY < 0) stopFollowingUpwardScroll()
         }}
+        onTouchMove={() => stopFollowingUpwardScroll()}
         onScroll={(event) => {
           const element = event.currentTarget
+          const currentTop = element.scrollTop
+          const movingUp = currentTop < lastScrollTopRef.current
+          lastScrollTopRef.current = currentTop
+          if (movingUp) stopFollowingUpwardScroll()
+          else nearBottomRef.current = element.scrollHeight - currentTop - element.clientHeight <= NEAR_BOTTOM_PX
+
           if (scrollFrameRef.current !== undefined) return
           scrollFrameRef.current = window.requestAnimationFrame(() => {
             scrollFrameRef.current = undefined
-            nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
             refreshJumpAffordances(element)
           })
         }}
