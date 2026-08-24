@@ -28,7 +28,8 @@ assert.ok(discovery.includes('sessionID: string'), 'native Session identity must
 assert.ok(discovery.includes('transport: agent.transport'), 'native Session discovery must retain the transport that defines writer ownership semantics')
 assert.ok(discovery.includes('key: `${machineID}:${record.key}`'), 'render/controller identity must not collide across machines')
 assert.ok(discovery.includes('agentId: record.agentId'), 'native Session targets must stay scoped to their owning harness')
-assert.ok(discovery.includes('requiresExplicitClaim: record.transport === "acp" || external'), 'metadata-only ACP Sessions must never expose a composer before explicit writer claim')
+assert.ok(discovery.includes('record.transport === "acp" && record.writerOwned !== true'), 'metadata-only ACP Sessions must remain observe-only unless this daemon explicitly knows it owns the writer')
+assert.ok(discovery.includes('writerOwned?: boolean'), 'daemon-created ACP Sessions need an explicit ownership fact so the UI never asks the user to claim them twice')
 assert.ok(discovery.includes('supportedStopCapability(record.stopCapability)'), 'Stop must be gated by the explicit Session capability contract')
 assert.ok(discovery.includes('abortSupported: agent.capabilities?.abort === true'), 'Stop must also require the harness abort capability')
 assert.ok(discovery.includes('modelsSupported: agent.capabilities?.models === true'), 'native Session model controls must be capability-gated from machine discovery')
@@ -37,6 +38,8 @@ assert.equal(discovery.includes('launch('), false, 'discovery must not acquire a
 
 assert.ok(feed.includes('mergeLatestMessagePage'), 'native Session tail refresh must reuse HR3 message identity merging')
 assert.ok(feed.includes('prependOlderMessagePage'), 'native Session history paging must reuse HR3 older-page merging')
+assert.ok(feed.includes('normalizeNativeSessionTurns'), 'native Session chat must reuse v3 logical-turn normalization before rendering ACP envelopes')
+assert.ok(feed.includes('limit,\n    false'), 'native Session transcript reads must stay on the mature v3 authority instead of switching to ACP replay after claim')
 
 assert.ok(continuation.includes('client.claimSession(target.config, target.directory, target.sessionID)'), 'ACP continuation must claim the exact native Session through an explicit Session boundary')
 assert.equal(continuation.includes('listModels('), false, 'Session-first continuation must not expose model discovery as its ownership primitive')
