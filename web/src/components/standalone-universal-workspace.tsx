@@ -370,13 +370,16 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
 
   return (
     <div className="uw-standalone-host">
-      <ConversationWorkspace
-        machines={machines}
-        activeMachineID={activeID}
-        onActiveMachineID={setActiveMachineID}
-        onManageMachines={showMachines}
-      />
-      {primarySection === "sessions" ? <NativeSessionsWorkspace machines={machines} onBackToConversations={showConversations} onManageMachines={showMachines} /> : null}
+      {primarySection === "conversations" ? (
+        <ConversationWorkspace
+          machines={machines}
+          activeMachineID={activeID}
+          onActiveMachineID={setActiveMachineID}
+          onManageMachines={showMachines}
+        />
+      ) : (
+        <NativeSessionsWorkspace machines={machines} onBackToConversations={showConversations} onManageMachines={showMachines} />
+      )}
       {primarySection === "conversations" && machines.length > 0 ? <button type="button" className="hr-session-launcher" onClick={showSessions}><ChatIcon size={16} /> Sessions</button> : null}
       {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={(nextMachines) => {
         onPersistMachines(nextMachines)
