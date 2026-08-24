@@ -51,7 +51,9 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const [writeState, setWriteState] = useState<WriteState>(target.requiresExplicitClaim ? "observe" : "ready")
   const [resumeError, setResumeError] = useState<string | null>(null)
   const feedRef = useRef<NativeSessionFeed | null>(null)
+  const writeStateRef = useRef<WriteState>(writeState)
   feedRef.current = feed
+  writeStateRef.current = writeState
 
   const working = nativeSessionIsWorking(statusType)
   const writable = writeState === "ready"
@@ -84,7 +86,12 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     const current = feedRef.current
     if (!current) return
     try {
-      const next = await refreshNativeSessionFeed(target, current, undefined, 200, refreshHistory)
+      // Before an ACP claim, the journal is the safe read authority. After a successful claim the
+      // ACP replay/live cache becomes authoritative for this controller. Never switch an idle claimed
+      // Session back to journal paging: journal and live envelopes intentionally use different ids,
+      // and merging those two authorities is how one native Codex reply was rendered twice.
+      const keepOwnedAuthority = writeStateRef.current === "ready" && target.transport === "acp"
+      const next = await refreshNativeSessionFeed(target, current, undefined, 200, refreshHistory || keepOwnedAuthority)
       setFeed((visible) => visible === current ? next : visible)
       setError(null)
     } catch (reason) {
@@ -151,7 +158,8 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     if (!current || loadingOlder) return
     setLoadingOlder(true)
     try {
-      const next = await loadOlderNativeSessionFeed(target, current)
+      const keepOwnedAuthority = writeStateRef.current === "ready" && target.transport === "acp"
+      const next = await loadOlderNativeSessionFeed(target, current, undefined, 500, keepOwnedAuthority)
       feedRef.current = next
       setFeed((visible) => visible === current ? next : visible)
       setError(null)
@@ -168,7 +176,22 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     setResumeError(null)
     const result = await probeNativeSessionContinuation(target)
     if (result.writable) {
+      if (target.transport === "acp") {
+        try {
+          // Claiming an external ACP Session changes transcript authority. Replace the current
+          // journal-backed page once with the claimed ACP replay/cache instead of merging IDs from
+          // two sources. From this point all tail/older refreshes stay on the owned authority.
+          const next = await loadNativeSessionFeed(target, undefined, 200, true)
+          feedRef.current = next
+          setFeed(next)
+        } catch (reason) {
+          setWriteState("observe")
+          setResumeError(`The Session was claimed but its transcript could not be reconciled safely: ${reason instanceof Error ? reason.message : String(reason)}`)
+          return
+        }
+      }
       setWriteState("ready")
+      void refreshStatus()
       return
     }
     setWriteState("observe")
