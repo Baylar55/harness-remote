@@ -27,6 +27,10 @@ function internalAuthorization(host) {
   return `Basic ${Buffer.from(`${host.username ?? ""}:${host.password ?? ""}`, "utf8").toString("base64")}`
 }
 
+function nativeSessionKey(agentID, sessionID) {
+  return `${agentID}\u0000${sessionID}`
+}
+
 export class MachineDaemon {
   constructor(identity, { registry = new MachineRegistry(identity) } = {}) {
     this.registry = registry
@@ -142,6 +146,7 @@ export function createMachineDaemonServer({
 }) {
   const bridgeServer = createServer({ config, acp: primaryAcp, machineRegistry: daemon.registry, serviceOptions })
   const scopedAcpServers = new Map()
+  const claimedAcpSessions = new Set()
   const acpBridgeServer = (agentID) => {
     if (agentID === primaryAgentID) return bridgeServer
     const cached = scopedAcpServers.get(agentID)
@@ -182,6 +187,7 @@ export function createMachineDaemonServer({
     await service.models(sessionID)
     const adopted = await service.adoptTaskSession(sessionID)
     if (!adopted) throw daemonError("session_unavailable", `Native Session ${sessionID} disappeared during claim`)
+    claimedAcpSessions.add(nativeSessionKey(agentID, sessionID))
   }
   const promptSession = async (agentID, sessionID, { text, directory }) => {
     const entry = daemon.hostEntry(agentID)
@@ -223,6 +229,45 @@ export function createMachineDaemonServer({
       throw daemonError("session_prompt_rejected", message)
     }
   }
+  const stopSession = async (agentID, sessionID, { directory }) => {
+    const entry = daemon.hostEntry(agentID)
+    if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
+
+    if (entry.kind === "acp") {
+      if (!claimedAcpSessions.has(nativeSessionKey(agentID, sessionID))) {
+        throw daemonError("session_not_claimed", `Native Session ${sessionID} must be claimed before Harness Remote can stop it`)
+      }
+      const service = acpService(agentID)
+      if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot stop native Sessions`)
+      await service.abort(sessionID)
+      return
+    }
+
+    const host = entry.host
+    try {
+      await host.start?.()
+    } catch (error) {
+      throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${agentID} is unavailable`)
+    }
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : ""
+    const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session/${encodeURIComponent(sessionID)}/abort${query}`
+    const headers = { Accept: "application/json", "Content-Type": "application/json" }
+    const authorization = internalAuthorization(host)
+    if (authorization) headers.Authorization = authorization
+    let response
+    try {
+      response = await fetch(url, { method: "POST", headers, body: "{}" })
+    } catch {
+      throw daemonError("session_stop_uncertain", `Stop delivery for Session ${sessionID} is uncertain`, { ambiguous: true })
+    }
+    if (!response.ok) {
+      let detail = ""
+      try { detail = await response.text() } catch {}
+      const message = detail || `Stopping ${agentID} returned HTTP ${response.status}`
+      if (response.status >= 500) throw daemonError("session_stop_uncertain", message, { ambiguous: true })
+      throw daemonError("session_stop_rejected", message)
+    }
+  }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
   const threads = workThreadController ?? new WorkThreadController({ taskStore: tasks, taskRunController: runs })
@@ -248,6 +293,7 @@ export function createMachineDaemonServer({
     config,
     claimSession,
     promptSession,
+    stopSession,
     operationLedger: operations
   })
   const launchServer = createLaunchServer({ innerServer: claimServer, config, taskRunController: runs })
