@@ -1,214 +1,216 @@
 import assert from "node:assert/strict"
+import http from "node:http"
 import { spawn } from "node:child_process"
-import { createServer } from "node:http"
 import { chromium } from "playwright"
 
-const APP_PORT = 4319
-const API_PORT = 4320
-const APP_ORIGIN = `http://127.0.0.1:${APP_PORT}`
-const API_ORIGIN = `http://127.0.0.1:${API_PORT}`
-const sessionID = "codex-native-session-1"
-const directory = "/workspace/native-session-project"
-
-function json(response, body, status = 200, headers = {}) {
-  response.writeHead(status, {
-    "Access-Control-Allow-Origin": APP_ORIGIN,
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Harness-Backend",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Content-Type": "application/json",
-    ...headers
-  })
-  response.end(JSON.stringify(body))
-}
+const PREVIEW_PORT = 4175
+const DAEMON_PORT = 4421
+const APP_ORIGIN = `http://127.0.0.1:${PREVIEW_PORT}`
+const STORAGE_KEY = "harness-remote.workspace.machines.v1"
+const SESSION_ID = "native-codex-regression-1"
+const DIRECTORY = "/work/native-session-regression"
+const USER = "harness"
+const PASSWORD = "testpw"
 
 function message(id, role, text, created) {
   return {
-    info: { id, role, time: { created } },
-    parts: [{ id: `part-${id}`, type: "text", text }]
+    info: { id, role, sessionID: SESSION_ID, time: { created } },
+    parts: [{ id: `${id}-text`, type: "text", text }]
   }
 }
 
-const journalMessages = []
-const liveMessages = []
-for (let index = 0; index < 18; index += 1) {
-  const first = index === 0
-  const last = index === 17
-  const userText = first
-    ? `USER-FIRST-MARKER\n${"user transcript line ".repeat(12)}`
-    : last
-      ? `USER-LAST-MARKER\n${"user transcript line ".repeat(12)}`
-      : `User turn ${index + 1}\n${"user transcript line ".repeat(12)}`
-  const assistantText = first
-    ? `ASSISTANT-FIRST-MARKER\n${"assistant transcript line ".repeat(14)}`
-    : last
-      ? `ASSISTANT-LAST-MARKER\n${"assistant transcript line ".repeat(14)}`
-      : `Assistant reply ${index + 1}\n${"assistant transcript line ".repeat(14)}`
-  const created = 1_000 + index * 10
-  journalMessages.push(
-    message(`journal-user-${index}`, "user", userText, created),
-    message(`journal-assistant-${index}`, "assistant", assistantText, created + 1)
-  )
-  liveMessages.push(
-    message(`live-user-${index}`, "user", userText, created),
-    message(`live-assistant-${index}`, "assistant", assistantText, created + 1)
-  )
+function transcript(prefix) {
+  const messages = []
+  for (let index = 0; index < 24; index += 1) {
+    const first = index === 0
+    const last = index === 23
+    messages.push(message(
+      `${prefix}-user-${index}`,
+      "user",
+      first ? "USER-FIRST-MARKER" : last ? "USER-LAST-MARKER" : `User turn ${index}: ${"context ".repeat(10)}`,
+      1_000 + index * 2
+    ))
+    messages.push(message(
+      `${prefix}-assistant-${index}`,
+      "assistant",
+      first ? "ASSISTANT-FIRST-MARKER" : last ? "ASSISTANT-LAST-MARKER" : `Assistant reply ${index}: ${"answer ".repeat(14)}`,
+      1_001 + index * 2
+    ))
+  }
+  return messages
 }
 
-let claimed = false
+const journalMessages = transcript("journal")
+const liveMessages = transcript("live")
+let claimCount = 0
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": APP_ORIGIN,
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Harness-Backend",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Max-Age": "600"
+  }
+}
+
+function json(response, status, value, extraHeaders = {}) {
+  response.writeHead(status, { "Content-Type": "application/json", ...corsHeaders(), ...extraHeaders })
+  response.end(JSON.stringify(value))
+}
 
 function startFakeDaemon() {
-  return createServer((request, response) => {
-    if (request.method === "OPTIONS") return json(response, {})
-    const url = new URL(request.url || "/", API_ORIGIN)
+  const server = http.createServer((request, response) => {
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, corsHeaders())
+      response.end()
+      return
+    }
 
-    if (url.pathname === "/v1/machine") {
-      return json(response, {
-        machine: { id: "machine-browser-smoke", label: "Browser smoke" },
+    const url = new URL(request.url || "/", `http://127.0.0.1:${DAEMON_PORT}`)
+    if (request.method === "GET" && url.pathname === "/v1/machine") {
+      json(response, 200, {
+        machine: { id: "machine-native-regression", name: "Native Session Test", createdAt: new Date().toISOString() },
         agents: [{
           id: "codex",
-          label: "Codex",
+          label: "Codex CLI",
           backend: "codex",
           transport: "acp",
           managed: true,
           state: "available",
-          capabilities: { sessions: true, abort: true, models: true },
+          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
           contract: { sessions: { stop: "owned-session-native-cancel" } }
         }]
       })
+      return
     }
 
-    if (url.pathname === "/v1/projects") {
-      return json(response, [{
-        id: "project-native-session",
-        machineId: "machine-browser-smoke",
-        name: "native-session-project",
-        path: directory,
-        kind: "git"
-      }])
-    }
-
-    if (url.pathname === "/v1/agents/codex/experimental/session") {
-      return json(response, [{
-        id: sessionID,
-        title: "Codex CLI native session",
-        directory,
-        time: { created: 1_000, updated: 2_000 },
-        external: true
-      }])
-    }
-
-    if (url.pathname === "/v1/agents/codex/session") {
-      return json(response, [{
-        id: sessionID,
-        title: "Codex CLI native session",
-        directory,
-        time: { created: 1_000, updated: 2_000 },
-        external: true
-      }])
-    }
-
-    if (url.pathname === "/v1/agents/codex/session/status") {
-      return json(response, { [sessionID]: { type: "idle" } })
-    }
-
-    if (url.pathname === `/v1/agents/codex/session/${sessionID}/claim` && request.method === "POST") {
-      claimed = true
-      return json(response, { ok: true })
-    }
-
-    if (url.pathname === `/v1/agents/codex/session/${sessionID}/message`) {
-      const page = claimed ? liveMessages : journalMessages
-      return json(response, page, 200, {
-        "X-Harness-Has-More": "false"
-      })
-    }
-
-    if (url.pathname === `/v1/agents/codex/session/${sessionID}/prompt` && request.method === "POST") {
-      return json(response, { state: "accepted" })
-    }
-
-    if (url.pathname === "/v1/agents/codex/config/providers") {
-      return json(response, {
-        providers: [{
-          id: "openai",
-          name: "OpenAI",
-          models: [{ id: "gpt-5.6", name: "GPT-5.6", default: true }]
+    if (request.method === "GET" && url.pathname === "/v1/projects") {
+      json(response, 200, {
+        projects: [{
+          id: "project-native-regression",
+          machineId: "machine-native-regression",
+          name: "native-session-regression",
+          path: DIRECTORY,
+          kind: "git",
+          configured: true
         }]
       })
+      return
     }
 
-    return json(response, { error: `Unhandled fake route: ${request.method} ${url.pathname}` }, 404)
-  }).listen(API_PORT, "127.0.0.1")
-}
+    if (request.method === "GET" && url.pathname === "/v1/agents/codex/experimental/session") {
+      json(response, 200, [{
+        id: SESSION_ID,
+        title: "Codex CLI regression session",
+        directory: DIRECTORY,
+        external: true,
+        time: { created: 1_000, updated: 2_000 }
+      }])
+      return
+    }
 
-function startPreview() {
-  return spawn("npx", ["vite", "preview", "--host", "127.0.0.1", "--port", String(APP_PORT)], {
-    cwd: new URL("..", import.meta.url),
-    stdio: ["ignore", "pipe", "pipe"]
+    if (request.method === "GET" && url.pathname === "/v1/agents/codex/session/status") {
+      json(response, 200, { [SESSION_ID]: { type: "idle" } })
+      return
+    }
+
+    if (request.method === "GET" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/message`) {
+      const refresh = url.searchParams.get("refresh") === "1"
+      json(response, 200, refresh ? liveMessages : journalMessages, {
+        "X-Has-More": "0"
+      })
+      return
+    }
+
+    if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/claim`) {
+      claimCount += 1
+      json(response, 200, { ok: true })
+      return
+    }
+
+    // The observer may attempt to establish live refresh. A failed optional stream must not affect
+    // the authoritative transcript reads used by this regression smoke.
+    if (request.method === "GET" && url.pathname.includes("/global/event")) {
+      response.writeHead(204, corsHeaders())
+      response.end()
+      return
+    }
+
+    json(response, 404, { error: `No fake route for ${request.method} ${url.pathname}` })
+  })
+
+  return new Promise((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(DAEMON_PORT, "127.0.0.1", () => resolve(server))
   })
 }
 
+function startPreview() {
+  const command = process.platform === "win32" ? "npm.cmd" : "npm"
+  return spawn(command, ["run", "preview", "--", "--host", "127.0.0.1", "--port", String(PREVIEW_PORT), "--strictPort"], {
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32"
+  })
+}
+
+async function ready(url) {
+  const deadline = Date.now() + 30_000
+  let lastError
+  while (Date.now() < deadline) {
+    try {
+      if ((await fetch(url)).ok) return
+    } catch (error) {
+      lastError = error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  throw lastError || new Error(`Preview did not become ready: ${url}`)
+}
+
 function stopPreview(child) {
-  if (!child || child.killed) return
-  child.kill("SIGTERM")
+  if (!child || child.killed || !child.pid) return
+  try {
+    if (process.platform === "win32") child.kill("SIGTERM")
+    else process.kill(-child.pid, "SIGTERM")
+  } catch {
+    try { child.kill("SIGTERM") } catch {}
+  }
 }
 
 function stopServer(server) {
-  if (!server) return
-  server.close()
+  try { server.closeAllConnections?.() } catch {}
+  try { server.close() } catch {}
 }
 
-async function ready(origin) {
-  const deadline = Date.now() + 15_000
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(origin)
-      if (response.ok) return
-    } catch {}
-    await new Promise((resolve) => setTimeout(resolve, 100))
-  }
-  throw new Error(`Preview did not become ready at ${origin}`)
-}
-
-async function seedProfile(page) {
-  await page.addInitScript(({ host, port }) => {
-    localStorage.clear()
-    localStorage.setItem("harness.remote.profiles", JSON.stringify({
-      version: 1,
-      activeProfileID: "browser-smoke",
-      profiles: [{
-        id: "browser-smoke",
-        label: "Browser smoke",
-        config: {
-          backend: "codex",
-          host,
-          port,
-          username: "harness",
-          password: "secret"
-        }
-      }]
-    }))
-  }, { host: "127.0.0.1", port: API_PORT })
+async function seed(page) {
+  await page.addInitScript(({ key, port, user, password }) => {
+    localStorage.setItem(key, JSON.stringify([{
+      id: "machine-native-regression",
+      name: "Native Session Test",
+      config: { backend: "opencode", host: "127.0.0.1", port, username: user, password }
+    }]))
+  }, { key: STORAGE_KEY, port: DAEMON_PORT, user: USER, password: PASSWORD })
 }
 
 async function assertSessionContract(browser, viewport, mobile) {
-  claimed = false
-  const context = await browser.newContext({ viewport, hasTouch: mobile, isMobile: mobile })
+  const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
-  await seedProfile(page)
+  await seed(page)
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
 
-  const sessionRow = page.getByText("Codex CLI native session", { exact: true }).first()
-  await sessionRow.waitFor({ state: "visible" })
-  await sessionRow.click()
+  const sessionsTab = page.locator('.hr-mobile-nav button[aria-current="page"]').filter({ hasText: "Sessions" })
+  if (mobile) await sessionsTab.waitFor({ state: "visible" })
+  await page.locator('.hr-native-workspace[aria-label="Sessions"]').waitFor({ state: "visible" })
 
-  const continueButton = page.getByRole("button", { name: /continue/i })
-  await continueButton.waitFor({ state: "visible" })
+  await page.getByRole("button", { name: /Codex CLI regression session/ }).click()
+  await page.locator(".hr-native-session-observer").waitFor({ state: "visible" })
+  await page.getByText("ASSISTANT-FIRST-MARKER", { exact: true }).waitFor({ state: "visible" })
 
-  // Before claiming, the external journal is the read authority and the composer remains hidden.
-  assert.equal(await page.locator(".uw-composer-shell").count(), 1)
-  await continueButton.click()
-  await page.locator(".uw-composer-shell textarea").waitFor({ state: "visible" })
+  assert.equal(await page.locator(".uw-composer-shell").isVisible(), false, "external ACP Session must begin observe-only")
+
+  await page.getByRole("button", { name: "Continue this Session" }).click()
+  await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
+  assert.equal(claimCount > 0, true, "Continue must cross the explicit ACP claim boundary")
 
   // Journal and ACP replay deliberately use different ids for the same semantic transcript in this
   // fixture. The UI must show one native response, never both authorities merged together.
@@ -241,11 +243,10 @@ async function assertSessionContract(browser, viewport, mobile) {
   assert.ok(composer && size, "composer geometry unavailable")
   assert.ok(composer.y >= -1 && composer.y + composer.height <= size.height + 1, `composer escaped the viewport: ${JSON.stringify({ composer, size })}`)
 
-  // TaskDeskConversation intentionally follows a newly loaded/sent turn while the reader remains at
-  // the bottom. A real upward gesture exits that mode before the browser changes scrollTop. Signal
-  // that same user intent here instead of assigning scrollTop behind React's back, then wait through
-  // the pending follow frame. If the transcript returns to the bottom after this, the UI is genuinely
-  // fighting the reader's scroll rather than the test manufacturing a race with autoscroll.
+  // TaskDeskConversation follows the bottom while the reader has not expressed scroll intent. A
+  // real upward gesture disables that follow mode before scrollTop changes, so exercise the same
+  // ordering here and wait through any already-scheduled follow frame. If it still snaps back down,
+  // the shared chat surface is genuinely fighting user scroll.
   await transcript.evaluate((element) => {
     element.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true, cancelable: true }))
     element.scrollTop = 0
