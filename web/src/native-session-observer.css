@@ -4,11 +4,49 @@
 }
 
 /* Observation deliberately reuses the HR3 conversation surface. Until a harness confirms the
-   native Session can be resumed safely, hide only the composer instead of creating a second chat. */
-.hr-native-session-observer .uw-composer-shell {
+   native Session can be resumed safely, hide only the existing composer instead of creating a
+   second chat. Once continuation succeeds, the same composer is revealed in place. */
+.hr-native-session-observer.observe-only .uw-composer-shell {
   display: none;
+}
+
+.hr-native-session-continuation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--uw-border, rgba(127, 127, 127, 0.24));
+  border-radius: 12px;
+}
+
+.hr-native-session-continuation > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.hr-native-session-continuation span {
+  font-size: 0.82rem;
+  opacity: 0.72;
+}
+
+.hr-native-session-continuation button {
+  flex: 0 0 auto;
 }
 
 .hr-native-session-observer-error {
   margin: 0 0 8px;
+}
+
+@media (max-width: 640px) {
+  .hr-native-session-continuation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hr-native-session-continuation button {
+    width: 100%;
+  }
 }
