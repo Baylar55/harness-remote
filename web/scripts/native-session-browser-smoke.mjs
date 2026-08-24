@@ -44,6 +44,8 @@ let nativePromptDispatches
 let uncertainDelivered
 let ledger
 let clock
+let sseResponses
+let liveEventTypes
 
 function resetFakeState() {
   claimed = false
@@ -55,6 +57,17 @@ function resetFakeState() {
   uncertainDelivered = false
   ledger = new Map()
   clock = 10_000
+  sseResponses = new Set()
+  liveEventTypes = []
+}
+
+function emitLiveEvent(type) {
+  liveEventTypes.push(type)
+  const frame = `data: ${JSON.stringify({ directory: DIRECTORY, payload: { type, properties: { info: { sessionID: SESSION_ID } } } })}\n\n`
+  for (const response of [...sseResponses]) {
+    try { response.write(frame) }
+    catch { sseResponses.delete(response) }
+  }
 }
 
 function appendSuccessTurn(prompt, requestId, reply = SUCCESS_REPLY) {
@@ -208,6 +221,19 @@ function startFakeDaemon() {
       return
     }
 
+    if (request.method === "GET" && url.pathname.includes("/global/event")) {
+      response.writeHead(200, {
+        ...corsHeaders(),
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive"
+      })
+      response.write(": connected\n\n")
+      sseResponses.add(response)
+      request.on("close", () => sseResponses.delete(response))
+      return
+    }
+
     if (request.method === "POST" && url.pathname === `/v1/agents/pi/session/${SESSION_ID}/claim`) {
       claimCount += 1
       claimed = true
@@ -232,6 +258,14 @@ function startFakeDaemon() {
         else appendSuccessTurn(body.text, requestId)
       }
 
+      if (body.text === SUCCESS_PROMPT) {
+        // Deliver both transcript and lifecycle events while the Send POST is still unresolved.
+        // WorkThreadConversation must reconcile those reads without ever issuing another prompt.
+        emitLiveEvent("message.updated")
+        emitLiveEvent("session.updated")
+        await new Promise((resolve) => setTimeout(resolve, 650))
+      }
+
       if (body.text === LOST_PROMPT && !uncertainDelivered) {
         uncertainDelivered = true
         json(response, 202, { status: "uncertain", clientRequestId: requestId })
@@ -249,12 +283,6 @@ function startFakeDaemon() {
 
     if (request.method === "GET" && (url.pathname.includes("/question") || url.pathname.includes("/permission"))) {
       json(response, 200, [])
-      return
-    }
-
-    if (request.method === "GET" && url.pathname.includes("/global/event")) {
-      response.writeHead(204, corsHeaders())
-      response.end()
       return
     }
 
@@ -378,6 +406,7 @@ async function assertSessionContract(browser, viewport, mobile) {
   await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
   assert.equal(claimCount, 1, "one Continue click must claim the exact PI Session once")
   assert.ok(modelCatalogReads > 0, "the mature v3 controller must load the PI model catalog after ownership")
+  await waitFor(() => sseResponses.size > 0, "PI v3 live event connection")
 
   for (const marker of ["PI-HISTORY-USER-1", "PI-HISTORY-ASSISTANT-1", "PI-HISTORY-USER-2", "PI-HISTORY-ASSISTANT-2"]) {
     assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `historical PI marker duplicated: ${marker}`)
@@ -395,9 +424,13 @@ async function assertSessionContract(browser, viewport, mobile) {
   const httpBefore = promptHttpBodies.length
   const dispatchBefore = nativePromptDispatches
   await sendPrompt(page, SUCCESS_PROMPT)
+  // Force the v3 foreground reconciliation path while the delayed prompt POST is still unresolved.
+  // This combines StrictMode, live events and a concurrent authoritative read around one Send.
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")))
   await waitFor(() => promptHttpBodies.length >= httpBefore + 1, "PI success HTTP attempt")
+  await waitFor(() => liveEventTypes.includes("message.updated") && liveEventTypes.includes("session.updated"), "PI live events during Send")
   assert.equal(promptHttpBodies.length, httpBefore + 1, "one PI Send click must create one prompt HTTP operation")
-  assert.equal(nativePromptDispatches, dispatchBefore + 1, "one PI Send click must dispatch one native session/prompt")
+  assert.equal(nativePromptDispatches, dispatchBefore + 1, "one PI Send click must dispatch one native session/prompt even during live reconciliation")
   const firstBody = promptHttpBodies[httpBefore]
   assert.equal(firstBody.text, SUCCESS_PROMPT)
   assert.deepEqual(firstBody.model, { providerID: "pi", modelID: "pi-coding" })
@@ -484,9 +517,12 @@ try {
   await assertSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: mobile")
   await assertSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: single dispatch, ordered activity, error recovery, uncertain-delivery reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: single dispatch, live reconciliation, ordered activity, error recovery, uncertain-delivery reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
+  for (const response of sseResponses || []) {
+    try { response.end() } catch {}
+  }
   stopPreview(preview)
   stopServer(daemon)
 }
