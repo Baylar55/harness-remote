@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import http from "node:http"
 import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
 
-const SESSION_OPERATION_ROUTE = /^\/v1\/agents\/([^/]+)\/session\/([^/]+)\/(claim|prompt|stop)$/
+const SESSION_OPERATION_ROUTE = /^\/v1\/agents\/([^/]+)\/session\/([^/]+)\/(claim|prompt|stop|handoff)$/
 
 function requestError(message) {
   const error = new Error(message)
@@ -20,6 +20,7 @@ function statusForSessionError(error) {
     "session_not_claimed",
     "session_prompt_rejected",
     "session_stop_rejected",
+    "handoff_rejected",
     "idempotency_conflict"
   ].includes(error?.code)) return 409
   // Native harness writer-lock errors are intentionally surfaced as conflicts rather than generic
@@ -75,20 +76,33 @@ function stopInput(body) {
   return { ...common, operationToken }
 }
 
+function handoffInput(body) {
+  const common = operationIdentityInput(body)
+  const targetAgentID = typeof body.targetAgentID === "string" ? body.targetAgentID.trim() : ""
+  const model = promptModelInput(body)
+  const variant = typeof body.variant === "string" && body.variant.trim() ? body.variant.trim() : undefined
+  const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : undefined
+  if (!common.directory) throw requestError("Native Session handoff requires a project directory")
+  if (!targetAgentID || targetAgentID.length > 200) throw requestError("Native Session handoff requires a targetAgentID")
+  return { ...common, targetAgentID, model, variant, title }
+}
+
 function mutationSignature(operation, payload) {
   return createHash("sha256").update(JSON.stringify({ operation, ...payload })).digest("hex")
 }
 
 async function runIdempotentMutation({ operationLedger, identity, signature, dispatch }) {
   const started = await operationLedger.begin({ ...identity, signature })
-  if (started.duplicate) return { status: started.state, duplicate: true }
+  if (started.duplicate) {
+    return { status: started.state, duplicate: true, result: started.entry.result }
+  }
 
   let dispatched = false
   try {
-    await dispatch()
+    const result = await dispatch()
     dispatched = true
-    await operationLedger.accept(identity)
-    return { status: "accepted", duplicate: false }
+    await operationLedger.accept({ ...identity, result })
+    return { status: "accepted", duplicate: false, result }
   } catch (error) {
     const ambiguous = dispatched || error?.ambiguous === true
     await operationLedger.fail({ ...identity, ambiguous })
@@ -100,11 +114,12 @@ async function runIdempotentMutation({ operationLedger, identity, signature, dis
 /**
  * Machine-daemon boundary for native Session ownership and idempotent mutations.
  *
- * None of these operations creates a Session or touches the Task/Run compatibility stack. Mutation
- * ids are persisted before dispatch; a duplicate accepted id returns success without dispatching
- * again. A pending/uncertain id is never replayed automatically after a crash or ambiguous local
- * transport failure because duplicate coding work or lifecycle mutations are worse than asking the
- * client to reconcile the real native Session.
+ * Prompt and Stop mutate one existing native Session. Handoff is the deliberate cross-agent
+ * exception: it creates one new real native Session on the target harness and returns that native
+ * identity. No operation here creates a Task, Conversation or Run. Mutation ids are persisted before
+ * dispatch; accepted resource-creating operations also persist their result before HTTP success so a
+ * lost response can return the exact same target Session. Pending/uncertain operations are never
+ * replayed automatically after a crash or ambiguous local transport failure.
  */
 export function createSessionClaimServer({
   innerServer,
@@ -112,6 +127,7 @@ export function createSessionClaimServer({
   claimSession,
   promptSession,
   stopSession,
+  handoffSession,
   operationLedger,
   createServer = http.createServer
 }) {
@@ -143,25 +159,46 @@ export function createSessionClaimServer({
       if (!operationLedger) throw new Error("Native Session operation ledger is not configured")
       if (operation === "prompt" && typeof promptSession !== "function") throw new Error("Native Session prompt transport is not configured")
       if (operation === "stop" && typeof stopSession !== "function") throw new Error("Native Session stop transport is not configured")
+      if (operation === "handoff" && typeof handoffSession !== "function") throw new Error("Native Session handoff transport is not configured")
 
-      const input = operation === "prompt" ? promptInput(await readJSONBody(request)) : stopInput(await readJSONBody(request))
+      const body = await readJSONBody(request)
+      const input = operation === "prompt"
+        ? promptInput(body)
+        : operation === "stop"
+          ? stopInput(body)
+          : handoffInput(body)
+      if (operation === "handoff" && input.targetAgentID === agentID) {
+        throw requestError("Cross-agent handoff requires a different target agent")
+      }
+
       const identity = { agentID, sessionID, clientRequestId: input.clientRequestId }
       const signaturePayload = operation === "prompt"
         ? { text: input.text, directory: input.directory, model: input.model, variant: input.variant ?? null }
-        : { directory: input.directory, operationToken: input.operationToken }
+        : operation === "stop"
+          ? { directory: input.directory, operationToken: input.operationToken }
+          : {
+              directory: input.directory,
+              targetAgentID: input.targetAgentID,
+              model: input.model,
+              variant: input.variant ?? null,
+              title: input.title ?? null
+            }
       const result = await runIdempotentMutation({
         operationLedger,
         identity,
         signature: mutationSignature(operation, signaturePayload),
         dispatch: () => operation === "prompt"
           ? promptSession(agentID, sessionID, input)
-          : stopSession(agentID, sessionID, input)
+          : operation === "stop"
+            ? stopSession(agentID, sessionID, input)
+            : handoffSession(agentID, sessionID, input)
       })
       const status = result.status === "accepted" ? 200 : 202
       writeJSON(response, status, {
         status: result.status,
         clientRequestId: input.clientRequestId,
-        sessionID
+        sessionID,
+        ...(result.result ? { result: result.result } : {})
       })
     } catch (error) {
       writeJSON(response, statusForSessionError(error), {
