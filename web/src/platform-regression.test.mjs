@@ -20,8 +20,10 @@ assert.match(desktopBridge, /profileId: string/, 'Desktop stream adapter must ac
 // native-response.test.mjs rather than asserted against the text of its own source.
 assert.match(api, /from "\.\/nativeResponse"/, 'Native normalization must come from the module that is unit tested')
 assert.match(api, /normalizeNativeResponseData\(response\.data\) as T/, 'Capacitor responses must use native JSON normalization before reaching API callers')
-assert.match(machineClient, /if \(typeof parsed === "string"\)/, 'native machine discovery must accept a JSON string payload')
-assert.match(machineClient, /parsed = JSON\.parse\(parsed\)/, 'stringified machine discovery payloads must be decoded')
+assert.match(machineClient, /function parseJSONValue\(value: unknown, label: string\)/, 'machine-scoped payloads must share one JSON-string normalizer')
+assert.match(machineClient, /if \(typeof value !== "string"\) return value/, 'native machine discovery must accept already-decoded payloads')
+assert.match(machineClient, /JSON\.parse\(value\)/, 'stringified machine discovery payloads must be decoded')
+assert.match(machineClient, /const parsed = parseJSONValue\(value, "machine discovery"\)/, 'machine discovery must pass through the shared JSON-string normalizer')
 assert.match(machineClient, /remember\(config, machineSnapshot\(response\.data\)\)/, 'Capacitor machine discovery must validate the native response before caching the last-known healthy snapshot')
 assert.match(machineClient, /DISCOVERY_STALE_GRACE_MS = 45_000/, 'machine discovery should retain a short last-known-good grace window for transient mobile transport drops')
 
