@@ -5,6 +5,8 @@ const discovery = readFileSync(new URL('./native-session-discovery.ts', import.m
 const feed = readFileSync(new URL('./native-session-feed.ts', import.meta.url), 'utf8')
 const continuation = readFileSync(new URL('./native-session-continuation.ts', import.meta.url), 'utf8')
 const observer = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
+const sessionHome = readFileSync(new URL('./components/native-session-home.tsx', import.meta.url), 'utf8')
+const standalone = readFileSync(new URL('./components/standalone-universal-workspace.tsx', import.meta.url), 'utf8')
 const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8')
 
 assert.ok(discovery.includes('listGlobalSessions(config).catch(() => client.listSessions(config))'), 'native discovery must retain global-list fallback')
@@ -31,7 +33,17 @@ assert.equal(observer.includes('createSession('), false, 'same-Session continuat
 assert.equal(observer.includes('createTask('), false, 'same-Session continuation must not synthesize a Task/Conversation')
 assert.equal(observer.includes('launch('), false, 'same-Session continuation must not use the Task launcher')
 
-assert.ok(main.includes('<StandaloneUniversalWorkspace'), 'the validated HR3 default workspace must remain the product entrypoint during the Session-first preview slice')
-assert.equal(main.includes('NativeSessionObserver'), false, 'the Session-first preview must not silently replace the default HR3 shell')
+assert.ok(sessionHome.includes('discoverMachineNativeSessions'), 'the Sessions home must use native discovery rather than Task data')
+assert.ok(sessionHome.includes('SESSION_HOME_REFRESH_MS = 30_000'), 'native Session discovery must stay off the existing 10s Conversation workspace poll')
+assert.equal(sessionHome.includes('taskClient'), false, 'the Sessions home must not depend on Task/Conversation storage')
+
+assert.ok(standalone.includes('<ConversationWorkspace'), 'the validated HR3 Conversation workspace must remain mounted')
+assert.ok(standalone.includes('primarySection === "sessions" ? <NativeSessionsWorkspace'), 'Sessions must be an additive section, not a replacement shell')
+assert.ok(standalone.includes('<NativeSessionObserver'), 'the integrated Sessions detail must reuse the native Session controller')
+assert.ok(standalone.includes('<NativeSessionHome'), 'the integrated workspace must expose native Sessions directly')
+assert.equal(standalone.includes('SessionFirstPreviewPage'), false, 'the product integration must not promote the isolated preview shell')
+
+assert.ok(main.includes('<StandaloneUniversalWorkspace'), 'the validated HR3 default workspace must remain the product entrypoint')
+assert.equal(main.includes('NativeSessionObserver'), false, 'main.tsx must not bypass the HR3 workspace host')
 
 console.log('session-first regression guards passed')
