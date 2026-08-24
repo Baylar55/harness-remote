@@ -40,7 +40,13 @@ let installed = false
 
 export function nativeSessionIsWorking(status?: string): boolean {
   const value = status?.trim().toLowerCase() || ""
-  return value === "busy" || value === "running" || value === "working" || value === "in_progress" || value === "in-progress"
+  return value === "busy"
+    || value === "running"
+    || value === "working"
+    || value === "retry"
+    || value === "waiting"
+    || value === "in_progress"
+    || value === "in-progress"
 }
 
 function projectionID(target: NativeSessionSurfaceTarget): string {
