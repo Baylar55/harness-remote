@@ -57,6 +57,9 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
         stopCapability: targetAgent.contract?.sessions?.stop,
         abortSupported: targetAgent.capabilities?.abort === true,
         modelsSupported: targetAgent.capabilities?.models === true,
+        // The daemon created this target Session and owns its ACP writer already. Treating it like a
+        // discovered external Session forced a redundant second "Continue this Session" step.
+        writerOwned: true,
         session: {
           id: response.result.target.sessionID,
           title,
