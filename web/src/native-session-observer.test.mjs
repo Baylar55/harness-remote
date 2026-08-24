@@ -1,29 +1,32 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const source = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
-assert.ok(source.includes('value === "busy" || value === "running" || value === "working" || value === "in_progress" || value === "in-progress"'), 'native Session working state must retain the known live status aliases')
-assert.ok(source.includes('import { TaskDeskConversation } from "./taskdesk-conversation"'), 'native Session observation must reuse the HR3 chat surface')
-assert.ok(source.includes('<TaskDeskConversation'), 'observer should render the existing chat component')
-assert.ok(source.includes('hr-native-session-observer tdw-work-thread-conversation'), 'native Session detail must inherit the mature HR3 chat formatting scope')
-assert.equal(source.includes('TaskDeskMessageContent'), false, 'observer must not grow a second message renderer')
-assert.equal(source.includes('createTask('), false, 'observation must not synthesize a Task/Conversation')
-assert.equal(source.includes('launch('), false, 'observation must not acquire a writer as a side effect')
-assert.equal(source.includes('sendPrompt('), false, 'read-only observation must not send to the native Session')
+const observer = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
+const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
+const workThread = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
 
-// A claimed ACP Session must never alternate between journal ids and ACP replay/live ids. The claim
-// boundary replaces the read-only journal page once, and all later refresh/paging stays on the same
-// owned authority. This protects both single-render semantics and chronological ordering.
-assert.ok(source.includes('writeStateRef.current === "ready" && target.transport === "acp"'), 'claimed ACP refreshes must detect owned transcript authority')
-assert.ok(source.includes('loadNativeSessionFeed(target, undefined, 200, true)'), 'successful ACP claim must replace the journal page with the owned replay/cache')
-assert.ok(source.includes('refreshHistory || keepOwnedAuthority'), 'claimed ACP tail refresh must not fall back to journal paging')
-assert.ok(source.includes('loadOlderNativeSessionFeed(target, current, undefined, 500, keepOwnedAuthority)'), 'claimed ACP older paging must stay on one transcript authority')
+assert.ok(observer.includes('import { WorkThreadConversation } from "./work-thread-conversation"'), 'native Session must mount the mature v3 conversation controller')
+assert.ok(observer.includes('<WorkThreadConversation'), 'native Session must render the v3 controller directly')
+assert.ok(observer.includes('registerNativeSessionV3Adapter'), 'native identity must be translated by a thin compatibility adapter')
+assert.ok(observer.includes('probeNativeSessionContinuation(target)'), 'ACP writer ownership must be explicit before the v3 composer mounts')
+assert.equal(observer.includes('TaskDeskConversation'), false, 'observer must not mount the chat renderer directly')
+assert.equal(observer.includes('loadNativeSessionFeed'), false, 'observer must not own transcript loading or paging')
+assert.equal(observer.includes('refreshNativeSessionFeed'), false, 'observer must not own a parallel tail refresh')
+assert.equal(observer.includes('startTaskDeskSessionLiveRefresh'), false, 'observer must not own a parallel live-event controller')
+assert.equal(observer.includes('sendNativeSessionPrompt'), false, 'observer must not own a parallel send controller')
+assert.equal(observer.includes('stopNativeSession'), false, 'observer must not own a parallel Stop controller')
+assert.equal(observer.includes('ModelSelectionControl'), false, 'observer must not own a parallel model picker')
 
-const css = readFileSync(new URL('./native-session-observer.css', import.meta.url), 'utf8')
-assert.ok(css.includes('.hr-native-session-observer.observe-only .uw-composer-shell'), 'observe-only mode should hide the existing composer rather than replace the chat')
-assert.match(css, /\.hr-native-session-observer\s*\{[\s\S]*?display:\s*flex;[\s\S]*?flex-direction:\s*column;[\s\S]*?overflow:\s*hidden;/, 'native Session detail must be a bounded flex column')
-assert.match(css, /\.hr-native-session-observer \.uw-transcript-shell\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?flex:\s*1;[\s\S]*?overflow:\s*hidden;/, 'transcript shell must shrink inside the Session detail instead of pushing the composer away')
-assert.match(css, /\.hr-native-session-observer \.uw-transcript\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?flex:\s*1;[\s\S]*?overflow-y:\s*auto;/, 'the reused HR3 transcript must remain the vertical scroll owner')
-assert.match(css, /\.hr-native-session-continuation\s*\{[\s\S]*?flex:\s*0 0 auto;/, 'Continue banner must not consume the transcript scroll region')
+assert.ok(adapter.includes('api.loadMessagePage = async function patchedLoadMessagePage'), 'adapter must observe the pages requested by the v3 controller')
+assert.ok(adapter.includes('!entry.initialPageCaptured || Boolean(before)'), 'initial history and explicit older paging may create compatibility Run identities')
+assert.ok(adapter.includes('if (!mayDiscoverRuns) return'), 'tail replay must not manufacture duplicate Runs from changed replay ids')
+assert.ok(adapter.includes(':request:${clientRequestId}'), 'new native prompts must use durable client request identity for the compatibility Run')
+assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not contain rendering')
+assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
 
-console.log('native session observer tests passed')
+assert.ok(workThread.includes('const sendInFlightRef = useRef(false)'), 'v3 send in-flight guard must remain authoritative')
+assert.ok(workThread.includes('api.loadMessagePage'), 'v3 transcript paging must remain authoritative')
+assert.ok(workThread.includes('startTaskDeskSessionLiveRefresh'), 'v3 live routing must remain authoritative')
+assert.ok(workThread.includes('buildWorkThreadTimeline'), 'v3 logical timeline must remain authoritative')
+
+console.log('native Session v3-controller tests passed')
