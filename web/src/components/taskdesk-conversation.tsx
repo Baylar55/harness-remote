@@ -230,7 +230,13 @@ const ConversationTranscript = memo(function ConversationTranscript({
         aria-label="Conversation transcript"
         ref={transcriptRef}
         onWheel={(event) => {
-          if (event.deltaY < 0) nearBottomRef.current = false
+          if (event.deltaY < 0) {
+            nearBottomRef.current = false
+            if (followFrameRef.current !== undefined) {
+              window.cancelAnimationFrame(followFrameRef.current)
+              followFrameRef.current = undefined
+            }
+          }
         }}
         onScroll={(event) => {
           const element = event.currentTarget
