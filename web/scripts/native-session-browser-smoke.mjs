@@ -8,6 +8,7 @@ const DAEMON_PORT = 4421
 const APP_ORIGIN = `http://127.0.0.1:${PREVIEW_PORT}`
 const STORAGE_KEY = "harness-remote.workspace.machines.v1"
 const SESSION_ID = "native-codex-regression-1"
+const HANDOFF_SESSION_ID = "native-opencode-handoff-1"
 const DIRECTORY = "/work/native-session-regression"
 const USER = "harness"
 const PASSWORD = "testpw"
@@ -46,6 +47,7 @@ const liveMessages = transcript("live")
 let claimCount = 0
 let modelCatalogReads = 0
 const promptBodies = []
+const handoffBodies = []
 
 const MODEL_CATALOG = {
   models: [
@@ -110,16 +112,28 @@ function startFakeDaemon() {
     if (request.method === "GET" && url.pathname === "/v1/machine") {
       json(response, 200, {
         machine: { id: "machine-native-regression", name: "Native Session Test", createdAt: new Date().toISOString() },
-        agents: [{
-          id: "codex",
-          label: "Codex CLI",
-          backend: "codex",
-          transport: "acp",
-          managed: true,
-          state: "available",
-          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
-          contract: { sessions: { stop: "owned-session-native-cancel" } }
-        }]
+        agents: [
+          {
+            id: "codex",
+            label: "Codex CLI",
+            backend: "codex",
+            transport: "acp",
+            managed: true,
+            state: "available",
+            capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+            contract: { sessions: { stop: "owned-session-native-cancel" } }
+          },
+          {
+            id: "opencode",
+            label: "OpenCode",
+            backend: "opencode",
+            transport: "http",
+            managed: true,
+            state: "available",
+            capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: false },
+            contract: { sessions: { stop: "native-abort" } }
+          }
+        ]
       })
       return
     }
@@ -149,8 +163,18 @@ function startFakeDaemon() {
       return
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/agents/opencode/experimental/session") {
+      json(response, 200, [])
+      return
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/agents/codex/session/status") {
       json(response, 200, { [SESSION_ID]: { type: "idle" } })
+      return
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/agents/opencode/session/status") {
+      json(response, 200, { [HANDOFF_SESSION_ID]: { type: "idle" } })
       return
     }
 
@@ -168,6 +192,11 @@ function startFakeDaemon() {
       return
     }
 
+    if (request.method === "GET" && url.pathname === `/v1/agents/opencode/session/${HANDOFF_SESSION_ID}/message`) {
+      json(response, 200, [], { "X-Has-More": "0" })
+      return
+    }
+
     if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/claim`) {
       claimCount += 1
       json(response, 200, { ok: true })
@@ -178,6 +207,29 @@ function startFakeDaemon() {
       const body = await requestJSON(request)
       promptBodies.push(body)
       json(response, 200, { status: "accepted" })
+      return
+    }
+
+    if (request.method === "POST" && url.pathname === `/v1/agents/codex/session/${SESSION_ID}/handoff`) {
+      const body = await requestJSON(request)
+      handoffBodies.push(body)
+      json(response, 200, {
+        status: "accepted",
+        clientRequestId: body.clientRequestId,
+        sessionID: SESSION_ID,
+        result: {
+          target: {
+            machineID: "machine-native-regression",
+            agentID: "opencode",
+            sessionID: HANDOFF_SESSION_ID,
+            directory: DIRECTORY
+          },
+          link: {
+            source: { machineID: "machine-native-regression", agentID: "codex", sessionID: SESSION_ID, directory: DIRECTORY },
+            target: { machineID: "machine-native-regression", agentID: "opencode", sessionID: HANDOFF_SESSION_ID, directory: DIRECTORY }
+          }
+        }
+      })
       return
     }
 
@@ -252,10 +304,18 @@ async function waitForPromptCount(expected) {
   }
 }
 
+async function waitForHandoffCount(expected) {
+  const deadline = Date.now() + 5000
+  while (handoffBodies.length < expected && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
 async function assertSessionContract(browser, viewport, mobile) {
   const claimsBefore = claimCount
   const catalogsBefore = modelCatalogReads
   const promptsBefore = promptBodies.length
+  const handoffsBefore = handoffBodies.length
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
@@ -348,6 +408,26 @@ async function assertSessionContract(browser, viewport, mobile) {
   await transcript.evaluate((element, previous) => { element.style.scrollBehavior = previous }, previousScrollBehavior)
   assert.equal(top, 0, "native transcript cannot scroll independently to the top after user scroll intent")
 
+  await page.getByRole("button", { name: "Continue with another agent" }).click()
+  const handoffPanel = page.locator(".hr-native-handoff-panel")
+  await handoffPanel.waitFor({ state: "visible" })
+  await handoffPanel.locator("select").selectOption("opencode")
+  await handoffPanel.getByRole("button", { name: "Continue" }).click()
+  await waitForHandoffCount(handoffsBefore + 1)
+  assert.equal(handoffBodies.length, handoffsBefore + 1, "one handoff action must create exactly one target native Session request")
+  const handoff = handoffBodies[handoffsBefore]
+  assert.equal(handoff.directory, DIRECTORY, "handoff must keep the source project directory")
+  assert.equal(handoff.targetAgentID, "opencode", "handoff must target the selected native harness")
+  assert.equal(typeof handoff.clientRequestId, "string", "handoff must carry a durable request id")
+  assert.ok(handoff.clientRequestId.length > 0, "handoff request id must not be empty")
+
+  await page.getByText("OpenCode", { exact: true }).first().waitFor({ state: "visible" })
+  await page.getByText(HANDOFF_SESSION_ID, { exact: true }).waitFor({ state: mobile ? "hidden" : "visible" }).catch(() => {})
+  await page.locator(".hr-native-session-observer").waitFor({ state: "visible" })
+  const targetComposer = page.getByRole("textbox", { name: "Message OpenCode" })
+  await targetComposer.waitFor({ state: "visible" })
+  assert.equal(claimCount, claimsBefore + 1, "opening the HTTP target Session must not claim the source or target ACP writer")
+
   await context.close()
 }
 
@@ -364,7 +444,7 @@ try {
   await assertSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native Session browser smoke: mobile")
   await assertSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native Session browser smoke: single reply, ordering, model effort prompt, scrolling and composer containment passed")
+  console.log("native Session browser smoke: single reply, ordering, model effort prompt, scrolling, composer containment and cross-agent handoff passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(preview)
