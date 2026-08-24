@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import {
   discoverAgentNativeSessions,
   discoverMachineNativeSessions,
-  nativeSessionConfig
+  nativeSessionConfig,
+  nativeSessionSurfaceTarget
 } from './native-session-discovery.ts'
 
 const base = {
@@ -56,6 +57,19 @@ assert.deepEqual(calls, [
   ['global', 'codex', 'codex'],
   ['status', 'codex', 'codex']
 ])
+
+assert.deepEqual(nativeSessionSurfaceTarget(base, codexSessions[0]), {
+  key: 'codex:s1',
+  sessionID: 's1',
+  directory: '/repo',
+  title: 'Native Codex',
+  agentID: 'codex',
+  agentLabel: 'Codex',
+  backend: 'codex',
+  config: { ...base, backend: 'codex', agentId: 'codex' },
+  status: { type: 'busy' },
+  external: true
+})
 
 const fallbackCalls = []
 const fallbackClient = {
