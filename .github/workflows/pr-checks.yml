@@ -96,8 +96,9 @@ jobs:
 
   # Source-level CSS assertions are useful but cannot tell us whether a control is actually clipped
   # after the cascade. This job drives the production build in real Chromium with touch viewports,
-  # two fake machines and all five harnesses, then rotates the phone to landscape. A second pass
-  # walks the complete New Conversation form and stores screenshots for human visual inspection.
+  # two fake machines and all five harnesses, then rotates the phone to landscape. It also opens a
+  # real Session-first detail with journal/live transcript ids that differ, then checks single-render
+  # semantics, chronological ordering, scrolling and composer containment before the controls pass.
   browser-smoke:
     name: Chromium product smoke
     needs: tests
@@ -131,6 +132,10 @@ jobs:
 
       - name: Run portrait landscape and multi-machine smoke
         run: node scripts/v3-browser-smoke.mjs
+        working-directory: web
+
+      - name: Run native Session transcript and composer smoke
+        run: node scripts/native-session-browser-smoke.mjs
         working-directory: web
 
       - name: Run complete controls and screenshot smoke
