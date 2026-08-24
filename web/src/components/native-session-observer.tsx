@@ -12,7 +12,10 @@ import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { loadPendingNativeSessionPrompt, sendNativeSessionPrompt } from "../native-session-prompt"
 import { stopNativeSession } from "../native-session-stop"
 import { startTaskDeskSessionLiveRefresh } from "../taskdesk-session-live-refresh"
-import { LoadingIcon } from "../Icons"
+import { taskClient } from "../taskClient"
+import type { ModelOption, ModelSelection } from "../types"
+import { LoadingIcon, RefreshIcon } from "../Icons"
+import { ModelSelectionControl, type ModelSelectionLabels } from "./model-selection-control"
 import { TaskDeskConversation } from "./taskdesk-conversation"
 import "../native-session-observer.css"
 
@@ -20,9 +23,28 @@ const IDLE_RECONCILE_MS = 30_000
 
 type WriteState = "observe" | "probing" | "ready"
 
+const MODEL_LABELS: ModelSelectionLabels = {
+  select: "Model and effort",
+  searchPlaceholder: "Search models",
+  searchEmpty: "No matching models.",
+  defaultBadge: "Default",
+  provider: (provider) => `Provider: ${provider}`,
+  context: (context, output) => `Context: ${context} · Output: ${output}`,
+  toolsYes: "Tools supported",
+  toolsNo: "Tools unavailable",
+  variant: (variant) => `Variant: ${variant}`
+}
+
 export function nativeSessionIsWorking(status?: string): boolean {
   const value = status?.trim().toLowerCase() || ""
   return value === "busy" || value === "running" || value === "working" || value === "in_progress" || value === "in-progress"
+}
+
+function sameModel(left: ModelSelection | null, right: ModelSelection): boolean {
+  return Boolean(left)
+    && left!.providerID === right.providerID
+    && left!.modelID === right.modelID
+    && (left!.variant || "") === (right.variant || "")
 }
 
 type Props = {
@@ -50,6 +72,12 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const [statusType, setStatusType] = useState(target.status?.type || "idle")
   const [writeState, setWriteState] = useState<WriteState>(target.requiresExplicitClaim ? "observe" : "ready")
   const [resumeError, setResumeError] = useState<string | null>(null)
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([])
+  const [selectedModel, setSelectedModel] = useState<ModelSelection | null>(target.model)
+  const [modelLoading, setModelLoading] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
+  const [modelSheetOpen, setModelSheetOpen] = useState(false)
+  const [promptUnresolved, setPromptUnresolved] = useState(false)
   const feedRef = useRef<NativeSessionFeed | null>(null)
   const writeStateRef = useRef<WriteState>(writeState)
   feedRef.current = feed
@@ -58,6 +86,12 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   const working = nativeSessionIsWorking(statusType)
   const writable = writeState === "ready"
   const attention = useMemo(() => latestConversationAttention(feed?.messages || [], { active: working }), [feed?.messages, working])
+  const activeModelOption = useMemo(() => selectedModel
+    ? modelOptions.find((option) => sameModel(selectedModel, option)) ?? null
+    : null, [modelOptions, selectedModel])
+  const modelLabel = activeModelOption
+    ? [activeModelOption.modelName, activeModelOption.variant].filter(Boolean).join(" · ")
+    : selectedModel ? [selectedModel.modelID, selectedModel.variant].filter(Boolean).join(" · ") : "Choose model"
   const profile = useMemo(() => ({
     id: target.key,
     name: target.agentLabel,
@@ -81,6 +115,28 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
       // their own path and a transient status read must never replace the last known state.
     }
   }, [target.config, target.directory, target.sessionID])
+
+  const loadModels = useCallback(async () => {
+    if (!target.modelsSupported) return
+    setModelLoading(true)
+    setModelError(null)
+    try {
+      // This is the machine daemon's technical catalog. It is read-only and independent from writer
+      // claim, so merely opening a Session or its model sheet cannot acquire that Session.
+      const catalog = await taskClient.listAgentModels(target.config, target.agentID)
+      setModelOptions(catalog.models)
+      setSelectedModel((current) => {
+        if (current && catalog.models.some((option) => sameModel(current, option))) return current
+        const sessionMatch = target.model && catalog.models.find((option) => sameModel(target.model, option))
+        return sessionMatch ?? catalog.models.find((option) => option.isDefault) ?? catalog.models[0] ?? current
+      })
+      if (catalog.error) setModelError(catalog.error)
+    } catch (reason) {
+      setModelError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setModelLoading(false)
+    }
+  }, [target.agentID, target.config, target.key, target.model, target.modelsSupported])
 
   const refreshTail = useCallback(async (refreshHistory = false) => {
     const current = feedRef.current
@@ -106,10 +162,16 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     setResumeError(null)
     setStopping(false)
     setStatusType(target.status?.type || "idle")
-    // If an HTTP response was lost, keep exactly the text and clientRequestId that may already have
-    // been accepted. Retrying after a WebView reload then converges on the daemon ledger instead of
-    // creating a second native prompt.
-    setDraft(loadPendingNativeSessionPrompt(target)?.text ?? "")
+    const pending = loadPendingNativeSessionPrompt(target)
+    // If an HTTP response was lost, keep exactly the text, model and clientRequestId that may already
+    // have been accepted. Retrying after a WebView reload then converges on the daemon ledger instead
+    // of creating a second native prompt with a different effort selection.
+    setDraft(pending?.text ?? "")
+    setSelectedModel(pending?.model ?? target.model)
+    setPromptUnresolved(Boolean(pending))
+    setModelOptions([])
+    setModelError(null)
+    setModelSheetOpen(false)
     setWriteState(target.requiresExplicitClaim ? "observe" : "ready")
     setFeed(null)
     feedRef.current = null
@@ -123,8 +185,9 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
       if (!cancelled) setLoading(false)
     })
     void refreshStatus()
+    void loadModels()
     return () => { cancelled = true }
-  }, [target.key, refreshStatus])
+  }, [target.key, refreshStatus, loadModels])
 
   useEffect(() => {
     const live = startTaskDeskSessionLiveRefresh({
@@ -204,10 +267,12 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     setSending(true)
     setError(null)
     try {
-      const result = await sendNativeSessionPrompt(target, text)
+      const result = await sendNativeSessionPrompt(target, text, selectedModel)
       if (result.status === "accepted") {
         setDraft("")
+        setPromptUnresolved(false)
       } else {
+        setPromptUnresolved(true)
         setError(`Prompt delivery is ${result.status}. Harness Remote will not send it again with a new request id; refresh the transcript or retry the same prompt to reconcile safely.`)
       }
       onSessionRefresh?.()
@@ -215,6 +280,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : String(reason)
       setError(message)
+      setPromptUnresolved(Boolean(loadPendingNativeSessionPrompt(target)))
       if (target.requiresExplicitClaim && /session|load|writer|locked|busy|owned/i.test(message)) {
         setWriteState("observe")
         setResumeError(message)
@@ -263,6 +329,19 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
           </button>
         </div>
       ) : null}
+      {target.modelsSupported ? (
+        <section className="session-context-strip hr-native-session-context" aria-label="Native Session controls">
+          <button
+            type="button"
+            className={`context-chip${modelError && !activeModelOption ? " chip-warning" : ""}`}
+            onClick={() => setModelSheetOpen(true)}
+            disabled={modelLoading && modelOptions.length === 0}
+          >
+            <span>Model</span>
+            <strong>{modelLoading && modelOptions.length === 0 ? "Loading…" : modelLabel}</strong>
+          </button>
+        </section>
+      ) : null}
       {loading && !feed ? (
         <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session…</div>
       ) : (
@@ -290,6 +369,39 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
           footerHint={writable ? "Continue the same native Session." : "Observe only until the harness confirms this Session can be resumed safely."}
         />
       )}
+
+      {modelSheetOpen && target.modelsSupported ? (
+        <div className="sheet-backdrop" role="presentation">
+          <section className="bottom-sheet fade-in" role="dialog" aria-modal="true" aria-labelledby="native-model-sheet-title">
+            <div className="sheet-handle" aria-hidden="true" />
+            <div className="sheet-header">
+              <div>
+                <h3 id="native-model-sheet-title">Model and effort</h3>
+                <p className="subtle">Selection applies to the next prompt in this same native Session.</p>
+              </div>
+              <button type="button" className="btn-secondary compact" onClick={() => setModelSheetOpen(false)}>Close</button>
+            </div>
+            <div className="sheet-content">
+              <button type="button" className="btn-secondary" onClick={() => void loadModels()} disabled={modelLoading}>
+                {modelLoading ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
+                Refresh
+              </button>
+              {modelOptions.length > 0 ? (
+                <ModelSelectionControl
+                  options={modelOptions}
+                  value={selectedModel}
+                  onChange={(option) => setSelectedModel(option)}
+                  disabled={working || sending || promptUnresolved}
+                  labels={MODEL_LABELS}
+                />
+              ) : (
+                <p className="subtle">{modelError || (modelLoading ? "Loading models…" : "No models are available for this harness.")}</p>
+              )}
+              {promptUnresolved ? <p className="subtle">Model and effort are locked until the unresolved prompt is reconciled.</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }
