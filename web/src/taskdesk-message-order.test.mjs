@@ -73,7 +73,6 @@ test("Task summary stays attached to its Run prompt after the Session is continu
 
 test("TaskDesk renderer keeps Activity collapsed by default while retaining technical content", () => {
   const renderer = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
-  const turnState = readFileSync(new URL("./conversation-turn-state.ts", import.meta.url), "utf8")
   assert.match(renderer, /visibleParts = message\.parts\.filter/)
   assert.match(renderer, /groupConversationParts\(visibleParts,/)
   assert.match(renderer, /forceActivity: liveAssistant/)
@@ -87,8 +86,7 @@ test("TaskDesk renderer keeps Activity collapsed by default while retaining tech
   assert.match(renderer, /open=\{open\}/)
   assert.match(renderer, /\{open \? \(/)
   assert.match(renderer, /group\.parts\.map\(\(part\) => <ActivityPart/)
-  assert.match(renderer, /isInternalProtocolPart/)
-  assert.match(turnState, /"step-start", "step-finish", "snapshot", "patch"/)
+  assert.match(renderer, /"step-start", "step-finish", "snapshot", "patch"/)
 })
 
 test("Work Thread keeps live state in compact chat chrome and forbids detached waiting rows", () => {
