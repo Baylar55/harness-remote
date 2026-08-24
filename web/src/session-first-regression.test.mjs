@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const discovery = readFileSync(new URL('./native-session-discovery.ts', import.meta.url), 'utf8')
 const feed = readFileSync(new URL('./native-session-feed.ts', import.meta.url), 'utf8')
+const claim = readFileSync(new URL('./native-session-claim.ts', import.meta.url), 'utf8')
 const continuation = readFileSync(new URL('./native-session-continuation.ts', import.meta.url), 'utf8')
 const observer = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
 const sessionHome = readFileSync(new URL('./components/native-session-home.tsx', import.meta.url), 'utf8')
@@ -19,7 +20,12 @@ assert.equal(discovery.includes('launch('), false, 'discovery must not acquire a
 assert.ok(feed.includes('mergeLatestMessagePage'), 'native Session tail refresh must reuse HR3 message identity merging')
 assert.ok(feed.includes('prependOlderMessagePage'), 'native Session history paging must reuse HR3 older-page merging')
 
-assert.ok(continuation.includes('listModels(target.config, target.directory, target.sessionID)'), 'ACP continuation must probe the exact native Session through the existing session/load path')
+assert.ok(continuation.includes('client.claimSession(target.config, target.directory, target.sessionID)'), 'ACP continuation must claim the exact native Session through an explicit Session boundary')
+assert.equal(continuation.includes('listModels('), false, 'Session-first continuation must not expose model discovery as its ownership primitive')
+assert.ok(claim.includes('api.listModels(config, directory, sessionID)'), 'the temporary claim transport must preserve the hardened ACP session/load probe until the bridge exposes a dedicated claim route')
+assert.equal(claim.includes('createSession('), false, 'claim transport must never create a replacement Session')
+assert.equal(claim.includes('createTask('), false, 'claim transport must not synthesize a Task/Conversation')
+assert.equal(claim.includes('launch('), false, 'claim transport must not enter the Task launcher')
 assert.ok(continuation.includes('target.backend === "opencode"'), 'OpenCode must retain its direct same-Session continuation path')
 assert.equal(continuation.includes('createSession('), false, 'continuation probing must never create a replacement Session')
 assert.equal(continuation.includes('createTask('), false, 'continuation probing must not synthesize a Task/Conversation')
