@@ -13,6 +13,7 @@ const target = {
   agentID: 'codex',
   agentLabel: 'Codex',
   backend: 'codex',
+  transport: 'acp',
   config: {
     backend: 'codex',
     host: '192.168.1.72',
@@ -24,9 +25,9 @@ const target = {
   external: true
 }
 
-function message(id, text) {
+function message(id, text, role = 'assistant') {
   return {
-    info: { id, role: 'assistant', time: { created: Number(id.replace(/\D/g, '')) || 1 } },
+    info: { id, role, time: { created: Number(id.replace(/\D/g, '')) || 1 } },
     parts: [{ id: `p-${id}`, type: 'text', text }]
   }
 }
@@ -86,5 +87,73 @@ const noMore = await loadOlderNativeSessionFeed(target, { ...older, hasMore: fal
   async loadMessagePage() { throw new Error('should not be called') }
 })
 assert.equal(noMore.hasMore, false)
+
+// Codex exposes an external session through its rollout journal first, then ACP session/load gives HR
+// a different set of envelope ids after the writer is claimed. That transition must replace the
+// visible page, not merge two authorities and show the same native assistant reply twice.
+const authorityCalls = []
+const authorityClient = {
+  async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
+    authorityCalls.push({ before, limit, refreshHistory })
+    if (!refreshHistory) {
+      return {
+        messages: [
+          message('journal-user-101', 'hello', 'user'),
+          message('journal-assistant-202', 'one native reply')
+        ],
+        before: '8192',
+        hasMore: true
+      }
+    }
+    return {
+      messages: [
+        message('live-user-1', 'hello', 'user'),
+        message('live-assistant-2', 'one native reply')
+      ],
+      before: undefined,
+      hasMore: false
+    }
+  }
+}
+const journalFeed = await loadNativeSessionFeed(target, authorityClient)
+assert.deepEqual(journalFeed.messages.map((item) => item.info.id), ['journal-user-101', 'journal-assistant-202'])
+const claimedFeed = await loadNativeSessionFeed(target, authorityClient, 200, true)
+assert.deepEqual(
+  claimedFeed.messages.map((item) => item.info.id),
+  ['live-user-1', 'live-assistant-2'],
+  'claim authority handoff must replace journal ids instead of merging a duplicate assistant reply'
+)
+assert.equal(claimedFeed.messages.filter((item) => item.info.role === 'assistant').length, 1)
+assert.equal(authorityCalls[0].refreshHistory, false)
+assert.equal(authorityCalls[1].refreshHistory, true)
+
+let ownedTailRefreshFlag = false
+await refreshNativeSessionFeed(target, claimedFeed, {
+  async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
+    ownedTailRefreshFlag = refreshHistory
+    return {
+      messages: [
+        message('live-user-1', 'hello', 'user'),
+        message('live-assistant-2', 'one native reply')
+      ],
+      before: 'live-user-1',
+      hasMore: true
+    }
+  }
+}, 200, true)
+assert.equal(ownedTailRefreshFlag, true, 'claimed ACP tail refresh must be able to bypass journal paging')
+
+let ownedOlderRefreshFlag = false
+await loadOlderNativeSessionFeed(target, {
+  ...claimedFeed,
+  before: 'live-user-1',
+  hasMore: true
+}, {
+  async loadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
+    ownedOlderRefreshFlag = refreshHistory
+    return { messages: [message('live-older-0', 'older', 'user')], before: undefined, hasMore: false }
+  }
+}, 500, true)
+assert.equal(ownedOlderRefreshFlag, true, 'claimed ACP older paging must stay on the owned transcript authority')
 
 console.log('native session feed tests passed')
