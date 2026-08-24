@@ -8,35 +8,41 @@ const DAEMON_PORT = 4421
 const APP_ORIGIN = `http://127.0.0.1:${PREVIEW_PORT}`
 const STORAGE_KEY = "harness-remote.workspace.machines.v1"
 const SESSION_ID = "native-pi-v3-first-1"
+const CREATED_SESSION_ID = "native-pi-created-1"
 const DIRECTORY = "/work/native-pi-v3-first"
 const SUCCESS_PROMPT = "PI-SUCCESS-PROMPT"
 const SUCCESS_REPLY = "PI-SINGLE-FINAL-REPLY"
 const ERROR_PROMPT = "PI-ERROR-PROMPT"
 const LOST_PROMPT = "PI-LOST-HTTP-PROMPT"
 const LOST_REPLY = "PI-LOST-HTTP-REPLY"
+const CREATE_TITLE = "PI created from Harness Remote"
+const CREATE_PROMPT = "PI-CREATED-FIRST-PROMPT"
+const CREATE_REPLY = "PI-CREATED-FIRST-REPLY"
+const REOPEN_PROMPT = "PI-CREATED-REOPEN-PROMPT"
+const REOPEN_REPLY = "PI-CREATED-REOPEN-REPLY"
 
 function textPart(id, text) {
   return { id, type: "text", text }
 }
 
-function message(id, role, parts, created, error) {
+function message(sessionID, id, role, parts, created, error) {
   return {
-    info: { id, role, sessionID: SESSION_ID, time: { created }, ...(error ? { error } : {}) },
+    info: { id, role, sessionID, time: { created }, ...(error ? { error } : {}) },
     parts
   }
 }
 
 function initialTranscript() {
   return [
-    message("pi-history-user-1", "user", [textPart("pi-history-user-text-1", "PI-HISTORY-USER-1")], 1_000),
-    message("pi-history-assistant-1", "assistant", [textPart("pi-history-assistant-text-1", "PI-HISTORY-ASSISTANT-1")], 1_001),
-    message("pi-history-user-2", "user", [textPart("pi-history-user-text-2", "PI-HISTORY-USER-2")], 1_002),
-    message("pi-history-assistant-2", "assistant", [textPart("pi-history-assistant-text-2", "PI-HISTORY-ASSISTANT-2")], 1_003)
+    message(SESSION_ID, "pi-history-user-1", "user", [textPart("pi-history-user-text-1", "PI-HISTORY-USER-1")], 1_000),
+    message(SESSION_ID, "pi-history-assistant-1", "assistant", [textPart("pi-history-assistant-text-1", "PI-HISTORY-ASSISTANT-1")], 1_001),
+    message(SESSION_ID, "pi-history-user-2", "user", [textPart("pi-history-user-text-2", "PI-HISTORY-USER-2")], 1_002),
+    message(SESSION_ID, "pi-history-assistant-2", "assistant", [textPart("pi-history-assistant-text-2", "PI-HISTORY-ASSISTANT-2")], 1_003)
   ]
 }
 
-let claimed
-let messages
+let sessionCatalog
+let transcripts
 let claimCount
 let modelCatalogReads
 let promptHttpBodies
@@ -46,10 +52,17 @@ let ledger
 let clock
 let sseResponses
 let liveEventTypes
+let createCount
 
 function resetFakeState() {
-  claimed = false
-  messages = initialTranscript()
+  sessionCatalog = new Map([[SESSION_ID, {
+    id: SESSION_ID,
+    title: "PI v3-first regression session",
+    directory: DIRECTORY,
+    external: true,
+    time: { created: 1_000, updated: 1_003 }
+  }]])
+  transcripts = new Map([[SESSION_ID, initialTranscript()]])
   claimCount = 0
   modelCatalogReads = 0
   promptHttpBodies = []
@@ -59,53 +72,66 @@ function resetFakeState() {
   clock = 10_000
   sseResponses = new Set()
   liveEventTypes = []
+  createCount = 0
 }
 
-function emitLiveEvent(type) {
-  liveEventTypes.push(type)
-  const frame = `data: ${JSON.stringify({ directory: DIRECTORY, payload: { type, properties: { info: { sessionID: SESSION_ID } } } })}\n\n`
+function emitLiveEvent(type, sessionID = SESSION_ID) {
+  liveEventTypes.push(`${sessionID}:${type}`)
+  const frame = `data: ${JSON.stringify({ directory: DIRECTORY, payload: { type, properties: { info: { sessionID } } } })}\n\n`
   for (const response of [...sseResponses]) {
     try { response.write(frame) }
     catch { sseResponses.delete(response) }
   }
 }
 
-function appendSuccessTurn(prompt, requestId, reply = SUCCESS_REPLY) {
+function transcript(sessionID) {
+  const current = transcripts.get(sessionID)
+  if (current) return current
+  const created = []
+  transcripts.set(sessionID, created)
+  return created
+}
+
+function appendSuccessTurn(sessionID, prompt, requestId, reply) {
   const base = clock
   clock += 20
-  messages.push(
-    message(`pi-user-${requestId}`, "user", [textPart(`pi-user-text-${requestId}`, prompt)], base),
-    message(`pi-assistant-reason-${requestId}`, "assistant", [{ id: `pi-reason-${requestId}`, type: "reasoning", text: "PI reasoning marker" }], base + 1),
-    message(`pi-assistant-note-${requestId}`, "assistant", [textPart(`pi-note-${requestId}`, "PI working note before tool")], base + 2),
-    message(`pi-assistant-tool-start-${requestId}`, "assistant", [{
+  transcript(sessionID).push(
+    message(sessionID, `pi-user-${requestId}`, "user", [textPart(`pi-user-text-${requestId}`, prompt)], base),
+    message(sessionID, `pi-assistant-reason-${requestId}`, "assistant", [{ id: `pi-reason-${requestId}`, type: "reasoning", text: "PI reasoning marker" }], base + 1),
+    message(sessionID, `pi-assistant-note-${requestId}`, "assistant", [textPart(`pi-note-${requestId}`, "PI working note before tool")], base + 2),
+    message(sessionID, `pi-assistant-tool-start-${requestId}`, "assistant", [{
       id: `pi-tool-start-${requestId}`,
       type: "tool",
       tool: "shell",
       callID: `pi-call-${requestId}`,
       state: { status: "running", title: "PI tool", input: { command: "printf pi" } }
     }], base + 3),
-    message(`pi-assistant-tool-finish-${requestId}`, "assistant", [{
+    message(sessionID, `pi-assistant-tool-finish-${requestId}`, "assistant", [{
       id: `pi-tool-finish-${requestId}`,
       type: "tool",
       tool: "shell",
       callID: `pi-call-${requestId}`,
       state: { status: "completed", title: "PI tool", input: { command: "printf pi" }, output: "PI tool completed" }
     }], base + 4),
-    message(`pi-assistant-final-${requestId}`, "assistant", [textPart(`pi-final-${requestId}`, reply)], base + 5)
+    message(sessionID, `pi-assistant-final-${requestId}`, "assistant", [textPart(`pi-final-${requestId}`, reply)], base + 5)
   )
+  const entry = sessionCatalog.get(sessionID)
+  if (entry) entry.time.updated = base + 5
 }
 
-function appendErrorTurn(prompt, requestId) {
+function appendErrorTurn(sessionID, prompt, requestId) {
   const base = clock
   clock += 20
-  messages.push(
-    message(`pi-error-user-${requestId}`, "user", [textPart(`pi-error-user-text-${requestId}`, prompt)], base),
-    message(`pi-error-assistant-${requestId}`, "assistant", [], base + 1, {
+  transcript(sessionID).push(
+    message(sessionID, `pi-error-user-${requestId}`, "user", [textPart(`pi-error-user-text-${requestId}`, prompt)], base),
+    message(sessionID, `pi-error-assistant-${requestId}`, "assistant", [], base + 1, {
       name: "PIError",
       message: "PI synthetic failure",
       data: { message: "PI synthetic failure" }
     })
   )
+  const entry = sessionCatalog.get(sessionID)
+  if (entry) entry.time.updated = base + 1
 }
 
 const MODEL_CATALOG = {
@@ -194,18 +220,12 @@ function startFakeDaemon() {
     }
 
     if (request.method === "GET" && url.pathname === "/v1/agents/pi/experimental/session") {
-      json(response, 200, [{
-        id: SESSION_ID,
-        title: "PI v3-first regression session",
-        directory: DIRECTORY,
-        external: true,
-        time: { created: 1_000, updated: clock }
-      }])
+      json(response, 200, [...sessionCatalog.values()])
       return
     }
 
     if (request.method === "GET" && url.pathname === "/v1/agents/pi/session/status") {
-      json(response, 200, { [SESSION_ID]: { type: "idle" } })
+      json(response, 200, Object.fromEntries([...sessionCatalog.keys()].map((sessionID) => [sessionID, { type: "idle" }])))
       return
     }
 
@@ -215,8 +235,10 @@ function startFakeDaemon() {
       return
     }
 
-    if (request.method === "GET" && url.pathname === `/v1/agents/pi/session/${SESSION_ID}/message`) {
-      json(response, 200, messages, { "X-Has-More": "0" })
+    const messageMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/message$/.exec(url.pathname)
+    if (request.method === "GET" && messageMatch) {
+      const sessionID = decodeURIComponent(messageMatch[1])
+      json(response, 200, transcript(sessionID), { "X-Has-More": "0" })
       return
     }
 
@@ -233,35 +255,54 @@ function startFakeDaemon() {
       return
     }
 
-    if (request.method === "POST" && url.pathname === `/v1/agents/pi/session/${SESSION_ID}/claim`) {
-      claimCount += 1
-      claimed = true
-      json(response, 200, { ok: true })
+    if (request.method === "POST" && url.pathname === "/v1/agents/pi/session") {
+      const body = await requestJSON(request)
+      createCount += 1
+      const created = {
+        id: CREATED_SESSION_ID,
+        title: typeof body?.title === "string" && body.title.trim() ? body.title.trim() : "Remote session",
+        directory: url.searchParams.get("directory") || DIRECTORY,
+        external: false,
+        time: { created: clock, updated: clock }
+      }
+      sessionCatalog.set(CREATED_SESSION_ID, created)
+      transcripts.set(CREATED_SESSION_ID, [])
+      json(response, 200, created)
       return
     }
 
-    if (request.method === "POST" && url.pathname === `/v1/agents/pi/session/${SESSION_ID}/prompt`) {
+    const claimMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/claim$/.exec(url.pathname)
+    if (request.method === "POST" && claimMatch) {
+      claimCount += 1
+      json(response, 200, { ok: true, sessionID: decodeURIComponent(claimMatch[1]) })
+      return
+    }
+
+    const promptMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/prompt$/.exec(url.pathname)
+    if (request.method === "POST" && promptMatch) {
+      const sessionID = decodeURIComponent(promptMatch[1])
       const body = await requestJSON(request)
-      promptHttpBodies.push(body)
+      promptHttpBodies.push({ sessionID, ...body })
       const requestId = body?.clientRequestId
       if (!requestId) {
         json(response, 400, { error: "missing clientRequestId" })
         return
       }
 
-      if (!ledger.has(requestId)) {
+      const ledgerKey = `${sessionID}:${requestId}`
+      if (!ledger.has(ledgerKey)) {
         nativePromptDispatches += 1
-        ledger.set(requestId, body)
-        if (body.text === ERROR_PROMPT) appendErrorTurn(body.text, requestId)
-        else if (body.text === LOST_PROMPT) appendSuccessTurn(body.text, requestId, LOST_REPLY)
-        else appendSuccessTurn(body.text, requestId)
+        ledger.set(ledgerKey, body)
+        if (body.text === ERROR_PROMPT) appendErrorTurn(sessionID, body.text, requestId)
+        else if (body.text === LOST_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, LOST_REPLY)
+        else if (body.text === CREATE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, CREATE_REPLY)
+        else if (body.text === REOPEN_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, REOPEN_REPLY)
+        else appendSuccessTurn(sessionID, body.text, requestId, SUCCESS_REPLY)
       }
 
       if (body.text === SUCCESS_PROMPT) {
-        // Deliver both transcript and lifecycle events while the Send POST is still unresolved.
-        // WorkThreadConversation must reconcile those reads without ever issuing another prompt.
-        emitLiveEvent("message.updated")
-        emitLiveEvent("session.updated")
+        emitLiveEvent("message.updated", sessionID)
+        emitLiveEvent("session.updated", sessionID)
         await new Promise((resolve) => setTimeout(resolve, 650))
       }
 
@@ -275,7 +316,8 @@ function startFakeDaemon() {
       return
     }
 
-    if (request.method === "POST" && url.pathname === `/v1/agents/pi/session/${SESSION_ID}/stop`) {
+    const stopMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/stop$/.exec(url.pathname)
+    if (request.method === "POST" && stopMatch) {
       json(response, 200, { status: "accepted" })
       return
     }
@@ -357,16 +399,13 @@ async function waitForReady(page) {
   assert.equal(await composer.isDisabled(), false, "v3 composer must be enabled when the Session is ready")
 }
 
-async function openSession(page, expectClaim) {
+async function openSession(page, title) {
   await page.locator('.hr-native-workspace[aria-label="Sessions"]').waitFor({ state: "visible" })
-  await page.getByRole("button", { name: /PI v3-first regression session/ }).click()
+  await page.getByRole("button", { name: new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")) }).click()
   await page.locator(".hr-native-session-observer").waitFor({ state: "visible" })
-  if (expectClaim) {
-    await page.getByRole("button", { name: "Continue this Session" }).waitFor({ state: "visible" })
-  } else {
-    await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible" })
-    await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
-  }
+  await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible" })
+  await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
+  assert.equal(await page.getByRole("button", { name: "Continue this Session" }).count(), 0, "Session open must never require a visible Continue unlock step")
 }
 
 async function sendPrompt(page, text) {
@@ -384,7 +423,7 @@ async function sendPrompt(page, text) {
   throw new Error(`Timed out waiting for v3 Send after filling ${text}`)
 }
 
-async function assertSessionContract(browser, viewport, mobile) {
+async function assertExistingSessionContract(browser, viewport, mobile) {
   resetFakeState()
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
@@ -395,16 +434,9 @@ async function assertSessionContract(browser, viewport, mobile) {
     await page.locator('.hr-mobile-nav button[aria-current="page"]').filter({ hasText: "Sessions" }).waitFor({ state: "visible" })
   }
 
-  await openSession(page, true)
-  assert.equal(await page.locator(".uw-composer-shell").count(), 0, "external PI ACP Session must stay observe-only before explicit ownership")
-  assert.equal(claimCount, 0, "opening the Session must not claim it")
-  assert.equal(modelCatalogReads, 0, "read-only Session shell must not mount a second model controller")
-
-  await page.getByRole("button", { name: "Continue this Session" }).click()
-  await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible" })
-  await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
-  assert.equal(claimCount, 1, "one Continue click must claim the exact PI Session once")
-  assert.ok(modelCatalogReads > 0, "the mature v3 controller must load the PI model catalog after ownership")
+  await openSession(page, "PI v3-first regression session")
+  assert.equal(claimCount, 0, "opening and reading an external PI Session must not claim its writer")
+  assert.ok(modelCatalogReads > 0, "the mature v3 controller must load the PI model catalog without claiming writer ownership")
   await waitFor(() => sseResponses.size > 0, "PI v3 live event connection")
 
   for (const marker of ["PI-HISTORY-USER-1", "PI-HISTORY-ASSISTANT-1", "PI-HISTORY-USER-2", "PI-HISTORY-ASSISTANT-2"]) {
@@ -423,14 +455,14 @@ async function assertSessionContract(browser, viewport, mobile) {
   const httpBefore = promptHttpBodies.length
   const dispatchBefore = nativePromptDispatches
   await sendPrompt(page, SUCCESS_PROMPT)
-  // Force the v3 foreground reconciliation path while the delayed prompt POST is still unresolved.
-  // This combines StrictMode, live events and a concurrent authoritative read around one Send.
   await page.evaluate(() => window.dispatchEvent(new Event("pageshow")))
   await waitFor(() => promptHttpBodies.length >= httpBefore + 1, "PI success HTTP attempt")
-  await waitFor(() => liveEventTypes.includes("message.updated") && liveEventTypes.includes("session.updated"), "PI live events during Send")
+  await waitFor(() => liveEventTypes.includes(`${SESSION_ID}:message.updated`) && liveEventTypes.includes(`${SESSION_ID}:session.updated`), "PI live events during Send")
+  assert.equal(claimCount, 1, "the first PI mutation must acquire writer ownership exactly once and without a separate button")
   assert.equal(promptHttpBodies.length, httpBefore + 1, "one PI Send click must create one prompt HTTP operation")
   assert.equal(nativePromptDispatches, dispatchBefore + 1, "one PI Send click must dispatch one native session/prompt even during live reconciliation")
   const firstBody = promptHttpBodies[httpBefore]
+  assert.equal(firstBody.sessionID, SESSION_ID)
   assert.equal(firstBody.text, SUCCESS_PROMPT)
   assert.deepEqual(firstBody.model, { providerID: "pi", modelID: "pi-coding" })
   assert.equal(firstBody.variant, "high")
@@ -449,13 +481,14 @@ async function assertSessionContract(browser, viewport, mobile) {
 
   const ordered = await page.locator(".uw-transcript").evaluate((element) => {
     const text = element.textContent || ""
-    return ["PI-SUCCESS-PROMPT", "PI reasoning marker", "PI working note before tool", "PI tool", "PI-SINGLE-FINAL-REPLY"].map((value) => text.indexOf(value))
+    return [SUCCESS_PROMPT, "PI reasoning marker", "PI working note before tool", "PI tool", SUCCESS_REPLY].map((value) => text.indexOf(value))
   })
   assert.ok(ordered.every((value) => value >= 0) && ordered.every((value, index) => index === 0 || ordered[index - 1] <= value), `PI activity order regressed: ${ordered.join(",")}`)
 
   await waitForReady(page)
   await sendPrompt(page, ERROR_PROMPT)
   await waitFor(() => nativePromptDispatches >= dispatchBefore + 2, "PI error native dispatch")
+  assert.equal(claimCount, 1, "writer ownership must be reused while the Session stays open")
   assert.equal(nativePromptDispatches, dispatchBefore + 2, "PI error Send dispatched more than once")
   await page.getByText("PI synthetic failure", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
   assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI error prompt duplicated")
@@ -484,18 +517,10 @@ async function assertSessionContract(browser, viewport, mobile) {
   const promptsBeforeReload = promptHttpBodies.length
   const dispatchesBeforeReload = nativePromptDispatches
   await page.reload({ waitUntil: "networkidle" })
-  await openSession(page, true)
-  assert.equal(claimCount, 1, "refresh itself must remain read-only and must not claim the PI Session")
+  await openSession(page, "PI v3-first regression session")
+  assert.equal(claimCount, 1, "reopening a Session must stay read-only until another mutation is attempted")
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "refresh must never emit a native PI prompt")
   assert.equal(nativePromptDispatches, dispatchesBeforeReload, "refresh must never dispatch native PI work")
-  assert.equal(await page.locator(".uw-composer-shell").count(), 0, "metadata-only ACP discovery after refresh must return to observe-only")
-
-  await page.getByRole("button", { name: "Continue this Session" }).click()
-  await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible" })
-  await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
-  assert.equal(claimCount, 2, "explicit refresh recovery must cross the idempotent claim boundary exactly once")
-  assert.equal(promptHttpBodies.length, promptsBeforeReload, "reclaiming after refresh must not emit a native PI prompt")
-  assert.equal(nativePromptDispatches, dispatchesBeforeReload, "reclaiming after refresh must not dispatch native PI work")
   await page.getByText(LOST_REPLY, { exact: true }).waitFor({ state: "visible" })
   for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, LOST_PROMPT, LOST_REPLY]) {
     assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `refresh duplicated transcript marker: ${marker}`)
@@ -510,6 +535,46 @@ async function assertSessionContract(browser, viewport, mobile) {
   await context.close()
 }
 
+async function assertCreateSessionContract(browser, viewport, mobile) {
+  resetFakeState()
+  const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  await seed(page)
+  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+
+  await page.getByRole("button", { name: "New Session" }).click()
+  await page.getByRole("group", { name: "Create native Session" }).waitFor({ state: "visible" })
+  await page.getByPlaceholder("New PI Session").fill(CREATE_TITLE)
+  await page.getByRole("button", { name: "Create Session" }).click()
+
+  await page.getByRole("heading", { name: CREATE_TITLE }).waitFor({ state: "visible", timeout: 12_000 })
+  await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
+  assert.equal(createCount, 1, "one New Session action must create exactly one native PI Session")
+  assert.equal(claimCount, 0, "a newly created PI Session is already owned and must not be claimed again")
+
+  const dispatchBefore = nativePromptDispatches
+  await sendPrompt(page, CREATE_PROMPT)
+  await page.getByText(CREATE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(claimCount, 0, "the first prompt of a freshly created PI Session must reuse creation ownership")
+  assert.equal(nativePromptDispatches, dispatchBefore + 1, "created PI Session first prompt must dispatch exactly once")
+  assert.equal(promptHttpBodies.filter((body) => body.sessionID === CREATED_SESSION_ID && body.text === CREATE_PROMPT).length, 1, "created PI Session prompt must target the returned native id exactly once")
+
+  await waitForReady(page)
+  await page.reload({ waitUntil: "networkidle" })
+  await openSession(page, CREATE_TITLE)
+  assert.equal(claimCount, 0, "reopening the created Session must not claim merely to show its transcript")
+  assert.equal(await page.getByText(CREATE_PROMPT, { exact: true }).count(), 1, "created Session prompt disappeared or duplicated after reopen")
+  assert.equal(await page.getByText(CREATE_REPLY, { exact: true }).count(), 1, "created Session reply disappeared or duplicated after reopen")
+
+  await sendPrompt(page, REOPEN_PROMPT)
+  await page.getByText(REOPEN_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(claimCount, 1, "first mutation after discovery-only reopen must reacquire ACP writer transparently")
+  assert.equal(await page.getByText(REOPEN_PROMPT, { exact: true }).count(), 1, "reopened Session prompt duplicated")
+  assert.equal(await page.getByText(REOPEN_REPLY, { exact: true }).count(), 1, "reopened Session reply duplicated")
+
+  await context.close()
+}
+
 let daemon
 let preview
 let browser
@@ -520,11 +585,15 @@ try {
   await ready(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
 
-  console.log("native PI v3-first browser smoke: desktop")
-  await assertSessionContract(browser, { width: 1366, height: 768 }, false)
-  console.log("native PI v3-first browser smoke: mobile")
-  await assertSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: single dispatch, live reconciliation, ordered activity, error recovery, uncertain-delivery reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: existing desktop")
+  await assertExistingSessionContract(browser, { width: 1366, height: 768 }, false)
+  console.log("native PI v3-first browser smoke: existing mobile")
+  await assertExistingSessionContract(browser, { width: 390, height: 844 }, true)
+  console.log("native PI v3-first browser smoke: create desktop")
+  await assertCreateSessionContract(browser, { width: 1366, height: 768 }, false)
+  console.log("native PI v3-first browser smoke: create mobile")
+  await assertCreateSessionContract(browser, { width: 390, height: 844 }, true)
+  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, create, ordered activity, error recovery, uncertain-delivery reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
