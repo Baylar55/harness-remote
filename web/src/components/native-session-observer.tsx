@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
+import { latestConversationAttention } from "../conversation-turn-state"
 import {
   loadNativeSessionFeed,
   loadOlderNativeSessionFeed,
@@ -54,6 +55,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
 
   const working = nativeSessionIsWorking(statusType)
   const writable = writeState === "ready"
+  const attention = useMemo(() => latestConversationAttention(feed?.messages || [], { active: working }), [feed?.messages, working])
   const profile = useMemo(() => ({
     id: target.key,
     name: target.agentLabel,
@@ -225,6 +227,7 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   return (
     <div className={`hr-native-session-observer${writable ? " writable" : " observe-only"}`}>
       {error ? <div className="tdw-field-note hr-native-session-observer-error" role="status">Showing the last known Session transcript. Request failed: {error}</div> : null}
+      {attention ? <div className="tdw-field-note" role="status"><strong>Needs attention.</strong> {attention.title}. Review the latest turn below before continuing.</div> : null}
       {!writable ? (
         <div className="hr-native-session-continuation" role="status">
           <div>
