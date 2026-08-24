@@ -147,7 +147,7 @@ test("machine server wires registry, routing, native Session operations, task li
   let modelOptions
   let finishOptions
   let workThreadOptions
-  const bridgeServer = { marker: "bridge", acpService: { async models() {}, async adoptTaskSession() { return true }, async prompt() {}, async abort() {} } }
+  const bridgeServer = { marker: "bridge", acpService: { async claimSession() { return true }, async prompt() {}, async abort() {} } }
   const routedServer = { marker: "router" }
   const claimServer = { marker: "session-claim" }
   const launchServer = { marker: "launch" }
@@ -214,8 +214,7 @@ test("machine Session operations retain ownership after claim before prompting o
     sessionOperationLedger: { marker: "ledger" },
     createServer: (options) => ({
       acpService: {
-        async models(sessionID) { calls.push(["claim-load", options.config.backend, sessionID]) },
-        async adoptTaskSession(sessionID) { calls.push(["claim-owned", options.config.backend, sessionID]); return true },
+        async claimSession(sessionID) { calls.push(["claim", options.config.backend, sessionID]); return true },
         async prompt(sessionID, text) { calls.push(["prompt", options.config.backend, sessionID, text]) },
         async abort(sessionID) { calls.push(["stop", options.config.backend, sessionID]) }
       },
@@ -237,8 +236,7 @@ test("machine Session operations retain ownership after claim before prompting o
   await claimOptions.promptSession("pi", "native-pi-1", { text: "Continue once", directory: "/repo" })
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   assert.deepEqual(calls, [
-    ["claim-load", "pi", "native-pi-1"],
-    ["claim-owned", "pi", "native-pi-1"],
+    ["claim", "pi", "native-pi-1"],
     ["prompt", "pi", "native-pi-1", "Continue once"],
     ["stop", "pi", "native-pi-1"]
   ])
@@ -258,8 +256,7 @@ test("machine Session claim fails if the native Session disappears before owners
     sessionOperationLedger: { marker: "ledger" },
     createServer: () => ({
       acpService: {
-        async models() {},
-        async adoptTaskSession() { return false },
+        async claimSession() { throw new Error("Harness session not found") },
         async prompt() {},
         async abort() {}
       },
@@ -275,7 +272,7 @@ test("machine Session claim fails if the native Session disappears before owners
 
   await assert.rejects(
     () => claimOptions.claimSession("codex", "native-gone"),
-    (error) => error.code === "session_unavailable" && /disappeared during claim/.test(error.message)
+    (error) => error.code === "session_unavailable" && /no longer available/.test(error.message)
   )
 })
 
@@ -293,7 +290,7 @@ test("machine server creates an isolated bridge service for every registered ACP
     primaryAcp: codex,
     sessionOperationLedger: { marker: "ledger" },
     createServer: (options) => {
-      const server = { options, acpService: { async models() {}, async adoptTaskSession() { return true }, async prompt() {}, async abort() {} }, emit() {} }
+      const server = { options, acpService: { async claimSession() { return true }, async prompt() {}, async abort() {} }, emit() {} }
       created.push(server)
       return server
     },
