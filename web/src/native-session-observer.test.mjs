@@ -38,7 +38,11 @@ assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not 
 assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
 
 assert.ok(nativeModel.includes('page.model ??'), 'native Session enrichment must consume a model supplied by a native journal page')
-assert.ok(nativeModel.includes('target.backend !== "opencode" && target.backend !== "omp"'), 'read-only model enrichment must stay scoped to harnesses with verified native model metadata')
+// Assert the invariant, not one spelling of it. Freezing the literal guard meant every legitimate
+// change to which harnesses expose native model metadata - adding PI, Codex, Claude - broke this
+// check while the behaviour it protects was still intact.
+assert.ok(nativeModel.includes('PAGE_MODEL_BACKENDS'), 'model enrichment must scope itself with an explicit set of harnesses that expose native model metadata')
+assert.match(nativeModel, /if \(target\.backend !== "opencode"[\s\S]{0,200}?\) return target/, 'read-only model enrichment must stay scoped to harnesses with verified native model metadata')
 assert.ok(workThread.includes('observedTaskModelKeyRef'), 'the v3 picker must observe a model that arrives after the controller mounted')
 assert.ok(workThread.includes('modelSelectionTouchedRef'), 'late native enrichment must not overwrite a model the user explicitly picked')
 assert.ok(workThread.includes('currentTaskModelKey === previous'), 'the late-model sync must be edge-triggered rather than resetting the picker on every render')
