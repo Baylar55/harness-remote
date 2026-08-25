@@ -455,9 +455,10 @@ async function assertCompletionAndModel(page, text, reasoning, final, label) {
   }, `${label}: reopened OpenCode Session must keep the last native model`)
   assert.equal(body.variant, LAST_MODEL.variant, `${label}: reopened OpenCode Session must keep the last native variant`)
 
-  // The partial reasoning event deliberately carries sessionID only inside properties.part. Seeing
-  // the mature v3 state switch out of "getting started" proves the mounted tail refreshed promptly.
-  await page.locator(".tdw-conversation-state").filter({ hasText: "OpenCode is working" }).waitFor({ state: "visible", timeout: 1_500 })
+  // The partial reasoning event deliberately carries sessionID only inside properties.part. Reasoning
+  // is collapsed by the mature renderer, so DOM attachment proves the mounted tail refreshed promptly
+  // without imposing different visibility semantics on the existing v3 conversation surface.
+  await page.getByText(reasoning, { exact: true }).waitFor({ state: "attached", timeout: 1_500 })
 
   // session.status idle happens before this answer is durable and no final message.updated follows.
   // The Session remains mounted throughout: the answer and Ready state must appear without navigation.
