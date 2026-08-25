@@ -9,13 +9,15 @@ function trimCarriageReturn(buffer) {
   return buffer.length > 0 && buffer[buffer.length - 1] === 0x0d ? buffer.subarray(0, -1) : buffer
 }
 
-function messageFromLine(sessionID, line, offset) {
-  let record
+function recordFromLine(line) {
   try {
-    record = JSON.parse(trimCarriageReturn(line).toString("utf8"))
+    return JSON.parse(trimCarriageReturn(line).toString("utf8"))
   } catch {
     return undefined
   }
+}
+
+function messageFromRecord(sessionID, record, offset) {
   if (record?.type !== "event_msg") return undefined
   const payload = record.payload
   const role = payload?.type === "user_message" ? "user"
@@ -41,6 +43,25 @@ function messageFromLine(sessionID, line, offset) {
     },
     parts: [{ id: `${messageID}:${type}:0`, messageID, type, text }]
   }
+}
+
+function messageFromLine(sessionID, line, offset) {
+  return messageFromRecord(sessionID, recordFromLine(line), offset)
+}
+
+/**
+ * Codex persists the model and reasoning effort that own a turn in `turn_context`. Reading that
+ * record is lock-free, unlike ACP session/load, and is the same native rollout authority used for
+ * transcript recovery. The app presents Codex's bare model ids under the synthetic `codex` provider,
+ * matching the ACP catalog's fallback provider id.
+ */
+function modelFromTurnContext(record) {
+  if (record?.type !== "turn_context") return undefined
+  const modelID = typeof record.payload?.model === "string" ? record.payload.model.trim() : ""
+  if (!modelID) return undefined
+  const effortValue = record.payload?.effort ?? record.payload?.collaboration_mode?.reasoning_effort
+  const variant = typeof effortValue === "string" && effortValue.trim() ? effortValue.trim() : undefined
+  return { providerID: "codex", modelID, ...(variant ? { variant } : {}) }
 }
 
 async function* forwardLines(file) {
@@ -75,6 +96,7 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
     }
 
     const found = []
+    let currentModel
     let cursor = end
     let carry = Buffer.alloc(0)
 
@@ -92,7 +114,11 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
         const lineStart = index + 1
         if (lineStart < lineEnd) {
           const offset = start + lineStart
-          const message = messageFromLine(sessionID, data.subarray(lineStart, lineEnd), offset)
+          const record = recordFromLine(data.subarray(lineStart, lineEnd))
+          // Only the newest-page read describes the Session's current model. Older page requests
+          // deliberately omit model metadata so paging cannot rewind the picker to a historical turn.
+          if (!before && !currentModel) currentModel = modelFromTurnContext(record)
+          const message = messageFromRecord(sessionID, record, offset)
           if (message) found.push({ message, offset })
         }
         lineEnd = index
@@ -100,7 +126,9 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
 
       if (start === 0) {
         if (lineEnd > 0 && found.length <= boundedLimit) {
-          const message = messageFromLine(sessionID, data.subarray(0, lineEnd), 0)
+          const record = recordFromLine(data.subarray(0, lineEnd))
+          if (!before && !currentModel) currentModel = modelFromTurnContext(record)
+          const message = messageFromRecord(sessionID, record, 0)
           if (message) found.push({ message, offset: 0 })
         }
         carry = Buffer.alloc(0)
@@ -115,7 +143,12 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
     const newest = found.slice(0, boundedLimit)
     const messages = newest.map((entry) => entry.message).reverse()
     const nextBefore = hasMore && newest.length > 0 ? String(newest[newest.length - 1].offset) : null
-    return { messages, before: nextBefore, hasMore }
+    return {
+      messages,
+      before: nextBefore,
+      hasMore,
+      ...(currentModel ? { model: currentModel } : {})
+    }
   } finally {
     await handle.close()
   }
