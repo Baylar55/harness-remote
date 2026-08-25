@@ -26,8 +26,15 @@ function textPart(id, text) {
 }
 
 function message(sessionID, id, role, text, created) {
+  const assistant = role === "assistant"
   return {
-    info: { id, role, sessionID, time: { created } },
+    info: {
+      id,
+      role,
+      sessionID,
+      time: assistant ? { created, completed: created } : { created },
+      ...(assistant ? { finish: "stop" } : {})
+    },
     parts: [textPart(`${id}-text`, text)]
   }
 }
