@@ -76,6 +76,12 @@ type Props = {
    * this shared client for every other consumer.
    */
   modelScope?: AgentModelScope
+  /**
+   * Native Session model authority arrives from transcript metadata after this controller mounts.
+   * Until then an empty choice means the harness default; do not present the catalog's first model
+   * as if it were the Session's persisted selection.
+   */
+  deferModelFallback?: boolean
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
@@ -267,7 +273,8 @@ export function WorkThreadConversation({
   onTaskUpdate,
   onWorkspaceRefresh,
   onAttentionChange,
-  modelScope
+  modelScope,
+  deferModelFallback = false
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${task.id}`
   const initialAgentID = agentForRun(task, task.run)
@@ -586,9 +593,10 @@ export function WorkThreadConversation({
       setModels(catalog.models)
       const prior = lastModelForAgent(taskRef.current, targetAgentID)
       const priorKey = modelKey(prior)
-      const chosen = catalog.models.find((model) => modelKey(model) === priorKey)
-        || catalog.models.find((model) => model.isDefault)
-        || catalog.models[0]
+      const fallback = deferModelFallback
+        ? undefined
+        : catalog.models.find((model) => model.isDefault) || catalog.models[0]
+      const chosen = catalog.models.find((model) => modelKey(model) === priorKey) || fallback
       setTargetModelKey((currentKey) => {
         if (modelSelectionTouchedRef.current && catalog.models.some((model) => modelKey(model) === currentKey)) return currentKey
         return chosen ? modelKey(chosen) : ""
@@ -602,7 +610,7 @@ export function WorkThreadConversation({
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, task.id, task.workspace.path, baseConfig, modelScopeKey])
+  }, [targetAgentID, task.id, task.workspace.path, baseConfig, modelScopeKey, deferModelFallback])
 
   // Only a model verified by the current live catalog is sent explicitly. A null selection is
   // intentional: the controller distinguishes it from an omitted field, which means reuse the
@@ -720,7 +728,7 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
               modelSelectionTouchedRef.current = true
               setTargetModelKey(value)
-            }} disabled={working || sending} loading={modelsLoading} unavailableHint={modelError || undefined} />
+            }} disabled={working || sending} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
           </label>
         </div>

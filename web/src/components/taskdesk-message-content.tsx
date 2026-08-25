@@ -251,6 +251,13 @@ function messageErrorText(message: MessageEnvelope): string {
   return readableErrorValue(error.data?.message) || readableErrorValue(error.message) || error.name || "The coding agent failed to complete this turn."
 }
 
+function assistantTurnCompleted(message: MessageEnvelope): boolean {
+  if (message.info.time?.completed) return true
+  const info = message.info as MessageEnvelope["info"] & { finish?: unknown }
+  if (typeof info.finish === "string" && info.finish.trim()) return true
+  return message.parts.some((part) => part.type === "step-finish")
+}
+
 /**
  * Render one logical conversation turn. Transport-level text chunks are joined into one Markdown
  * body, while reasoning, tools and working narration remain inside Activity. Internal OpenCode
@@ -271,6 +278,7 @@ export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }
   const interruptedWithoutFinal = message.info.role === "assistant"
     && !liveAssistant
     && !turnError
+    && assistantTurnCompleted(message)
     && hasActivity
     && !hasFinalText
 

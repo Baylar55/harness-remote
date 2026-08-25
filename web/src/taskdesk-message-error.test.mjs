@@ -25,6 +25,7 @@ test("a terminal assistant turn with only reasoning or tools is never silently p
   assert.match(source, /interruptedWithoutFinal/)
   assert.match(source, />Response interrupted</)
   assert.match(source, /stopped before producing a final answer/)
+  assert.match(source, /assistantTurnCompleted\(message\)/)
 })
 
 test("a later final answer suppresses a stale transport or intermediate turn error", () => {

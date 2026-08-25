@@ -34,6 +34,8 @@ assert.ok(adapter.includes('message.info.error'), 'PI identity stabilization mus
 assert.ok(adapter.includes('if (entry && entry.listeners.size === 0) projections.delete(id)'), 'leaving a Session must dispose its transient projection so another Session starts cleanly')
 assert.equal(adapter.includes('MAX_CACHED_PROJECTIONS'), false, 'Session projections must not survive navigation in a global cache')
 assert.equal(adapter.includes('pruneInactiveProjections'), false, 'Session navigation must not retain inactive projection state')
+assert.ok(adapter.includes('reconcileNativeSessionModel(entry, page, before)'), 'every current tail page must refresh delayed OpenCode and Codex model metadata')
+assert.ok(adapter.includes('lastNativeMessageModel(page.messages)'), 'OpenCode tail reconciliation must recover the newest native turn model')
 assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not contain rendering')
 assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
 
@@ -46,6 +48,8 @@ assert.match(nativeModel, /if \(target\.backend !== "opencode"[\s\S]{0,200}?\) r
 assert.ok(workThread.includes('observedTaskModelKeyRef'), 'the v3 picker must observe a model that arrives after the controller mounted')
 assert.ok(workThread.includes('modelSelectionTouchedRef'), 'late native enrichment must not overwrite a model the user explicitly picked')
 assert.ok(workThread.includes('currentTaskModelKey === previous'), 'the late-model sync must be edge-triggered rather than resetting the picker on every render')
+assert.ok(observer.includes('deferModelFallback'), 'native Sessions must not display the catalog default before native model metadata resolves')
+assert.ok(workThread.includes('const fallback = deferModelFallback'), 'the shared controller must preserve ordinary Work Thread fallback behavior')
 
 assert.ok(workThread.includes('const sendInFlightRef = useRef(false)'), 'v3 send in-flight guard must remain authoritative')
 assert.ok(workThread.includes('api.loadMessagePage'), 'v3 transcript paging must remain authoritative')

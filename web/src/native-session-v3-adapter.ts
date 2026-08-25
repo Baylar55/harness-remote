@@ -1,5 +1,6 @@
 import { api, type MessagePage } from "./api"
 import { probeNativeSessionContinuation } from "./native-session-continuation"
+import { lastNativeMessageModel } from "./native-session-model"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { sendNativeSessionPrompt } from "./native-session-prompt"
 import { stopNativeSession } from "./native-session-stop"
@@ -156,6 +157,37 @@ function nativeAssistantCompleted(message: MessageEnvelope): boolean {
   if (message.info.error || message.info.time?.completed) return true
   const info = message.info as MessageEnvelope["info"] & { finish?: unknown }
   return typeof info.finish === "string" && Boolean(info.finish.trim())
+}
+
+function sameModel(left: ModelSelection | null, right: ModelSelection | null): boolean {
+  return Boolean(left && right
+    && left.providerID === right.providerID
+    && left.modelID === right.modelID
+    && (left.variant || "") === (right.variant || ""))
+}
+
+/**
+ * Model enrichment is not a mount-only read. A user can leave immediately after Send, before the
+ * new native envelope is durable, then return while the reply is still streaming. Every current-tail
+ * page can therefore advance the projection from stale/default metadata to the model on the newest
+ * native turn.
+ */
+function reconcileNativeSessionModel(entry: ProjectionEntry, page: MessagePage, before?: string): void {
+  if (before || (entry.target.backend !== "opencode" && entry.target.backend !== "codex")) return
+  const model = page.model ?? (entry.target.backend === "opencode" ? lastNativeMessageModel(page.messages) : null)
+  if (!model) return
+
+  let changed = !sameModel(entry.currentModel, model)
+  entry.currentModel = model
+  const latestUser = [...page.messages].reverse().find((message) => message.info.role === "user" && message.info.id)
+  if (latestUser) {
+    const run = entry.runs.get(`${projectionID(entry.target)}:native-user:${latestUser.info.id}`)
+    if (run && !sameModel(run.model, model)) {
+      run.model = model
+      changed = true
+    }
+  }
+  if (changed) notify(entry)
 }
 
 /**
@@ -393,6 +425,7 @@ function installAdapter(): void {
       page = stabilizePiTailPage(entry, page, before)
       captureUserRuns(entry, page, before)
       reconcileOpenCodeTranscriptStatus(entry, page, before)
+      reconcileNativeSessionModel(entry, page, before)
     }
     return page
   }
