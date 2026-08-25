@@ -52,6 +52,8 @@ export async function createNativeSessionTarget({
     stopCapability: agent.contract?.sessions?.stop,
     abortSupported: agent.capabilities?.abort === true,
     modelsSupported: agent.capabilities?.models === true,
+    renameSupported: agent.capabilities?.sessionRename === true,
+    deleteSupported: agent.capabilities?.sessionDelete === true,
     writerOwned: true,
     session
   }
