@@ -25,6 +25,11 @@ assert.ok(adapter.includes(':request:${clientRequestId}'), 'new native prompts m
 assert.ok(adapter.includes('probeNativeSessionContinuation(entry.target)'), 'ACP writer acquisition must be deferred to the mutation boundary')
 assert.ok(adapter.includes('await ensureWriter(entry)'), 'Send and Stop must acquire writer ownership transparently when needed')
 assert.ok(adapter.includes('value === "retry"') && adapter.includes('value === "waiting"'), 'retry and waiting must remain working states')
+assert.ok(adapter.includes('stabilizePiTailMessageIDs'), 'PI tail reads must stabilize live ACP ids when the journal later exposes the same reply under a persisted id')
+assert.ok(adapter.includes('candidates?.length !== 1'), 'PI identity stabilization must refuse ambiguous repeated-answer matches')
+assert.ok(adapter.includes('nextKeyCounts.get(key) !== 1'), 'PI identity stabilization must preserve legitimate repeated identical journal answers')
+assert.ok(adapter.includes('entry.target.backend !== "pi" || before'), 'PI identity stabilization must stay scoped to current tail reads and never rewrite older-page history')
+assert.ok(adapter.includes('message.info.error'), 'PI identity stabilization must keep interrupted/error turns outside text-only aliasing')
 assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not contain rendering')
 assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
 
