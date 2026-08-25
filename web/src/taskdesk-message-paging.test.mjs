@@ -39,6 +39,26 @@ test("newest-page refresh preserves explicitly loaded older messages", () => {
   assert.equal(merged[3], newD)
 })
 
+test("newest-page reconcile never cuts a streamed assistant reply back to a stale journal prefix", () => {
+  const complete = message("reply", "This is the complete answer from the live ACP stream.")
+  const staleJournal = message("reply", "This is the complete answer")
+
+  const merged = mergeLatestMessagePage([complete], [staleJournal])
+  assert.equal(merged[0], complete, "a same-id journal prefix must not replace the longer live answer")
+  assert.equal(merged[0].parts[0].text, "This is the complete answer from the live ACP stream.")
+
+  const laterJournal = message("reply", "This is the complete answer from the live ACP stream. Persisted.")
+  const caughtUp = mergeLatestMessagePage(merged, [laterJournal])
+  assert.equal(caughtUp[0], laterJournal, "a journal that catches up and extends the answer remains authoritative")
+})
+
+test("a divergent native rewrite is not mistaken for a stale prefix", () => {
+  const current = message("reply", "draft answer that was streamed")
+  const rewritten = message("reply", "final answer from native history")
+  const merged = mergeLatestMessagePage([current], [rewritten])
+  assert.equal(merged[0], rewritten)
+})
+
 test("older pages prepend without duplicating the cursor boundary", () => {
   const currentB = message("b")
   const currentC = message("c")
