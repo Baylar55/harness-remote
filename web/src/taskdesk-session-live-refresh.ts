@@ -18,6 +18,7 @@ export type SelectedLiveSession = {
 type Timer = ReturnType<typeof setTimeout>
 
 const FOREGROUND_DEDUP_MS = 500
+const LIFECYCLE_SETTLE_MS = 900
 
 function isAttentionEvent(type: string): boolean {
   return type.startsWith("permission.") || type.startsWith("question.")
@@ -52,6 +53,7 @@ export function startTaskDeskSessionLiveRefresh({
   let indexTimer: Timer | undefined
   let detailTimer: Timer | undefined
   let foregroundTimer: Timer | undefined
+  let lifecycleSettleTimer: Timer | undefined
   let lastForegroundRefreshAt = 0
   let appStateHandle: PluginListenerHandle | undefined
 
@@ -68,6 +70,23 @@ export function startTaskDeskSessionLiveRefresh({
     if (kind === "message") messageTimer = timer
     else if (kind === "index") indexTimer = timer
     else detailTimer = timer
+  }
+
+  /**
+   * OpenCode may publish the lifecycle edge before the final assistant envelope is readable through
+   * `/session/:id/message`. Keep one bounded, coalesced settle read after the latest status edge so
+   * the already-mounted Session gets a second authoritative chance without permanent fast polling.
+   * A later busy/idle status simply moves this one timer; it never creates an unbounded retry loop.
+   */
+  const settleAfterLifecycle = () => {
+    if (closed || !getSelected()) return
+    if (lifecycleSettleTimer !== undefined) clearTimeout(lifecycleSettleTimer)
+    lifecycleSettleTimer = setTimeout(() => {
+      lifecycleSettleTimer = undefined
+      if (closed || !getSelected()) return
+      onMessage()
+      onIndex()
+    }, LIFECYCLE_SETTLE_MS)
   }
 
   const reconcileAfterForeground = () => {
@@ -126,12 +145,15 @@ export function startTaskDeskSessionLiveRefresh({
       }
 
       // OpenCode's authoritative turn lifecycle is session.status. The deprecated session.idle event
-      // is still accepted because older OpenCode releases emit it. A completion event must reconcile
-      // both status and the selected transcript: the final message can become durable after the last
-      // message-part event, so relying on message.* alone leaves the UI painted as Working.
+      // is still accepted because older OpenCode releases emit it. The immediate tail read covers the
+      // normal case; the one bounded settle read covers real servers where transcript durability lags
+      // the lifecycle edge and no convenient final message.updated is emitted.
       if (event.type === "session.status" || event.type === "session.idle") {
         throttle("index", 120, onIndex)
-        if (selectedEvent) throttle("message", 80, onMessage)
+        if (selectedEvent) {
+          throttle("message", 80, onMessage)
+          settleAfterLifecycle()
+        }
         return
       }
 
@@ -167,7 +189,12 @@ export function startTaskDeskSessionLiveRefresh({
       if (status.type !== "connected") return
       throttle("index", 100, onIndex)
       const selected = getSelected()
-      if (selected?.targetKey === target.key) throttle("detail", 100, onDetail)
+      if (selected?.targetKey === target.key) {
+        // A reconnect proves that an event gap may have happened. Re-read the selected native tail
+        // once instead of waiting for a future token that may never arrive after a completed turn.
+        throttle("message", 100, onMessage)
+        throttle("detail", 100, onDetail)
+      }
     }
   }))
 
@@ -179,6 +206,7 @@ export function startTaskDeskSessionLiveRefresh({
       if (indexTimer !== undefined) clearTimeout(indexTimer)
       if (detailTimer !== undefined) clearTimeout(detailTimer)
       if (foregroundTimer !== undefined) clearTimeout(foregroundTimer)
+      if (lifecycleSettleTimer !== undefined) clearTimeout(lifecycleSettleTimer)
       if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibilityChange)
       if (typeof window !== "undefined") window.removeEventListener("pageshow", onPageShow)
       if (appStateHandle) void appStateHandle.remove()
