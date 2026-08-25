@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -146,6 +146,56 @@ test("ignores an image record carrying no payload", async () => {
     const loadHistory = createOmpHistoryLoader(root)
     const messages = await loadHistory(sessionID, { activeSessionLeaf: "user-1" })
     assert.deepEqual(messages[0].parts.map((part) => part.type), ["text"], "an empty image must not become a broken thumbnail")
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("indexes OMP Session files once across different Session opens and refreshes only on a true miss", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "harness-remote-omp-index-"))
+  const nested = path.join(root, "workspace")
+  await mkdir(nested)
+
+  const writeSession = async (sessionID, messageID, text) => {
+    await writeFile(
+      path.join(nested, `2026-08-25_${sessionID}.jsonl`),
+      `${JSON.stringify({
+        type: "message",
+        id: messageID,
+        parentId: null,
+        timestamp: "2026-08-25T10:00:00.000Z",
+        message: { role: "assistant", content: text }
+      })}\n`
+    )
+  }
+
+  try {
+    await writeSession("session-one", "a1", "first")
+    await writeSession("session-two", "a2", "second")
+    let scans = 0
+    const loadHistory = createOmpHistoryLoader(root, {
+      readDirectory: async (...args) => {
+        scans += 1
+        return readdir(...args)
+      }
+    })
+
+    assert.deepEqual(
+      (await loadHistory.page("session-one", { activeSessionLeaf: "a1" })).messages.map((message) => message.parts[0].text),
+      ["first"]
+    )
+    assert.deepEqual(
+      (await loadHistory.page("session-two", { activeSessionLeaf: "a2" })).messages.map((message) => message.parts[0].text),
+      ["second"]
+    )
+    assert.equal(scans, 1, "opening a different existing OMP Session must reuse the indexed journal tree")
+
+    await writeSession("session-three", "a3", "third")
+    assert.deepEqual(
+      (await loadHistory.page("session-three", { activeSessionLeaf: "a3" })).messages.map((message) => message.parts[0].text),
+      ["third"]
+    )
+    assert.equal(scans, 2, "a true miss must refresh the index so a newly-created Session becomes visible")
   } finally {
     await rm(root, { recursive: true, force: true })
   }
