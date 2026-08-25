@@ -169,25 +169,71 @@ async function readOmpPage(file, sessionID, { limit = 100, before, activeSession
   }
 }
 
+/*
+ * How long a directory listing may be reused before another lookup miss rescans.
+ *
+ * Short enough that a Session created moments ago is still found, long enough that opening many
+ * Sessions in a row does not walk the tree once per Session.
+ */
+const OMP_SESSION_LISTING_TTL_MS = 1_000
+
 export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp", "agent", "sessions")) {
   const sessionFiles = new Map()
+  let listing = []
+  let listedAt = 0
+  let listingInFlight
+  let listingScans = 0
+
+  /*
+   * The recursive walk already enumerates every Session file, so keep what it read.
+   *
+   * Discarding it meant each new Session opened paid its own full walk of the OMP session tree, so a
+   * machine with a lot of history spent O(Sessions) tree walks just to find files it had already
+   * seen - which is what made opening Sessions progressively slower. The listing is retained instead
+   * and searched in memory; only a miss against a stale listing walks the tree again.
+   *
+   * Session ids may themselves contain underscores, so files are matched by suffix rather than by
+   * trying to recover an id from a file name.
+   */
+  async function refreshListing() {
+    if (listingInFlight) return listingInFlight
+    listingInFlight = (async () => {
+      try {
+        listingScans += 1
+        const entries = await readdir(sessionRoot, { recursive: true, withFileTypes: true })
+        listing = entries
+          .filter((candidate) => candidate.isFile() && candidate.name.endsWith(".jsonl"))
+          .map((candidate) => ({ name: candidate.name, file: path.join(candidate.parentPath ?? candidate.path, candidate.name) }))
+        listedAt = Date.now()
+      } catch (error) {
+        if (error?.code === "ENOENT") {
+          listing = []
+          listedAt = Date.now()
+          return
+        }
+        throw error
+      } finally {
+        listingInFlight = undefined
+      }
+    })()
+    return listingInFlight
+  }
 
   async function locateSession(sessionID) {
     const known = sessionFiles.get(sessionID)
     if (known) return known
     if (!/^[A-Za-z0-9_-]+$/.test(sessionID)) return undefined
-    try {
-      const suffix = `_${sessionID}.jsonl`
-      const entries = await readdir(sessionRoot, { recursive: true, withFileTypes: true })
-      const entry = entries.find((candidate) => candidate.isFile() && candidate.name.endsWith(suffix))
-      if (!entry) return undefined
-      const file = path.join(entry.parentPath ?? entry.path, entry.name)
-      sessionFiles.set(sessionID, file)
-      return file
-    } catch (error) {
-      if (error?.code === "ENOENT") return undefined
-      throw error
+    const suffix = `_${sessionID}.jsonl`
+    const find = () => listing.find((candidate) => candidate.name.endsWith(suffix))?.file
+
+    let file = find()
+    if (!file && Date.now() - listedAt >= OMP_SESSION_LISTING_TTL_MS) {
+      await refreshListing()
+      file = find()
     }
+    if (!file) return undefined
+    sessionFiles.set(sessionID, file)
+    return file
   }
 
   const loadOmpHistory = async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
@@ -235,6 +281,14 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     })
   }
 
+  /** How often the session tree was walked, and how many files that walk is currently serving. */
+  loadOmpHistory.diagnostics = () => ({
+    source: "omp-session-jsonl",
+    listingScans,
+    listedFiles: listing.length,
+    resolvedSessions: sessionFiles.size,
+    listingAgeMs: listedAt ? Date.now() - listedAt : null
+  })
   loadOmpHistory.pageRequiresActiveLeaf = true
   loadOmpHistory.page = async (sessionID, options = {}) => {
     const file = await locateSession(sessionID)

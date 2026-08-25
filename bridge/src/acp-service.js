@@ -307,7 +307,10 @@ export class AcpService {
       queuedSessions: this.#queues.size,
       inFlightLoads: this.#loads.size,
       snapshotWrites: this.#snapshotWrites.size,
-      subscribers: this.#listeners.size
+      subscribers: this.#listeners.size,
+      // How this harness resolves history. A loader that walks a session tree reports how often it
+      // has had to, which is what makes "opening Sessions gets slower" measurable rather than felt.
+      ...(this.#historyLoader?.diagnostics ? { history: this.#historyLoader.diagnostics() } : {})
     }
   }
 
