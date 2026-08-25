@@ -15,6 +15,22 @@
   min-height: 0;
   flex: 1;
 }
+.hr-native-session-observer .tdw-agent-control {
+  flex: 1;
+}
+
+/* A native Session has one owning harness. Repeating it as a one-option "Continue with" select
+   competes with the model and live state without offering a choice. Cross-agent continuation stays
+   in the explicit header action. */
+.hr-native-session-observer .tdw-agent-control > label:first-child {
+  display: none;
+}
+
+.hr-native-session-observer .tdw-model-control {
+  width: min(360px, 100%);
+}
+
+
 
 .hr-native-session-continuation {
   flex: 0 0 auto;
@@ -41,6 +57,62 @@
 
 .hr-native-session-continuation button {
   flex: 0 0 auto;
+}
+
+@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
+  .hr-native-session-observer .tdw-conversation-toolbar {
+    min-height: 48px !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+  }
+
+  .hr-native-session-observer .tdw-agent-control {
+    min-width: 0 !important;
+    width: auto !important;
+    flex: 1 1 auto !important;
+    display: flex !important;
+    grid-template-columns: none !important;
+  }
+
+  .hr-native-session-observer .tdw-agent-control > label:first-child {
+    display: none !important;
+  }
+
+  .hr-native-session-observer .tdw-model-control,
+  .hr-native-session-observer .tdw-model-picker.compact {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .hr-control-plane .hr-native-session-observer .tdw-conversation-state {
+    max-width: 46%;
+    min-height: 32px;
+    display: inline-flex !important;
+    overflow: hidden;
+    margin-left: 0;
+    white-space: nowrap;
+  }
+
+  .hr-native-session-observer .tdw-conversation-state > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hr-native-session-observer .uw-composer-footer .uw-button {
+    width: 44px !important;
+    min-width: 44px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    overflow: hidden;
+  }
+
+  .hr-native-session-observer .uw-transcript-jump {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 @media (max-width: 640px) {

@@ -9,13 +9,6 @@
   background: var(--tdw-bg, #0f1115);
 }
 
-/* ConversationWorkspace stays mounted during the Session-first migration so switching back keeps its
-   local state, but it must not remain a second interactive surface underneath Sessions. Some of its
-   desktop controls create their own stacking contexts, so z-index alone is not a sufficient boundary. */
-.uw-standalone-host:has(> .hr-native-workspace) > .hr-control-plane:not(.hr-native-workspace) {
-  visibility: hidden;
-  pointer-events: none;
-}
 
 .hr-native-workspace-body {
   display: grid;
@@ -66,6 +59,45 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.hr-native-session-heading {
+  min-width: 0;
+}
+
+.hr-native-session-eyebrow {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.hr-native-session-eyebrow span,
+.hr-native-session-eyebrow strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hr-native-session-eyebrow strong {
+  color: var(--tdw-text, #f5f6f8);
+  font-weight: 700;
+}
+
+.hr-native-session-eyebrow i {
+  color: var(--tdw-border, rgba(127, 127, 127, 0.42));
+  font-style: normal;
+}
+
+.hr-native-workspace-session-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 
 .hr-native-workspace-session-header code {
   max-width: 34%;
@@ -109,7 +141,7 @@
   padding: 2px 4px 12px;
 }
 
-.hr-native-home-heading > div {
+.hr-native-home-heading > div:first-child {
   min-width: 0;
 }
 
@@ -119,11 +151,135 @@
   line-height: 1.25;
 }
 
-.hr-native-home-heading span {
+.hr-native-home-heading > div:first-child > span {
   display: block;
   margin-top: 3px;
   color: var(--tdw-muted, #9299a8);
   font-size: 11px;
+}
+
+.hr-native-home-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hr-native-new-session {
+  min-height: 34px;
+  white-space: nowrap;
+}
+
+.hr-native-new-session > span {
+  color: inherit;
+  margin: 0;
+  font-size: inherit;
+}
+
+.hr-native-create-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 12px;
+  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.22));
+  border-radius: 12px;
+  background: var(--tdw-card, rgba(255, 255, 255, 0.035));
+}
+
+.hr-native-create-heading,
+.hr-native-create-title,
+.hr-native-create-error,
+.hr-native-create-actions {
+  grid-column: 1 / -1;
+}
+
+.hr-native-create-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hr-native-create-heading strong,
+.hr-native-create-heading small {
+  display: block;
+}
+
+.hr-native-create-heading strong {
+  color: var(--tdw-text, #f5f6f8);
+  font-size: 13px;
+}
+
+.hr-native-create-heading small {
+  margin-top: 3px;
+  color: var(--tdw-muted, #9299a8);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.hr-native-create-panel > label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.hr-native-create-panel > label > span {
+  color: var(--tdw-muted, #9299a8);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.hr-native-create-panel select,
+.hr-native-create-panel input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.22));
+  border-radius: 9px;
+  color: var(--tdw-text, #f5f6f8);
+  background: var(--tdw-control, rgba(255, 255, 255, 0.04));
+  font: inherit;
+}
+
+.hr-native-create-panel select:focus-visible,
+.hr-native-create-panel input:focus-visible {
+  outline: 2px solid var(--td3-focus, #5b8cff);
+  outline-offset: 1px;
+}
+
+.hr-native-create-error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--td3-red-text, #d73a49);
+  background: var(--td3-red-soft, rgba(215, 58, 73, 0.08));
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.hr-native-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.hr-native-home-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 2px 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--td3-yellow-border, rgba(191, 135, 0, 0.34));
+  border-radius: 9px;
+  color: var(--tdw-muted, #9299a8);
+  background: var(--td3-yellow-soft, rgba(191, 135, 0, 0.08));
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.hr-native-home-notice strong {
+  color: var(--tdw-text, #f5f6f8);
 }
 
 .hr-native-project-group + .hr-native-project-group {
@@ -133,10 +289,10 @@
 .hr-native-project-heading {
   min-width: 0;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 0 6px 6px;
+  padding: 0 6px 7px;
 }
 
 .hr-native-project-heading > div {
@@ -165,13 +321,17 @@
 }
 
 .hr-native-project-heading > span {
-  max-width: 100px;
+  max-width: 120px;
   flex: 0 0 auto;
   overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.18));
+  border-radius: 999px;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--tdw-muted, #9299a8);
-  font-size: 10px;
+  background: var(--tdw-card, rgba(255, 255, 255, 0.025));
+  font-size: 9.5px;
 }
 
 .hr-native-home-list {
@@ -182,9 +342,9 @@
 .hr-native-session-row {
   width: 100%;
   min-width: 0;
-  min-height: 48px;
+  min-height: 52px;
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
   align-items: center;
   gap: 9px;
   padding: 7px 8px;
@@ -203,22 +363,57 @@
   outline: 0;
 }
 
-.hr-native-session-row.active {
+.hr-native-session-row.working {
   background: color-mix(in srgb, var(--tdw-card, rgba(255, 255, 255, 0.035)) 78%, transparent);
 }
 
-.hr-native-session-state {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--tdw-muted, #9299a8);
-  opacity: .58;
+.hr-native-session-row.attention {
+  background: var(--td3-yellow-soft, rgba(191, 135, 0, 0.08));
 }
 
-.hr-native-session-state[data-state="active"] {
-  background: #42c77a;
-  box-shadow: 0 0 0 3px rgba(66, 199, 122, .12);
-  opacity: 1;
+.hr-native-session-harness {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.18));
+  border-radius: 8px;
+  color: var(--tdw-text, #f5f6f8);
+  background: var(--tdw-card, rgba(255, 255, 255, 0.04));
+}
+
+.hr-native-session-harness img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+.hr-native-session-harness b {
+  font-size: 9px;
+}
+
+.hr-native-session-harness i {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--tdw-panel, #181b22);
+  border-radius: 50%;
+  background: var(--tdw-muted, #9299a8);
+}
+
+.hr-native-session-harness i[data-state="working"] {
+  background: var(--td3-yellow, #d29922);
+}
+
+.hr-native-session-harness i[data-state="ready"] {
+  background: var(--td3-green, #2da44e);
+}
+
+.hr-native-session-harness i[data-state="attention"] {
+  background: var(--td3-red, #cf222e);
 }
 
 .hr-native-session-copy {
@@ -246,11 +441,31 @@
   font-size: 10px;
 }
 
-.hr-native-session-time {
-  min-width: 24px;
+.hr-native-session-meta {
+  min-width: 54px;
+  display: grid;
+  justify-items: end;
+  gap: 3px;
   color: var(--tdw-muted, #9299a8);
-  font-size: 10px;
+  font-size: 9.5px;
   text-align: right;
+}
+
+.hr-native-session-status {
+  color: var(--tdw-muted, #9299a8);
+  white-space: nowrap;
+}
+
+.hr-native-session-status[data-state="working"] {
+  color: var(--td3-yellow-text, #9a6700);
+}
+
+.hr-native-session-status[data-state="attention"] {
+  color: var(--td3-red-text, #d73a49);
+}
+
+.hr-native-session-meta time {
+  font-variant-numeric: tabular-nums;
 }
 
 .hr-native-project-more {
@@ -284,50 +499,51 @@
   font-size: 11px;
 }
 
-/* Compatibility escape hatch while Conversation remains mounted during Session-first migration. */
-.hr-session-launcher {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 13px;
-  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.28));
-  border-radius: 999px;
-  background: var(--tdw-panel, #181b22);
-  color: var(--tdw-text, #f5f6f8);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .24);
-  cursor: pointer;
-}
 
-@media (max-width: 900px) {
-  .hr-session-launcher { display: none; }
+@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
   .hr-native-workspace-body { grid-template-columns: 1fr; }
   .hr-native-workspace-list { border-right: 0; }
   .hr-native-workspace-detail {
     position: absolute;
-    inset: 57px 0 0;
+    inset: 52px 0 var(--hr-mobile-nav-height);
     background: var(--tdw-bg, #0f1115);
     transform: translateX(100%);
     transition: transform .18s ease;
   }
   .hr-native-workspace-detail.mobile-open { transform: translateX(0); }
-  .hr-native-workspace-session-header { padding: 10px 12px; }
+  .hr-native-workspace-session-header {
+    min-height: 58px;
+    padding: 8px 10px 8px 48px;
+  }
   .hr-native-workspace-session-header code { display: none; }
+  .hr-native-workspace-session-header h1 {
+    margin-block: 1px 2px;
+    font-size: 16px;
+  }
+  .hr-native-workspace-session-header small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hr-native-session-eyebrow { font-size: 9.5px; }
   .hr-native-home { padding: 12px 8px 84px; }
-  .hr-native-project-heading small { max-width: 70vw; }
-  .hr-native-session-row { min-height: 52px; padding-block: 8px; }
-  .hr-native-project-more { min-height: 40px; }
+  .hr-native-home-heading { align-items: flex-start; }
+  .hr-native-home-actions { flex: none; }
+  .hr-native-project-heading small { max-width: 62vw; }
+  .hr-native-session-row { min-height: 56px; padding-block: 8px; }
+  .hr-native-project-more { min-height: 44px; }
+  .hr-native-create-panel { grid-template-columns: 1fr; }
+  .hr-native-create-panel > label,
+  .hr-native-create-actions { grid-column: 1; }
+  .hr-native-create-panel select,
+  .hr-native-create-panel input { min-height: 44px; font-size: 16px; }
+  .hr-native-create-actions > .tdw-button { min-height: 44px; }
+  .hr-native-home-notice { align-items: flex-start; flex-direction: column; }
 }
 
-/* On phone and short touch-landscape the bottom navigation owns the final strip of the viewport.
-   The native Session detail is an absolute surface, so unlike the older Conversation detail it did
-   not inherit the shell's nav-height reservation. Reserve that strip here: the shared composer and
-   its Send/Stop controls then remain fully visible and tappable instead of sitting underneath nav. */
-@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
-  .hr-native-workspace-detail {
-    inset: 57px 0 var(--hr-mobile-nav-height);
-  }
+@media (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
+  .hr-native-workspace-detail { inset-block-start: 44px; }
+  .hr-native-workspace-session-header { min-height: 48px; padding-block: 5px; }
+  .hr-native-create-panel { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hr-native-create-title { grid-column: auto; }
 }

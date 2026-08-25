@@ -57,7 +57,8 @@ assert.match(main, /loadWorkspaceMachines/, 'v3 must boot from machine-level con
 assert.match(main, /<StandaloneUniversalWorkspace/, 'v3 must boot directly into the universal workspace')
 assert.doesNotMatch(main, /loadServerProfiles/, 'the primary v3 boot path must not depend on per-harness Classic profiles')
 assert.match(standalone, /discoverMachine/, 'machine editing must validate the daemon before use')
-assert.match(standalone, /ConversationWorkspace/, 'the machine shell must open the conversation control plane')
+assert.match(standalone, /NativeSessionsWorkspace/, 'the machine shell must open the Session-first control plane')
+assert.doesNotMatch(standalone, /ConversationWorkspace/, 'the retired Conversations surface must not remain mounted')
 
 const boundary = readFileSync(new URL('./ErrorBoundary.tsx', import.meta.url), 'utf8')
 assert.match(boundary, /localStorage\.removeItem\(key\)/, 'recovery must clear saved configuration keys')

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
 import {
@@ -14,7 +14,17 @@ import "../native-session-observer.css"
 type Props = {
   target: NativeSessionSurfaceTarget
   onSessionRefresh?: () => void
+  onStateChange?: (state: NativeSessionVisualState) => void
 }
+export type NativeSessionVisualState = "working" | "attention" | "stopped" | "ready"
+
+function visualState(task: MachineTask, attention = false): NativeSessionVisualState {
+  if (attention || task.status === "failed") return "attention"
+  if (task.status === "cancelled") return "stopped"
+  if (nativeSessionIsWorking(task.status)) return "working"
+  return "ready"
+}
+
 
 export { nativeSessionIsWorking }
 
@@ -26,8 +36,24 @@ export { nativeSessionIsWorking }
  * Writer acquisition is deferred to the first mutation by native-session-v3-adapter, so the user
  * never has to unlock the transcript with an extra Continue step. Nothing is persisted as a Task or Run.
  */
-export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
+export function NativeSessionObserver({ target, onSessionRefresh, onStateChange }: Props) {
   const [task, setTask] = useState<MachineTask | null>(null)
+  const taskRef = useRef<MachineTask | null>(null)
+  const attentionRef = useRef(false)
+  const onStateChangeRef = useRef(onStateChange)
+  onStateChangeRef.current = onStateChange
+
+  const handleTaskUpdate = useCallback((next: MachineTask) => {
+    taskRef.current = next
+    setTask(next)
+    onStateChangeRef.current?.(visualState(next, attentionRef.current))
+  }, [])
+
+  const handleAttentionChange = useCallback((attention: boolean) => {
+    attentionRef.current = attention
+    const current = taskRef.current
+    if (current) onStateChangeRef.current?.(visualState(current, attention))
+  }, [])
 
   const agent = useMemo<MachineAgentHost>(() => ({
     id: target.agentID,
@@ -49,17 +75,19 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
     let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
 
     setTask(null)
+    taskRef.current = null
+    attentionRef.current = false
     void resolveNativeSessionTargetModel(target).then((resolvedTarget) => {
       if (disposed) return
-      registration = registerNativeSessionV3Adapter(resolvedTarget, (next) => setTask(next))
-      setTask(registration.task)
+      registration = registerNativeSessionV3Adapter(resolvedTarget, handleTaskUpdate)
+      handleTaskUpdate(registration.task)
     })
 
     return () => {
       disposed = true
       registration?.dispose()
     }
-  }, [target.key])
+  }, [target.key, handleTaskUpdate])
 
   if (!task) {
     return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session into the v3 controller...</div>
@@ -72,8 +100,9 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
         task={task}
         baseConfig={target.config}
         agents={[agent]}
-        onTaskUpdate={setTask}
+        onTaskUpdate={handleTaskUpdate}
         onWorkspaceRefresh={onSessionRefresh}
+        onAttentionChange={handleAttentionChange}
       />
     </div>
   )

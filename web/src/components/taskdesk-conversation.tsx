@@ -397,9 +397,10 @@ export function TaskDeskConversation({
                 className="uw-button uw-button-danger"
                 disabled={stopping}
                 onClick={() => void onStop()}
+                aria-label={stopping ? "Stopping" : "Stop"}
               >
                 {stopping ? <LoadingIcon size={15} /> : <StopCircleIcon size={15} />}
-                {stopping ? "Stopping" : "Stop"}
+                <span className="uw-button-label">{stopping ? "Stopping" : "Stop"}</span>
               </button>
             ) : (
               <button
@@ -407,9 +408,10 @@ export function TaskDeskConversation({
                 className="uw-button uw-button-primary"
                 disabled={!canSend}
                 onClick={() => void onSend()}
+                aria-label={sending ? "Sending" : "Send"}
               >
                 {sending ? <LoadingIcon size={15} /> : "↑"}
-                {sending ? "Sending" : "Send"}
+                <span className="uw-button-label">{sending ? "Sending" : "Send"}</span>
               </button>
             )}
           </div>

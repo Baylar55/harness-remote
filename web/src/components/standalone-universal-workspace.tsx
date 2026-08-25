@@ -9,7 +9,7 @@ import {
   persistThemePreference,
   type ThemePreference
 } from "../appPreferences"
-import { ChatIcon, ServerIcon, SettingsIcon } from "../Icons"
+import { ChatIcon, LoadingIcon, RefreshIcon, ServerIcon, SettingsIcon } from "../Icons"
 import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine, machineAgentStateLabel } from "../machineClient"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
@@ -18,16 +18,27 @@ import {
   createWorkspaceMachine,
   type WorkspaceMachine
 } from "../workspaceMachines"
+import { reuseList } from "../workspace-runtime-merge"
 import { useDialogDismiss } from "../useDialogDismiss"
-import { ConversationWorkspace } from "./conversation-workspace"
 import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
-import { NativeSessionObserver } from "./native-session-observer"
+import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
+import "../taskdesk-workthreads.css"
+import "../taskdesk-mobile-navigation.css"
+import "../taskdesk-focus-layout.css"
+import "../conversation-control-plane.css"
 
 type Props = {
   machines: WorkspaceMachine[]
   onPersistMachines: (machines: WorkspaceMachine[]) => void
 }
+type NativeMachineRuntime = {
+  machine: WorkspaceMachine
+  snapshot: MachineSnapshot | null
+  state: "loading" | "online" | "offline"
+  error?: string
+}
+
 
 type MachineEditorProps = {
   machine: WorkspaceMachine
@@ -202,53 +213,137 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <section className="hr-mobile-settings-page" aria-label={t("nav.settings")} ref={pageRef}>
-      <header>
-        <div><span>Harness Remote</span><h2>{t("nav.settings")}</h2></div>
-        <button type="button" onClick={onClose} aria-label={t("action.close")}>×</button>
-      </header>
-      <div className="hr-mobile-settings-body">
-        <div className="hr-mobile-settings-group">
-          <span>Appearance</span>
-          <label><strong>{t("settings.theme")}</strong><select value={theme} onChange={(event) => changeTheme(event.target.value)}><option value="system">{t("settings.themeSystem")}</option><option value="light">{t("settings.themeLight")}</option><option value="dark">{t("settings.themeDark")}</option></select></label>
-          <label><strong>{t("settings.language")}</strong><select value={language} onChange={(event) => changeLanguage(event.target.value)}>{languageOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label>
+    <div className="hr-session-settings-backdrop" role="presentation" onMouseDown={onClose}>
+      <section className="hr-mobile-settings-page hr-session-settings-page" role="dialog" aria-modal="true" aria-label={t("nav.settings")} ref={pageRef} onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div><span>Harness Remote</span><h2>{t("nav.settings")}</h2></div>
+          <button type="button" onClick={onClose} aria-label={t("action.close")}>×</button>
+        </header>
+        <div className="hr-mobile-settings-body">
+          <div className="hr-mobile-settings-group">
+            <span>Interface</span>
+            <label><strong>{t("settings.theme")}</strong><select value={theme} onChange={(event) => changeTheme(event.target.value)}><option value="system">{t("settings.themeSystem")}</option><option value="light">{t("settings.themeLight")}</option><option value="dark">{t("settings.themeDark")}</option></select></label>
+            <label><strong>{t("settings.language")}</strong><select value={language} onChange={(event) => changeLanguage(event.target.value)}>{languageOptions.map((option) => <option value={option.code} key={option.code}>{option.label}</option>)}</select></label>
+          </div>
+          <p>Appearance and language are shared across Harness Remote on this device.</p>
         </div>
-        <p>Appearance and language are shared across Harness Remote on this device.</p>
-      </div>
-    </section>
+        <footer><button type="button" className="tdw-button primary" onClick={onClose}>{t("action.close")}</button></footer>
+      </section>
+    </div>
   )
 }
+function projectLabel(directory: string): string {
+  const parts = directory.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || directory || "Unknown Project"
+}
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`
+  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`
+  return String(value)
+}
+
+
 
 function NativeSessionsWorkspace({
   machines,
-  onBackToConversations,
-  onManageMachines
+  onManageMachines,
+  onManageSettings
 }: {
   machines: WorkspaceMachine[]
-  onBackToConversations: () => void
   onManageMachines: () => void
+  onManageSettings: () => void
 }) {
-  const [snapshots, setSnapshots] = useState<Record<string, MachineSnapshot | null>>({})
+  const [runtimes, setRuntimes] = useState<NativeMachineRuntime[]>(() =>
+    machines.map((machine) => ({ machine, snapshot: null, state: "loading" }))
+  )
+  const [loaded, setLoaded] = useState(machines.length === 0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [revision, setRevision] = useState(0)
   const [selected, setSelected] = useState<NativeSessionSurfaceTarget | null>(null)
+  const [selectedState, setSelectedState] = useState<NativeSessionVisualState | undefined>(undefined)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const refreshGeneration = useRef(0)
 
   useEffect(() => {
+    const generation = ++refreshGeneration.current
     let cancelled = false
-    void Promise.all(machines.map(async (machine) => {
-      try { return [machine.id, await discoverMachine(machine.config)] as const }
-      catch { return [machine.id, null] as const }
-    })).then((entries) => {
-      if (!cancelled) setSnapshots(Object.fromEntries(entries))
+    if (machines.length === 0) {
+      setRuntimes([])
+      setLoaded(true)
+      setRefreshing(false)
+      return
+    }
+
+    setRefreshing(true)
+    setRuntimes((current) => reuseList(current, machines.map((machine) => {
+      const previous = current.find((runtime) => runtime.machine.id === machine.id)
+      return previous ? { ...previous, machine } : { machine, snapshot: null, state: "loading" }
+    })))
+
+    void Promise.all(machines.map(async (machine): Promise<NativeMachineRuntime> => {
+      try {
+        const snapshot = await discoverMachine(machine.config)
+        return snapshot
+          ? { machine, snapshot, state: "online" }
+          : { machine, snapshot: null, state: "offline", error: "This endpoint is not a Harness machine daemon." }
+      } catch (reason) {
+        return {
+          machine,
+          snapshot: null,
+          state: "offline",
+          error: reason instanceof Error ? reason.message : String(reason)
+        }
+      }
+    })).then((next) => {
+      if (!cancelled && refreshGeneration.current === generation) {
+        setRuntimes((current) => reuseList(current, next))
+      }
+    }).finally(() => {
+      if (!cancelled && refreshGeneration.current === generation) {
+        setLoaded(true)
+        setRefreshing(false)
+      }
     })
     return () => { cancelled = true }
-  }, [machines])
+  }, [machines, revision])
 
-  const sources = useMemo(() => machines.flatMap((machine) => {
-    const snapshot = snapshots[machine.id]
-    return snapshot ? [{ machine, snapshot }] : []
-  }), [machines, snapshots])
+  useEffect(() => {
+    if (!loaded) return
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") setRevision((value) => value + 1)
+    }, 10_000)
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") setRevision((value) => value + 1)
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [loaded])
+
+  const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
+  const loadingCount = runtimes.filter((runtime) => runtime.state === "loading").length
+  const offlineCount = runtimes.filter((runtime) => runtime.state === "offline").length
+  const selectedRuntime = selected ? runtimes.find((runtime) => runtime.machine.id === selected.machineID) : undefined
+  const selectedMachine = selectedRuntime?.machine
+  const selectedProject = selected ? projectLabel(selected.directory) : undefined
+  const selectedTokenCount = selected?.tokens
+    ? (selected.tokens.input || 0) + (selected.tokens.output || 0) + (selected.tokens.reasoning || 0)
+    : 0
+  const selectedHasChanges = Boolean(selected?.summary && (
+    selected.summary.files || selected.summary.additions || selected.summary.deletions
+  ))
+  const selectedPermissionRules = selected?.permission || []
+  const selectedRestrictionCount = selectedPermissionRules.filter((rule) => rule.action === "deny").length
+  const selectedPolicyLabel = selectedPermissionRules.length
+    ? selectedRestrictionCount === selectedPermissionRules.length
+      ? `${selectedRestrictionCount} restrictions`
+      : `${selectedPermissionRules.length} policy rules`
+    : ""
 
   function openSession(target: NativeSessionSurfaceTarget) {
+    setSelectedState(undefined)
     setSelected(target)
     setMobileDetailOpen(true)
   }
@@ -256,32 +351,104 @@ function NativeSessionsWorkspace({
   return (
     <section className="tdw-shell hr-control-plane hr-native-workspace" aria-label="Sessions">
       <header className="tdw-topbar hr-topbar">
-        <div className="tdw-brand hr-brand"><span className="tdw-logo hr-logo">H</span><div><strong>Harness Remote</strong><small>Any coding agent. One workspace.</small></div></div>
-        <div className="tdw-context-path" aria-label="Current workspace context"><span>All projects</span><b>/</b><strong>Sessions</strong>{selected ? <><b>/</b><em>{selected.title}</em></> : null}</div>
+        <div className="tdw-brand hr-brand"><span className="tdw-logo hr-logo">H</span><div><strong>Harness Remote</strong><small>Native coding-agent Sessions, anywhere.</small></div></div>
+        <div className="tdw-context-path" aria-label="Current workspace context">
+          <span>{selectedMachine?.name || "All machines"}</span><b>/</b>
+          <strong>{selectedProject || "Native Sessions"}</strong>
+          {selected ? <><b>/</b><em>{selected.title}</em></> : null}
+        </div>
         <div className="tdw-top-actions">
+          <span className="tdw-machine-health">
+            <i className={onlineCount > 0 ? "online" : loadingCount > 0 ? "loading" : "offline"} />
+            {loadingCount && !loaded ? "Connecting" : `${onlineCount}/${machines.length} machines`}
+          </span>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
-          <button type="button" className="tdw-button secondary" onClick={onBackToConversations}><ChatIcon size={15} /> Conversations</button>
+          <button type="button" className="tdw-icon-button" onClick={onManageSettings} title="Settings" aria-label="Settings"><SettingsIcon size={16} /></button>
+          <button type="button" className="tdw-icon-button hr-refresh-button" onClick={() => setRevision((value) => value + 1)} title="Refresh" aria-label={refreshing ? "Refreshing machines" : "Refresh"} aria-busy={refreshing} disabled={refreshing}>
+            {refreshing ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
+          </button>
         </div>
       </header>
       <div className="hr-native-workspace-body">
         <aside className="hr-native-workspace-list">
-          <NativeSessionHome sources={sources} onOpen={openSession} />
+          <NativeSessionHome sources={runtimes} onOpen={openSession} selectedKey={selected?.key} selectedState={selectedState} />
         </aside>
         <main className={`hr-native-workspace-detail${mobileDetailOpen ? " mobile-open" : ""}`}>
           {selected ? (
             <>
               <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Sessions">← Sessions</button>
               <header className="hr-native-workspace-session-header">
-                <div><span>{selected.agentLabel}</span><h1>{selected.title}</h1><small>{selected.external ? "Native Session started outside Harness Remote" : "Native Session"}</small></div>
+                <div className="hr-native-session-heading">
+                  <div className="hr-native-session-eyebrow">
+                    <span>{selected.agentLabel}</span>
+                    {selected.nativeAgent ? <><i aria-hidden="true">/</i><span>{selected.nativeAgent}</span></> : null}
+                    <i aria-hidden="true">/</i>
+                    <span>{selectedMachine?.name || "Machine"}</span>
+                    <i aria-hidden="true">/</i>
+                    <strong>{selectedProject}</strong>
+                  </div>
+                  <h1>{selected.title}</h1>
+                  <small title={selected.directory}>
+                    {selected.external ? "Started in the native harness" : "Created in Harness Remote"}
+                    {selected.directory ? ` · ${selected.directory}` : ""}
+                  </small>
+                </div>
                 <div className="hr-native-workspace-session-actions">
-                  <NativeSessionHandoffControl source={selected} agents={snapshots[selected.machineID]?.agents || []} onOpen={openSession} />
+                  {selected.nativeAgent || selectedPolicyLabel || selectedTokenCount || selectedHasChanges || Number(selected.cost) > 0 ? (
+                    <div className="hr-native-session-stats" aria-label="Native Session statistics">
+                      {selected.nativeAgent ? <span title="Native coding-agent mode">Agent {selected.nativeAgent}</span> : null}
+                      {selectedPolicyLabel ? <span title="Native Session policy summary">{selectedPolicyLabel}</span> : null}
+                      {selectedTokenCount ? <span title="Cumulative native Session tokens">{compactNumber(selectedTokenCount)} tokens</span> : null}
+                      {selectedHasChanges ? (
+                        <span title={`${selected.summary?.files || 0} changed files`}>
+                          <b>+{selected.summary?.additions || 0}</b>
+                          <i>−{selected.summary?.deletions || 0}</i>
+                          <em>{selected.summary?.files || 0} files</em>
+                        </span>
+                      ) : null}
+                      {Number(selected.cost) > 0 ? <span title="Reported native Session cost">${Number(selected.cost).toFixed(2)}</span> : null}
+                    </div>
+                  ) : null}
+                  <NativeSessionHandoffControl source={selected} agents={selectedRuntime?.snapshot?.agents || []} onOpen={openSession} />
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>
               </header>
-              <div className="hr-native-workspace-chat"><NativeSessionObserver key={selected.key} target={selected} /></div>
+              <div className="hr-native-workspace-chat">
+                <NativeSessionObserver key={selected.key} target={selected} onStateChange={setSelectedState} />
+              </div>
             </>
+          ) : machines.length === 0 ? (
+            <div className="hr-native-workspace-empty hr-native-startup">
+              <ServerIcon size={28} />
+              <span>Harness Remote 3.0</span>
+              <strong>Add your first machine</strong>
+              <p>Connect the computer that runs Codex, Claude, OpenCode, OMP or PI. Its native Sessions will appear here directly.</p>
+              <button type="button" className="tdw-button primary" onClick={onManageMachines}><ServerIcon size={15} /> Add machine</button>
+            </div>
+          ) : !loaded || (onlineCount === 0 && loadingCount > 0) ? (
+            <div className="hr-native-workspace-empty hr-native-startup connecting" role="status" aria-live="polite">
+              <LoadingIcon size={28} />
+              <span>Preparing Harness Remote</span>
+              <strong>Connecting to your machines…</strong>
+              <p>Discovering Projects, installed coding agents and native Sessions. An ACP harness may need a few seconds to start.</p>
+              <small>{machines.length} configured machine{machines.length === 1 ? "" : "s"}</small>
+            </div>
+          ) : onlineCount === 0 ? (
+            <div className="hr-native-workspace-empty hr-native-startup offline">
+              <ServerIcon size={28} />
+              <span>Machines unavailable</span>
+              <strong>Harness Remote could not connect</strong>
+              <p>{offlineCount} configured machine{offlineCount === 1 ? " is" : "s are"} offline. Check the daemon, network and saved credentials; the configurations remain saved.</p>
+              <div><button type="button" className="tdw-button secondary" onClick={onManageMachines}>Manage machines</button><button type="button" className="tdw-button primary" onClick={() => setRevision((value) => value + 1)}>Retry</button></div>
+            </div>
           ) : (
-            <div className="hr-native-workspace-empty"><ChatIcon size={28} /><strong>Open a native Session</strong><span>Observe an existing coding-agent Session, then continue that same Session when the harness allows it.</span></div>
+            <div className="hr-native-workspace-empty hr-native-startup ready">
+              <ChatIcon size={28} />
+              <span>Harness Remote 3.0</span>
+              <strong>Open a native Session</strong>
+              <p>Select a Session from the left, or start a new one inside a Project. You will continue the same Session owned by its coding agent.</p>
+              <div className="hr-native-startup-facts"><span>{onlineCount} online</span>{offlineCount ? <span>{offlineCount} offline</span> : null}<span>Native Session truth</span></div>
+            </div>
           )}
         </main>
       </div>
@@ -291,19 +458,16 @@ function NativeSessionsWorkspace({
 
 export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Props) {
   const [managerOpen, setManagerOpen] = useState(machines.length === 0)
-  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false)
-  const [primarySection, setPrimarySection] = useState<"conversations" | "sessions">("sessions")
-  const [activeMachineID, setActiveMachineID] = useState(machines[0]?.id || "")
-  const activeID = machines.some((machine) => machine.id === activeMachineID) ? activeMachineID : machines[0]?.id || ""
-  const mobileSection = managerOpen ? "machines" : mobileSettingsOpen ? "settings" : primarySection
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const mobileSection = managerOpen ? "machines" : settingsOpen ? "settings" : "sessions"
 
   useEffect(() => {
     if (Capacitor.getPlatform() !== "android") return
     let disposed = false
     let handle: { remove: () => Promise<void> } | undefined
     void CapacitorApp.addListener("backButton", () => {
-      if (mobileSettingsOpen) {
-        setMobileSettingsOpen(false)
+      if (settingsOpen) {
+        setSettingsOpen(false)
         return
       }
       if (managerOpen) {
@@ -323,12 +487,6 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
         return
       }
 
-      const drawerScrim = document.querySelector<HTMLButtonElement>(".tdw-task-drawer-scrim")
-      if (drawerScrim && drawerScrim.getClientRects().length > 0) {
-        drawerScrim.click()
-        return
-      }
-
       const mobileBack = document.querySelector<HTMLButtonElement>(".tdw-mobile-back")
       if (mobileBack && mobileBack.getClientRects().length > 0) {
         mobileBack.click()
@@ -344,53 +502,32 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
       disposed = true
       if (handle) void handle.remove()
     }
-  }, [managerOpen, mobileSettingsOpen, primarySection])
-
-  function showConversations() {
-    setManagerOpen(false)
-    setMobileSettingsOpen(false)
-    setPrimarySection("conversations")
-  }
+  }, [managerOpen, settingsOpen])
 
   function showSessions() {
     setManagerOpen(false)
-    setMobileSettingsOpen(false)
-    setPrimarySection("sessions")
+    setSettingsOpen(false)
   }
 
   function showMachines() {
-    setMobileSettingsOpen(false)
+    setSettingsOpen(false)
     setManagerOpen(true)
   }
 
   function showSettings() {
     setManagerOpen(false)
-    setMobileSettingsOpen(true)
+    setSettingsOpen(true)
   }
 
   return (
     <div className="uw-standalone-host">
-      {primarySection === "conversations" ? (
-        <ConversationWorkspace
-          machines={machines}
-          activeMachineID={activeID}
-          onActiveMachineID={setActiveMachineID}
-          onManageMachines={showMachines}
-        />
-      ) : (
-        <NativeSessionsWorkspace machines={machines} onBackToConversations={showConversations} onManageMachines={showMachines} />
-      )}
-      {primarySection === "conversations" && machines.length > 0 ? <button type="button" className="hr-session-launcher" onClick={showSessions}><ChatIcon size={16} /> Sessions</button> : null}
-      {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={(nextMachines) => {
-        onPersistMachines(nextMachines)
-        if (!nextMachines.some((machine) => machine.id === activeID)) setActiveMachineID(nextMachines[0]?.id || "")
-      }} /> : null}
-      {mobileSettingsOpen ? <MobileSettingsPage onClose={() => setMobileSettingsOpen(false)} /> : null}
+      <NativeSessionsWorkspace machines={machines} onManageMachines={showMachines} onManageSettings={showSettings} />
+      {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={onPersistMachines} /> : null}
+      {settingsOpen ? <MobileSettingsPage onClose={() => setSettingsOpen(false)} /> : null}
       <nav className="hr-mobile-nav" aria-label="Main navigation">
         <button type="button" className={mobileSection === "sessions" ? "active" : ""} onClick={showSessions} aria-current={mobileSection === "sessions" ? "page" : undefined}><ChatIcon size={20} /><span>Sessions</span></button>
         <button type="button" className={mobileSection === "machines" ? "active" : ""} onClick={showMachines} aria-current={mobileSection === "machines" ? "page" : undefined}><ServerIcon size={20} /><span>Machines</span></button>
         <button type="button" className={mobileSection === "settings" ? "active" : ""} onClick={showSettings} aria-current={mobileSection === "settings" ? "page" : undefined}><SettingsIcon size={20} /><span>Settings</span></button>
-        <button type="button" className={mobileSection === "conversations" ? "active" : ""} onClick={showConversations} aria-current={mobileSection === "conversations" ? "page" : undefined}><ChatIcon size={20} /><span>Conversations</span></button>
       </nav>
     </div>
   )

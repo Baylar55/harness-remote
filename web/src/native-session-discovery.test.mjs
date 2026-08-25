@@ -41,6 +41,15 @@ const client = {
       directory: '/repo',
       time: { created: 1, updated: 20 },
       external: true,
+      parentID: 'parent-1',
+      summary: { additions: 12, deletions: 3, files: 2 },
+      tokens: { input: 1200, output: 300, reasoning: 50, cache: { read: 400, write: 20 } },
+      cost: 0.25,
+      agent: 'plan',
+      permission: [
+        { permission: 'edit', pattern: '*', action: 'deny' },
+        { permission: 'bash', pattern: 'git push *', action: 'ask' }
+      ],
       model: { providerID: 'openai', id: 'gpt-5.6', variant: 'high' }
     }]
   },
@@ -91,6 +100,15 @@ assert.deepEqual(nativeSessionSurfaceTarget('machine-1', base, codexSessions[0])
   external: true,
   modelsSupported: true,
   model: { providerID: 'openai', modelID: 'gpt-5.6', variant: 'high' },
+  parentID: 'parent-1',
+  summary: { additions: 12, deletions: 3, files: 2 },
+  tokens: { input: 1200, output: 300, reasoning: 50, cache: { read: 400, write: 20 } },
+  cost: 0.25,
+  nativeAgent: 'plan',
+  permission: [
+    { permission: 'edit', pattern: '*', action: 'deny' },
+    { permission: 'bash', pattern: 'git push *', action: 'ask' }
+  ],
   requiresExplicitClaim: true,
   canStop: true
 })
