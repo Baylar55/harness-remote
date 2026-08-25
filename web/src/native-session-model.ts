@@ -57,22 +57,23 @@ export function lastNativeMessageModel(messages: MessageEnvelope[]): ModelSelect
   return null
 }
 
-const PAGE_MODEL_BACKENDS = new Set(["omp", "pi", "codex", "claude"])
+const PAGE_MODEL_BACKENDS = new Set(["omp", "pi", "codex"])
 
 /**
  * Recover the last model from native Session state without persisting a second Harness Remote model.
  *
  * OpenCode stores the requested model on message metadata. OMP and PI report the model selected on
- * their exact native JSONL branch, Codex reports it from the newest rollout turn_context, and Claude
- * can report the current ACP model option from the same session/load already required to read its
- * transcript. None of these reads exists solely to claim writer ownership. If a harness cannot prove
- * a current model, leave it unset and let its own native default win rather than resurrecting stale
+ * their exact native JSONL branch and Codex reports it from the newest rollout turn_context. Claude
+ * has no journal authority of its own here, but its transcript already requires ACP session/load;
+ * after that load the adapter's current model config option is available through the normal models
+ * endpoint, so reading it adds no parallel Session-first model state. If a harness cannot prove a
+ * current model, leave it unset and let its own native default win rather than resurrecting stale
  * browser state.
  */
 export async function resolveNativeSessionTargetModel(
   target: NativeSessionSurfaceTarget
 ): Promise<NativeSessionSurfaceTarget> {
-  if (target.backend !== "opencode" && !PAGE_MODEL_BACKENDS.has(target.backend)) return target
+  if (target.backend !== "opencode" && target.backend !== "claude" && !PAGE_MODEL_BACKENDS.has(target.backend)) return target
   try {
     const page = await api.loadMessagePage(
       target.config,
@@ -82,7 +83,16 @@ export async function resolveNativeSessionTargetModel(
       20,
       false
     )
-    const model = page.model ?? (target.backend === "opencode" ? lastNativeMessageModel(page.messages) : null)
+    let model = page.model ?? (target.backend === "opencode" ? lastNativeMessageModel(page.messages) : null)
+    if (!model && target.backend === "claude") {
+      const models = await api.listModels(target.config, target.directory, target.sessionID)
+      const current = models.find((candidate) => candidate.isDefault)
+      if (current) model = {
+        providerID: current.providerID,
+        modelID: current.modelID,
+        ...(current.variant ? { variant: current.variant } : {})
+      }
+    }
     return model ? { ...target, model } : target
   } catch {
     return target
