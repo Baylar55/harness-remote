@@ -26,6 +26,7 @@ let statuses
 let sessions
 let sseResponses
 let promptBodies
+let messageReads
 let directoryScopedStatusRequests
 let statusRequests
 let clock
@@ -94,6 +95,7 @@ function resetState() {
   ])
   sseResponses = new Set()
   promptBodies = []
+  messageReads = []
   directoryScopedStatusRequests = 0
   statusRequests = 0
   clock = 10_000
@@ -294,6 +296,11 @@ function startFakeDaemon() {
     if (request.method === "GET" && messageMatch) {
       const sessionID = decodeURIComponent(messageMatch[1])
       const all = transcripts.get(sessionID) || []
+      messageReads.push({
+        sessionID,
+        at: Date.now(),
+        texts: all.flatMap((message) => message.parts || []).map((part) => part.text).filter(Boolean)
+      })
       const requestedLimit = Number(url.searchParams.get("limit")) || all.length
       const data = all.slice(Math.max(0, all.length - requestedLimit))
       json(response, 200, data, { "X-Has-More": "0" })
@@ -325,15 +332,16 @@ function startFakeDaemon() {
         variant: body?.variant
       }
       appendPrompt(sessionID, body)
-      emit("message.updated", { info: { sessionID } })
+      // Do not emit a convenient prompt-level message.updated. The nested part event below must be
+      // sufficient to refresh the mounted tail, matching sparse/lossy real OpenCode event delivery.
       json(response, 200, { status: "accepted", clientRequestId: body?.clientRequestId })
 
       const final = body?.text === SECOND_PROMPT ? SECOND_FINAL : FINAL
       const reasoning = body?.text === SECOND_PROMPT ? SECOND_REASONING : REASONING
       let assistantID
       setTimeout(() => { assistantID = appendReasoning(sessionID, reasoning, model) }, 90)
-      setTimeout(() => markIdle(sessionID), 240)
-      setTimeout(() => persistFinal(sessionID, assistantID, final, model), 650)
+      setTimeout(() => markIdle(sessionID), 600)
+      setTimeout(() => persistFinal(sessionID, assistantID, final, model), 1_000)
       return
     }
 
@@ -455,10 +463,17 @@ async function assertCompletionAndModel(page, text, reasoning, final, label) {
   }, `${label}: reopened OpenCode Session must keep the last native model`)
   assert.equal(body.variant, LAST_MODEL.variant, `${label}: reopened OpenCode Session must keep the last native variant`)
 
-  // The partial reasoning event deliberately carries sessionID only inside properties.part. Reasoning
-  // is collapsed by the mature renderer, so DOM attachment proves the mounted tail refreshed promptly
-  // without imposing different visibility semantics on the existing v3 conversation surface.
-  await page.getByText(reasoning, { exact: true }).waitFor({ state: "attached", timeout: 1_500 })
+  // The only partial-assistant lifecycle signal is message.part.updated with sessionID nested in the
+  // part. Prove the mounted tail consumes it before the later session.status fallback instead of
+  // inferring renderer visibility from a reasoning block that mature v3 intentionally keeps collapsed.
+  const reasoningDeadline = sendStartedAt + 500
+  let reasoningRead
+  while (Date.now() < reasoningDeadline && !reasoningRead) {
+    reasoningRead = messageReads.find((read) => read.sessionID === PRIMARY_ID && read.at >= sendStartedAt && read.texts.includes(reasoning))
+    if (!reasoningRead) await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  assert.ok(reasoningRead, `${label}: nested message.part.updated did not refresh the native transcript promptly`)
+  assert.ok(reasoningRead.at - sendStartedAt < 500, `${label}: first reasoning tail refresh was artificially delayed`)
 
   // session.status idle happens before this answer is durable and no final message.updated follows.
   // The Session remains mounted throughout: the answer and Ready state must appear without navigation.
