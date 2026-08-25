@@ -24,6 +24,7 @@ let statuses
 let sessions
 let sseResponses
 let promptBodies
+let directoryScopedStatusRequests
 let clock
 
 function userMessage(id, text, created, model = LAST_MODEL) {
@@ -87,6 +88,7 @@ function resetState() {
   ])
   sseResponses = new Set()
   promptBodies = []
+  directoryScopedStatusRequests = 0
   clock = 10_000
 }
 
@@ -238,6 +240,11 @@ function startFakeDaemon() {
     }
 
     if (request.method === "GET" && url.pathname === "/v1/agents/opencode/session/status") {
+      if (url.searchParams.has("directory")) {
+        directoryScopedStatusRequests += 1
+        json(response, 504, { error: "directory-scoped OpenCode status is intentionally unavailable in this regression" })
+        return
+      }
       json(response, 200, Object.fromEntries(statuses))
       return
     }
@@ -431,8 +438,10 @@ try {
   await openPrimary(page)
   await assertCompletionAndModel(page, SECOND_PROMPT, SECOND_FINAL)
 
+  assert.equal(directoryScopedStatusRequests, 0, "Session-first OpenCode must never use directory-scoped status reconciliation")
+
   await context.close()
-  console.log("native OpenCode real-regression smoke: completion, model restore and stable ordering passed")
+  console.log("native OpenCode real-regression smoke: completion, model restore, global status and stable ordering passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
