@@ -9,6 +9,27 @@ function sameEnvelope(left: MessageEnvelope, right: MessageEnvelope): boolean {
     && JSON.stringify(left.parts) === JSON.stringify(right.parts)
 }
 
+function visibleText(message: MessageEnvelope): string {
+  return message.parts
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("")
+}
+
+/**
+ * A live ACP reply can be ahead of its append-only journal for a brief moment after the turn becomes
+ * idle. The next newest-page reconcile must never replace that complete in-memory reply with an older
+ * prefix from disk: doing so makes the answer look cut until the Session is reopened after the journal
+ * catches up. Only reject an unambiguous textual regression for the exact same assistant message id;
+ * divergent native rewrites are still accepted.
+ */
+function regressesAssistantText(current: MessageEnvelope, incoming: MessageEnvelope): boolean {
+  if (current.info.role !== "assistant" || incoming.info.role !== "assistant") return false
+  const currentText = visibleText(current)
+  const incomingText = visibleText(incoming)
+  return currentText.length > incomingText.length && currentText.startsWith(incomingText)
+}
+
 /**
  * Refresh the newest page without discarding older pages the user explicitly loaded.
  * Reuse both message objects and the array itself when the server did not change anything.
@@ -21,7 +42,7 @@ export function mergeLatestMessagePage(existing: MessageEnvelope[], latest: Mess
 
   const merged = existing.map((message) => {
     const incoming = latestByID.get(message.info.id)
-    if (!incoming || sameEnvelope(message, incoming)) return message
+    if (!incoming || sameEnvelope(message, incoming) || regressesAssistantText(message, incoming)) return message
     changed = true
     return incoming
   })
