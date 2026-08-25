@@ -348,6 +348,14 @@ function NativeSessionsWorkspace({
     setMobileDetailOpen(true)
   }
 
+  function handleSessionDeleted(key: string) {
+    if (selected?.key !== key) return
+    setSelected(null)
+    setSelectedState(undefined)
+    setMobileDetailOpen(false)
+    setRevision((value) => value + 1)
+  }
+
   return (
     <section className="tdw-shell hr-control-plane hr-native-workspace" aria-label="Sessions">
       <header className="tdw-topbar hr-topbar">
@@ -371,7 +379,7 @@ function NativeSessionsWorkspace({
       </header>
       <div className="hr-native-workspace-body">
         <aside className="hr-native-workspace-list">
-          <NativeSessionHome sources={runtimes} onOpen={openSession} selectedKey={selected?.key} selectedState={selectedState} />
+          <NativeSessionHome sources={runtimes} onOpen={openSession} onDeleted={handleSessionDeleted} selectedKey={selected?.key} selectedState={selectedState} />
         </aside>
         <main className={`hr-native-workspace-detail${mobileDetailOpen ? " mobile-open" : ""}`}>
           {selected ? (
