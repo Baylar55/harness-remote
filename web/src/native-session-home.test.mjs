@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import { sessionTreeRows } from "./components/native-session-home.tsx"
 
 function item(id, parentID) {
@@ -44,4 +45,10 @@ assert.deepEqual(rows.map(({ item: row, depth }) => [row.record.session.id, dept
 ])
 assert.equal(new Set(rows.map(({ item: row }) => row.record.session.id)).size, 7, "cycles or missing parents must never hide or duplicate a native Session")
 
-console.log("native Session Home tree tests passed")
+const source = readFileSync(new URL("./components/native-session-home.tsx", import.meta.url), "utf8")
+assert.match(source, /presentationOverrides/, "live detail status must survive selecting another Session")
+assert.match(source, /\{ \.\.\.current, \[selectedKey\]: selectedState \}/, "the status bridge must be keyed by native Session identity")
+assert.match(source, /setPresentationOverrides\(\{\}\)[\s\S]*setRecords\(results\.flatMap/, "a successful native discovery must retire temporary presentation overrides")
+assert.match(source, /presentationOverrides\[targetKey\]/, "non-selected rows must retain their last observed live state until discovery reconciles them")
+
+console.log("native Session Home tree and status reconciliation tests passed")
