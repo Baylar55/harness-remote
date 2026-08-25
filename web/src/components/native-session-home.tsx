@@ -84,6 +84,16 @@ function sessionPresentation(record: NativeSessionRecord): { state: SessionPrese
   return { state: "ready", label: "Ready" }
 }
 
+function presentationLabel(state: SessionPresentationState): string {
+  return state === "working"
+    ? "Working"
+    : state === "attention"
+      ? "Needs attention"
+      : state === "stopped"
+        ? "Stopped"
+        : "Ready"
+}
+
 function harnessIconUrl(backend: string): string | undefined {
   const file = HARNESS_ICON_FILES[backend.toLowerCase()]
   return file ? `${import.meta.env.BASE_URL}harness-icons/${file}` : undefined
@@ -231,12 +241,24 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<SessionFilter>("all")
   const [agentFilter, setAgentFilter] = useState("")
+  // The selected Session receives live status before the 30s discovery list refreshes. Keep that
+  // last observed state by Session key while the user navigates elsewhere, otherwise the row falls
+  // back to its stale discovery snapshot and visibly flips Working <-> Ready. The next successful
+  // native discovery clears these bridge states and becomes authoritative again.
+  const [presentationOverrides, setPresentationOverrides] = useState<Record<string, SessionPresentationState>>({})
 
+  useEffect(() => {
+    if (!selectedKey || !selectedState) return
+    setPresentationOverrides((current) => current[selectedKey] === selectedState
+      ? current
+      : { ...current, [selectedKey]: selectedState })
+  }, [selectedKey, selectedState])
 
   useEffect(() => {
     if (!sources.length) {
       setRecords([])
       setProjectsByMachine({})
+      setPresentationOverrides({})
       setLoaded(true)
       setLoading(false)
       return
@@ -262,6 +284,9 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     })).then((results) => {
       if (cancelled) return
       setProjectsByMachine(Object.fromEntries(results.map((result) => [result.machine.id, result.projects])))
+      // This is a fresh status read from every harness, so it supersedes any presentation bridge
+      // remembered only to span the gap between a detail event and this discovery cycle.
+      setPresentationOverrides({})
       setRecords(results.flatMap((result) => result.records).sort(sessionActivityCompare))
       setLoaded(true)
     }).catch((reason) => {
@@ -283,18 +308,12 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
   }, [loaded])
   const presentationForItem = useCallback((item: RecordWithMachine) => {
     const targetKey = `${item.machine.id}:${item.record.key}`
-    if (targetKey === selectedKey && selectedState) {
-      const label = selectedState === "working"
-        ? "Working"
-        : selectedState === "attention"
-          ? "Needs attention"
-          : selectedState === "stopped"
-            ? "Stopped"
-            : "Ready"
-      return { state: selectedState, label }
-    }
+    const bridgedState = targetKey === selectedKey && selectedState
+      ? selectedState
+      : presentationOverrides[targetKey]
+    if (bridgedState) return { state: bridgedState, label: presentationLabel(bridgedState) }
     return sessionPresentation(item.record)
-  }, [selectedKey, selectedState])
+  }, [presentationOverrides, selectedKey, selectedState])
 
 
   const groups = useMemo(() => projectGroups(records), [records])
