@@ -58,14 +58,19 @@ export function lastNativeMessageModel(messages: MessageEnvelope[]): ModelSelect
 }
 
 /**
- * Enrich only the Session the user opened. Home discovery remains transcript-free and read-only.
- * The recent tail is enough to recover OpenCode's last requested model without persisting a second
- * Session state in Harness Remote.
+ * Recover the last model from native Session state without persisting a second Harness Remote model.
+ *
+ * OpenCode stores the requested model on message metadata. OMP's selected branch can change models
+ * between turns, so its journal loader reports the model that actually owns the newest branch in the
+ * X-Session-Model page header. Both reads are local/native state and therefore safe enrichment: they
+ * do not claim ACP writer ownership. Other ACP adapters currently expose neither a read-only current
+ * model nor enough transcript metadata to prove one, so they deliberately keep the harness default
+ * rather than reviving a stale client-side selection.
  */
 export async function resolveNativeSessionTargetModel(
   target: NativeSessionSurfaceTarget
 ): Promise<NativeSessionSurfaceTarget> {
-  if (target.backend !== "opencode") return target
+  if (target.backend !== "opencode" && target.backend !== "omp") return target
   try {
     const page = await api.loadMessagePage(
       target.config,
@@ -75,7 +80,7 @@ export async function resolveNativeSessionTargetModel(
       20,
       false
     )
-    const model = lastNativeMessageModel(page.messages)
+    const model = page.model ?? (target.backend === "opencode" ? lastNativeMessageModel(page.messages) : null)
     return model ? { ...target, model } : target
   } catch {
     return target
