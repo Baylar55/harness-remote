@@ -62,6 +62,12 @@ export type NativeSessionSurfaceTarget = {
   external: boolean
   modelsSupported: boolean
   model: ModelSelection | null
+  parentID?: string
+  summary?: Session["summary"]
+  tokens?: Session["tokens"]
+  cost?: number
+  nativeAgent?: string
+  permission?: Session["permission"]
   /** Earlier linked native Sessions shown before this Session, preserving the mature v3 continuity
    * experience without introducing a new Conversation identity. */
   history?: NativeSessionHistoryEntry[]
@@ -153,6 +159,12 @@ export function nativeSessionSurfaceTarget(
     external,
     modelsSupported: record.modelsSupported,
     model: sessionModel(record.session),
+    parentID: record.session.parentID,
+    summary: record.session.summary,
+    tokens: record.session.tokens,
+    cost: record.session.cost,
+    nativeAgent: record.session.agent,
+    permission: record.session.permission,
     requiresExplicitClaim: external || (record.transport === "acp" && record.writerOwned !== true),
     canStop: record.abortSupported && supportedStopCapability(record.stopCapability)
   }

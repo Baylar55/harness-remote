@@ -25,6 +25,8 @@ type ModelGroup = {
   variants: ModelOption[]
   options: ModelOption[]
 }
+const MAX_VISIBLE_MODEL_GROUPS = 100
+
 
 export function modelOptionKey(model: Pick<ModelOption, "providerID" | "modelID" | "variant">): string {
   return `${model.providerID}|${model.modelID}|${model.variant || ""}`
@@ -99,25 +101,34 @@ function ModelBadges({ group }: { group: ModelGroup }) {
 export function ModelPicker({ models, value, onChange, disabled = false, loading = false, placeholder = "Choose model", compact = false, unavailableHint }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const [freeOnly, setFreeOnly] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const groups = useMemo(() => groupModels(models), [models])
+  const freeCount = useMemo(
+    () => groups.filter((group) => group.options.some((option) => option.isFree === true)).length,
+    [groups]
+  )
   const selected = models.find((model) => modelOptionKey(model) === value)
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    if (!needle) return groups
-    return groups.filter((group) => `${group.providerName} ${group.providerID} ${group.modelName} ${group.modelID} ${group.description || ""} ${group.variants.map((variant) => variant.variant).join(" ")}`.toLowerCase().includes(needle))
-  }, [groups, query])
+    const candidates = freeOnly
+      ? groups.filter((group) => group.options.some((option) => option.isFree === true))
+      : groups
+    if (!needle) return candidates
+    return candidates.filter((group) => `${group.providerName} ${group.providerID} ${group.modelName} ${group.modelID} ${group.description || ""} ${group.variants.map((variant) => variant.variant).join(" ")}`.toLowerCase().includes(needle))
+  }, [freeOnly, groups, query])
+  const visibleGroups = useMemo(() => filtered.slice(0, MAX_VISIBLE_MODEL_GROUPS), [filtered])
 
   const providers = useMemo(() => {
     const result = new Map<string, ModelGroup[]>()
-    for (const group of filtered) {
+    for (const group of visibleGroups) {
       const key = group.providerName || group.providerID
       result.set(key, [...(result.get(key) || []), group])
     }
     return [...result.entries()]
-  }, [filtered])
+  }, [visibleGroups])
 
   useEffect(() => {
     if (!open) return
@@ -140,6 +151,10 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
   useEffect(() => {
     if (!open) setQuery("")
   }, [open])
+  useEffect(() => {
+    if (freeOnly && freeCount === 0) setFreeOnly(false)
+  }, [freeCount, freeOnly])
+
 
   function choose(next: ModelOption) {
     onChange(modelOptionKey(next))
@@ -186,6 +201,14 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
             <input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search model, provider, variant…" spellCheck={false} />
             <kbd>{filtered.length}</kbd>
           </div>
+          {freeCount > 0 ? (
+            <div className="tdw-model-filter-row">
+              <button type="button" className={freeOnly ? "active" : ""} onClick={() => setFreeOnly((current) => !current)} aria-pressed={freeOnly}>
+                Free <b>{freeCount}</b>
+              </button>
+              <span>{freeOnly ? "Showing catalog-confirmed free models" : "Free and paid models"}</span>
+            </div>
+          ) : null}
           <div className="tdw-model-results">
             {providers.length === 0 ? <div className="tdw-model-empty"><strong>No models found</strong><span>Try another model name, provider or variant.</span></div> : providers.map(([provider, providerModels]) => (
               <section className="tdw-model-provider" key={provider}>
@@ -233,7 +256,10 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
               </section>
             ))}
           </div>
-          <footer>Showing {filtered.length} base models from {providers.length} provider{providers.length === 1 ? "" : "s"}. Variants stay grouped with their model.</footer>
+          <footer>
+            Showing {visibleGroups.length}{visibleGroups.length < filtered.length ? ` of ${filtered.length}` : ""} base models from {providers.length} provider{providers.length === 1 ? "" : "s"}.
+            {visibleGroups.length < filtered.length ? " Refine the search to see more." : " Variants stay grouped with their model."}
+          </footer>
         </div>
       ) : null}
     </div>

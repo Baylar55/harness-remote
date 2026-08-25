@@ -154,6 +154,23 @@ export type Session = {
     partID?: string
   }
   external?: boolean
+  parentID?: string
+  cost?: number
+  tokens?: {
+    input?: number
+    output?: number
+    reasoning?: number
+    cache?: {
+      read?: number
+      write?: number
+    }
+  }
+  agent?: string
+  permission?: Array<{
+    permission?: string
+    pattern?: string
+    action?: string
+  }>
 }
 
 export type SessionStatus = {

@@ -22,7 +22,7 @@ import { useDialogDismiss } from "../useDialogDismiss"
 import { ConversationWorkspace } from "./conversation-workspace"
 import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
-import { NativeSessionObserver } from "./native-session-observer"
+import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
 
 type Props = {
   machines: WorkspaceMachine[]
@@ -218,6 +218,17 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
     </section>
   )
 }
+function projectLabel(directory: string): string {
+  const parts = directory.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || directory || "Unknown Project"
+}
+function compactNumber(value: number): string {
+  if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}M`
+  if (value >= 1_000) return `${Math.round(value / 100) / 10}k`
+  return String(value)
+}
+
+
 
 function NativeSessionsWorkspace({
   machines,
@@ -230,6 +241,7 @@ function NativeSessionsWorkspace({
 }) {
   const [snapshots, setSnapshots] = useState<Record<string, MachineSnapshot | null>>({})
   const [selected, setSelected] = useState<NativeSessionSurfaceTarget | null>(null)
+  const [selectedState, setSelectedState] = useState<NativeSessionVisualState | undefined>(undefined)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
 
   useEffect(() => {
@@ -247,8 +259,27 @@ function NativeSessionsWorkspace({
     const snapshot = snapshots[machine.id]
     return snapshot ? [{ machine, snapshot }] : []
   }), [machines, snapshots])
+  const selectedMachine = selected ? machines.find((machine) => machine.id === selected.machineID) : undefined
+  const selectedProject = selected ? projectLabel(selected.directory) : undefined
+  const selectedTokenCount = selected?.tokens
+    ? (selected.tokens.input || 0) + (selected.tokens.output || 0) + (selected.tokens.reasoning || 0)
+    : 0
+  const selectedHasChanges = Boolean(selected?.summary && (
+    selected.summary.files || selected.summary.additions || selected.summary.deletions
+  ))
+  const selectedPermissionRules = selected?.permission || []
+  const selectedRestrictionCount = selectedPermissionRules.filter((rule) => rule.action === "deny").length
+  const selectedPolicyLabel = selectedPermissionRules.length
+    ? selectedRestrictionCount === selectedPermissionRules.length
+      ? `${selectedRestrictionCount} restrictions`
+      : `${selectedPermissionRules.length} policy rules`
+    : ""
+
+
+
 
   function openSession(target: NativeSessionSurfaceTarget) {
+    setSelectedState(undefined)
     setSelected(target)
     setMobileDetailOpen(true)
   }
@@ -257,7 +288,11 @@ function NativeSessionsWorkspace({
     <section className="tdw-shell hr-control-plane hr-native-workspace" aria-label="Sessions">
       <header className="tdw-topbar hr-topbar">
         <div className="tdw-brand hr-brand"><span className="tdw-logo hr-logo">H</span><div><strong>Harness Remote</strong><small>Any coding agent. One workspace.</small></div></div>
-        <div className="tdw-context-path" aria-label="Current workspace context"><span>All projects</span><b>/</b><strong>Sessions</strong>{selected ? <><b>/</b><em>{selected.title}</em></> : null}</div>
+        <div className="tdw-context-path" aria-label="Current workspace context">
+          <span>{selectedMachine?.name || "All machines"}</span><b>/</b>
+          <strong>{selectedProject || "Native Sessions"}</strong>
+          {selected ? <><b>/</b><em>{selected.title}</em></> : null}
+        </div>
         <div className="tdw-top-actions">
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> Machines</button>
           <button type="button" className="tdw-button secondary" onClick={onBackToConversations}><ChatIcon size={15} /> Conversations</button>
@@ -265,20 +300,51 @@ function NativeSessionsWorkspace({
       </header>
       <div className="hr-native-workspace-body">
         <aside className="hr-native-workspace-list">
-          <NativeSessionHome sources={sources} onOpen={openSession} />
+          <NativeSessionHome sources={sources} onOpen={openSession} selectedKey={selected?.key} selectedState={selectedState} />
         </aside>
         <main className={`hr-native-workspace-detail${mobileDetailOpen ? " mobile-open" : ""}`}>
           {selected ? (
             <>
               <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label="Back to Sessions">← Sessions</button>
               <header className="hr-native-workspace-session-header">
-                <div><span>{selected.agentLabel}</span><h1>{selected.title}</h1><small>{selected.external ? "Native Session started outside Harness Remote" : "Native Session"}</small></div>
+                <div className="hr-native-session-heading">
+                  <div className="hr-native-session-eyebrow">
+                    <span>{selected.agentLabel}</span>
+                    {selected.nativeAgent ? <><i aria-hidden="true">/</i><span>{selected.nativeAgent}</span></> : null}
+                    <i aria-hidden="true">/</i>
+                    <span>{selectedMachine?.name || "Machine"}</span>
+                    <i aria-hidden="true">/</i>
+                    <strong>{selectedProject}</strong>
+                  </div>
+                  <h1>{selected.title}</h1>
+                  <small title={selected.directory}>
+                    {selected.external ? "Started in the native harness" : "Created in Harness Remote"}
+                    {selected.directory ? ` · ${selected.directory}` : ""}
+                  </small>
+                </div>
                 <div className="hr-native-workspace-session-actions">
+                  {selected.nativeAgent || selectedPolicyLabel || selectedTokenCount || selectedHasChanges || Number(selected.cost) > 0 ? (
+                    <div className="hr-native-session-stats" aria-label="Native Session statistics">
+                      {selected.nativeAgent ? <span title="Native coding-agent mode">Agent {selected.nativeAgent}</span> : null}
+                      {selectedPolicyLabel ? <span title="Native Session policy summary">{selectedPolicyLabel}</span> : null}
+                      {selectedTokenCount ? <span title="Cumulative native Session tokens">{compactNumber(selectedTokenCount)} tokens</span> : null}
+                      {selectedHasChanges ? (
+                        <span title={`${selected.summary?.files || 0} changed files`}>
+                          <b>+{selected.summary?.additions || 0}</b>
+                          <i>−{selected.summary?.deletions || 0}</i>
+                          <em>{selected.summary?.files || 0} files</em>
+                        </span>
+                      ) : null}
+                      {Number(selected.cost) > 0 ? <span title="Reported native Session cost">${Number(selected.cost).toFixed(2)}</span> : null}
+                    </div>
+                  ) : null}
                   <NativeSessionHandoffControl source={selected} agents={snapshots[selected.machineID]?.agents || []} onOpen={openSession} />
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>
               </header>
-              <div className="hr-native-workspace-chat"><NativeSessionObserver key={selected.key} target={selected} /></div>
+              <div className="hr-native-workspace-chat">
+                <NativeSessionObserver key={selected.key} target={selected} onStateChange={setSelectedState} />
+              </div>
             </>
           ) : (
             <div className="hr-native-workspace-empty"><ChatIcon size={28} /><strong>Open a native Session</strong><span>Observe an existing coding-agent Session, then continue that same Session when the harness allows it.</span></div>
