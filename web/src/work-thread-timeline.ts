@@ -229,6 +229,29 @@ function runErrorText(task: MachineTask, run: MachineTaskRun): string {
   return ""
 }
 
+/**
+ * OpenCode can journal an interrupted assistant attempt and then recover inside the same user turn.
+ * Showing the first error forever made a successful retry arrive underneath a red "response
+ * interrupted" banner. Walk backward through meaningful assistant envelopes: a later successful
+ * envelope clears an earlier transient error, while a genuinely terminal error still survives.
+ */
+function terminalNativeAssistantError(assistants: MessageEnvelope[]): MessageEnvelope["info"]["error"] | undefined {
+  for (let index = assistants.length - 1; index >= 0; index -= 1) {
+    const message = assistants[index]
+    if (message.info.error) return message.info.error
+    const info = message.info as MessageEnvelope["info"] & { finish?: unknown }
+    const meaningful = Boolean(message.info.time?.completed)
+      || (typeof info.finish === "string" && Boolean(info.finish.trim()))
+      || message.parts.some((part) => {
+        if (part.type === "tool") return true
+        if (part.type === "reasoning" || part.type === "text") return Boolean(part.text?.trim())
+        return false
+      })
+    if (meaningful) return undefined
+  }
+  return undefined
+}
+
 function assistantForRun({
   task,
   run,
@@ -251,7 +274,7 @@ function assistantForRun({
   const assistants = (turn?.messages ?? []).filter((message) => message.info.role === "assistant")
   const outcome = typeof run.outcome === "string" ? run.outcome.trim() : ""
   const persistedError = run.status === "failed" ? runErrorText(task, run) : ""
-  const nativeError = assistants.find((message) => message.info.error)?.info.error
+  const nativeError = terminalNativeAssistantError(assistants)
   const active = Boolean(run.id && run.id === task.run?.id && (task.status === "starting" || task.status === "running"))
 
   if (!assistants.length && !outcome && !persistedError) return null
