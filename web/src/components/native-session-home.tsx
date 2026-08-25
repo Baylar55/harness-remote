@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { api } from "../api"
 import { listMachineProjects, type MachineProject } from "../machineClient"
 import { canCreateNativeSession, createNativeSessionTarget } from "../native-session-create"
 import {
@@ -7,9 +8,9 @@ import {
   type NativeSessionRecord,
   type NativeSessionSurfaceTarget
 } from "../native-session-discovery"
-import type { MachineAgentHost, MachineSnapshot } from "../types"
+import type { MachineAgentHost, MachineSnapshot, ServerConfig } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
-import { ChatIcon, LoadingIcon, PlusIcon, RefreshIcon, SearchIcon, ServerIcon } from "../Icons"
+import { ChatIcon, LoadingIcon, PencilIcon, PlusIcon, RefreshIcon, SearchIcon, ServerIcon, TrashIcon } from "../Icons"
 import "../native-session-home.css"
 
 type Source = {
@@ -46,6 +47,7 @@ type SessionPresentationState = "working" | "attention" | "stopped" | "ready"
 type Props = {
   sources: Source[]
   onOpen: (target: NativeSessionSurfaceTarget) => void
+  onDeleted?: (key: string) => void
   selectedKey?: string
   selectedState?: SessionPresentationState
 }
@@ -99,6 +101,17 @@ function harnessIconUrl(backend: string): string | undefined {
   return file ? `${import.meta.env.BASE_URL}harness-icons/${file}` : undefined
 }
 
+function recordKey(item: RecordWithMachine): string {
+  return `${item.machine.id}:${item.record.key}`
+}
+
+function recordConfig(item: RecordWithMachine): ServerConfig {
+  return {
+    ...item.machine.config,
+    backend: item.record.backend,
+    agentId: item.record.agentId
+  }
+}
 
 function sessionActivityCompare(left: RecordWithMachine, right: RecordWithMachine): number {
   const updated = (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)
@@ -218,12 +231,11 @@ export function sessionTreeRows(sessions: RecordWithMachine[]): Array<{ item: Re
   return rows
 }
 
-
 function nativeCreateAgents(snapshot: MachineSnapshot): MachineAgentHost[] {
   return snapshot.agents.filter(canCreateNativeSession)
 }
 
-export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState }: Props) {
+export function NativeSessionHome({ sources, onOpen, onDeleted, selectedKey, selectedState }: Props) {
   const [records, setRecords] = useState<RecordWithMachine[]>([])
   const [projectsByMachine, setProjectsByMachine] = useState<Record<string, MachineProject[]>>({})
   const [loading, setLoading] = useState(false)
@@ -240,7 +252,13 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<SessionFilter>("all")
+  const [machineFilter, setMachineFilter] = useState("")
   const [agentFilter, setAgentFilter] = useState("")
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameTitle, setRenameTitle] = useState("")
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [mutationBusy, setMutationBusy] = useState(false)
+  const [mutationError, setMutationError] = useState<string | null>(null)
   // The selected Session receives live status before the 30s discovery list refreshes. Keep that
   // last observed state by Session key while the user navigates elsewhere, otherwise the row falls
   // back to its stale discovery snapshot and visibly flips Working <-> Ready. The next successful
@@ -253,6 +271,16 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
       ? current
       : { ...current, [selectedKey]: selectedState })
   }, [selectedKey, selectedState])
+
+  useEffect(() => {
+    setRenameOpen(false)
+    setDeleteConfirm(false)
+    setMutationError(null)
+  }, [selectedKey])
+
+  useEffect(() => {
+    if (machineFilter && !sources.some(({ machine }) => machine.id === machineFilter)) setMachineFilter("")
+  }, [machineFilter, sources])
 
   useEffect(() => {
     if (!sources.length) {
@@ -307,7 +335,7 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     return () => window.clearInterval(timer)
   }, [loaded])
   const presentationForItem = useCallback((item: RecordWithMachine) => {
-    const targetKey = `${item.machine.id}:${item.record.key}`
+    const targetKey = recordKey(item)
     const bridgedState = targetKey === selectedKey && selectedState
       ? selectedState
       : presentationOverrides[targetKey]
@@ -315,12 +343,15 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     return sessionPresentation(item.record)
   }, [presentationOverrides, selectedKey, selectedState])
 
-
+  const selectedItem = useMemo(
+    () => selectedKey ? records.find((item) => recordKey(item) === selectedKey) : undefined,
+    [records, selectedKey]
+  )
   const groups = useMemo(() => projectGroups(records), [records])
   useEffect(() => {
     if (!selectedKey) return
     const selectedGroup = groups.find((group) =>
-      group.sessions.some((item) => `${item.machine.id}:${item.record.key}` === selectedKey)
+      group.sessions.some((item) => recordKey(item) === selectedKey)
     )
     if (!selectedGroup) return
     setCollapsedProjects((current) => {
@@ -331,9 +362,18 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     })
   }, [groups, selectedKey])
 
+  const machineChoices = useMemo(() => sources.map(({ machine, snapshot }) => ({
+    id: machine.id,
+    label: snapshot?.machine.name || machine.name,
+    count: records.filter((item) => item.machine.id === machine.id).length
+  })), [records, sources])
+  const machineScopedRecords = useMemo(
+    () => machineFilter ? records.filter((item) => item.machine.id === machineFilter) : records,
+    [machineFilter, records]
+  )
   const agentChoices = useMemo(() => {
     const choices = new Map<string, { id: string; label: string; count: number }>()
-    for (const item of records) {
+    for (const item of machineScopedRecords) {
       const existing = choices.get(item.record.agentId)
       if (existing) existing.count += 1
       else choices.set(item.record.agentId, {
@@ -343,10 +383,13 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
       })
     }
     return [...choices.values()].sort((left, right) => left.label.localeCompare(right.label))
-  }, [records])
+  }, [machineScopedRecords])
+  useEffect(() => {
+    if (agentFilter && !agentChoices.some((choice) => choice.id === agentFilter)) setAgentFilter("")
+  }, [agentChoices, agentFilter])
   const scopedRecords = useMemo(
-    () => agentFilter ? records.filter((item) => item.record.agentId === agentFilter) : records,
-    [agentFilter, records]
+    () => agentFilter ? machineScopedRecords.filter((item) => item.record.agentId === agentFilter) : machineScopedRecords,
+    [agentFilter, machineScopedRecords]
   )
 
   const activeCount = useMemo(
@@ -362,6 +405,7 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     return groups.flatMap((group) => {
       const sessions = group.sessions.filter((item) => {
         const presentation = presentationForItem(item)
+        if (machineFilter && item.machine.id !== machineFilter) return false
         if (agentFilter && item.record.agentId !== agentFilter) return false
         if (filter === "working" && presentation.state !== "working") return false
         if (filter === "attention" && presentation.state !== "attention") return false
@@ -377,41 +421,46 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
       })
       return sessions.length ? [{ ...group, sessions }] : []
     })
-  }, [agentFilter, filter, groups, presentationForItem, query])
-  const machineGroups = useMemo(() => sources.flatMap(({ machine, snapshot, state, error }) => {
-    const projects = filteredGroups.filter((group) => group.machine.id === machine.id)
-    const filtering = Boolean(query.trim() || agentFilter || filter !== "all")
-    if (!projects.length && filtering) return []
-    return [{
-      machine,
-      label: snapshot?.machine.name || machine.name,
-      state,
-      error,
-      projects,
-      sessionCount: projects.reduce((count, group) => count + group.sessions.length, 0),
-      workingCount: projects.reduce((count, group) =>
-        count + group.sessions.filter((item) => presentationForItem(item).state === "working").length, 0),
-      attentionCount: projects.reduce((count, group) =>
-        count + group.sessions.filter((item) => presentationForItem(item).state === "attention").length, 0),
-      updatedAt: projects.reduce((latest, group) => Math.max(latest, group.updatedAt), 0)
-    }]
-  }).sort((left, right) => right.updatedAt - left.updatedAt || left.label.localeCompare(right.label)), [agentFilter, filter, filteredGroups, presentationForItem, query, sources])
-  const createProjects = useMemo<CreateProject[]>(() => sources.flatMap(({ machine, snapshot }) => {
-    if (!snapshot) return []
-    return (projectsByMachine[machine.id] || []).map((project) => ({
-      key: `${machine.id}:${project.id}`,
-      machine,
-      snapshot,
-      project
-    }))
-  }), [sources, projectsByMachine])
+  }, [agentFilter, filter, groups, machineFilter, presentationForItem, query])
+  const machineGroups = useMemo(() => sources
+    .filter(({ machine }) => !machineFilter || machine.id === machineFilter)
+    .flatMap(({ machine, snapshot, state, error }) => {
+      const projects = filteredGroups.filter((group) => group.machine.id === machine.id)
+      const filtering = Boolean(query.trim() || agentFilter || filter !== "all")
+      if (!projects.length && filtering) return []
+      return [{
+        machine,
+        label: snapshot?.machine.name || machine.name,
+        state,
+        error,
+        projects,
+        sessionCount: projects.reduce((count, group) => count + group.sessions.length, 0),
+        workingCount: projects.reduce((count, group) =>
+          count + group.sessions.filter((item) => presentationForItem(item).state === "working").length, 0),
+        attentionCount: projects.reduce((count, group) =>
+          count + group.sessions.filter((item) => presentationForItem(item).state === "attention").length, 0),
+        updatedAt: projects.reduce((latest, group) => Math.max(latest, group.updatedAt), 0)
+      }]
+    })
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.label.localeCompare(right.label)), [agentFilter, filter, filteredGroups, machineFilter, presentationForItem, query, sources])
+  const createProjects = useMemo<CreateProject[]>(() => sources
+    .filter(({ machine }) => !machineFilter || machine.id === machineFilter)
+    .flatMap(({ machine, snapshot }) => {
+      if (!snapshot) return []
+      return (projectsByMachine[machine.id] || []).map((project) => ({
+        key: `${machine.id}:${project.id}`,
+        machine,
+        snapshot,
+        project
+      }))
+    }), [machineFilter, sources, projectsByMachine])
   const selectedCreateProject = createProjects.find((choice) => choice.key === createProjectKey) || createProjects[0]
   const createAgents = selectedCreateProject ? nativeCreateAgents(selectedCreateProject.snapshot) : []
   const selectedCreateAgent = createAgents.find((agent) => agent.id === createAgentID) || createAgents[0]
 
   useEffect(() => {
     if (!createOpen) return
-    if (!createProjectKey && createProjects[0]) setCreateProjectKey(createProjects[0].key)
+    if (!createProjects.some((choice) => choice.key === createProjectKey)) setCreateProjectKey(createProjects[0]?.key || "")
   }, [createOpen, createProjectKey, createProjects])
 
   useEffect(() => {
@@ -441,6 +490,75 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     })
   }
 
+  function beginRename() {
+    if (!selectedItem?.record.renameSupported || mutationBusy) return
+    setMutationError(null)
+    setDeleteConfirm(false)
+    setRenameTitle(selectedItem.record.session.title?.trim() || "")
+    setRenameOpen(true)
+  }
+
+  async function renameSelectedSession() {
+    if (!selectedItem || mutationBusy) return
+    const title = renameTitle.replace(/[\r\n]+/g, " ").trim()
+    if (!title) {
+      setMutationError("Enter a Session name.")
+      return
+    }
+    setMutationBusy(true)
+    setMutationError(null)
+    try {
+      const updated = await api.renameSession(
+        recordConfig(selectedItem),
+        selectedItem.record.session.id,
+        title,
+        selectedItem.record.session.directory
+      )
+      const nextRecord: NativeSessionRecord = {
+        ...selectedItem.record,
+        session: { ...selectedItem.record.session, ...updated, title: updated.title || title }
+      }
+      setRecords((current) => current.map((item) => recordKey(item) === recordKey(selectedItem)
+        ? { ...item, record: nextRecord }
+        : item))
+      setRenameOpen(false)
+      onOpen(nativeSessionSurfaceTarget(selectedItem.machine.id, selectedItem.machine.config, nextRecord))
+      setRevision((value) => value + 1)
+    } catch (reason) {
+      setMutationError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setMutationBusy(false)
+    }
+  }
+
+  async function deleteSelectedSession() {
+    if (!selectedItem || mutationBusy) return
+    const key = recordKey(selectedItem)
+    setMutationBusy(true)
+    setMutationError(null)
+    try {
+      await api.deleteSession(
+        recordConfig(selectedItem),
+        selectedItem.record.session.id,
+        selectedItem.record.session.directory
+      )
+      setRecords((current) => current.filter((item) => recordKey(item) !== key))
+      setPresentationOverrides((current) => {
+        if (!(key in current)) return current
+        const next = { ...current }
+        delete next[key]
+        return next
+      })
+      setRenameOpen(false)
+      setDeleteConfirm(false)
+      onDeleted?.(key)
+      setRevision((value) => value + 1)
+    } catch (reason) {
+      setMutationError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setMutationBusy(false)
+    }
+  }
 
   async function createSession() {
     if (creating || !selectedCreateProject || !selectedCreateAgent) return
@@ -474,9 +592,19 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
       <div className="hr-native-home-heading">
         <div>
           <h2>Sessions</h2>
-          <span>{activeCount ? `${activeCount} working · ${records.length} total` : `${records.length} recent`}</span>
+          <span>{activeCount ? `${activeCount} working · ${scopedRecords.length} shown` : `${scopedRecords.length} recent`}</span>
         </div>
         <div className="hr-native-home-actions">
+          {selectedItem?.record.renameSupported ? (
+            <button type="button" className="tdw-icon-button" onClick={beginRename} disabled={mutationBusy} aria-label="Rename selected Session" title="Rename Session">
+              <PencilIcon size={15} />
+            </button>
+          ) : null}
+          {selectedItem?.record.deleteSupported ? (
+            <button type="button" className="tdw-icon-button" onClick={() => { setMutationError(null); setRenameOpen(false); setDeleteConfirm(true) }} disabled={mutationBusy} aria-label="Delete selected Session" title="Delete Session">
+              <TrashIcon size={15} />
+            </button>
+          ) : null}
           <button type="button" className="tdw-button primary hr-native-new-session" onClick={() => { setCreateError(null); setCreateOpen(true) }} aria-label="New Session">
             <PlusIcon size={15} /> <span>New Session</span>
           </button>
@@ -498,6 +626,12 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
             />
           </label>
           <div className="hr-native-session-filters" role="group" aria-label="Filter Sessions">
+            {sources.length > 1 ? (
+              <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)} aria-label="Filter by machine">
+                <option value="">All machines · {records.length}</option>
+                {machineChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
+              </select>
+            ) : null}
             <button type="button" className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")} aria-pressed={filter === "all"}>
               All <b>{scopedRecords.length}</b>
             </button>
@@ -515,6 +649,36 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
         </div>
       ) : null}
 
+      {renameOpen && selectedItem ? (
+        <div className="hr-native-create-panel" role="group" aria-label="Rename native Session">
+          <div className="hr-native-create-heading">
+            <div><strong>Rename Session</strong><small>Changes the native harness Session name, not a Harness Remote alias.</small></div>
+            <button type="button" className="tdw-icon-button" onClick={() => !mutationBusy && setRenameOpen(false)} disabled={mutationBusy} aria-label="Close Rename Session">×</button>
+          </div>
+          <label className="hr-native-create-title">
+            <span>Session name</span>
+            <input value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={mutationBusy} maxLength={200} autoFocus onKeyDown={(event) => { if (event.key === "Enter") void renameSelectedSession() }} />
+          </label>
+          {mutationError ? <div className="hr-native-create-error" role="alert">{mutationError}</div> : null}
+          <div className="hr-native-create-actions">
+            <button type="button" className="tdw-button secondary" onClick={() => setRenameOpen(false)} disabled={mutationBusy}>Cancel</button>
+            <button type="button" className="tdw-button primary" onClick={() => void renameSelectedSession()} disabled={mutationBusy || !renameTitle.trim()}>{mutationBusy ? "Renaming..." : "Rename"}</button>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteConfirm && selectedItem ? (
+        <div className="hr-native-create-panel" role="group" aria-label="Delete native Session">
+          <div className="hr-native-create-heading">
+            <div><strong>Delete “{selectedItem.record.session.title || "Untitled Session"}”?</strong><small>This deletes the native Session from {selectedItem.record.agentLabel}. This cannot be undone from Harness Remote.</small></div>
+          </div>
+          {mutationError ? <div className="hr-native-create-error" role="alert">{mutationError}</div> : null}
+          <div className="hr-native-create-actions">
+            <button type="button" className="tdw-button secondary" onClick={() => setDeleteConfirm(false)} disabled={mutationBusy}>Keep Session</button>
+            <button type="button" className="tdw-button danger" onClick={() => void deleteSelectedSession()} disabled={mutationBusy}>{mutationBusy ? "Deleting..." : "Delete Session"}</button>
+          </div>
+        </div>
+      ) : null}
 
       {createOpen ? (
         <div className="hr-native-create-panel" role="group" aria-label="Create native Session">
@@ -525,7 +689,7 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
           <label>
             <span>Project</span>
             <select value={selectedCreateProject?.key || ""} onChange={(event) => { setCreateProjectKey(event.target.value); setCreateError(null) }} disabled={creating || createProjects.length === 0}>
-              {sources.map(({ machine }) => {
+              {sources.filter(({ machine }) => !machineFilter || machine.id === machineFilter).map(({ machine }) => {
                 const choices = createProjects.filter((choice) => choice.machine.id === machine.id)
                 return choices.length ? (
                   <optgroup label={machine.name} key={machine.id}>
@@ -545,7 +709,7 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
             <span>Title <small>optional</small></span>
             <input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} disabled={creating} placeholder={`New ${selectedCreateAgent?.label || selectedCreateAgent?.id || "native"} Session`} maxLength={200} />
           </label>
-          {createProjects.length === 0 ? <div className="hr-native-create-error">No Project is available on the connected machines.</div> : null}
+          {createProjects.length === 0 ? <div className="hr-native-create-error">No Project is available on the selected machine.</div> : null}
           {selectedCreateProject && createAgents.length === 0 ? <div className="hr-native-create-error">No installed coding agent can create a native Session on this machine yet.</div> : null}
           {createError ? <div className="hr-native-create-error" role="alert">{createError}</div> : null}
           <div className="hr-native-create-actions">
@@ -565,7 +729,6 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
           <button type="button" className="tdw-button secondary" onClick={() => setRevision((value) => value + 1)} disabled={loading}>Retry</button>
         </div>
       ) : null}
-
 
       <div className="hr-native-machine-list">
         {machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => (
@@ -627,7 +790,7 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
                           const nativeAgent = item.record.session.agent?.trim()
                           const restrictionCount = item.record.session.permission?.filter((rule) => rule.action === "deny").length || 0
                           const icon = harnessIconUrl(item.record.backend)
-                          const targetKey = `${item.machine.id}:${item.record.key}`
+                          const targetKey = recordKey(item)
                           const selected = targetKey === selectedKey
                           return (
                             <button
