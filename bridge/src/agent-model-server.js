@@ -74,6 +74,9 @@ export function createAgentModelServer({ innerServer, config, daemon, taskStore,
           refreshedAt: diagnostics.refreshedAt ?? null,
           loading: true,
           source: diagnostics.source,
+          // Which phase discovery is in is the difference between "the adapter will not start" and
+          // "variant probing is slow". Without it a stuck picker looks the same in every case.
+          phase: diagnostics.phase ?? undefined,
           lastError: diagnostics.lastError ?? undefined
         })
         return

@@ -226,9 +226,10 @@ function commandInfoList(commands) {
 export class AcpService {
   #acp
   #sessions = new Map()
+  // Bounds come from TranscriptCache: the 24MB weight budget governs, and the entry cap only stops
+  // unbounded growth from many tiny transcripts. Pinning 8 here re-introduced the Session-first
+  // thrash the default exists to avoid.
   #messages = new TranscriptCache({
-    maxEntries: 8,
-    maxWeight: 24 * 1024 * 1024,
     isProtected: (sessionID) => this.#active.has(sessionID)
       || this.#replaying.has(sessionID)
       || this.#loads.has(sessionID)
@@ -730,14 +731,22 @@ export class AcpService {
       ? model
       : option?.options?.find((candidate) => candidate.value === model.slice(model.indexOf("/") + 1))?.value
     if (!value) throw new Error(`Harness model is not available: ${model}`)
-    await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value })
-    option.currentValue = value
+    const changed = await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value })
+    // Adopt the options the adapter reports for the model it now holds. A harness whose dependent
+    // controls differ per model - PI advertises a different thinkingLevel range for each one, from a
+    // single `off` up to `max` - otherwise leaves this Session describing the previous model, so the
+    // variant about to be applied would be checked against the wrong set of values.
+    if (Array.isArray(changed?.configOptions)) this.#rememberConfigOptions(sessionID, changed.configOptions)
+    const current = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
+    if (current) current.currentValue = value
+    else option.currentValue = value
     await this.#setModelVariant(sessionID, variant)
   }
 
   /**
-   * A variant is only ever applied against an id the running adapter advertised for this Session.
-   * A harness that does not offer the control is not asked for it, so no reasoning level is invented.
+   * A variant is only ever applied against an id the running adapter advertised for this Session's
+   * current model. A harness that does not offer the control is not asked for it, so no reasoning
+   * level is invented, and a level the current model does not support is refused rather than sent.
    */
   async #setModelVariant(sessionID, variant) {
     const configId = typeof variant?.configId === "string" ? variant.configId : ""
@@ -745,10 +754,16 @@ export class AcpService {
     if (!configId || !value) return
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === configId)
     if (!option?.options?.some((candidate) => candidate?.value === value)) {
-      throw new Error(`Harness model variant is not available: ${configId}=${value}`)
+      const offered = (option?.options ?? []).map((candidate) => candidate?.value).filter(Boolean)
+      const error = new Error(`Harness model variant is not available: ${configId}=${value}${offered.length ? ` (this model offers ${offered.join(", ")})` : ""}`)
+      error.code = "model_variant_unavailable"
+      throw error
     }
-    await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId, value })
-    option.currentValue = value
+    const changed = await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId, value })
+    if (Array.isArray(changed?.configOptions)) this.#rememberConfigOptions(sessionID, changed.configOptions)
+    const current = this.#configOptions.get(sessionID)?.find((item) => item.id === configId)
+    if (current) current.currentValue = value
+    else option.currentValue = value
   }
 
   /**

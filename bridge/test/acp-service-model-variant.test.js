@@ -88,3 +88,81 @@ test("a prompt queued behind a running turn defers both model and variant to deq
   const after = configCalls(acp).slice(before.length)
   assert.deepEqual(after, ["model=openai/b", "thinking=high"])
 })
+
+/**
+ * A harness may advertise a different variant range for every model. Real PI does exactly this: one
+ * model offers only `off`, another offers up to `max`. The Session therefore has to adopt the options
+ * the adapter reports for the model it now holds, or the variant is validated - and sent - against
+ * the previous model's range.
+ */
+class PerModelVariantAcp {
+  calls = []
+  promptCapabilities = {}
+  processID = 99
+  #model = "openai/basic"
+  #ranges = {
+    "openai/basic": ["off"],
+    "openai/deep": ["off", "low", "high", "max"]
+  }
+  on() { return this }
+  off() { return this }
+  async start() {}
+  close() {}
+  notify() {}
+  diagnostics() { return { processID: this.processID } }
+  async listSessions() { return [{ sessionId: "s1", cwd: "/repo", title: "S1", updatedAt: new Date().toISOString() }] }
+  #options() {
+    return [
+      { id: "model", currentValue: this.#model, options: Object.keys(this.#ranges).map((value) => ({ value })) },
+      { id: "thinkingLevel", currentValue: this.#ranges[this.#model][0], options: this.#ranges[this.#model].map((value) => ({ value })) }
+    ]
+  }
+  async request(method, params) {
+    this.calls.push([method, params?.configId ?? null, params?.value ?? null])
+    if (method === "session/load") return { sessionId: "s1", configOptions: this.#options() }
+    if (method === "session/set_config_option") {
+      if (params.configId === "model") this.#model = params.value
+      if (params.configId === "thinkingLevel" && !this.#ranges[this.#model].includes(params.value)) {
+        throw new Error(`adapter rejected thinkingLevel=${params.value}`)
+      }
+      return { configOptions: this.#options() }
+    }
+    if (method === "session/prompt") return { stopReason: "end_turn" }
+    return {}
+  }
+  subscribe() { return () => {} }
+}
+
+test("a variant only the newly selected model offers is applied, not refused against the old model", async () => {
+  const acp = new PerModelVariantAcp()
+  const service = new AcpService(acp, {})
+  // The Session starts on a model whose only level is `off`.
+  await service.setModel("s1", "openai/deep", { configId: "thinkingLevel", value: "max" })
+  assert.deepEqual(
+    acp.calls.filter(([method]) => method === "session/set_config_option").map(([, id, value]) => `${id}=${value}`),
+    ["model=openai/deep", "thinkingLevel=max"]
+  )
+})
+
+test("a variant the newly selected model does not offer is refused before it reaches the adapter", async () => {
+  const acp = new PerModelVariantAcp()
+  const service = new AcpService(acp, {})
+  await service.setModel("s1", "openai/deep", { configId: "thinkingLevel", value: "max" })
+  const before = acp.calls.length
+
+  // Going back to the restricted model must not carry `max` with it.
+  await assert.rejects(
+    service.setModel("s1", "openai/basic", { configId: "thinkingLevel", value: "max" }),
+    (error) => {
+      assert.equal(error.code, "model_variant_unavailable")
+      assert.match(error.message, /this model offers off/)
+      return true
+    }
+  )
+  const after = acp.calls.slice(before).filter(([method]) => method === "session/set_config_option")
+  assert.deepEqual(
+    after.map(([, id, value]) => `${id}=${value}`),
+    ["model=openai/basic"],
+    "the model change still applied; only the unsupported level was withheld"
+  )
+})

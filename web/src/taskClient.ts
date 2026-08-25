@@ -133,6 +133,8 @@ export type AgentModelCatalog = {
   error?: string
   loading?: boolean
   source?: string
+  /** Which discovery phase the daemon reported while still loading, when it reports one. */
+  phase?: string
 }
 
 export type AgentModelScope = {
@@ -367,6 +369,7 @@ function requireModelCatalog(value: unknown, path: string): AgentModelCatalog {
     refreshedAt: typeof catalog.refreshedAt === "string" ? catalog.refreshedAt : null,
     ...(catalog.loading === true ? { loading: true } : {}),
     ...(typeof catalog.source === "string" ? { source: catalog.source } : {}),
+    ...(typeof catalog.phase === "string" ? { phase: catalog.phase } : {}),
     ...(typeof catalog.error === "string" ? { error: catalog.error } : typeof catalog.lastError === "string" ? { error: catalog.lastError } : {})
   }
 }
@@ -382,7 +385,14 @@ async function loadAgentModelCatalog(config: ServerConfig, agentId: string, scop
     const catalog = requireModelCatalog(await machineRequest<unknown>(config, path), path)
     if (!catalog.loading) return catalog
     if (Date.now() - started >= MODEL_CATALOG_LOAD_TIMEOUT_MS) {
-      throw new Error(`${agentId} model discovery is still starting after ${MODEL_CATALOG_LOAD_TIMEOUT_MS / 1000}s.`)
+      // Name the phase and the last error the daemon reported. "Model catalog unavailable" on its own
+      // gives no way to tell a harness that will not start from discovery that is merely slow.
+      const detail = [
+        catalog.phase ? `stuck in ${catalog.phase}` : null,
+        catalog.source ? `source ${catalog.source}` : null,
+        catalog.error ? `last error: ${catalog.error}` : null
+      ].filter(Boolean).join("; ")
+      throw new Error(`${agentId} model discovery is still starting after ${MODEL_CATALOG_LOAD_TIMEOUT_MS / 1000}s${detail ? ` (${detail})` : ""}.`)
     }
     await sleep(MODEL_CATALOG_POLL_MS)
   }

@@ -108,6 +108,9 @@ export class BoundedLru {
 
   #evict() {
     while (this.#entries.size > this.maxEntries || this.#weight > this.maxWeight) {
+      // Which bound forced this eviction has to be read before the entry is removed, because
+      // removing it is what brings the weight back under budget.
+      const reason = this.#weight > this.maxWeight ? "weight" : "entries"
       let victim
       for (const [key, entry] of this.#entries) {
         if (this.canEvict(key, entry.value)) {
@@ -119,7 +122,7 @@ export class BoundedLru {
       const entry = this.#entries.get(victim)
       if (!entry) break
       this.delete(victim)
-      this.onEvict(victim, entry.value, entry.weight)
+      this.onEvict(victim, entry.value, entry.weight, reason)
     }
   }
 }

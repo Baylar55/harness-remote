@@ -20,6 +20,9 @@ function statusForSessionError(error) {
     "session_not_claimed",
     "session_prompt_rejected",
     "session_stop_rejected",
+    // A variant the current model does not offer is a conflict about the user's choice, not a
+    // server fault: the Session is fine and remains usable with another selection.
+    "model_variant_unavailable",
     "handoff_rejected",
     "idempotency_conflict"
   ].includes(error?.code)) return 409

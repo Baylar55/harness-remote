@@ -39,6 +39,16 @@ const TURN_BUDGET_MS = Number(process.env.HR_TURN_BUDGET_MS ?? "120000")
  * evidence, and the summary says so rather than quietly claiming the stronger check ran.
  */
 const ECHO_MARKERS = process.env.HR_ECHO_MARKERS !== "0"
+/*
+ * Whether a turn the harness answered with a native error still counts as delivered.
+ *
+ * Off by default: a real run should produce real replies. Turn it on when the harness is reachable
+ * but a provider will not serve inference - an unset or rejected credential, a provider outage - so
+ * the control plane can still be soaked. The summary then says so and reports how many turns ended
+ * in a native error, rather than presenting a run with no successful reply as a clean pass.
+ */
+const ALLOW_TURN_ERRORS = process.env.HR_ALLOW_TURN_ERRORS === "1"
+let erroredTurns = 0
 
 const problems = []
 const log = (...parts) => console.log(...parts)
@@ -156,11 +166,16 @@ async function waitForTurn(agentID, sessionID, directory, marker, expectedAssist
   let list = []
   while (Date.now() - started < budgetMs) {
     list = await messages(agentID, sessionID, directory)
-    const assistants = list.filter((message) => message.info?.role === "assistant" && !message.info?.error)
-    const done = ECHO_MARKERS
+    const replied = list.filter((message) => message.info?.role === "assistant" && !message.info?.error)
+    const failed = list.filter((message) => message.info?.role === "assistant" && message.info?.error)
+    const arrived = ALLOW_TURN_ERRORS ? replied.length + failed.length : replied.length
+    const done = ECHO_MARKERS && !ALLOW_TURN_ERRORS
       ? transcriptText(list, "assistant").some((text) => text.includes(marker))
-      : assistants.length >= expectedAssistants
-    if (done) return { found: true, list, ms: Date.now() - started }
+      : arrived >= expectedAssistants
+    if (done) {
+      erroredTurns = Math.max(erroredTurns, failed.length)
+      return { found: true, list, ms: Date.now() - started }
+    }
     await sleep(1500)
   }
   return { found: false, list, ms: Date.now() - started }
@@ -191,10 +206,14 @@ const secondaryCatalog = await catalog(SECONDARY)
 log(`  ${PRIMARY}: ${primaryCatalog.models.length} models in ${primaryCatalog.ms}ms (${primaryCatalog.attempts} request(s))${primaryCatalog.error ? ` error=${primaryCatalog.error}` : ""}`)
 log(`  ${SECONDARY}: ${secondaryCatalog.models.length} models in ${secondaryCatalog.ms}ms (${secondaryCatalog.attempts} request(s))${secondaryCatalog.error ? ` error=${secondaryCatalog.error}` : ""}`)
 check(primaryCatalog.models.length > 0, `${PRIMARY} advertises a model catalog`)
-const secondaryKeys = new Set(secondaryCatalog.models.map((model) => `${model.providerID}/${model.modelID}`))
+// Two harnesses may legitimately be configured against the same provider, so overlapping model ids
+// are expected. What must not happen is one harness answering with the other's catalog, so compare
+// the catalogs as a whole rather than requiring them to be disjoint.
+const primaryKeys = primaryCatalog.models.map((model) => `${model.providerID}/${model.modelID}/${model.variant ?? ""}`).sort()
+const secondaryKeys = secondaryCatalog.models.map((model) => `${model.providerID}/${model.modelID}/${model.variant ?? ""}`).sort()
 check(
-  !primaryCatalog.models.some((model) => secondaryKeys.has(`${model.providerID}/${model.modelID}`)),
-  "no model is shared between the two harness catalogs"
+  primaryKeys.join("|") !== secondaryKeys.join("|"),
+  `each harness answers with its own catalog, not the other's (${PRIMARY}=${primaryKeys.length}, ${SECONDARY}=${secondaryKeys.length})`
 )
 
 const models = distinctModels(primaryCatalog.models, 3)
@@ -265,12 +284,21 @@ async function assertTranscriptFidelity(label) {
     const assistants = transcriptText(list, "assistant").join(" | ")
     check(users.length === userTurns[name], `${name}: one user turn per accepted prompt, no duplicates (${users.length}/${userTurns[name]})`)
     check(new Set(users).size === users.length, `${name}: no duplicated user prompt`)
-    if (ECHO_MARKERS) {
+    if (ECHO_MARKERS && !ALLOW_TURN_ERRORS) {
       const missing = expected[name].filter((marker) => !assistants.includes(marker))
       check(missing.length === 0, `${name}: every prompt answered with its own marker${missing.length ? ` (missing ${missing.join(", ")})` : ""}`)
     } else {
-      const replies = transcriptText(list, "assistant").filter((text) => text.trim())
-      check(replies.length >= expected[name].length, `${name}: one assistant turn per prompt (${replies.length}/${expected[name].length}); marker echo not asserted`)
+      // Count turns the harness answered, not characters it produced: with HR_ALLOW_TURN_ERRORS a
+      // native error is a real answer for control-plane purposes, and it carries no text.
+      const answered = list.filter((message) => message.info?.role === "assistant"
+        && (Boolean(message.info?.error)
+          ? ALLOW_TURN_ERRORS
+          : (message.parts ?? []).some((part) => part.type === "text" && part.text?.trim())))
+      const failed = list.filter((message) => message.info?.role === "assistant" && message.info?.error).length
+      check(
+        answered.length >= expected[name].length,
+        `${name}: one assistant turn per prompt (${answered.length}/${expected[name].length}${failed ? `, ${failed} native error(s)` : ""}); marker echo not asserted`
+      )
     }
   }
 }
@@ -278,10 +306,19 @@ async function assertTranscriptFidelity(label) {
 await assertTranscriptFidelity("after cross-harness cycles")
 
 log("\n== harness-advertised variant, when this harness offers one ==")
-// Prefer the last advertised variant: the first is usually the harness default ("off", "default"),
-// which would not actually change anything and so would not exercise the variant path.
-const variantCandidates = primaryCatalog.models.filter((model) => model.variant && model.variantConfigId)
-const variantModel = variantCandidates[variantCandidates.length - 1]
+// Pick from the model with the most advertised variants, and take its last one: the first is usually
+// the harness default ("off", "default"), which would not change anything. A harness whose variant
+// range differs per model - PI advertises a different thinkingLevel set for each - makes picking any
+// arbitrary pair unsafe, so keep the variant with the model that actually offers it.
+const variantsByModel = new Map()
+for (const model of primaryCatalog.models) {
+  if (!model.variant || !model.variantConfigId) continue
+  const key = `${model.providerID}/${model.modelID}`
+  if (!variantsByModel.has(key)) variantsByModel.set(key, [])
+  variantsByModel.get(key).push(model)
+}
+const richest = [...variantsByModel.values()].sort((left, right) => right.length - left.length)[0] ?? []
+const variantModel = richest[richest.length - 1]
 if (!variantModel) {
   log(`  skipped: ${PRIMARY} advertises no model variant, so none is invented`)
 } else {
@@ -356,6 +393,10 @@ check(after.unresolvedOperations === 0, `no unresolved native Session mutation l
 
 log("\n================================")
 if (!ECHO_MARKERS) log("NOTE: HR_ECHO_MARKERS=0 - per-turn routing was judged by turn arrival, not by echoed markers.")
+if (ALLOW_TURN_ERRORS) {
+  log("NOTE: HR_ALLOW_TURN_ERRORS=1 - turns answered with a native harness error counted as delivered.")
+  log(`      ${erroredTurns} turn(s) ended in a native error, so this run soaked the control plane only, not inference.`)
+}
 if (problems.length === 0) {
   log("ALL CHECKS PASSED")
 } else {

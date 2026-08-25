@@ -33,15 +33,23 @@ function sessions(count) {
   }))
 }
 
-test("AcpService retains at most the bounded number of inactive transcripts", async () => {
-  const listed = sessions(12)
+function countingService(sessionCount) {
+  const listed = sessions(sessionCount)
   const loads = new Map()
   const loader = async (sessionID) => {
     loads.set(sessionID, (loads.get(sessionID) ?? 0) + 1)
     return transcript(sessionID)
   }
   loader.authoritativeHistory = true
-  const service = new AcpService(new ListingAcp(listed), { historyLoader: loader })
+  return { listed, loads, service: new AcpService(new ListingAcp(listed), { historyLoader: loader }) }
+}
+
+test("AcpService retains at most the bounded number of inactive transcripts", async () => {
+  // Exceed whatever the configured cap is rather than pinning its value, so the invariant is what
+  // is under test and the bound can be tuned for how the product actually navigates.
+  const probe = new AcpService(new ListingAcp(sessions(1)), { historyLoader: Object.assign(async () => [], { authoritativeHistory: true }) })
+  const cap = probe.diagnostics().transcriptCache.maxEntries
+  const { listed, loads, service } = countingService(cap + 4)
 
   for (const session of listed) {
     assert.equal((await service.messages(session.sessionId)).length, 1)
@@ -49,12 +57,53 @@ test("AcpService retains at most the bounded number of inactive transcripts", as
 
   const stats = service.diagnostics().transcriptCache
   assert.equal(stats.entries <= stats.maxEntries, true)
-  assert.equal(stats.maxEntries, 8)
   assert.equal(stats.evictions >= 4, true)
   assert.equal(stats.weight <= stats.maxWeight, true)
 
   assert.equal((await service.messages("session-0"))[0].info.id, "session-0:1")
   assert.equal(loads.get("session-0"), 2, "an evicted transcript must be reloadable on demand")
+})
+
+/*
+ * Session-first navigation hops between many native Sessions. Dropping one the moment a user opens
+ * a ninth means going back re-reads that harness's journal or re-runs session/load, which is what
+ * made switching Sessions feel slow. Small transcripts must stay cached while the memory budget that
+ * actually bounds this cache is still nearly empty.
+ */
+test("ordinary Session-first navigation does not evict transcripts while the memory budget is free", async () => {
+  const { listed, loads, service } = countingService(40)
+
+  for (const session of listed) {
+    assert.equal((await service.messages(session.sessionId)).length, 1)
+  }
+  for (const session of listed) {
+    assert.equal((await service.messages(session.sessionId)).length, 1)
+  }
+
+  const stats = service.diagnostics().transcriptCache
+  assert.equal(stats.evictions, 0, `40 small Sessions must not evict (weight ${stats.weight} of ${stats.maxWeight})`)
+  assert.equal(stats.weightEvictions, 0)
+  assert.ok(stats.weight < stats.maxWeight / 100, "these transcripts use a negligible share of the memory budget")
+  assert.ok(stats.hits >= 40, `revisits must be served from cache (hits ${stats.hits}, misses ${stats.misses})`)
+  assert.ok(loads.size === 40, "every Session was read at least once")
+})
+
+test("the memory budget still evicts when transcripts are genuinely large", async () => {
+  const big = "z".repeat(3 * 1024 * 1024)
+  const loader = async (sessionID) => [{
+    info: { id: `${sessionID}:1`, role: "assistant", sessionID, time: { created: 1 } },
+    parts: [{ id: `${sessionID}:1:text`, type: "text", text: big }]
+  }]
+  loader.authoritativeHistory = true
+  const listed = sessions(16)
+  const service = new AcpService(new ListingAcp(listed), { historyLoader: loader })
+
+  for (const session of listed) await service.messages(session.sessionId)
+
+  const stats = service.diagnostics().transcriptCache
+  assert.ok(stats.entries < 16, `the memory budget must cap large transcripts (entries ${stats.entries})`)
+  assert.ok(stats.weight <= stats.maxWeight, `weight ${stats.weight} exceeded budget ${stats.maxWeight}`)
+  assert.ok(stats.weightEvictions > 0, "these evictions must be attributed to the memory budget, not the entry cap")
 })
 
 test("messagePage uses an authoritative branch pager without materializing full history", async () => {
