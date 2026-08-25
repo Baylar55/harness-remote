@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 const observer = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
 const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
 const workThread = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
+const nativeModel = readFileSync(new URL('./native-session-model.ts', import.meta.url), 'utf8')
 
 assert.ok(observer.includes('import { WorkThreadConversation } from "./work-thread-conversation"'), 'native Session must mount the mature v3 conversation controller')
 assert.ok(observer.includes('<WorkThreadConversation'), 'native Session must render the v3 controller directly')
@@ -35,6 +36,12 @@ assert.equal(adapter.includes('MAX_CACHED_PROJECTIONS'), false, 'Session project
 assert.equal(adapter.includes('pruneInactiveProjections'), false, 'Session navigation must not retain inactive projection state')
 assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not contain rendering')
 assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
+
+assert.ok(nativeModel.includes('page.model ??'), 'native Session enrichment must consume a model supplied by a native journal page')
+assert.ok(nativeModel.includes('target.backend !== "opencode" && target.backend !== "omp"'), 'read-only model enrichment must stay scoped to harnesses with verified native model metadata')
+assert.ok(workThread.includes('observedTaskModelKeyRef'), 'the v3 picker must observe a model that arrives after the controller mounted')
+assert.ok(workThread.includes('modelSelectionTouchedRef'), 'late native enrichment must not overwrite a model the user explicitly picked')
+assert.ok(workThread.includes('currentTaskModelKey === previous'), 'the late-model sync must be edge-triggered rather than resetting the picker on every render')
 
 assert.ok(workThread.includes('const sendInFlightRef = useRef(false)'), 'v3 send in-flight guard must remain authoritative')
 assert.ok(workThread.includes('api.loadMessagePage'), 'v3 transcript paging must remain authoritative')
