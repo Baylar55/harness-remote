@@ -30,6 +30,9 @@ assert.ok(adapter.includes('candidates?.length !== 1'), 'PI identity stabilizati
 assert.ok(adapter.includes('nextKeyCounts.get(key) !== 1'), 'PI identity stabilization must preserve legitimate repeated identical journal answers')
 assert.ok(adapter.includes('entry.target.backend !== "pi" || before'), 'PI identity stabilization must stay scoped to current tail reads and never rewrite older-page history')
 assert.ok(adapter.includes('message.info.error'), 'PI identity stabilization must keep interrupted/error turns outside text-only aliasing')
+assert.ok(adapter.includes('const MAX_CACHED_PROJECTIONS = 12'), 'native Session projections must be retained in a bounded in-memory cache across navigation')
+assert.ok(adapter.includes('pruneInactiveProjections(MAX_CACHED_PROJECTIONS - 1)'), 'opening a new Session must bound inactive projection retention')
+assert.equal(adapter.includes('entry.listeners.size === 0) projections.delete(id)'), false, 'leaving a Session must not erase its transient Run/model continuity immediately')
 assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not contain rendering')
 assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
 
