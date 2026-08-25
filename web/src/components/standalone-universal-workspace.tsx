@@ -23,6 +23,10 @@ import { useDialogDismiss } from "../useDialogDismiss"
 import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
 import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
+import "../taskdesk-workthreads.css"
+import "../taskdesk-mobile-navigation.css"
+import "../taskdesk-focus-layout.css"
+import "../conversation-control-plane.css"
 
 type Props = {
   machines: WorkspaceMachine[]
