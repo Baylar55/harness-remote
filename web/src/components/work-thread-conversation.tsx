@@ -270,6 +270,8 @@ export function WorkThreadConversation({
   modelScope
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${task.id}`
+  const initialAgentID = agentForRun(task, task.run)
+  const initialModelKey = modelKey(lastModelForAgent(task, initialAgentID))
   const [feeds, setFeeds] = useState<Record<string, SessionFeed>>({})
   const feedsRef = useRef<Record<string, SessionFeed>>({})
   const [loading, setLoading] = useState(true)
@@ -281,10 +283,10 @@ export function WorkThreadConversation({
   const [modelError, setModelError] = useState<string | null>(null)
   const [questions, setQuestions] = useState<QuestionRequest[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
-  const [targetAgentID, setTargetAgentID] = useState(agentForRun(task, task.run))
+  const [targetAgentID, setTargetAgentID] = useState(initialAgentID)
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
-  const [targetModelKey, setTargetModelKey] = useState(modelKey(lastModelForAgent(task, agentForRun(task, task.run))))
+  const [targetModelKey, setTargetModelKey] = useState(initialModelKey)
   // The catalog effect must depend on the scope's value, not a caller's object identity: a fresh
   // object per render would restart model discovery on every render.
   const modelScopeKey = modelScope ? `${modelScope.workThreadId ?? ""}|${modelScope.projectId ?? ""}` : ""
@@ -293,6 +295,8 @@ export function WorkThreadConversation({
   const draftRef = useRef(draft)
   draftRef.current = draft
   const targetAgentIDRef = useRef(targetAgentID)
+  const observedTaskModelKeyRef = useRef(initialModelKey)
+  const modelSelectionTouchedRef = useRef(false)
   const sendInFlightRef = useRef(false)
   const stopInFlightRef = useRef(false)
   const tailInFlightRef = useRef(false)
@@ -315,6 +319,7 @@ export function WorkThreadConversation({
   const agentsSignature = agents.map((agent) => `${agent.id}:${agent.label}:${agent.backend}`).join("|")
   const agentsByID = useMemo(() => agentMap(agents), [agentsSignature])
   const currentAgentID = agentForRun(task, task.run)
+  const currentTaskModelKey = modelKey(lastModelForAgent(task, currentAgentID))
   const currentAgent = agents.find((agent) => agent.id === currentAgentID)
   const currentSessionID = runSessionID(task.run)
   const currentTarget = currentSessionID ? targets.find((target) => target.sessionID === currentSessionID) : undefined
@@ -351,7 +356,9 @@ export function WorkThreadConversation({
     setQuestions([])
     setPermissions([])
     setTargetAgentID(currentAgentID)
-    setTargetModelKey(modelKey(lastModelForAgent(task, currentAgentID)))
+    setTargetModelKey(currentTaskModelKey)
+    observedTaskModelKeyRef.current = currentTaskModelKey
+    modelSelectionTouchedRef.current = false
     sendInFlightRef.current = false
     stopInFlightRef.current = false
     tailInFlightRef.current = false
@@ -361,10 +368,25 @@ export function WorkThreadConversation({
 
   useEffect(() => {
     if (currentAgentID !== targetAgentIDRef.current && task.run?.id) {
+      const nextModelKey = modelKey(task.run.model ?? lastModelForAgent(task, currentAgentID))
       setTargetAgentID(currentAgentID)
-      setTargetModelKey(modelKey(task.run.model ?? lastModelForAgent(task, currentAgentID)))
+      setTargetModelKey(nextModelKey)
+      observedTaskModelKeyRef.current = nextModelKey
+      modelSelectionTouchedRef.current = false
     }
   }, [currentAgentID, task.run?.id])
+
+  // Native Session enrichment is intentionally asynchronous so transcript rendering never waits for
+  // model discovery. If the catalog wins that race it may temporarily choose its default. Follow a
+  // later verified model from the Task projection unless the user has already touched the picker;
+  // this keeps the control on the Session's real last model without clobbering an explicit choice.
+  useEffect(() => {
+    const previous = observedTaskModelKeyRef.current
+    observedTaskModelKeyRef.current = currentTaskModelKey
+    if (!currentTaskModelKey || currentTaskModelKey === previous) return
+    if (currentAgentID !== targetAgentIDRef.current || modelSelectionTouchedRef.current) return
+    setTargetModelKey(currentTaskModelKey)
+  }, [currentAgentID, currentTaskModelKey])
 
   const loadInitialTarget = useCallback(async (target: SessionTarget): Promise<SessionFeed> => {
     const page = await api.loadMessagePage(target.config, target.sessionID, target.directory, undefined, INITIAL_PAGE_SIZE, false)
@@ -567,7 +589,10 @@ export function WorkThreadConversation({
       const chosen = catalog.models.find((model) => modelKey(model) === priorKey)
         || catalog.models.find((model) => model.isDefault)
         || catalog.models[0]
-      setTargetModelKey(chosen ? modelKey(chosen) : "")
+      setTargetModelKey((currentKey) => {
+        if (modelSelectionTouchedRef.current && catalog.models.some((model) => modelKey(model) === currentKey)) return currentKey
+        return chosen ? modelKey(chosen) : ""
+      })
     }).catch((reason) => {
       if (modelGeneration.current === current) {
         setModels([])
@@ -633,6 +658,7 @@ export function WorkThreadConversation({
       localStorage.removeItem(draftStorageKey)
       onTaskUpdateRef.current(next)
       taskRef.current = next
+      modelSelectionTouchedRef.current = false
       await refreshCurrentTail(next)
       void refreshAttention(next)
     } catch (reason) {
@@ -682,13 +708,19 @@ export function WorkThreadConversation({
         <div className="tdw-agent-control">
           <label>
             <span>Continue with</span>
-            <select value={targetAgentID} disabled={working || sending} onChange={(event) => setTargetAgentID(event.target.value)}>
+            <select value={targetAgentID} disabled={working || sending} onChange={(event) => {
+              modelSelectionTouchedRef.current = false
+              setTargetAgentID(event.target.value)
+            }}>
               {agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label}</option>)}
             </select>
           </label>
           <label className="tdw-model-control">
             <span>Model</span>
-            <ModelPicker compact models={models} value={targetModelKey} onChange={setTargetModelKey} disabled={working || sending} loading={modelsLoading} unavailableHint={modelError || undefined} />
+            <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
+              modelSelectionTouchedRef.current = true
+              setTargetModelKey(value)
+            }} disabled={working || sending} loading={modelsLoading} unavailableHint={modelError || undefined} />
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
           </label>
         </div>
