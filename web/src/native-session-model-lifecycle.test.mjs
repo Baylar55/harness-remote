@@ -29,6 +29,7 @@ const {
   loadPendingNativeSessionPrompt,
   clearPendingNativeSessionPrompt
 } = await import('./native-session-prompt.ts')
+const { lastNativeMessageModel } = await import('./native-session-model.ts')
 
 function target(overrides = {}) {
   return {
@@ -128,5 +129,32 @@ assert.equal(otherOk.status, 'accepted', 'a wedged PI Session must not make an O
 const last = sent[sent.length - 1]
 assert.deepEqual(last.body.model, { providerID: 'anthropic', modelID: 'claude-opus-4-8' })
 assert.equal(last.body.variant, 'high', 'the variant travels beside the model, not inside it')
+
+// --- 6. OpenCode current model is recovered from the newest native envelope ----------------------
+const openCodeModel = lastNativeMessageModel([
+  {
+    info: {
+      id: 'old-user',
+      role: 'user',
+      time: { created: 1 },
+      model: { providerID: 'google', modelID: 'nano-banana' }
+    },
+    parts: [{ id: 'old-user:text', type: 'text', text: 'old prompt' }]
+  },
+  {
+    info: {
+      id: 'new-assistant',
+      role: 'assistant',
+      time: { created: 2 },
+      model: { providerID: 'anthropic', id: 'claude-sonnet-4-6', variant: 'high' }
+    },
+    parts: [{ id: 'new-assistant:text', type: 'text', text: 'new answer' }]
+  }
+])
+assert.deepEqual(
+  openCodeModel,
+  { providerID: 'anthropic', modelID: 'claude-sonnet-4-6', variant: 'high' },
+  'a stale old user-model envelope must never beat the newer OpenCode assistant model'
+)
 
 console.log('native-session model lifecycle regressions: OK')
