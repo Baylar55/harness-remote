@@ -52,6 +52,29 @@ test("reads a Codex rollout as the conversation the user saw", async () => {
   }
 })
 
+test("restores the current Codex model and reasoning effort from the newest native turn context", async () => {
+  const root = await writeRollout([
+    { timestamp: "2026-08-07T09:28:49.000Z", type: "turn_context", payload: { model: "gpt-5.6-codex", effort: "medium" } },
+    { timestamp: "2026-08-07T09:28:51.000Z", type: "event_msg", payload: { type: "user_message", message: "First" } },
+    { timestamp: "2026-08-07T09:28:55.000Z", type: "event_msg", payload: { type: "agent_message", message: "One", phase: "final" } },
+    { timestamp: "2026-08-07T09:29:00.000Z", type: "turn_context", payload: { model: "gpt-5.7-codex", effort: "high" } },
+    { timestamp: "2026-08-07T09:29:01.000Z", type: "event_msg", payload: { type: "user_message", message: "Second" } },
+    { timestamp: "2026-08-07T09:29:05.000Z", type: "event_msg", payload: { type: "agent_message", message: "Two", phase: "final" } }
+  ])
+
+  try {
+    const loader = createCodexHistoryLoader(root)
+    const newest = await loader.page(sessionID, { limit: 10 })
+    assert.deepEqual(newest.model, { providerID: "codex", modelID: "gpt-5.7-codex", variant: "high" })
+
+    // Older paging is transcript-only. A historical context must never rewind the model picker.
+    const older = await loader.page(sessionID, { limit: 1, before: newest.before })
+    assert.equal(older.model, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("keeps message ids stable as a Codex rollout grows", async () => {
   // A rollout is append-only and re-read on every refresh. Byte-offset ids survive later turns being
   // appended and can also be recovered by the tail pager without scanning every older line first.
