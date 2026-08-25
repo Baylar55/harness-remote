@@ -64,8 +64,10 @@ test("restores the current Codex model and reasoning effort from the newest nati
 
   try {
     const loader = createCodexHistoryLoader(root)
-    const newest = await loader.page(sessionID, { limit: 10 })
+    const newest = await loader.page(sessionID, { limit: 2 })
     assert.deepEqual(newest.model, { providerID: "codex", modelID: "gpt-5.7-codex", variant: "high" })
+    assert.equal(newest.hasMore, true)
+    assert.ok(newest.before)
 
     // Older paging is transcript-only. A historical context must never rewind the model picker.
     const older = await loader.page(sessionID, { limit: 1, before: newest.before })
