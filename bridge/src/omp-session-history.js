@@ -95,7 +95,6 @@ function parseRecordBuffer(buffer) {
 async function readOmpPage(file, sessionID, { limit = 100, before, activeSessionLeaf } = {}) {
   const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
   if (activeSessionLeaf === null) return { messages: [], before: null, hasMore: false }
-  if (activeSessionLeaf === undefined && !before) return undefined
 
   const handle = await open(file, "r")
   try {
@@ -167,6 +166,37 @@ async function readOmpPage(file, sessionID, { limit = 100, before, activeSession
   } finally {
     await handle.close()
   }
+}
+
+/**
+ * OMP's undo extension normally tells us the selected leaf.  Without it, a JSONL journal still
+ * contains enough ordering information for the normal case: the last terminal record is the
+ * branch the writer most recently reached.  Selecting it is observational and, unlike ACP
+ * session/load, cannot claim or stall the native Session.
+ */
+function inferLatestTerminalLeaf(records) {
+  const parents = new Set(records
+    .map((record) => record.parentId)
+    .filter((parentID) => typeof parentID === "string" && parentID))
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const id = records[index].id
+    if (!parents.has(id)) return id
+  }
+  return undefined
+}
+
+async function inferLatestTerminalLeafFromFile(file) {
+  const records = []
+  const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity })
+  for await (const line of lines) {
+    try {
+      const record = JSON.parse(line)
+      if (typeof record?.id === "string") records.push(record)
+    } catch {
+      // One malformed journal line must not make a valid preceding transcript unavailable.
+    }
+  }
+  return inferLatestTerminalLeaf(records)
 }
 
 /*
@@ -258,13 +288,8 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     const selected = []
     let selectedLeaf = activeSessionLeaf
     if (selectedLeaf === undefined) {
-      // The extension is optional.  A transcript with one terminal leaf is not
-      // ambiguous, so use it instead of issuing a blocking ACP session/load.
-      // Multiple leaves still require the extension's authoritative selection.
-      const parents = new Set(records.map((record) => record.parentId).filter((parentID) => typeof parentID === "string" && parentID))
-      const leaves = records.map((record) => record.id).filter((id) => !parents.has(id))
-      if (leaves.length !== 1) return []
-      selectedLeaf = leaves[0]
+      selectedLeaf = inferLatestTerminalLeaf(records)
+      if (!selectedLeaf) return []
     }
     if (selectedLeaf === null) {
       // The extension selected the session root.
@@ -296,15 +321,18 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     resolvedSessions: sessionFiles.size,
     listingAgeMs: listedAt ? Date.now() - listedAt : null
   })
-  loadOmpHistory.pageRequiresActiveLeaf = true
-  // Without an extension-published leaf, a journal branch is ambiguous.  Do not
-  // turn a read-only open into an ACP session/load just to guess it: external
-  // attachment-only Sessions otherwise stall the whole OMP adapter.
+  // The loader derives a latest terminal leaf when the optional undo extension is absent, so
+  // paging remains journal-only and does not wait on ACP session/load.
+  loadOmpHistory.pageRequiresActiveLeaf = false
   loadOmpHistory.deferAcpReplayWithoutActiveLeaf = true
   loadOmpHistory.page = async (sessionID, options = {}) => {
     const file = await locateSession(sessionID)
     if (!file) return { messages: [], before: null, hasMore: false }
-    return readOmpPage(file, sessionID, options)
+    const activeSessionLeaf = options.activeSessionLeaf === undefined
+      ? await inferLatestTerminalLeafFromFile(file)
+      : options.activeSessionLeaf
+    if (activeSessionLeaf === undefined) return { messages: [], before: null, hasMore: false }
+    return readOmpPage(file, sessionID, { ...options, activeSessionLeaf })
   }
 
   return loadOmpHistory

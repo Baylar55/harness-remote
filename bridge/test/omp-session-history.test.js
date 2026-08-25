@@ -20,7 +20,11 @@ test("reads only the authoritative branch from an OMP session transcript", async
 
   try {
     const loadHistory = createOmpHistoryLoader(root)
-    assert.deepEqual(await loadHistory(sessionID), [], "append order must not be treated as the active branch")
+    assert.deepEqual(
+      (await loadHistory(sessionID)).map((message) => message.parts.at(-1)?.text),
+      ["Question", "Answer"],
+      "without the optional extension, the newest terminal branch stays readable"
+    )
 
     const messages = await loadHistory(sessionID, { activeSessionLeaf: "assistant-1" })
     assert.deepEqual(messages.map((message) => [message.info.role, message.parts.map((part) => [part.type, part.text])]), [
@@ -93,7 +97,9 @@ test("pages only the authoritative OMP branch and ignores later abandoned record
 
     const rootPage = await loadHistory.page(sessionID, { activeSessionLeaf: null, limit: 2 })
     assert.deepEqual(rootPage, { messages: [], before: null, hasMore: false })
-    assert.equal(await loadHistory.page(sessionID, { limit: 2 }), undefined, "unknown OMP leaf must fall back to ACP instead of guessing")
+    const inferred = await loadHistory.page(sessionID, { limit: 2 })
+    assert.deepEqual(inferred.messages.map((message) => message.parts[0].text), ["abandoned-u", "abandoned-a"])
+    assert.equal(inferred.hasMore, true)
     await assert.rejects(
       loadHistory.page(sessionID, { activeSessionLeaf: "missing-leaf", limit: 2 }),
       /active session leaf is missing/
