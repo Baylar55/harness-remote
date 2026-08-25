@@ -10,6 +10,8 @@ export type NativeSessionRecord = {
   stopCapability?: string
   abortSupported: boolean
   modelsSupported: boolean
+  renameSupported: boolean
+  deleteSupported: boolean
   /** True only when this UI record comes from a mutation that just created/claimed the Session through
    * this daemon. Discovery itself deliberately leaves ownership unknown. */
   writerOwned?: boolean
@@ -198,6 +200,8 @@ export async function discoverAgentNativeSessions(
     stopCapability: agent.contract?.sessions?.stop,
     abortSupported: agent.capabilities?.abort === true,
     modelsSupported: agent.capabilities?.models === true,
+    renameSupported: agent.capabilities?.sessionRename === true,
+    deleteSupported: agent.capabilities?.sessionDelete === true,
     session,
     status: statuses[session.id]
   }))
