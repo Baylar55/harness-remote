@@ -37,7 +37,7 @@ function passthroughServerOptions(daemon, primaryAcp, service, sessionLinkStore 
   return claimOptions
 }
 
-test("ACP native Session prompt resolves model and applies native variant config before prompting", async () => {
+test("ACP native Session prompt hands model and native variant to AcpService so the variant is applied after the model", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-acp", name: "workstation" })
   const acp = new FakeAcp()
   daemon.registerAcpHost({
@@ -53,7 +53,7 @@ test("ACP native Session prompt resolves model and applies native variant config
   const prompts = []
   const claimOptions = passthroughServerOptions(daemon, acp, {
     async claimSession() {},
-    async prompt(sessionID, text, model) { prompts.push([sessionID, text, model]) },
+    async prompt(sessionID, text, model, attachments, variant) { prompts.push([sessionID, text, model, attachments, variant]) },
     async abort() {}
   })
 
@@ -64,12 +64,74 @@ test("ACP native Session prompt resolves model and applies native variant config
     variant: "high"
   })
 
-  assert.deepEqual(acp.configCalls, [["session/set_config_option", {
-    sessionId: "native-acp-model",
-    configId: "reasoning_effort",
-    value: "high"
-  }]])
-  assert.deepEqual(prompts, [["native-acp-model", "Continue once", "openai/gpt-5.6"]])
+  // The daemon must not issue its own set_config_option: doing so applied the variant before the
+  // model, and a harness that resets dependent controls on model change then dropped it silently.
+  assert.deepEqual(acp.configCalls, [])
+  assert.deepEqual(prompts, [[
+    "native-acp-model",
+    "Continue once",
+    "openai/gpt-5.6",
+    [],
+    { configId: "reasoning_effort", value: "high" }
+  ]])
+})
+
+test("ACP native Session prompt keeps a Session usable when model discovery fails for a non-catalog reason", async () => {
+  const daemon = new MachineDaemon({ id: "machine-model-degraded", name: "workstation" })
+  const acp = new FakeAcp()
+  daemon.registerAcpHost({
+    id: "codex",
+    agent: acp,
+    modelCatalog: {
+      async resolve() { throw new Error("codex model catalog timed out after 90000ms") }
+    }
+  })
+  const prompts = []
+  const claimOptions = passthroughServerOptions(daemon, acp, {
+    async claimSession() {},
+    async prompt(sessionID, text, model, attachments, variant) { prompts.push([sessionID, text, model, variant]) },
+    async abort() {}
+  })
+
+  await claimOptions.promptSession("codex", "native-acp-degraded", {
+    text: "Continue once",
+    directory: "/repo",
+    model: { providerID: "openai", modelID: "gpt-5.6" },
+    variant: "high"
+  })
+
+  // The requested model still reaches the harness; only the variant enrichment is lost.
+  assert.deepEqual(prompts, [["native-acp-degraded", "Continue once", "openai/gpt-5.6", undefined]])
+})
+
+test("ACP native Session prompt still rejects a model the catalog says is gone", async () => {
+  const daemon = new MachineDaemon({ id: "machine-model-gone", name: "workstation" })
+  const acp = new FakeAcp()
+  daemon.registerAcpHost({
+    id: "codex",
+    agent: acp,
+    modelCatalog: {
+      async resolve() {
+        const error = new Error("Selected model is no longer available: openai/gpt-5.6")
+        error.code = "model_unavailable"
+        throw error
+      }
+    }
+  })
+  const claimOptions = passthroughServerOptions(daemon, acp, {
+    async claimSession() {},
+    async prompt() { throw new Error("prompt must not be dispatched") },
+    async abort() {}
+  })
+
+  await assert.rejects(
+    claimOptions.promptSession("codex", "native-acp-gone", {
+      text: "Continue once",
+      directory: "/repo",
+      model: { providerID: "openai", modelID: "gpt-5.6" }
+    }),
+    /no longer available/
+  )
 })
 
 test("OpenCode native Session prompt preserves parts, model and variant without inventing an internal agent", async () => {
@@ -131,11 +193,13 @@ test("ACP cross-agent handoff creates one real target Session, applies effort, a
   })
   const created = []
   const links = []
+  const modelCalls = []
   const service = {
     async createSession(input) {
       created.push(input)
       return { id: "pi-native-new" }
     },
+    async setModel(sessionID, model, variant) { modelCalls.push([sessionID, model, variant]) },
     async claimSession() {},
     async prompt() {},
     async abort() {}
@@ -156,11 +220,10 @@ test("ACP cross-agent handoff creates one real target Session, applies effort, a
   })
 
   assert.deepEqual(created, [{ directory: "/repo", title: "Continue in PI", model: "openai/gpt-5.6" }])
-  assert.deepEqual(pi.configCalls, [["session/set_config_option", {
-    sessionId: "pi-native-new",
-    configId: "effort",
-    value: "high"
-  }]])
+  // The variant goes through the owning service, which applies it after the model, not as a raw
+  // adapter request that races the target Session's own configOptions load.
+  assert.deepEqual(pi.configCalls, [])
+  assert.deepEqual(modelCalls, [["pi-native-new", "openai/gpt-5.6", { configId: "effort", value: "high" }]])
   assert.deepEqual(links, [{
     source: { machineID: "machine-handoff-acp", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
     target: { machineID: "machine-handoff-acp", agentID: "pi", sessionID: "pi-native-new", directory: "/repo" }

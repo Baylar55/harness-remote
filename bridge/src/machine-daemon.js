@@ -36,6 +36,30 @@ function modelWireName(model) {
   return model ? `${model.providerID}/${model.modelID}` : undefined
 }
 
+/** Only a variant the catalog actually resolved from adapter-advertised options is applied. */
+function acpModelVariant(model) {
+  return model?.variant && model?.variantConfigId
+    ? { configId: model.variantConfigId, value: model.variant }
+    : undefined
+}
+
+/**
+ * A native Session that the harness can still serve must not be made unusable by model discovery.
+ *
+ * `model_unavailable` is an authoritative catalog answer about the user's explicit choice and stays a
+ * conflict. Any other discovery failure - a cold adapter, a timeout, a transport error - only costs
+ * the variant/metadata enrichment, so the requested model is still sent and the Session keeps working.
+ */
+async function resolvePromptModel(daemon, agentID, requestedModel, directory) {
+  if (!requestedModel) return null
+  try {
+    return await daemon.resolveModel(agentID, requestedModel, directory ? { directory } : undefined)
+  } catch (error) {
+    if (error?.code === "model_unavailable") throw error
+    return { ...requestedModel, variant: undefined, variantConfigId: undefined }
+  }
+}
+
 export class MachineDaemon {
   constructor(identity, { registry = new MachineRegistry(identity) } = {}) {
     this.registry = registry
@@ -202,21 +226,16 @@ export function createMachineDaemonServer({
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
     const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
-    const resolvedModel = requestedModel
-      ? await daemon.resolveModel(agentID, requestedModel, directory ? { directory } : undefined)
-      : null
+    const resolvedModel = await resolvePromptModel(daemon, agentID, requestedModel, directory)
 
     if (entry.kind === "acp") {
       const service = acpService(agentID)
       if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
-      if (resolvedModel?.variant && resolvedModel?.variantConfigId) {
-        await entry.host.request("session/set_config_option", {
-          sessionId: sessionID,
-          configId: resolvedModel.variantConfigId,
-          value: resolvedModel.variant
-        })
-      }
-      await service.prompt(sessionID, text, modelWireName(resolvedModel))
+      // Model and variant travel with the prompt through AcpService so they are applied in the one
+      // place that already loads configOptions, orders the model before its variant, and defers both
+      // to dequeue when a turn is still running. Setting them here directly reordered the model
+      // after the variant and mutated a live turn's configuration.
+      await service.prompt(sessionID, text, modelWireName(resolvedModel), [], acpModelVariant(resolvedModel))
       return
     }
 
@@ -327,13 +346,10 @@ export function createMachineDaemonServer({
         }
         if (!targetSession?.id) throw daemonError("handoff_rejected", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
         nativeCreated = true
-        if (resolvedModel?.variant && resolvedModel?.variantConfigId) {
-          await targetEntry.host.request("session/set_config_option", {
-            sessionId: targetSession.id,
-            configId: resolvedModel.variantConfigId,
-            value: resolvedModel.variant
-          })
-        }
+        // createSession already applied the base model, so only the variant is left. Apply it through
+        // the service that owns this Session's configOptions rather than as a raw adapter request.
+        const variantToApply = acpModelVariant(resolvedModel)
+        if (variantToApply) await service.setModel(targetSession.id, modelWireName(resolvedModel), variantToApply)
       } else {
         const host = targetEntry.host
         try {

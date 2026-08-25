@@ -711,7 +711,15 @@ export class AcpService {
     )
   }
 
-  async setModel(sessionID, model) {
+  /**
+   * Apply the model, and any harness-advertised variant that belongs to it, to one native Session.
+   *
+   * The variant is applied here rather than by the caller because a harness legitimately resets
+   * dependent controls when the model changes: setting the variant first silently discards it. This
+   * is also the only place that already waits for real configOptions, so the variant cannot be sent
+   * against a Session whose options have not been loaded yet.
+   */
+  async setModel(sessionID, model, variant) {
     await this.#loadForConfigOptions(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
     // The app addresses models as `provider/model` because that is what OpenCode's API does, but a
@@ -724,6 +732,23 @@ export class AcpService {
     if (!value) throw new Error(`Harness model is not available: ${model}`)
     await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value })
     option.currentValue = value
+    await this.#setModelVariant(sessionID, variant)
+  }
+
+  /**
+   * A variant is only ever applied against an id the running adapter advertised for this Session.
+   * A harness that does not offer the control is not asked for it, so no reasoning level is invented.
+   */
+  async #setModelVariant(sessionID, variant) {
+    const configId = typeof variant?.configId === "string" ? variant.configId : ""
+    const value = typeof variant?.value === "string" ? variant.value : ""
+    if (!configId || !value) return
+    const option = this.#configOptions.get(sessionID)?.find((item) => item.id === configId)
+    if (!option?.options?.some((candidate) => candidate?.value === value)) {
+      throw new Error(`Harness model variant is not available: ${configId}=${value}`)
+    }
+    await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId, value })
+    option.currentValue = value
   }
 
   /**
@@ -731,7 +756,7 @@ export class AcpService {
    * still working is queued rather than rejected. It is recorded straight away, which
    * is what makes it visible in the conversation while it waits.
    */
-  async prompt(sessionID, text, model, attachments = []) {
+  async prompt(sessionID, text, model, attachments = [], variant) {
     // Refuse before touching the session: an agent that never advertised image support
     // would reject the block mid-turn, which reads as a failed prompt rather than a
     // rejected attachment.
@@ -754,12 +779,12 @@ export class AcpService {
     if (this.#active.has(sessionID)) {
       const messageID = this.#recordPrompt(sessionID, text, attachments)
       const queue = this.#queues.get(sessionID) ?? []
-      queue.push({ text, model, messageID, attachments })
+      queue.push({ text, model, messageID, attachments, variant })
       this.#queues.set(sessionID, queue)
       this.#emit("session.updated", sessionID)
       return
     }
-    if (model) await this.setModel(sessionID, model)
+    if (model) await this.setModel(sessionID, model, variant)
     this.#startTurn(sessionID, text, false, attachments)
   }
 
@@ -855,7 +880,7 @@ export class AcpService {
     // underneath the turn that was still running.
     if (next.model) {
       try {
-        await this.setModel(sessionID, next.model)
+        await this.setModel(sessionID, next.model, next.variant)
       } catch (error) {
         this.#emit("session.error", sessionID, { message: error.message })
       }
