@@ -14,8 +14,10 @@ const OLDER_BUSY_ID = "opencode-older-busy"
 const PRIMARY_TITLE = "Newer OpenCode Session"
 const OLDER_TITLE = "Older Working OpenCode Session"
 const PROMPT = "OPENCODE-STATUS-COMPLETION-PROMPT"
+const REASONING = "OPENCODE-STATUS-COMPLETION-REASONING"
 const FINAL = "OPENCODE-STATUS-COMPLETION-FINAL"
 const SECOND_PROMPT = "OPENCODE-MODEL-RESTORE-SECOND"
+const SECOND_REASONING = "OPENCODE-MODEL-RESTORE-SECOND-REASONING"
 const SECOND_FINAL = "OPENCODE-MODEL-RESTORE-SECOND-FINAL"
 const LAST_MODEL = { providerID: "anthropic", modelID: "claude-sonnet-4-6", variant: "high" }
 
@@ -25,6 +27,7 @@ let sessions
 let sseResponses
 let promptBodies
 let directoryScopedStatusRequests
+let statusRequests
 let clock
 
 function userMessage(id, text, created, model = LAST_MODEL) {
@@ -66,8 +69,11 @@ function resetState() {
     ]],
     [OLDER_BUSY_ID, []]
   ])
+  // Deliberately omit PRIMARY_ID. Current OpenCode releases can omit a child-directory Session from
+  // GET /session/status without a directory even while that same Session exists in global discovery.
+  // Home therefore looks gray/Ready because status enrichment is absent, not because an explicit
+  // idle status was observed. The mounted v3 projection must not depend on this map to finish.
   statuses = new Map([
-    [PRIMARY_ID, { type: "idle" }],
     [OLDER_BUSY_ID, { type: "busy" }]
   ])
   sessions = new Map([
@@ -89,6 +95,7 @@ function resetState() {
   sseResponses = new Set()
   promptBodies = []
   directoryScopedStatusRequests = 0
+  statusRequests = 0
   clock = 10_000
 }
 
@@ -169,28 +176,56 @@ function appendPrompt(sessionID, body) {
   transcripts.set(sessionID, list)
 }
 
-function completePrompt(sessionID, text, model) {
+function appendReasoning(sessionID, text, model) {
   const list = transcripts.get(sessionID) || []
   const created = clock++
+  const messageID = `assistant-${created}`
+  const part = {
+    id: `${messageID}-reasoning`,
+    messageID,
+    sessionID,
+    type: "reasoning",
+    text
+  }
   list.push({
     info: {
-      id: `assistant-${created}`,
+      id: messageID,
       role: "assistant",
       sessionID,
-      time: { created, completed: created },
+      time: { created },
       providerID: model.providerID,
       modelID: model.modelID
     },
-    parts: [{ id: `assistant-${created}-text`, type: "text", text }]
+    parts: [part]
   })
   transcripts.set(sessionID, list)
-  statuses.set(sessionID, { type: "idle" })
-  const session = sessions.get(sessionID)
-  if (session) session.time.updated = created
+  // Older real OpenCode event shapes carry the Session id only inside properties.part. This must
+  // still target the mounted Session immediately; otherwise reasoning appears only on a later poll.
+  emit("message.part.updated", { part })
+  return messageID
+}
 
-  // This is the real regression: no final message.updated is emitted. OpenCode's lifecycle event is
-  // the authoritative completion signal, so the selected transcript must be re-read from status.
+function markIdle(sessionID) {
+  const session = sessions.get(sessionID)
+  if (session) session.time.updated = clock++
+  // Important ordering: the lifecycle edge arrives first. The terminal assistant envelope is NOT
+  // durable yet and there will be no later message.updated event to rescue an eager one-shot read.
   emit("session.status", { sessionID, status: { type: "idle" } })
+}
+
+function persistFinal(sessionID, assistantID, text, model) {
+  const list = transcripts.get(sessionID) || []
+  const assistant = list.find((message) => message.info.id === assistantID)
+  assert.ok(assistant, `missing reasoning assistant ${assistantID}`)
+  const completed = clock++
+  assistant.info.time.completed = completed
+  assistant.info.finish = "stop"
+  assistant.parts.push({ id: `${assistantID}-text`, type: "text", text })
+  assistant.info.providerID = model.providerID
+  assistant.info.modelID = model.modelID
+  const session = sessions.get(sessionID)
+  if (session) session.time.updated = completed
+  // Intentionally emit nothing. The mounted Session must settle by re-reading the native transcript.
 }
 
 function startFakeDaemon() {
@@ -240,6 +275,7 @@ function startFakeDaemon() {
     }
 
     if (request.method === "GET" && url.pathname === "/v1/agents/opencode/session/status") {
+      statusRequests += 1
       if (url.searchParams.has("directory")) {
         directoryScopedStatusRequests += 1
         json(response, 504, { error: "directory-scoped OpenCode status is intentionally unavailable in this regression" })
@@ -281,20 +317,23 @@ function startFakeDaemon() {
     if (request.method === "POST" && promptMatch) {
       const sessionID = decodeURIComponent(promptMatch[1])
       const body = await requestJSON(request)
-      promptBodies.push({ sessionID, ...body })
+      promptBodies.push({ sessionID, receivedAt: Date.now(), ...body })
 
       const model = {
         providerID: body?.model?.providerID,
         modelID: body?.model?.modelID,
         variant: body?.variant
       }
-      statuses.set(sessionID, { type: "busy" })
       appendPrompt(sessionID, body)
       emit("message.updated", { info: { sessionID } })
       json(response, 200, { status: "accepted", clientRequestId: body?.clientRequestId })
 
       const final = body?.text === SECOND_PROMPT ? SECOND_FINAL : FINAL
-      setTimeout(() => completePrompt(sessionID, final, model), 220)
+      const reasoning = body?.text === SECOND_PROMPT ? SECOND_REASONING : REASONING
+      let assistantID
+      setTimeout(() => { assistantID = appendReasoning(sessionID, reasoning, model) }, 90)
+      setTimeout(() => markIdle(sessionID), 240)
+      setTimeout(() => persistFinal(sessionID, assistantID, final, model), 650)
       return
     }
 
@@ -320,7 +359,7 @@ function startFakeDaemon() {
 function startPreview() {
   const command = process.platform === "win32" ? "npm.cmd" : "npm"
   return spawn(command, ["run", "preview", "--", "--host", "127.0.0.1", "--port", String(PREVIEW_PORT), "--strictPort"], {
-    stdio: [ "ignore", "pipe", "pipe" ],
+    stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32"
   })
 }
@@ -384,6 +423,8 @@ async function openPrimary(page) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   assert.ok(sseResponses.size > 0, "OpenCode event stream did not connect")
+  // Let the initial SSE-connected reconciliation settle before measuring the Send path.
+  await new Promise((resolve) => setTimeout(resolve, 150))
 }
 
 async function send(page, text) {
@@ -393,25 +434,68 @@ async function send(page, text) {
   await button.click()
 }
 
-async function assertCompletionAndModel(page, text, final) {
+async function assertCompletionAndModel(page, text, reasoning, final, label) {
   const before = promptBodies.length
+  const statusBefore = statusRequests
+  const sendStartedAt = Date.now()
   await send(page, text)
 
-  const deadline = Date.now() + 2_500
-  while (Date.now() < deadline && promptBodies.length === before) {
+  const promptDeadline = Date.now() + 1_500
+  while (Date.now() < promptDeadline && promptBodies.length === before) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
-  assert.equal(promptBodies.length, before + 1)
+  assert.equal(promptBodies.length, before + 1, `${label}: Send must reach OpenCode without a legacy status wait`)
   const body = promptBodies.at(-1)
+  assert.ok(body.receivedAt - sendStartedAt < 1_500, `${label}: prompt delivery was artificially delayed before OpenCode started`)
+  assert.equal(statusRequests, statusBefore, `${label}: pre-Send reconciliation must not call OpenCode /session/status`)
+  assert.equal(body.sessionID, PRIMARY_ID, `${label}: continuation must keep the same native Session id`)
   assert.deepEqual(body.model, {
     providerID: LAST_MODEL.providerID,
     modelID: LAST_MODEL.modelID
-  }, "reopened OpenCode Session must keep the last native model")
-  assert.equal(body.variant, LAST_MODEL.variant, "reopened OpenCode Session must keep the last native variant")
+  }, `${label}: reopened OpenCode Session must keep the last native model`)
+  assert.equal(body.variant, LAST_MODEL.variant, `${label}: reopened OpenCode Session must keep the last native variant`)
 
-  await page.getByText(final, { exact: true }).waitFor({ state: "visible", timeout: 2_500 })
-  await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 2_500 })
-  assert.equal(await page.getByText(final, { exact: true }).count(), 1)
+  // The partial reasoning event deliberately carries sessionID only inside properties.part. Seeing
+  // the mature v3 state switch out of "getting started" proves the mounted tail refreshed promptly.
+  await page.locator(".tdw-conversation-state").filter({ hasText: "OpenCode is working" }).waitFor({ state: "visible", timeout: 1_500 })
+
+  // session.status idle happens before this answer is durable and no final message.updated follows.
+  // The Session remains mounted throughout: the answer and Ready state must appear without navigation.
+  await page.getByText(final, { exact: true }).waitFor({ state: "visible", timeout: 3_000 })
+  await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 3_000 })
+  assert.equal(await page.getByText(text, { exact: true }).count(), 1, `${label}: prompt rendered more than once`)
+  assert.equal(await page.getByText(final, { exact: true }).count(), 1, `${label}: final response rendered more than once`)
+  assert.equal(promptBodies.length, before + 1, `${label}: one user Send must dispatch exactly one native prompt`)
+
+  // Reasoning text is intentionally collapsed by the mature renderer. Verify it exists in the same
+  // activity group without changing the renderer's visibility semantics.
+  const activity = page.locator(".uw-activity-group").last()
+  await activity.locator("summary").click()
+  await page.getByText(reasoning, { exact: true }).waitFor({ state: "visible", timeout: 1_000 })
+}
+
+async function runScenario(browser, viewport, label) {
+  resetState()
+  const context = await browser.newContext({ viewport, hasTouch: viewport.width < 600 })
+  const page = await context.newPage()
+  await seed(page)
+  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+
+  await openPrimary(page)
+  await assertCompletionAndModel(page, PROMPT, REASONING, FINAL, `${label} first turn`)
+
+  // Remount must still be correct, but it is no longer required to make the first final appear.
+  await page.reload({ waitUntil: "networkidle" })
+  await openPrimary(page)
+  await page.getByText(FINAL, { exact: true }).waitFor({ state: "visible", timeout: 2_000 })
+  await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 2_000 })
+  assert.equal(await page.getByText(PROMPT, { exact: true }).count(), 1, `${label}: reopen duplicated first prompt`)
+  assert.equal(await page.getByText(FINAL, { exact: true }).count(), 1, `${label}: reopen duplicated first final`)
+
+  await assertCompletionAndModel(page, SECOND_PROMPT, SECOND_REASONING, SECOND_FINAL, `${label} reopened turn`)
+
+  assert.equal(directoryScopedStatusRequests, 0, `${label}: recovery must not fall back to an unbounded directory status wait`)
+  await context.close()
 }
 
 let daemon
@@ -424,24 +508,10 @@ try {
   await ready(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
 
-  const context = await browser.newContext({ viewport: { width: 1366, height: 768 } })
-  const page = await context.newPage()
-  await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await runScenario(browser, { width: 1366, height: 768 }, "desktop")
+  await runScenario(browser, { width: 412, height: 915 }, "mobile")
 
-  await openPrimary(page)
-  await assertCompletionAndModel(page, PROMPT, FINAL)
-
-  // Returning to the Session must derive the picker from native message history again. No manual
-  // model selection is performed before this second Send.
-  await page.reload({ waitUntil: "networkidle" })
-  await openPrimary(page)
-  await assertCompletionAndModel(page, SECOND_PROMPT, SECOND_FINAL)
-
-  assert.equal(directoryScopedStatusRequests, 0, "Session-first OpenCode must never use directory-scoped status reconciliation")
-
-  await context.close()
-  console.log("native OpenCode real-regression smoke: completion, model restore, global status and stable ordering passed")
+  console.log("native OpenCode real-regression smoke: mounted completion lag, prompt latency, model restore, single-dispatch and desktop/mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
