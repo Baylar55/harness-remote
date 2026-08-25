@@ -29,6 +29,7 @@ type ProjectionEntry = {
   forcedStatus: "running" | "cancelled" | null
   currentModel: ModelSelection | null
   initialPageCaptured: boolean
+  piTailMessages: MessageEnvelope[]
   writerReady: boolean
   writerClaimInFlight: Promise<void> | null
   runs: Map<string, ProjectionRun>
@@ -63,6 +64,74 @@ function messageText(message: MessageEnvelope): string {
     .map((part) => part.text)
     .join("\n")
     .trim()
+}
+
+/**
+ * PI exposes two legitimate identities for one completed assistant reply: while the turn is live the
+ * ACP stream has one message id, then the authoritative JSONL journal can expose the same reply with
+ * its persisted record id. The mature v3 tail merge intentionally retains unseen ids, so letting that
+ * transport identity swap through would display the same answer twice after Stop/reopen or any other
+ * live-to-journal transition.
+ *
+ * Preserve the prior browser identity only for one unambiguous, text-only assistant match. Repeated
+ * identical answers stay distinct because neither side may contain more than one candidate. Errors,
+ * reasoning and tools retain their native identities and semantics unchanged.
+ */
+function piStableAssistantKey(message: MessageEnvelope): string | null {
+  if (message.info.role !== "assistant" || message.info.error || !message.parts.length) return null
+  if (message.parts.some((part) => part.type !== "text" || typeof part.text !== "string")) return null
+  const text = canonicalText(message.parts.map((part) => part.text || "").join("\n"))
+  return text ? text : null
+}
+
+export function stabilizePiTailMessageIDs(
+  previous: MessageEnvelope[],
+  next: MessageEnvelope[]
+): MessageEnvelope[] {
+  if (!previous.length || !next.length) return next
+
+  const previousIDs = new Set(previous.map((message) => message.info.id))
+  const nextIDs = new Set(next.map((message) => message.info.id))
+  const previousByKey = new Map<string, MessageEnvelope[]>()
+  const nextKeyCounts = new Map<string, number>()
+
+  for (const message of previous) {
+    if (nextIDs.has(message.info.id)) continue
+    const key = piStableAssistantKey(message)
+    if (!key) continue
+    const candidates = previousByKey.get(key) ?? []
+    candidates.push(message)
+    previousByKey.set(key, candidates)
+  }
+  for (const message of next) {
+    if (previousIDs.has(message.info.id)) continue
+    const key = piStableAssistantKey(message)
+    if (key) nextKeyCounts.set(key, (nextKeyCounts.get(key) ?? 0) + 1)
+  }
+
+  let changed = false
+  const stabilized = next.map((message) => {
+    if (previousIDs.has(message.info.id)) return message
+    const key = piStableAssistantKey(message)
+    if (!key || nextKeyCounts.get(key) !== 1) return message
+    const candidates = previousByKey.get(key)
+    if (candidates?.length !== 1) return message
+    const stableID = candidates[0].info.id
+    changed = true
+    return {
+      ...message,
+      info: { ...message.info, id: stableID },
+      parts: message.parts.map((part) => ({ ...part, messageID: stableID }))
+    }
+  })
+  return changed ? stabilized : next
+}
+
+function stabilizePiTailPage(entry: ProjectionEntry, page: MessagePage, before?: string): MessagePage {
+  if (entry.target.backend !== "pi" || before) return page
+  const messages = stabilizePiTailMessageIDs(entry.piTailMessages, page.messages)
+  entry.piTailMessages = messages
+  return messages === page.messages ? page : { ...page, messages }
 }
 
 /**
@@ -316,9 +385,10 @@ function installAdapter(): void {
 
   const originalLoadMessagePage = api.loadMessagePage.bind(api)
   api.loadMessagePage = async function patchedLoadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
-    const page = await originalLoadMessagePage(config, sessionID, directory, before, limit, refreshHistory)
+    let page = await originalLoadMessagePage(config, sessionID, directory, before, limit, refreshHistory)
     const entry = entryForRead(config, sessionID, directory)
     if (entry) {
+      page = stabilizePiTailPage(entry, page, before)
       captureUserRuns(entry, page, before)
       reconcileOpenCodeTranscriptStatus(entry, page, before)
     }
@@ -394,6 +464,7 @@ export function registerNativeSessionV3Adapter(
       forcedStatus: null,
       currentModel: target.model,
       initialPageCaptured: false,
+      piTailMessages: [],
       writerReady: !target.requiresExplicitClaim,
       writerClaimInFlight: null,
       runs: new Map(),
