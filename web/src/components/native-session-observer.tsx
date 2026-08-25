@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
 import {
+  applyDiscoveredNativeSessionModel,
   nativeSessionIsWorking,
   registerNativeSessionV3Adapter
 } from "../native-session-v3-adapter"
@@ -85,10 +86,18 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
     setTask(null)
     taskRef.current = null
     attentionRef.current = false
-    void resolveNativeSessionTargetModel(target).then((resolvedTarget) => {
-      if (disposed) return
-      registration = registerNativeSessionV3Adapter(resolvedTarget, handleTaskUpdate)
-      handleTaskUpdate(registration.task)
+
+    // Mount the mature controller on the Session itself, before any model enrichment. Gating the
+    // whole transcript on a network read left this surface stuck on "Loading Session into the v3
+    // controller..." whenever that read was slow, which is exactly what a busy daemon produces.
+    registration = registerNativeSessionV3Adapter(target, handleTaskUpdate)
+    handleTaskUpdate(registration.task)
+
+    // Recovering the last requested native model is enrichment. It refines the already usable
+    // Session and must never be able to fail it.
+    void resolveNativeSessionTargetModel(target).then((resolved) => {
+      if (disposed || resolved.model === target.model) return
+      applyDiscoveredNativeSessionModel(target, resolved.model)
     })
 
     return () => {

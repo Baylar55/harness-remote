@@ -56,6 +56,40 @@ export class SessionOperationLedger {
     }
   }
 
+  /**
+   * Bounded, credential-free view of the mutation ledger.
+   *
+   * Only counts and the unresolved entries are exposed, and never a prompt body or signature: an
+   * unresolved entry is what blocks a client from sending a different prompt for that Session, so
+   * being able to see the age of the oldest one is what makes a wedged Session diagnosable.
+   */
+  diagnostics({ maxUnresolved = 20 } = {}) {
+    const now = Date.now()
+    const counts = { pending: 0, accepted: 0, uncertain: 0 }
+    const unresolved = []
+    for (const entry of this.#operations.values()) {
+      if (entry.state in counts) counts[entry.state] += 1
+      if (entry.state === "accepted") continue
+      const updatedAt = Date.parse(entry.updatedAt ?? "")
+      unresolved.push({
+        agentID: entry.agentID,
+        sessionID: entry.sessionID,
+        state: entry.state,
+        ageMs: Number.isFinite(updatedAt) ? Math.max(0, now - updatedAt) : null
+      })
+    }
+    unresolved.sort((left, right) => (right.ageMs ?? 0) - (left.ageMs ?? 0))
+    return {
+      loaded: this.#loaded,
+      total: this.#operations.size,
+      maxOperations: MAX_OPERATIONS,
+      counts,
+      unresolvedCount: unresolved.length,
+      oldestUnresolvedMs: unresolved[0]?.ageMs ?? null,
+      unresolved: unresolved.slice(0, maxUnresolved)
+    }
+  }
+
   #trim() {
     if (this.#operations.size <= MAX_OPERATIONS) return
     const accepted = [...this.#operations.entries()]

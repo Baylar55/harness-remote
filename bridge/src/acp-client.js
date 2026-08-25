@@ -67,6 +67,7 @@ export class AcpClient extends EventEmitter {
     const pendingRequests = [...this.#pending.values()].map((pending) => ({
       method: pending.method,
       ...(pending.sessionID ? { sessionID: pending.sessionID } : {}),
+      ...(pending.configID ? { configID: pending.configID } : {}),
       ageMs: Math.max(0, now - pending.startedAt),
       idleMs: Math.max(0, now - pending.lastActivityAt),
       timeoutMs: pending.timeoutMs
@@ -183,7 +184,11 @@ export class AcpClient extends EventEmitter {
         reject,
         timer: undefined,
         method,
-        sessionID: method === "session/prompt" && typeof params?.sessionId === "string" ? params.sessionId : undefined,
+        // Every session-scoped RPC reports which Session it is waiting on, not just prompts. A stuck
+        // `session/load` or `session/set_config_option` was previously indistinguishable from any
+        // other pending request, which is what made a wedged model change impossible to attribute.
+        sessionID: typeof params?.sessionId === "string" ? params.sessionId : undefined,
+        configID: typeof params?.configId === "string" ? params.configId : undefined,
         startedAt,
         lastActivityAt: startedAt,
         timeoutMs,

@@ -486,3 +486,21 @@ export function registerNativeSessionV3Adapter(
 export function isNativeSessionV3Projection(taskId: string): boolean {
   return taskId.startsWith(PROJECTION_ID_PREFIX)
 }
+
+/**
+ * Record a model that was recovered from native metadata after this Session was already mounted.
+ *
+ * Opening a Session must never wait for model enrichment: the transcript is the product, and the
+ * mature v3 contract keeps catalog/model discovery independent of chat availability. An explicit
+ * selection the user has since made always wins, so a late enrichment result cannot overwrite it.
+ */
+export function applyDiscoveredNativeSessionModel(
+  target: NativeSessionSurfaceTarget,
+  model: ModelSelection | null
+): void {
+  if (!model) return
+  const entry = projections.get(projectionID(target))
+  if (!entry || entry.currentModel) return
+  entry.currentModel = model
+  notify(entry)
+}

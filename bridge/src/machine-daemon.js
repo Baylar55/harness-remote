@@ -176,7 +176,17 @@ export function createMachineDaemonServer({
 }) {
   const bridgeServer = createServer({ config, acp: primaryAcp, machineRegistry: daemon.registry, serviceOptions })
   const scopedAcpServers = new Map()
+  // Writer ownership belongs to one live adapter process. An adapter that exits takes every loaded
+  // Session with it, so remembering a claim across a restart made Stop skip the reload it needs and
+  // fail against a Session the new process had never opened.
   const claimedAcpSessions = new Set()
+  const forgetClaimsOnAgentExit = (agentID, host) => {
+    host?.on?.("exit", () => {
+      for (const key of [...claimedAcpSessions]) {
+        if (key.startsWith(`${agentID}\u0000`)) claimedAcpSessions.delete(key)
+      }
+    })
+  }
   const acpBridgeServer = (agentID) => {
     if (agentID === primaryAgentID) return bridgeServer
     const cached = scopedAcpServers.get(agentID)
@@ -204,10 +214,15 @@ export function createMachineDaemonServer({
     const server = agentID === primaryAgentID ? bridgeServer : acpBridgeServer(agentID)
     return server?.acpService
   }
+  const claimedAgents = new Set()
   const claimSession = async (agentID, sessionID) => {
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
     if (entry.kind !== "acp") throw daemonError("unsupported_agent", `Agent ${agentID} does not require ACP Session claiming`)
+    if (!claimedAgents.has(agentID)) {
+      claimedAgents.add(agentID)
+      forgetClaimsOnAgentExit(agentID, entry.host)
+    }
     const service = acpService(agentID)
     if (!service || typeof service.claimSession !== "function") {
       throw daemonError("session_unavailable", `Agent ${agentID} cannot claim native Sessions`)
@@ -421,7 +436,17 @@ export function createMachineDaemonServer({
       services: Object.fromEntries([
         [primaryAgentID, bridgeServer.acpService?.diagnostics?.()],
         ...[...scopedAcpServers.entries()].map(([agentID, server]) => [agentID, server.acpService?.diagnostics?.()])
-      ].filter(([, value]) => value))
+      ].filter(([, value]) => value)),
+      // Session-first control-plane state. Writer claims are per live adapter process, so a count
+      // that outlives an adapter restart is itself the bug worth seeing here. Session ids are
+      // harness-owned identifiers, never credentials or prompt content.
+      nativeSessions: {
+        claimedWriters: [...claimedAcpSessions].map((key) => {
+          const [agentID, sessionID] = key.split("\u0000")
+          return { agentID, sessionID }
+        }),
+        operationLedger: operations.diagnostics?.() ?? null
+      }
     })
   })
   const claimServer = createClaimServer({
