@@ -65,6 +65,26 @@ function messageEnvelope(record, sessionID) {
   }
 }
 
+function modelSelection(providerID, modelID) {
+  if (typeof providerID !== "string" || !providerID || typeof modelID !== "string" || !modelID) return undefined
+  return { providerID, modelID }
+}
+
+/** PI persists both explicit model_change entries and provider/model on terminal assistant messages. */
+function modelSelectionFromRecord(record) {
+  if (record?.type === "model_change") return modelSelection(record.provider, record.modelId)
+  if (record?.type === "message" && record.message?.role === "assistant") {
+    return modelSelection(record.message.provider, record.message.model)
+  }
+  return undefined
+}
+
+function thinkingLevelFromRecord(record) {
+  return record?.type === "thinking_level_change" && typeof record.thinkingLevel === "string" && record.thinkingLevel
+    ? record.thinkingLevel
+    : undefined
+}
+
 async function readRecords(file) {
   const records = []
   const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity })
@@ -122,6 +142,8 @@ async function readPiPage(file, sessionID, { limit = 100, before } = {}) {
     let resumeCursor = null
     let hasMore = false
     let done = false
+    let selectedModel
+    let selectedVariant
 
     while (cursor > 0 && !done) {
       const start = Math.max(0, cursor - BACKWARD_READ_BYTES)
@@ -142,6 +164,10 @@ async function readPiPage(file, sessionID, { limit = 100, before } = {}) {
         }
         if (record.id !== target) return
         matchedRequestedTarget = true
+        // We are walking the selected branch newest -> oldest. The first model / thinking entries
+        // encountered are therefore the settings that own this native Session at its current leaf.
+        selectedModel ??= modelSelectionFromRecord(record)
+        selectedVariant ??= thinkingLevelFromRecord(record)
         target = typeof record.parentId === "string" && record.parentId ? record.parentId : undefined
         const message = messageEnvelope(record, sessionID)
         if (message) {
@@ -174,10 +200,14 @@ async function readPiPage(file, sessionID, { limit = 100, before } = {}) {
     }
 
     if (decoded && !matchedRequestedTarget) throw new Error("Invalid PI history cursor")
+    const model = selectedModel
+      ? { ...selectedModel, ...(selectedVariant ? { variant: selectedVariant } : {}) }
+      : undefined
     return {
       messages: messages.slice(0, boundedLimit).reverse(),
       before: hasMore ? resumeCursor : null,
-      hasMore
+      hasMore,
+      ...(model ? { model } : {})
     }
   } finally {
     await handle.close()
