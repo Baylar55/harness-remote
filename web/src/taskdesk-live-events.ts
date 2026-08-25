@@ -35,6 +35,7 @@ export function taskDeskLiveEvent(name: string | undefined, data: unknown): Task
   const properties = object(payload.properties)
   const info = object(properties?.info)
   const session = object(properties?.session)
+  const part = object(properties?.part)
   const type = eventType(data) ?? text(payload.type) ?? name
   if (!type) return null
   const sessionID = text(payload.sessionId)
@@ -44,6 +45,10 @@ export function taskDeskLiveEvent(name: string | undefined, data: unknown): Task
     ?? text(info?.sessionID)
     ?? text(info?.id)
     ?? text(session?.id)
+    // Older OpenCode message.part.updated envelopes put the Session identity only on the part.
+    // Keep this as transport normalization; the mature v3 renderer still owns reasoning semantics.
+    ?? text(part?.sessionId)
+    ?? text(part?.sessionID)
   return { type, ...(sessionID ? { sessionID } : {}) }
 }
 
