@@ -169,25 +169,62 @@ async function readOmpPage(file, sessionID, { limit = 100, before, activeSession
   }
 }
 
-export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp", "agent", "sessions")) {
+export function createOmpHistoryLoader(
+  sessionRoot = path.join(homedir(), ".omp", "agent", "sessions"),
+  { readDirectory = readdir } = {}
+) {
   const sessionFiles = new Map()
+  let indexedFiles = null
+  let indexInFlight = null
+
+  async function refreshSessionIndex() {
+    if (indexInFlight) return indexInFlight
+    const operation = (async () => {
+      try {
+        const entries = await readDirectory(sessionRoot, { recursive: true, withFileTypes: true })
+        indexedFiles = entries
+          .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+          .map((entry) => ({
+            name: entry.name,
+            file: path.join(entry.parentPath ?? entry.path, entry.name)
+          }))
+      } catch (error) {
+        if (error?.code === "ENOENT") {
+          indexedFiles = []
+          return
+        }
+        throw error
+      }
+    })()
+    indexInFlight = operation
+    try {
+      await operation
+    } finally {
+      if (indexInFlight === operation) indexInFlight = null
+    }
+  }
+
+  function indexedSessionFile(sessionID) {
+    const suffix = `_${sessionID}.jsonl`
+    return indexedFiles?.find((entry) => entry.name.endsWith(suffix))?.file
+  }
 
   async function locateSession(sessionID) {
     const known = sessionFiles.get(sessionID)
     if (known) return known
     if (!/^[A-Za-z0-9_-]+$/.test(sessionID)) return undefined
-    try {
-      const suffix = `_${sessionID}.jsonl`
-      const entries = await readdir(sessionRoot, { recursive: true, withFileTypes: true })
-      const entry = entries.find((candidate) => candidate.isFile() && candidate.name.endsWith(suffix))
-      if (!entry) return undefined
-      const file = path.join(entry.parentPath ?? entry.path, entry.name)
-      sessionFiles.set(sessionID, file)
-      return file
-    } catch (error) {
-      if (error?.code === "ENOENT") return undefined
-      throw error
+
+    if (indexedFiles === null) await refreshSessionIndex()
+    let file = indexedSessionFile(sessionID)
+    if (!file) {
+      // A miss can mean OMP created this Session after the first index build. Refresh once rather
+      // than making every different historical Session recursively scan the full journal tree.
+      await refreshSessionIndex()
+      file = indexedSessionFile(sessionID)
     }
+    if (!file) return undefined
+    sessionFiles.set(sessionID, file)
+    return file
   }
 
   const loadOmpHistory = async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
