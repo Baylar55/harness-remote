@@ -329,6 +329,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
             })
             if (page.before) response.setHeader("X-Next-Cursor", page.before)
             response.setHeader("X-Has-More", page.hasMore ? "1" : "0")
+            if (page.model) response.setHeader("X-Session-Model", encodeURIComponent(JSON.stringify(page.model)))
             writeJSON(response, 200, page.messages)
             return
           }

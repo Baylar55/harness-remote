@@ -60,6 +60,26 @@ test("uses a journal's only terminal leaf when the optional OMP extension is abs
   }
 })
 
+test("reports the last model selected on the inferred OMP journal branch", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "harness-remote-omp-model-history-"))
+  const sessionID = "session-model"
+  const records = [
+    { type: "message", id: "u1", parentId: null, timestamp: "2026-07-26T10:00:00.000Z", message: { role: "user", content: "Question" } },
+    { type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-26T10:00:01.000Z", message: { role: "assistant", provider: "anthropic", model: "claude-sonnet-4", content: "Answer" } },
+    { type: "model_change", id: "model-2", parentId: "a1", timestamp: "2026-07-26T10:00:02.000Z", model: "openai-codex/gpt-5.6" }
+  ]
+  await writeFile(path.join(root, `2026-07-26_${sessionID}.jsonl`), `${records.map((record) => JSON.stringify(record)).join("\n")}\n`)
+
+  try {
+    const loadHistory = createOmpHistoryLoader(root)
+    const page = await loadHistory.page(sessionID, { limit: 10 })
+    assert.deepEqual(page.model, { providerID: "openai-codex", modelID: "gpt-5.6" })
+    assert.deepEqual(page.messages.map((message) => message.parts[0].text), ["Question", "Answer"])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("pages only the authoritative OMP branch and ignores later abandoned records", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "harness-remote-omp-page-"))
   const sessionID = "session-page"

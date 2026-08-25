@@ -185,7 +185,7 @@ function inferLatestTerminalLeaf(records) {
   return undefined
 }
 
-async function inferLatestTerminalLeafFromFile(file) {
+async function readOmpRecords(file) {
   const records = []
   const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity })
   for await (const line of lines) {
@@ -196,7 +196,48 @@ async function inferLatestTerminalLeafFromFile(file) {
       // One malformed journal line must not make a valid preceding transcript unavailable.
     }
   }
-  return inferLatestTerminalLeaf(records)
+  return records
+}
+
+function modelSelection(providerID, modelID) {
+  if (typeof providerID !== "string" || !providerID || typeof modelID !== "string" || !modelID) return undefined
+  return { providerID, modelID }
+}
+
+function modelSelectionFromWireName(value) {
+  if (typeof value !== "string") return undefined
+  const separator = value.indexOf("/")
+  if (separator <= 0 || separator === value.length - 1) return undefined
+  return modelSelection(value.slice(0, separator), value.slice(separator + 1))
+}
+
+/** Resolve the model selected on one exact branch, including journals predating model_change. */
+function branchModel(records, selectedLeaf) {
+  const entries = new Map(records.map((record) => [record.id, record]))
+  const branch = []
+  const visited = new Set()
+  let entry = entries.get(selectedLeaf)
+  while (entry && !visited.has(entry.id)) {
+    visited.add(entry.id)
+    branch.push(entry)
+    entry = typeof entry.parentId === "string" ? entries.get(entry.parentId) : undefined
+  }
+
+  let selected
+  for (const record of branch.reverse()) {
+    if (record.type === "model_change" && (record.role === undefined || record.role === "default")) {
+      selected = modelSelectionFromWireName(record.model) ?? selected
+      continue
+    }
+    if (record.type === "session_init") {
+      selected = modelSelectionFromWireName(record.resolvedModel) ?? selected
+      continue
+    }
+    if (record.type === "message" && record.message?.role === "assistant") {
+      selected = modelSelection(record.message.provider, record.message.model) ?? selected
+    }
+  }
+  return selected
 }
 
 /*
@@ -328,11 +369,14 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
   loadOmpHistory.page = async (sessionID, options = {}) => {
     const file = await locateSession(sessionID)
     if (!file) return { messages: [], before: null, hasMore: false }
+    const records = await readOmpRecords(file)
     const activeSessionLeaf = options.activeSessionLeaf === undefined
-      ? await inferLatestTerminalLeafFromFile(file)
+      ? inferLatestTerminalLeaf(records)
       : options.activeSessionLeaf
     if (activeSessionLeaf === undefined) return { messages: [], before: null, hasMore: false }
-    return readOmpPage(file, sessionID, { ...options, activeSessionLeaf })
+    const page = await readOmpPage(file, sessionID, { ...options, activeSessionLeaf })
+    const model = activeSessionLeaf === null ? undefined : branchModel(records, activeSessionLeaf)
+    return { ...page, ...(model ? { model } : {}) }
   }
 
   return loadOmpHistory

@@ -2931,8 +2931,8 @@ function App() {
 
   async function loadSelected(sessionID: string, directory: string, refreshHistory = false, replaceMessages = false) {
     const requestID = ++loadSelectedRequestRef.current
-    const [msg, todo, diff, questions, permissions, actions] = await Promise.all([
-      api.loadMessages(config, sessionID, directory, backendClient.messageRefreshSupported && refreshHistory),
+    const [messagePage, todo, diff, questions, permissions, actions] = await Promise.all([
+      api.loadMessagePage(config, sessionID, directory, undefined, 100, backendClient.messageRefreshSupported && refreshHistory),
       capabilities.todos ? api.loadTodo(config, sessionID, directory) : Promise.resolve([]),
       capabilities.diff ? api.loadDiff(config, sessionID, directory).catch(() => []) : Promise.resolve([]),
       capabilities.questions ? api.loadQuestions(config, directory).catch(() => []) : Promise.resolve([]),
@@ -2940,6 +2940,12 @@ function App() {
       capabilities.actions ? api.listActions(config, sessionID, directory).catch(() => []) : Promise.resolve([])
     ])
     if (requestID !== loadSelectedRequestRef.current) return
+    const msg = messagePage.messages
+    if (messagePage.model) {
+      const nextKey = modelKey(messagePage.model)
+      setSelectedModelKey(nextKey)
+      writeStoredModel(config.backend, sessionID, nextKey)
+    }
     setLoadedSessionID(sessionID)
     // Background polling keeps running after a failed open, so a session that only failed once must
     // not stay stuck on the failure state once its history does arrive.

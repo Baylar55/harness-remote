@@ -61,6 +61,18 @@ export type MessagePage = {
   messages: MessageEnvelope[]
   before?: string
   hasMore: boolean
+  model?: ModelSelection
+}
+
+function sessionModelHeader(value: string | undefined): ModelSelection | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value)) as Partial<ModelSelection>
+    if (typeof parsed.providerID !== "string" || !parsed.providerID || typeof parsed.modelID !== "string" || !parsed.modelID) return undefined
+    return { providerID: parsed.providerID, modelID: parsed.modelID, ...(typeof parsed.variant === "string" && parsed.variant ? { variant: parsed.variant } : {}) }
+  } catch {
+    return undefined
+  }
 }
 
 function responseDetail(body: unknown): string | null {
@@ -323,7 +335,8 @@ export const api = {
     return {
       messages: response.data,
       before: response.headers["x-next-cursor"] || undefined,
-      hasMore: response.headers["x-has-more"] === "1"
+      hasMore: response.headers["x-has-more"] === "1",
+      model: sessionModelHeader(response.headers["x-session-model"])
     }
   },
 
