@@ -7,6 +7,7 @@ const create = readFileSync(new URL('./native-session-create.ts', import.meta.ur
 const prompt = readFileSync(new URL('./native-session-prompt.ts', import.meta.url), 'utf8')
 const stop = readFileSync(new URL('./native-session-stop.ts', import.meta.url), 'utf8')
 const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
+const modelRecovery = readFileSync(new URL('./native-session-model.ts', import.meta.url), 'utf8')
 const observer = readFileSync(new URL('./components/native-session-observer.tsx', import.meta.url), 'utf8')
 const home = readFileSync(new URL('./components/native-session-home.tsx', import.meta.url), 'utf8')
 const workThread = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
@@ -17,10 +18,13 @@ const messageContent = readFileSync(new URL('./components/taskdesk-message-conte
 const handoff = readFileSync(new URL('./components/native-session-handoff-control.tsx', import.meta.url), 'utf8')
 const standalone = readFileSync(new URL('./components/standalone-universal-workspace.tsx', import.meta.url), 'utf8')
 const daemon = readFileSync(new URL('../../bridge/src/machine-daemon.js', import.meta.url), 'utf8')
+const daemonCli = readFileSync(new URL('../../bridge/src/daemon-cli.js', import.meta.url), 'utf8')
 
 assert.ok(discovery.includes('export type NativeSessionRef'), 'Session-first must keep native Session identity explicit')
 assert.ok(discovery.includes('machineID: string') && discovery.includes('agentID: string') && discovery.includes('sessionID: string'), 'native identity must include machine, harness and native Session id')
 assert.ok(discovery.includes('listGlobalSessions(config).catch(() => client.listSessions(config))'), 'native discovery must retain global-list fallback')
+assert.ok(discovery.includes('renameSupported: agent.capabilities?.sessionRename === true'), 'native discovery must expose rename capability from the harness contract')
+assert.ok(discovery.includes('deleteSupported: agent.capabilities?.sessionDelete === true'), 'native discovery must expose delete capability from the harness contract')
 assert.equal(discovery.includes('createTask('), false, 'discovery must not persist a Task')
 assert.equal(discovery.includes('launch('), false, 'discovery must not launch work')
 
@@ -36,6 +40,9 @@ assert.equal(create.includes('Conversation'), true, 'native create comments must
 assert.ok(home.includes('aria-label="New Session"'), 'Session Home must expose New Session')
 assert.ok(home.includes('createNativeSessionTarget'), 'Session Home must create a real native Session rather than a Task')
 assert.ok(home.includes('canCreateNativeSession'), 'Session Home must expose only harness transports that passed native create parity')
+assert.ok(home.includes('aria-label="Filter by machine"') && home.includes('All machines ·'), 'multi-machine navigation must offer an explicit All/single-machine filter')
+assert.ok(home.includes('api.renameSession(') && home.includes('api.deleteSession('), 'Session Home must mutate the real native Session for rename/delete')
+assert.ok(home.includes('Keep Session') && home.includes('Delete Session'), 'native deletion must use an inline confirmation instead of a blocking browser dialog')
 
 assert.ok(prompt.includes('clientRequestId'), 'native prompts must retain durable mutation identity')
 assert.ok(prompt.includes('loadPendingNativeSessionPrompt'), 'lost-response retries must reuse the unresolved request id')
@@ -45,6 +52,7 @@ assert.ok(stop.includes('clientRequestId') && stop.includes('operationToken'), '
 assert.ok(observer.includes('import { WorkThreadConversation } from "./work-thread-conversation"'), 'native Session detail must mount the mature v3 controller')
 assert.ok(observer.includes('<WorkThreadConversation'), 'native Session detail must render WorkThreadConversation directly')
 assert.ok(observer.includes('registerNativeSessionV3Adapter'), 'observer must limit Session-first behavior to a compatibility adapter')
+assert.ok(observer.includes('target.backend === "opencode" || target.backend === "codex"'), 'OpenCode/Codex list-level models must stay provisional until native turn metadata is recovered')
 assert.equal(observer.includes('Continue this Session'), false, 'opening a Session must not require a visible writer-claim step')
 assert.equal(observer.includes('probeNativeSessionContinuation'), false, 'opening a Session must stay read-only and must not claim ACP ownership')
 assert.equal(observer.includes('TaskDeskConversation'), false, 'observer must not bypass the v3 controller and mount the renderer directly')
@@ -54,6 +62,10 @@ assert.equal(observer.includes('sendNativeSessionPrompt'), false, 'observer must
 assert.equal(observer.includes('stopNativeSession'), false, 'observer must not own Stop lifecycle')
 assert.equal(observer.includes('startTaskDeskSessionLiveRefresh'), false, 'observer must not own a second live-event controller')
 assert.equal(observer.includes('TaskDeskMessageContent'), false, 'observer must not own a second renderer')
+
+assert.ok(modelRecovery.includes('info.model?.providerID') && modelRecovery.includes('info.model?.id'), 'OpenCode model recovery must accept the current nested assistant model envelope')
+assert.ok(modelRecovery.includes('for (let index = messages.length - 1; index >= 0; index -= 1)'), 'model recovery must choose the newest model-bearing native message regardless of role')
+assert.ok(modelRecovery.includes('PAGE_MODEL_BACKENDS = new Set(["omp", "pi", "codex"])'), 'journal-backed model recovery must remain explicit and scoped')
 
 assert.ok(adapter.includes('api.loadMessagePage = async function patchedLoadMessagePage'), 'adapter must feed the existing v3 paging path rather than loading a parallel transcript')
 assert.ok(adapter.includes('taskClient.continueTask = async function patchedContinueTask'), 'native continuation must enter the same v3 controller call site')
@@ -81,6 +93,7 @@ assert.ok(liveRefresh.includes('if (lifecycleSettleTimer !== undefined) clearTim
 assert.ok(daemon.includes('/prompt_async${query}'), 'managed OpenCode must keep its native asynchronous prompt endpoint')
 assert.equal(daemon.includes('agent: agentID'), false, 'machine harness id must never be sent as an OpenCode internal agent id')
 assert.ok(daemon.includes('await claimSession(agentID, sessionID)'), 'ACP Stop must transparently recover writer ownership when needed')
+assert.ok(daemonCli.includes('sessionRename: true') && daemonCli.includes('sessionDelete: true'), 'managed OpenCode must advertise its native rename/delete primitives')
 
 assert.ok(workThread.includes('api.loadMessagePage'), 'v3 WorkThreadConversation must remain transcript paging authority')
 assert.ok(workThread.includes('buildWorkThreadTimeline'), 'v3 WorkThreadConversation must remain timeline authority')
@@ -90,6 +103,7 @@ assert.ok(workThread.includes('taskClient.cancelWorkThread'), 'v3 WorkThreadConv
 assert.ok(workThread.includes('<TaskDeskConversation'), 'v3 WorkThreadConversation must remain the renderer owner')
 assert.ok(timeline.includes('Native user messages are the only conversation boundary'), 'mature v3 native turn boundary semantics must remain authoritative')
 assert.ok(timeline.includes('part.type === "tool" && part.callID'), 'mature v3 tool update identity must remain authoritative')
+assert.ok(timeline.includes('terminalNativeAssistantError'), 'a recovered OpenCode retry must be able to supersede a transient interrupted attempt in the same turn')
 
 assert.equal(conversation.includes('MessageAgentMeta'), false, 'Session-first must not modify the mature conversation renderer with alternate agent metadata')
 assert.equal(messageContent.includes('conversation-turn-state'), false, 'Session-first must not replace mature v3 reasoning/error semantics')
@@ -111,5 +125,6 @@ for (const retiredPath of [
 assert.match(handoff, /export function NativeSessionHandoffControl\(_props: Props\)\s*\{\s*return null\s*\}/, 'cross-agent handoff UI must remain disabled during single-Session stabilization')
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
 assert.ok(standalone.includes('<NativeSessionHome'), 'Session-first navigation must remain native discovery based')
+assert.ok(standalone.includes('onDeleted={handleSessionDeleted}'), 'deleting the selected native Session must clear its detail surface')
 
 console.log('session-first v3-first architecture guards passed')
