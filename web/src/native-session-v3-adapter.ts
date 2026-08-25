@@ -80,6 +80,61 @@ function visiblePrompt(message: MessageEnvelope): string {
   return canonicalText(value.slice(instructionStart, footerStart >= 0 ? footerStart : undefined))
 }
 
+function nativeAssistantCompleted(message: MessageEnvelope): boolean {
+  if (message.info.role !== "assistant") return false
+  if (message.info.error || message.info.time?.completed) return true
+  const info = message.info as MessageEnvelope["info"] & { finish?: unknown }
+  return typeof info.finish === "string" && Boolean(info.finish.trim())
+}
+
+/**
+ * OpenCode status and transcript durability are separate streams. After HR accepts one prompt, the
+ * durable native transcript is the strongest evidence that this exact turn finished: it cannot be
+ * scoped away by `/session/status`, and it is also the payload the user ultimately needs to see.
+ *
+ * Match by prompt occurrence, not timestamps, so repeated prompts remain correct and clock skew
+ * between the browser and OpenCode cannot attach an older completed assistant to a new Run.
+ */
+function reconcileOpenCodeTranscriptStatus(entry: ProjectionEntry, page: MessagePage, before?: string): void {
+  if (entry.target.backend !== "opencode" || before || entry.forcedStatus !== "running") return
+
+  const orderedRuns = [...entry.runs.values()].sort((left, right) => left.created - right.created || left.id.localeCompare(right.id))
+  const current = orderedRuns[orderedRuns.length - 1]
+  const prompt = canonicalText(current?.prompt || "")
+  if (!current || !prompt) return
+
+  const occurrence = orderedRuns.slice(0, -1).filter((run) => canonicalText(run.prompt) === prompt).length
+  let seen = 0
+  let userIndex = -1
+  for (let index = 0; index < page.messages.length; index += 1) {
+    const message = page.messages[index]
+    if (message.info.role !== "user" || visiblePrompt(message) !== prompt) continue
+    if (seen === occurrence) {
+      userIndex = index
+      break
+    }
+    seen += 1
+  }
+  if (userIndex < 0) return
+
+  let completedAt = 0
+  let completed = false
+  for (let index = userIndex + 1; index < page.messages.length; index += 1) {
+    const message = page.messages[index]
+    if (message.info.role === "user") break
+    if (!nativeAssistantCompleted(message)) continue
+    completed = true
+    completedAt = Math.max(completedAt, Number(message.info.time?.completed) || Number(message.info.time?.created) || 0)
+  }
+  if (!completed) return
+
+  const priorStatus = taskStatus(entry)
+  entry.statusType = "idle"
+  entry.forcedStatus = null
+  if (completedAt) entry.updatedAt = Math.max(entry.updatedAt, completedAt)
+  if (taskStatus(entry) !== priorStatus) notify(entry)
+}
+
 function iso(timestamp: number): string {
   return new Date(Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now()).toISOString()
 }
@@ -212,11 +267,14 @@ function appendAcceptedRun(entry: ProjectionEntry, prompt: string, model: ModelS
 }
 
 async function refreshStatus(entry: ProjectionEntry): Promise<void> {
+  // OpenCode's legacy /session/status has changed scope across recent releases and can omit a child
+  // directory Session entirely. More importantly, this read sits in the v3 pre-Send reconciliation
+  // path, so a slow status endpoint delays prompt delivery before OpenCode even starts reasoning.
+  // Once HR accepts an OpenCode prompt, reconcileOpenCodeTranscriptStatus clears Working only after
+  // the same native transcript consumed by the UI contains a terminal assistant envelope.
+  if (entry.target.backend === "opencode") return
+
   try {
-    // Native Session status is harness-scoped, not Project-scoped. The Session Home already reads
-    // the global status index. Reusing that same authority here avoids a managed OpenCode status
-    // request being filtered or delayed by directory state, which otherwise blocks the v3 pre-Send
-    // safety read and can leave the projection forced to Working after OpenCode is already idle.
     const statuses = await api.listStatuses(entry.target.config)
     const next = statuses[entry.target.sessionID]?.type
     if (typeof next === "string" && next) {
@@ -260,7 +318,10 @@ function installAdapter(): void {
   api.loadMessagePage = async function patchedLoadMessagePage(config, sessionID, directory, before, limit, refreshHistory) {
     const page = await originalLoadMessagePage(config, sessionID, directory, before, limit, refreshHistory)
     const entry = entryForRead(config, sessionID, directory)
-    if (entry) captureUserRuns(entry, page, before)
+    if (entry) {
+      captureUserRuns(entry, page, before)
+      reconcileOpenCodeTranscriptStatus(entry, page, before)
+    }
     return page
   }
 
