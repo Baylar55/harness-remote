@@ -27,33 +27,34 @@ function userMessageModel(info: NativeMessageInfo): ModelSelection | null {
 }
 
 function assistantMessageModel(info: NativeMessageInfo): ModelSelection | null {
-  const providerID = text(info.providerID)
-  const modelID = text(info.modelID)
+  // OpenCode v2 keeps the served model on the assistant envelope as `info.model`.
+  // Older releases exposed the provider/model pair as flat info fields, so retain that
+  // shape as a compatibility fallback rather than tying Session-first to one server version.
+  const providerID = text(info.model?.providerID) ?? text(info.providerID)
+  const modelID = text(info.model?.modelID) ?? text(info.model?.id) ?? text(info.modelID)
   if (!providerID || !modelID) return null
-  const variant = text(info.variant)
+  const variant = text(info.model?.variant) ?? text(info.variant)
   return { providerID, modelID, ...(variant ? { variant } : {}) }
 }
 
 /**
- * OpenCode keeps the model used for a turn in native message metadata rather than reliably exposing
- * it on the Session list item. Prefer the most recent user turn because that is the requested model
- * and carries the effort/variant; use assistant metadata only as a compatibility fallback.
+ * Recover the most recent model-bearing native message, not merely the most recent message of one
+ * role. Newer OpenCode versions put model identity on assistant envelopes while older versions also
+ * put it on user turns. Scanning role-by-role let an old user envelope beat a newer assistant one and
+ * made reopening a Session fall back to the catalog default even though its actual model was present.
  */
 export function lastNativeMessageModel(messages: MessageEnvelope[]): ModelSelection | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
-    if (message?.info?.role !== "user") continue
-    const model = userMessageModel(message.info as NativeMessageInfo)
-    if (model) return model
-  }
-
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const info = messages[index]?.info as NativeMessageInfo | undefined
+    const info = message?.info as NativeMessageInfo | undefined
     if (!info) continue
-    const model = assistantMessageModel(info)
+    const model = message.info.role === "user"
+      ? userMessageModel(info)
+      : message.info.role === "assistant"
+        ? assistantMessageModel(info)
+        : null
     if (model) return model
   }
-
   return null
 }
 
@@ -62,13 +63,13 @@ const PAGE_MODEL_BACKENDS = new Set(["omp", "pi", "codex"])
 /**
  * Recover the last model from native Session state without persisting a second Harness Remote model.
  *
- * OpenCode stores the requested model on message metadata. OMP and PI report the model selected on
- * their exact native JSONL branch and Codex reports it from the newest rollout turn_context. Claude
- * has no journal authority of its own here, but its transcript already requires ACP session/load;
- * after that load the adapter's current model config option is available through the normal models
- * endpoint, so reading it adds no parallel Session-first model state. If a harness cannot prove a
- * current model, leave it unset and let its own native default win rather than resurrecting stale
- * browser state.
+ * OpenCode stores the served/requested model on native message metadata. OMP and PI report the model
+ * selected on their exact native JSONL branch and Codex reports it from the newest rollout
+ * turn_context. Claude has no journal authority of its own here, but its transcript already requires
+ * ACP session/load; after that load the adapter's current model config option is available through
+ * the normal models endpoint, so reading it adds no parallel Session-first model state. If a harness
+ * cannot prove a current model, leave it unset and let its own native default win rather than
+ * resurrecting stale browser state.
  */
 export async function resolveNativeSessionTargetModel(
   target: NativeSessionSurfaceTarget
