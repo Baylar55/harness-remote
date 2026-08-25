@@ -43,20 +43,43 @@ function acpModelVariant(model) {
     : undefined
 }
 
+/*
+ * How long sending a prompt may wait for model discovery before proceeding without it.
+ *
+ * This mirrors the ceiling the model route already applies to a client-facing request. Discovery
+ * itself keeps its full budget and stays owned by the daemon's single-flight catalog, so a cold ACP
+ * adapter continues warming and the next prompt gets the resolved answer; what this bounds is only
+ * how long the user waits. Without it, sending on a cold catalog blocked for the catalog's whole
+ * 90s budget, which is what made a Session look wedged after a model change.
+ */
+const PROMPT_MODEL_RESOLVE_BUDGET_MS = 8_000
+
 /**
- * A native Session that the harness can still serve must not be made unusable by model discovery.
+ * A native Session that the harness can still serve must not be made unusable, or unusably slow, by
+ * model discovery.
  *
  * `model_unavailable` is an authoritative catalog answer about the user's explicit choice and stays a
- * conflict. Any other discovery failure - a cold adapter, a timeout, a transport error - only costs
- * the variant/metadata enrichment, so the requested model is still sent and the Session keeps working.
+ * conflict. Any other outcome - a cold adapter, a timeout, a transport error, or discovery simply
+ * taking longer than a person should wait - only costs the variant/metadata enrichment, so the
+ * requested model is still sent and the Session keeps working.
  */
 async function resolvePromptModel(daemon, agentID, requestedModel, directory) {
   if (!requestedModel) return null
+  const unenriched = { ...requestedModel, variant: undefined, variantConfigId: undefined }
+  const discovery = daemon.resolveModel(agentID, requestedModel, directory ? { directory } : undefined)
+  let timer
   try {
-    return await daemon.resolveModel(agentID, requestedModel, directory ? { directory } : undefined)
+    return await Promise.race([
+      discovery,
+      new Promise((resolve) => { timer = setTimeout(() => resolve(unenriched), PROMPT_MODEL_RESOLVE_BUDGET_MS) })
+    ])
   } catch (error) {
     if (error?.code === "model_unavailable") throw error
-    return { ...requestedModel, variant: undefined, variantConfigId: undefined }
+    return unenriched
+  } finally {
+    clearTimeout(timer)
+    // The catalog keeps this operation; this await only stops an unobserved rejection from the race.
+    void discovery.catch(() => undefined)
   }
 }
 

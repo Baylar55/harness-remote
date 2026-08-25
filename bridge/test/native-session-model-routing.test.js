@@ -285,3 +285,37 @@ test("OpenCode cross-agent handoff uses native Session creation with model and v
   }])
   assert.equal(result.target.sessionID, "opencode-native-new")
 })
+
+test("ACP native Session prompt does not wait out a cold catalog's whole discovery budget", async () => {
+  const daemon = new MachineDaemon({ id: "machine-model-cold", name: "workstation" })
+  const acp = new FakeAcp()
+  let resolveDiscovery
+  daemon.registerAcpHost({
+    id: "pi",
+    agent: acp,
+    modelCatalog: {
+      // A cold ACP adapter can legitimately take far longer than a person will wait.
+      resolve() { return new Promise((resolve) => { resolveDiscovery = resolve }) }
+    }
+  })
+  const prompts = []
+  const claimOptions = passthroughServerOptions(daemon, acp, {
+    async claimSession() {},
+    async prompt(sessionID, text, model, attachments, variant) { prompts.push([model, variant]) },
+    async abort() {}
+  })
+
+  const started = Date.now()
+  await claimOptions.promptSession("pi", "native-cold", {
+    text: "Continue once",
+    directory: "/repo",
+    model: { providerID: "openai", modelID: "gpt-5.6" },
+    variant: "high"
+  })
+  const waited = Date.now() - started
+
+  assert.ok(waited < 30_000, `sending must not block on cold discovery (waited ${waited}ms)`)
+  // The requested model still reaches the harness; only the variant enrichment is deferred.
+  assert.deepEqual(prompts, [["openai/gpt-5.6", undefined]])
+  resolveDiscovery?.({ providerID: "openai", modelID: "gpt-5.6" })
+})
