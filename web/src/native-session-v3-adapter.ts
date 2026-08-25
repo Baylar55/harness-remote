@@ -73,14 +73,17 @@ function messageText(message: MessageEnvelope): string {
  * transport identity swap through would display the same answer twice after Stop/reopen or any other
  * live-to-journal transition.
  *
- * Preserve the prior browser identity only for one unambiguous, text-only assistant match. Repeated
- * identical answers stay distinct because neither side may contain more than one candidate. Errors,
- * reasoning and tools retain their native identities and semantics unchanged.
+ * Preserve the prior browser identity only for one unambiguous assistant final-text match. Reasoning
+ * may accompany the final text because PI journals thinking and the answer in the same assistant
+ * record. Repeated identical answers stay distinct because neither side may contain more than one
+ * candidate. Errors and tool-bearing messages keep their native identities unchanged.
  */
 function piStableAssistantKey(message: MessageEnvelope): string | null {
   if (message.info.role !== "assistant" || message.info.error || !message.parts.length) return null
-  if (message.parts.some((part) => part.type !== "text" || typeof part.text !== "string")) return null
-  const text = canonicalText(message.parts.map((part) => part.text || "").join("\n"))
+  if (message.parts.some((part) => part.type !== "text" && part.type !== "reasoning")) return null
+  const textParts = message.parts.filter((part) => part.type === "text" && typeof part.text === "string")
+  if (!textParts.length) return null
+  const text = canonicalText(textParts.map((part) => part.text || "").join("\n"))
   return text ? text : null
 }
 
