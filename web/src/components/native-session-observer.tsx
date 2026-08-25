@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
+import { resolveNativeSessionTargetModel } from "../native-session-model"
 import {
   nativeSessionIsWorking,
   registerNativeSessionV3Adapter
@@ -44,10 +45,20 @@ export function NativeSessionObserver({ target, onSessionRefresh }: Props) {
   }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported])
 
   useEffect(() => {
+    let disposed = false
+    let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
+
     setTask(null)
-    const registration = registerNativeSessionV3Adapter(target, (next) => setTask(next))
-    setTask(registration.task)
-    return registration.dispose
+    void resolveNativeSessionTargetModel(target).then((resolvedTarget) => {
+      if (disposed) return
+      registration = registerNativeSessionV3Adapter(resolvedTarget, (next) => setTask(next))
+      setTask(registration.task)
+    })
+
+    return () => {
+      disposed = true
+      registration?.dispose()
+    }
   }, [target.key])
 
   if (!task) {

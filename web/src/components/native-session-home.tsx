@@ -49,7 +49,23 @@ const COLLAPSED_PROJECT_SESSION_COUNT = 5
 
 function sessionWorking(record: NativeSessionRecord): boolean {
   const value = record.status?.type?.trim().toLowerCase() || ""
-  return value === "busy" || value === "running" || value === "working" || value === "in_progress" || value === "in-progress"
+  return value === "busy"
+    || value === "running"
+    || value === "working"
+    || value === "waiting"
+    || value === "retry"
+    || value === "in_progress"
+    || value === "in-progress"
+}
+
+function sessionActivityCompare(left: RecordWithMachine, right: RecordWithMachine): number {
+  const updated = (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)
+  if (updated) return updated
+  const created = (right.record.session.time?.created || 0) - (left.record.session.time?.created || 0)
+  if (created) return created
+  const machine = left.machine.id.localeCompare(right.machine.id)
+  if (machine) return machine
+  return left.record.key.localeCompare(right.record.key)
 }
 
 function relativeTime(timestamp: number): string {
@@ -126,13 +142,10 @@ function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
     })
   }
 
-  for (const group of groups.values()) {
-    group.sessions.sort((left, right) => {
-      const workingDelta = Number(sessionWorking(right.record)) - Number(sessionWorking(left.record))
-      if (workingDelta) return workingDelta
-      return (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)
-    })
-  }
+  // Status is presentation, not ordering. Moving a Session to the top merely because it enters
+  // Working makes the list jump twice per turn and makes the 30s refresh look random. Native
+  // activity time is the single ordering rule, with deterministic tie-breakers.
+  for (const group of groups.values()) group.sessions.sort(sessionActivityCompare)
 
   return [...groups.values()].sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
 }
@@ -182,7 +195,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
     })).then((results) => {
       if (cancelled) return
       setProjectsByMachine(Object.fromEntries(results.map((result) => [result.machine.id, result.projects])))
-      setRecords(results.flatMap((result) => result.records).sort((left, right) => (right.record.session.time?.updated || 0) - (left.record.session.time?.updated || 0)))
+      setRecords(results.flatMap((result) => result.records).sort(sessionActivityCompare))
       setLoaded(true)
     }).catch(() => {
       // Session discovery is enrichment for the Home. A transient adapter failure must not replace
@@ -254,7 +267,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
       setRecords((current) => [
         { machine: selectedCreateProject.machine, record, project: selectedCreateProject.project },
         ...current.filter((item) => !(item.machine.id === selectedCreateProject.machine.id && item.record.key === record.key))
-      ])
+      ].sort(sessionActivityCompare))
       setCreateTitle("")
       setCreateOpen(false)
       onOpen(target)

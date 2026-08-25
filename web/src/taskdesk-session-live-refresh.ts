@@ -125,6 +125,16 @@ export function startTaskDeskSessionLiveRefresh({
         return
       }
 
+      // OpenCode's authoritative turn lifecycle is session.status. The deprecated session.idle event
+      // is still accepted because older OpenCode releases emit it. A completion event must reconcile
+      // both status and the selected transcript: the final message can become durable after the last
+      // message-part event, so relying on message.* alone leaves the UI painted as Working.
+      if (event.type === "session.status" || event.type === "session.idle") {
+        throttle("index", 120, onIndex)
+        if (selectedEvent) throttle("message", 80, onMessage)
+        return
+      }
+
       // OpenCode and ACP adapters can expose permission/question lifecycle events with different
       // suffixes. They all mean the selected conversation detail must be re-read immediately.
       if (isAttentionEvent(event.type)) {

@@ -40,6 +40,16 @@ test("TaskDesk Session workspace uses live events as the primary refresh path", 
   assert.match(workspace, /<TaskDeskMessageContent message=\{message\} \/>/)
 })
 
+test("OpenCode completion lifecycle reconciles status and the selected transcript", () => {
+  const refresh = readFileSync(new URL("./taskdesk-session-live-refresh.ts", import.meta.url), "utf8")
+  const lifecycle = refresh.match(/if \(event\.type === "session\.status"[\s\S]*?\n      \}/)?.[0] || ""
+
+  assert.match(lifecycle, /event\.type === "session\.idle"/)
+  assert.match(lifecycle, /throttle\("index", [^,]+, onIndex\)/)
+  assert.match(lifecycle, /selectedEvent[\s\S]*?throttle\("message", [^,]+, onMessage\)/)
+  assert.doesNotMatch(lifecycle, /send|prompt|continueWorkThread/)
+})
+
 test("foregrounding the app immediately reconciles durable conversation state", () => {
   const refresh = readFileSync(new URL("./taskdesk-session-live-refresh.ts", import.meta.url), "utf8")
 
