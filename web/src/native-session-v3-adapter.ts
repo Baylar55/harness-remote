@@ -13,7 +13,6 @@ import {
 import type { MessageEnvelope, ModelSelection, ServerConfig } from "./types"
 
 const PROJECTION_ID_PREFIX = "native-session-v3:"
-const MAX_CACHED_PROJECTIONS = 12
 
 type ProjectionRun = {
   id: string
@@ -39,14 +38,6 @@ type ProjectionEntry = {
 
 const projections = new Map<string, ProjectionEntry>()
 let installed = false
-
-function pruneInactiveProjections(limit: number): void {
-  for (const [id, entry] of projections) {
-    if (projections.size <= limit) return
-    if (entry.listeners.size > 0) continue
-    projections.delete(id)
-  }
-}
 
 export function nativeSessionIsWorking(status?: string): boolean {
   const value = status?.trim().toLowerCase() || ""
@@ -467,12 +458,6 @@ export function registerNativeSessionV3Adapter(
   const id = projectionID(target)
   let entry = projections.get(id)
   if (!entry) {
-    // A Session-first projection is transient process memory, but navigation must not erase it.
-    // Dropping it on unmount discarded the exact model/effort and Run identities we had just used,
-    // so reopening the same PI Session reconstructed history with model=null and the v3 controller
-    // then mistook its catalog default for a user-requested model change. Keep a small bounded cache
-    // across in-app navigation; active projections are never evicted.
-    pruneInactiveProjections(MAX_CACHED_PROJECTIONS - 1)
     const now = Date.now()
     entry = {
       target,
@@ -490,9 +475,6 @@ export function registerNativeSessionV3Adapter(
     }
     projections.set(id, entry)
   } else {
-    // Reinsert to make the Map's insertion order a cheap LRU approximation for inactive entries.
-    projections.delete(id)
-    projections.set(id, entry)
     entry.target = target
     entry.statusType = target.status?.type || entry.statusType
     entry.currentModel = target.model ?? entry.currentModel
@@ -503,7 +485,7 @@ export function registerNativeSessionV3Adapter(
     task: projectedTask(entry),
     dispose: () => {
       entry?.listeners.delete(onTaskUpdate)
-      pruneInactiveProjections(MAX_CACHED_PROJECTIONS)
+      if (entry && entry.listeners.size === 0) projections.delete(id)
     }
   }
 }
