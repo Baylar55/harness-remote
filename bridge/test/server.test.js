@@ -839,6 +839,19 @@ test("replays ACP history when extension state is unavailable", async () => {
   assert.deepEqual(await service.actions("session-1"), [])
 })
 
+test("keeps an external OMP session observational when its journal has no active leaf", async () => {
+  const acp = new ExtensionActionAcp()
+  const historyLoader = async () => []
+  historyLoader.deferAcpReplayWithoutActiveLeaf = true
+  const service = new AcpService(acp, { historyLoader })
+
+  // The Session-first UI uses the paged endpoint, not `messages()` directly.
+  // Keep this on that path so a missing active leaf cannot turn opening a row
+  // into a minutes-long `session/load` that serializes all OMP requests.
+  assert.deepEqual((await service.messagePage("session-1", { limit: 100 })).messages, [])
+  assert.equal(acp.loads, 0, "a read-only OMP open must not fall back to a blocking ACP replay")
+})
+
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
   const bridge = await startServer()
   try {

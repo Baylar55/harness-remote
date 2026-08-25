@@ -58,6 +58,22 @@ test("mergeReplay handles middle modifications and suffix matches", () => {
   assert.deepEqual(merged.map((m) => m.info.id), ["m1", "m2", "m2-new", "m3"])
 })
 
+test("mergeReplay uses the bounded linear merge for a large divergent replay", () => {
+  const count = 1_024
+  const previous = Array.from({ length: count }, (_, index) =>
+    message(`snapshot-${index}`, `snapshot ${index}`, index)
+  )
+  const replayed = Array.from({ length: count }, (_, index) =>
+    message(`replay-${index}`, `replay ${index}`, count + index)
+  )
+
+  const merged = mergeReplay(previous, replayed)
+
+  assert.equal(merged.length, count * 2)
+  assert.deepEqual(merged.slice(0, 2).map((item) => item.info.id), ["snapshot-0", "snapshot-1"])
+  assert.deepEqual(merged.slice(-2).map((item) => item.info.id), ["replay-1022", "replay-1023"])
+})
+
 test("mergeExternalHistory handles in-place mutated messages without stale signature leaks", () => {
   const msg = message("live-1", "initial text", 1_000)
   // First merge

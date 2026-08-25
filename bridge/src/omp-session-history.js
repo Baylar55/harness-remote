@@ -237,9 +237,6 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
   }
 
   const loadOmpHistory = async function loadOmpHistory(sessionID, { activeSessionLeaf } = {}) {
-    // JSONL is append-only: its final record may belong to an abandoned branch.
-    // Without an authoritative selected leaf, ACP replay is safer than guessing.
-    if (activeSessionLeaf === undefined) return []
     const file = await locateSession(sessionID)
     if (!file) return []
     const records = []
@@ -259,12 +256,22 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     }
 
     const selected = []
-    if (activeSessionLeaf === null) {
+    let selectedLeaf = activeSessionLeaf
+    if (selectedLeaf === undefined) {
+      // The extension is optional.  A transcript with one terminal leaf is not
+      // ambiguous, so use it instead of issuing a blocking ACP session/load.
+      // Multiple leaves still require the extension's authoritative selection.
+      const parents = new Set(records.map((record) => record.parentId).filter((parentID) => typeof parentID === "string" && parentID))
+      const leaves = records.map((record) => record.id).filter((id) => !parents.has(id))
+      if (leaves.length !== 1) return []
+      selectedLeaf = leaves[0]
+    }
+    if (selectedLeaf === null) {
       // The extension selected the session root.
-    } else if (entries.has(activeSessionLeaf)) {
+    } else if (entries.has(selectedLeaf)) {
       const branch = []
       const visited = new Set()
-      let entry = entries.get(activeSessionLeaf)
+      let entry = entries.get(selectedLeaf)
       while (entry && !visited.has(entry.id)) {
         visited.add(entry.id)
         branch.push(entry)
@@ -290,6 +297,10 @@ export function createOmpHistoryLoader(sessionRoot = path.join(homedir(), ".omp"
     listingAgeMs: listedAt ? Date.now() - listedAt : null
   })
   loadOmpHistory.pageRequiresActiveLeaf = true
+  // Without an extension-published leaf, a journal branch is ambiguous.  Do not
+  // turn a read-only open into an ACP session/load just to guess it: external
+  // attachment-only Sessions otherwise stall the whole OMP adapter.
+  loadOmpHistory.deferAcpReplayWithoutActiveLeaf = true
   loadOmpHistory.page = async (sessionID, options = {}) => {
     const file = await locateSession(sessionID)
     if (!file) return { messages: [], before: null, hasMore: false }

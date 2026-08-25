@@ -69,6 +69,13 @@ function mergeFragmentedPiSnapshot(messages) {
 function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
 }
+
+// A complete LCS table is useful for the small, genuinely divergent replays it was written for,
+// but it consumes one Uint32 cell per pair of messages.  Large restored snapshots therefore used
+// to monopolise Node's only event loop while session/load replayed the same journal.  Keep the
+// exact merge inside a bounded 1 MB working set; beyond it the timestamp-aware external merge is
+// linear in the transcript size (apart from its final ordering pass).
+const REPLAY_LCS_CELL_LIMIT = 250_000
 function stableSemanticValue(value) {
   if (Array.isArray(value)) return value.map(stableSemanticValue)
   if (!value || typeof value !== "object") return value
@@ -131,6 +138,10 @@ export function mergeReplay(previous, replayed) {
 
   const midLeft = left.slice(prefix)
   const midRight = right.slice(prefix)
+
+  if (midLeft.length * midRight.length > REPLAY_LCS_CELL_LIMIT) {
+    return mergeExternalHistory(replayed, previous)
+  }
 
   const common = Array.from({ length: midLeft.length + 1 }, () => new Uint32Array(midRight.length + 1))
   for (let leftIndex = midLeft.length - 1; leftIndex >= 0; leftIndex -= 1) {
@@ -1080,6 +1091,24 @@ export class AcpService {
             this.#persistSnapshot(sessionID)
             return
           }
+        }
+        // OMP's journal deliberately refuses to guess a branch when its optional
+        // extension did not publish an active leaf.  Replaying through ACP is not
+        // a safe fallback for an externally-owned Session: it can take minutes
+        // (or acquire the Session) merely to render an empty attachment-only
+        // transcript.  Such a Session stays observational until the user takes
+        // ownership by sending a prompt or explicitly asks for its config.
+        if (
+          this.#journalBacked(sessionID) &&
+          !requireConfigOptions &&
+          this.#historyLoader.deferAcpReplayWithoutActiveLeaf === true &&
+          authoritativeState?.activeSessionLeaf === undefined
+        ) {
+          this.#messages.set(sessionID, previousMessages)
+          this.#todos.set(sessionID, [])
+          this.#loaded.add(sessionID)
+          this.#persistSnapshot(sessionID)
+          return
         }
       } catch {
         this.#emit("session.error", sessionID, { message: "Harness session history could not be read" })

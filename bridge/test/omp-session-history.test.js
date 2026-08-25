@@ -39,6 +39,23 @@ test("reads only the authoritative branch from an OMP session transcript", async
   }
 })
 
+test("uses a journal's only terminal leaf when the optional OMP extension is absent", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "harness-remote-omp-linear-history-"))
+  const sessionID = "session-linear"
+  const records = [
+    { type: "message", id: "user-1", parentId: null, timestamp: "2026-07-26T10:00:00.000Z", message: { role: "user", content: "Question" } },
+    { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-07-26T10:00:01.000Z", message: { role: "assistant", content: "Answer" } }
+  ]
+  await writeFile(path.join(root, `2026-07-26_${sessionID}.jsonl`), `${records.map((record) => JSON.stringify(record)).join("\n")}\n`)
+
+  try {
+    const loadHistory = createOmpHistoryLoader(root)
+    assert.deepEqual((await loadHistory(sessionID)).map((message) => message.parts[0].text), ["Question", "Answer"])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("pages only the authoritative OMP branch and ignores later abandoned records", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "harness-remote-omp-page-"))
   const sessionID = "session-page"
