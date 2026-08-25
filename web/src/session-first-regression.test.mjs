@@ -27,12 +27,14 @@ assert.ok(continuation.includes('client.claimSession(target.config, target.direc
 assert.equal(continuation.includes('createSession('), false, 'same-Session continuation must not create a replacement Session')
 
 assert.ok(create.includes('api.createSession(config'), 'New Session must reuse the existing native /session create primitive')
-assert.ok(create.includes('agent.backend !== "pi"'), 'native create must stay PI-only until create parity is validated on more harnesses')
-assert.ok(create.includes('writerOwned: true'), 'a freshly created ACP Session must enter the v3 controller as already owned')
+assert.ok(create.includes('agent.backend === "pi" && agent.transport === "acp"'), 'PI native create must remain on its validated ACP transport')
+assert.ok(create.includes('agent.backend === "opencode" && agent.transport === "http"'), 'OpenCode native create must remain on its validated managed HTTP transport')
+assert.ok(create.includes('writerOwned: true'), 'a freshly created native Session must enter the v3 controller as already writable')
 assert.equal(create.includes('createTask('), false, 'native create must not create a Task')
 assert.equal(create.includes('Conversation'), true, 'native create comments must explicitly document the no-Conversation boundary')
 assert.ok(home.includes('aria-label="New Session"'), 'Session Home must expose New Session')
 assert.ok(home.includes('createNativeSessionTarget'), 'Session Home must create a real native Session rather than a Task')
+assert.ok(home.includes('canCreateNativeSession'), 'Session Home must expose only harness transports that passed native create parity')
 
 assert.ok(prompt.includes('clientRequestId'), 'native prompts must retain durable mutation identity')
 assert.ok(prompt.includes('loadPendingNativeSessionPrompt'), 'lost-response retries must reuse the unresolved request id')

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { listMachineProjects, type MachineProject } from "../machineClient"
-import { createNativeSessionTarget } from "../native-session-create"
+import { canCreateNativeSession, createNativeSessionTarget } from "../native-session-create"
 import {
   discoverMachineNativeSessions,
   nativeSessionSurfaceTarget,
@@ -137,8 +137,8 @@ function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
   return [...groups.values()].sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
 }
 
-function piCreateAgents(snapshot: MachineSnapshot): MachineAgentHost[] {
-  return snapshot.agents.filter((agent) => agent.backend === "pi" && agent.transport === "acp" && agent.capabilities?.sessions !== false)
+function nativeCreateAgents(snapshot: MachineSnapshot): MachineAgentHost[] {
+  return snapshot.agents.filter(canCreateNativeSession)
 }
 
 export function NativeSessionHome({ sources, onOpen }: Props) {
@@ -212,7 +212,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
     }))
   ), [sources, projectsByMachine])
   const selectedCreateProject = createProjects.find((choice) => choice.key === createProjectKey) || createProjects[0]
-  const createAgents = selectedCreateProject ? piCreateAgents(selectedCreateProject.snapshot) : []
+  const createAgents = selectedCreateProject ? nativeCreateAgents(selectedCreateProject.snapshot) : []
   const selectedCreateAgent = createAgents.find((agent) => agent.id === createAgentID) || createAgents[0]
 
   useEffect(() => {
@@ -222,7 +222,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
 
   useEffect(() => {
     if (!createOpen) return
-    const available = selectedCreateProject ? piCreateAgents(selectedCreateProject.snapshot) : []
+    const available = selectedCreateProject ? nativeCreateAgents(selectedCreateProject.snapshot) : []
     if (!available.some((agent) => agent.id === createAgentID)) setCreateAgentID(available[0]?.id || "")
   }, [createOpen, createProjectKey, createAgentID, selectedCreateProject])
 
@@ -286,7 +286,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
       {createOpen ? (
         <div className="hr-native-create-panel" role="group" aria-label="Create native Session">
           <div className="hr-native-create-heading">
-            <div><strong>New native Session</strong><small>Creates a real PI Session in the selected Project.</small></div>
+            <div><strong>New native Session</strong><small>Creates a real native Session in the selected Project.</small></div>
             <button type="button" className="tdw-icon-button" onClick={() => !creating && setCreateOpen(false)} disabled={creating} aria-label="Close New Session">×</button>
           </div>
           <label>
@@ -298,15 +298,15 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
           <label>
             <span>Coding agent</span>
             <select value={selectedCreateAgent?.id || ""} onChange={(event) => { setCreateAgentID(event.target.value); setCreateError(null) }} disabled={creating || createAgents.length === 0}>
-              {createAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label || "PI"}</option>)}
+              {createAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label || agent.id}</option>)}
             </select>
           </label>
           <label className="hr-native-create-title">
             <span>Title <small>optional</small></span>
-            <input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} disabled={creating} placeholder="New PI Session" maxLength={200} />
+            <input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} disabled={creating} placeholder={`New ${selectedCreateAgent?.label || selectedCreateAgent?.id || "native"} Session`} maxLength={200} />
           </label>
           {createProjects.length === 0 ? <div className="hr-native-create-error">No Project is available on the connected machines.</div> : null}
-          {selectedCreateProject && createAgents.length === 0 ? <div className="hr-native-create-error">PI is not available for native Session creation on this machine yet.</div> : null}
+          {selectedCreateProject && createAgents.length === 0 ? <div className="hr-native-create-error">PI or OpenCode is not available for native Session creation on this machine yet.</div> : null}
           {createError ? <div className="hr-native-create-error" role="alert">{createError}</div> : null}
           <div className="hr-native-create-actions">
             <button type="button" className="tdw-button secondary" onClick={() => setCreateOpen(false)} disabled={creating}>Cancel</button>
@@ -369,7 +369,7 @@ export function NativeSessionHome({ sources, onOpen }: Props) {
       })}
 
       {loaded && !loading && records.length === 0 ? (
-        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No Sessions found yet. Create a native PI Session to start working in this Project.</span></div>
+        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No Sessions found yet. Create a native PI or OpenCode Session to start working in this Project.</span></div>
       ) : null}
     </section>
   )
