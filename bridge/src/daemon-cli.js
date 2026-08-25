@@ -183,7 +183,18 @@ async function main() {
       id: "opencode",
       label: "OpenCode",
       backend: "opencode",
-      capabilities: { sessions: true },
+      // These are native OpenCode HTTP primitives, not Session-first inventions. Advertising the
+      // complete mutation subset lets the UI expose the same rename/delete/stop/model controls as
+      // the direct OpenCode surface instead of treating a managed host as read-only.
+      capabilities: {
+        sessions: true,
+        prompt: true,
+        abort: true,
+        streaming: true,
+        models: true,
+        sessionRename: true,
+        sessionDelete: true
+      },
       contract: openCodeCapabilityContract(),
       host: managedOpenCode,
       modelCatalog: openCodeModels,
