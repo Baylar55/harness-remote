@@ -213,7 +213,11 @@ function appendAcceptedRun(entry: ProjectionEntry, prompt: string, model: ModelS
 
 async function refreshStatus(entry: ProjectionEntry): Promise<void> {
   try {
-    const statuses = await api.listStatuses(entry.target.config, entry.target.directory)
+    // Native Session status is harness-scoped, not Project-scoped. The Session Home already reads
+    // the global status index. Reusing that same authority here avoids a managed OpenCode status
+    // request being filtered or delayed by directory state, which otherwise blocks the v3 pre-Send
+    // safety read and can leave the projection forced to Working after OpenCode is already idle.
+    const statuses = await api.listStatuses(entry.target.config)
     const next = statuses[entry.target.sessionID]?.type
     if (typeof next === "string" && next) {
       entry.statusType = next
