@@ -37,6 +37,17 @@ export { nativeSessionIsWorking }
  */
 const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
 
+function targetForInitialProjection(target: NativeSessionSurfaceTarget): NativeSessionSurfaceTarget {
+  // OpenCode's Session list model is provider/default metadata rather than reliable per-turn truth,
+  // and Codex's list can likewise expose the adapter default while the rollout carries the model
+  // actually used by the latest turn. Treat those list values as provisional: mount immediately
+  // without them, then let native message/rollout metadata refine the already-visible controller.
+  // OMP/PI branch metadata and Claude ACP config are already authoritative on their normal paths.
+  return target.backend === "opencode" || target.backend === "codex"
+    ? { ...target, model: null }
+    : target
+}
+
 /**
  * Thin Session-first adapter around the mature HR3 conversation controller.
  *
@@ -82,6 +93,7 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
   useEffect(() => {
     let disposed = false
     let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
+    const initialTarget = targetForInitialProjection(target)
 
     setTask(null)
     taskRef.current = null
@@ -90,14 +102,15 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
     // Mount the mature controller on the Session itself, before any model enrichment. Gating the
     // whole transcript on a network read left this surface stuck on "Loading Session into the v3
     // controller..." whenever that read was slow, which is exactly what a busy daemon produces.
-    registration = registerNativeSessionV3Adapter(target, handleTaskUpdate)
+    registration = registerNativeSessionV3Adapter(initialTarget, handleTaskUpdate)
     handleTaskUpdate(registration.task)
 
     // Recovering the last requested native model is enrichment. It refines the already usable
-    // Session and must never be able to fail it.
+    // Session and must never be able to fail it. OpenCode/Codex deliberately started with no model
+    // above so a list-level default cannot block this authoritative per-turn result.
     void resolveNativeSessionTargetModel(target).then((resolved) => {
-      if (disposed || resolved.model === target.model) return
-      applyDiscoveredNativeSessionModel(target, resolved.model)
+      if (disposed || resolved.model === initialTarget.model) return
+      applyDiscoveredNativeSessionModel(initialTarget, resolved.model)
     })
 
     return () => {
