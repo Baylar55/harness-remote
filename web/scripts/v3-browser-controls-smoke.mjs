@@ -245,57 +245,37 @@ async function assertSessionFirstHome(page, mobile) {
   await noOverflow(page, mobile ? "Session-first mobile home" : "Session-first desktop home")
 }
 
-async function enterCompatibilityConversations(page, mobile) {
-  const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
-  await assertSessionFirstHome(page, mobile)
-  if (mobile) {
-    await page.locator(".hr-mobile-nav").getByRole("button", { name: /Conversations/ }).click()
-  } else {
-    await sessions.locator(".tdw-top-actions").getByRole("button", { name: /Conversations/ }).click()
-  }
-  await sessions.waitFor({ state: "hidden" })
-  await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
+async function assertConfiguredMachines(page, label) {
+  const groups = page.locator(".hr-native-machine-group")
+  await groups.filter({ hasText: fixtures[0].name }).waitFor({ state: "visible" })
+  await groups.filter({ hasText: fixtures[1].name }).waitFor({ state: "visible" })
+  assert.equal(await groups.count(), 2, `${label}: every configured machine must remain visible`)
 }
 
-async function newConversationAudit(page, label) {
-  await page.locator(".hr-new-conversation").click()
-  const dialog = page.getByRole("dialog", { name: "New conversation" })
-  await dialog.waitFor({ state: "visible" })
-  await insideViewport(page, dialog, `${label} New Conversation`)
+async function newSessionAudit(page, label) {
+  await page.getByRole("button", { name: "New Session" }).click()
+  const group = page.getByRole("group", { name: "Create native Session" })
+  await group.waitFor({ state: "visible" })
 
-  const machine = dialog.getByLabel("Machine")
-  const project = dialog.getByLabel("Project")
-  const agent = dialog.getByLabel("Coding agent")
-  const prompt = dialog.getByLabel("First message")
-  const cancel = dialog.getByRole("button", { name: "Cancel" })
-  const start = dialog.getByRole("button", { name: /Start conversation/ })
-  for (const [locator, name] of [[machine, "Machine"], [project, "Project"], [agent, "Coding agent"], [prompt, "First message"], [cancel, "Cancel"], [start, "Start conversation"]]) {
+  const project = group.getByLabel("Project")
+  const agent = group.getByLabel("Coding agent")
+  const title = group.getByLabel("Title optional")
+  const cancel = group.getByRole("button", { name: "Cancel" })
+  const create = group.getByRole("button", { name: /Create Session/ })
+  for (const [locator, name] of [[project, "Project"], [agent, "Coding agent"], [title, "Title"], [cancel, "Cancel"], [create, "Create Session"]]) {
     await locator.waitFor({ state: "visible" })
     await locator.scrollIntoViewIfNeeded()
     await insideViewport(page, locator, `${label} ${name}`)
   }
 
-  assert.equal(await machine.locator("option").count(), 2, `${label}: New Conversation must expose both machines`)
-  assert.equal(await agent.locator("option").count(), 5, `${label}: New Conversation must expose all five harnesses`)
-  assert.equal(await start.isDisabled(), true, `${label}: Start should stay disabled until a first message exists`)
-
-  for (const [id, text] of [["pi", "PI Model"], ["codex", "Codex CLI Model"], ["claude", "Claude Code Model"], ["omp", "Oh My Pi Model"], ["opencode", "OpenCode Model"]]) {
-    await agent.selectOption(id)
-    const trigger = dialog.locator(".tdw-model-trigger")
-    await trigger.getByText(text, { exact: false }).waitFor({ state: "visible", timeout: 10_000 })
-    assert.equal(await dialog.locator(".tdw-field-note").count(), 0, `${label}: ${id} fell back to unavailable model catalog`)
-  }
-
-  await machine.selectOption(fixtures[1].id)
-  await project.locator(`option[value="${fixtures[1].project.id}"]`).waitFor({ state: "attached" })
-  assert.equal(await project.inputValue(), fixtures[1].project.id, `${label}: switching machine did not switch Project`)
-
-  await prompt.fill("Audit this candidate")
-  assert.equal(await start.isDisabled(), false, `${label}: Start did not enable after entering a message`)
-  await noOverflow(page, `${label} New Conversation`)
-  await shot(page, `${label}-new-conversation`)
+  assert.equal(await project.locator("option").count(), 2, `${label}: New Session must expose Projects from both machines`)
+  assert.equal(await agent.locator("option").count(), 2, `${label}: New Session must expose the supported native create agents`)
+  await title.fill("Session-first UI audit")
+  assert.equal(await create.isDisabled(), false, `${label}: a valid Project and agent must enable Create Session`)
+  await noOverflow(page, `${label} New Session`)
+  await shot(page, `${label}-new-session`)
   await cancel.click()
-  await dialog.waitFor({ state: "hidden" })
+  await group.waitFor({ state: "hidden" })
 }
 
 async function runMobile(browser) {
@@ -304,41 +284,35 @@ async function runMobile(browser) {
   await seed(page)
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
   await assertSessionFirstHome(page, true)
+  await assertConfiguredMachines(page, "portrait")
   await shot(page, "portrait-sessions-home")
-  await enterCompatibilityConversations(page, true)
-  await page.locator(".hr-mobile-nav").waitFor({ state: "visible" })
-  await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
-  await shot(page, "portrait-list")
-  await noOverflow(page, "portrait list")
-  await newConversationAudit(page, "portrait")
-
-  await page.getByRole("button", { name: /Audit Windows UI/ }).click()
-  await page.locator(".tdw-main.mobile-open").waitFor({ state: "visible" })
-  await shot(page, "portrait-conversation")
-
-  await page.setViewportSize({ width: 844, height: 390 })
-  await page.waitForTimeout(200)
-  await page.locator(".tdw-main.mobile-open").waitFor({ state: "visible" })
-  await page.locator(".tdw-mobile-back").waitFor({ state: "visible" })
-  await insideViewport(page, page.locator(".tdw-main.mobile-open"), "landscape Conversation")
-  await noOverflow(page, "landscape Conversation")
-  await shot(page, "landscape-conversation")
-
-  await page.locator(".tdw-mobile-back").click()
-  await page.locator(".hr-mobile-nav").waitFor({ state: "visible" })
-  await shot(page, "landscape-list")
-  await newConversationAudit(page, "landscape")
+  await noOverflow(page, "portrait Session Home")
+  await newSessionAudit(page, "portrait")
 
   await page.locator(".hr-mobile-nav").getByRole("button", { name: /Machines/ }).click()
   await page.locator(".uw-machine-manager").waitFor({ state: "visible" })
-  await shot(page, "landscape-machines")
-  await noOverflow(page, "landscape Machines")
+  await shot(page, "portrait-machines")
+  await noOverflow(page, "portrait Machines")
+  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Sessions/ }).click()
+  await page.locator(".uw-machine-manager").waitFor({ state: "hidden" })
 
-  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Conversations/ }).click()
   await page.locator(".hr-mobile-nav").getByRole("button", { name: /Settings/ }).click()
-  await page.locator(".hr-mobile-settings-page").waitFor({ state: "visible" })
-  await shot(page, "landscape-settings")
-  await noOverflow(page, "landscape Settings")
+  const settings = page.locator(".hr-session-settings-page")
+  await settings.waitFor({ state: "visible" })
+  assert.equal(await settings.locator("select").nth(0).locator("option").count(), 3, "mobile Settings must expose system, light and dark themes")
+  assert.ok(await settings.locator("select").nth(1).locator("option").count() >= 4, "mobile Settings must expose every supported language")
+  await shot(page, "portrait-settings")
+  await noOverflow(page, "portrait Settings")
+  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Sessions/ }).click()
+  await settings.waitFor({ state: "hidden" })
+
+  await page.setViewportSize({ width: 844, height: 390 })
+  await page.waitForTimeout(200)
+  await assertSessionFirstHome(page, true)
+  await assertConfiguredMachines(page, "landscape")
+  await shot(page, "landscape-sessions-home")
+  await noOverflow(page, "landscape Session Home")
+  await newSessionAudit(page, "landscape")
   await context.close()
 }
 
@@ -348,32 +322,26 @@ async function runDesktop(browser) {
   await seed(page)
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
   await assertSessionFirstHome(page, false)
+  await assertConfiguredMachines(page, "desktop")
   await shot(page, "desktop-sessions-home")
-  await enterCompatibilityConversations(page, false)
-  await page.locator(".tdw-topbar").waitFor({ state: "visible" })
-  await shot(page, "desktop-list")
-  await noOverflow(page, "desktop list")
-  await newConversationAudit(page, "desktop")
+  await noOverflow(page, "desktop Session Home")
+  await newSessionAudit(page, "desktop")
 
-  const conversationsToggle = page.locator(".tdw-tasks-toggle")
-  const drawer = page.locator(".tdw-thread-column")
-  await conversationsToggle.click()
-  await drawer.waitFor({ state: "visible" })
-  await waitForDrawerSettled(page)
-  const drawerGeometry = await page.evaluate(() => {
-    const workspace = document.querySelector(".tdw-project-column")?.getBoundingClientRect()
-    const drawer = document.querySelector(".tdw-thread-column")?.getBoundingClientRect()
-    if (!workspace || !drawer) return null
-    return { workspaceRight: workspace.right, drawerLeft: drawer.left }
-  })
-  assert.ok(drawerGeometry, "desktop drawer geometry unavailable")
-  assert.ok(drawerGeometry.drawerLeft >= drawerGeometry.workspaceRight - 1, `desktop drawer overlaps workspace: ${drawerGeometry.drawerLeft} < ${drawerGeometry.workspaceRight}`)
-  await shot(page, "desktop-drawer")
-  await page.getByRole("button", { name: /Audit Windows UI/ }).click()
-  await drawer.waitFor({ state: "hidden" })
-  await page.locator(".tdw-main").waitFor({ state: "visible" })
-  await shot(page, "desktop-conversation")
-  await noOverflow(page, "desktop conversation")
+  await page.getByRole("button", { name: "Settings" }).click()
+  const settings = page.locator(".hr-session-settings-page")
+  await settings.waitFor({ state: "visible" })
+  await insideViewport(page, settings, "desktop Settings")
+  assert.equal(await settings.locator("select").nth(0).locator("option").count(), 3, "desktop Settings must expose system, light and dark themes")
+  assert.ok(await settings.locator("select").nth(1).locator("option").count() >= 4, "desktop Settings must expose every supported language")
+  await shot(page, "desktop-settings")
+  await settings.locator("header button").click()
+  await settings.waitFor({ state: "hidden" })
+
+  await page.getByRole("button", { name: /Machines/ }).click()
+  await page.locator(".uw-machine-manager").waitFor({ state: "visible" })
+  await shot(page, "desktop-machines")
+  await noOverflow(page, "desktop Machines")
+  await page.locator(".uw-manager-close").click()
   await context.close()
 }
 
@@ -391,7 +359,7 @@ try {
   console.log("v3 browser controls smoke: mobile controls audit passed")
   await runDesktop(browser)
   console.log("v3 browser controls smoke: desktop controls audit passed")
-  console.log("v3 browser controls smoke: Session-first entry, compatibility controls, model catalogs and screenshots passed")
+  console.log("v3 browser controls smoke: Session-first multi-machine, Settings, New Session and screenshots passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(vite)

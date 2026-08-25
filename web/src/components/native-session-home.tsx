@@ -9,12 +9,14 @@ import {
 } from "../native-session-discovery"
 import type { MachineAgentHost, MachineSnapshot } from "../types"
 import type { WorkspaceMachine } from "../workspaceMachines"
-import { ChatIcon, LoadingIcon, PlusIcon, RefreshIcon, SearchIcon } from "../Icons"
+import { ChatIcon, LoadingIcon, PlusIcon, RefreshIcon, SearchIcon, ServerIcon } from "../Icons"
 import "../native-session-home.css"
 
 type Source = {
   machine: WorkspaceMachine
-  snapshot: MachineSnapshot
+  snapshot: MachineSnapshot | null
+  state: "loading" | "online" | "offline"
+  error?: string
 }
 
 type RecordWithMachine = {
@@ -243,6 +245,7 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
     setLoading(true)
     setDiscoveryError(null)
     void Promise.all(sources.map(async ({ machine, snapshot }) => {
+      if (!snapshot) return { machine, projects: [] as MachineProject[], records: [] as RecordWithMachine[] }
       const [sessions, projects] = await Promise.all([
         discoverMachineNativeSessions(machine.config, snapshot.agents),
         listMachineProjects(machine.config).catch(() => [] as MachineProject[])
@@ -356,11 +359,15 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
       return sessions.length ? [{ ...group, sessions }] : []
     })
   }, [agentFilter, filter, groups, presentationForItem, query])
-  const machineGroups = useMemo(() => sources.flatMap(({ machine }) => {
+  const machineGroups = useMemo(() => sources.flatMap(({ machine, snapshot, state, error }) => {
     const projects = filteredGroups.filter((group) => group.machine.id === machine.id)
-    if (!projects.length) return []
+    const filtering = Boolean(query.trim() || agentFilter || filter !== "all")
+    if (!projects.length && filtering) return []
     return [{
       machine,
+      label: snapshot?.machine.name || machine.name,
+      state,
+      error,
       projects,
       sessionCount: projects.reduce((count, group) => count + group.sessions.length, 0),
       workingCount: projects.reduce((count, group) =>
@@ -369,15 +376,16 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
         count + group.sessions.filter((item) => presentationForItem(item).state === "attention").length, 0),
       updatedAt: projects.reduce((latest, group) => Math.max(latest, group.updatedAt), 0)
     }]
-  }).sort((left, right) => right.updatedAt - left.updatedAt || left.machine.name.localeCompare(right.machine.name)), [filteredGroups, presentationForItem, sources])
-  const createProjects = useMemo<CreateProject[]>(() => sources.flatMap(({ machine, snapshot }) =>
-    (projectsByMachine[machine.id] || []).map((project) => ({
+  }).sort((left, right) => right.updatedAt - left.updatedAt || left.label.localeCompare(right.label)), [agentFilter, filter, filteredGroups, presentationForItem, query, sources])
+  const createProjects = useMemo<CreateProject[]>(() => sources.flatMap(({ machine, snapshot }) => {
+    if (!snapshot) return []
+    return (projectsByMachine[machine.id] || []).map((project) => ({
       key: `${machine.id}:${project.id}`,
       machine,
       snapshot,
       project
     }))
-  ), [sources, projectsByMachine])
+  }), [sources, projectsByMachine])
   const selectedCreateProject = createProjects.find((choice) => choice.key === createProjectKey) || createProjects[0]
   const createAgents = selectedCreateProject ? nativeCreateAgents(selectedCreateProject.snapshot) : []
   const selectedCreateAgent = createAgents.find((agent) => agent.id === createAgentID) || createAgents[0]
@@ -541,22 +549,28 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
 
 
       <div className="hr-native-machine-list">
-        {machineGroups.map(({ machine, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => (
-          <section className="hr-native-machine-group" key={machine.id} aria-label={`${machine.name} Sessions`}>
+        {machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => (
+          <section className={`hr-native-machine-group ${state}`} key={machine.id} aria-label={`${label} Sessions`}>
             <header className="hr-native-machine-heading">
               <div>
-                <i aria-hidden="true" />
+                <i data-state={state} aria-hidden="true" />
                 <span>
-                  <strong>{machine.name}</strong>
-                  <small title={machine.config.host}>{machine.config.host}</small>
+                  <strong>{label}</strong>
+                  <small title={error || machine.config.host}>{state === "loading" ? "Connecting…" : state === "offline" ? error || "Machine offline" : machine.config.host}</small>
                 </span>
               </div>
               <span>
                 {machineAttentionCount ? <b>{machineAttentionCount} attention</b> : null}
                 {workingCount ? <em>{workingCount} live</em> : null}
-                <small>{sessionCount}</small>
+                <small>{state === "online" ? sessionCount : state === "loading" ? "…" : "Offline"}</small>
               </span>
             </header>
+            {projects.length === 0 ? (
+              <div className="hr-native-machine-empty">
+                {state === "loading" ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
+                <span>{state === "loading" ? "Discovering Projects and native Sessions…" : state === "offline" ? "This machine is unavailable. Its configuration is still saved." : "No native Sessions discovered on this machine."}</span>
+              </div>
+            ) : null}
 
             {projects.map((group) => {
               const expanded = expandedProjects.has(group.key)
@@ -659,8 +673,8 @@ export function NativeSessionHome({ sources, onOpen, selectedKey, selectedState 
         <div className="hr-native-home-empty compact"><SearchIcon size={18} /><span>No Sessions match this view.</span></div>
       ) : null}
 
-      {loaded && !loading && !discoveryError && records.length === 0 ? (
-        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>No native Sessions yet. Start one in a Project to begin.</span></div>
+      {loaded && !loading && !discoveryError && records.length === 0 && sources.length === 0 ? (
+        <div className="hr-native-home-empty"><ChatIcon size={18} /><span>Add a machine to discover its Projects and native Sessions.</span></div>
       ) : null}
     </section>
   )

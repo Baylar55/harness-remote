@@ -252,39 +252,41 @@ async function assertSessionFirstHome(page, mobile) {
   await assertNoDocumentOverflow(page, mobile ? "Session-first mobile home" : "Session-first desktop home")
 }
 
-async function enterCompatibilityConversations(page, mobile) {
-  const sessions = page.locator('.hr-native-workspace[aria-label="Sessions"]')
-  await assertSessionFirstHome(page, mobile)
-  if (mobile) {
-    await page.locator(".hr-mobile-nav").getByRole("button", { name: /Conversations/ }).click()
-  } else {
-    await sessions.locator(".tdw-top-actions").getByRole("button", { name: /Conversations/ }).click()
-  }
-  await sessions.waitFor({ state: "hidden" })
-  await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
-}
-
-async function assertMobileList(page, label) {
+async function assertMobileHome(page, label) {
   assert.equal(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), true, `${label}: expected coarse pointer`)
+  await assertSessionFirstHome(page, true)
   await page.locator(".hr-mobile-nav").waitFor({ state: "visible" })
-  await page.locator(".tdw-machine-section").waitFor({ state: "visible" })
-  await page.getByRole("button", { name: /Windows Test/ }).first().waitFor({ state: "visible" })
-  await page.getByRole("button", { name: /Linux Test/ }).first().waitFor({ state: "visible" })
+  await page.locator(".hr-native-machine-group", { hasText: "Windows Test" }).waitFor({ state: "visible" })
+  await page.locator(".hr-native-machine-group", { hasText: "Linux Test" }).waitFor({ state: "visible" })
+  assert.equal(await page.locator(".hr-native-machine-group").count(), 2, `${label}: every configured machine must be visible`)
   await boundingBoxInside(page, ".tdw-topbar", `${label} topbar`)
-  await boundingBoxInside(page, ".tdw-project-column", `${label} machine/project rail`)
-  await boundingBoxInside(page, ".tdw-thread-column", `${label} conversation list`)
+  await boundingBoxInside(page, ".hr-native-workspace-list", `${label} Session list`)
   await boundingBoxInside(page, ".hr-mobile-nav", `${label} bottom navigation`)
   await assertNoDocumentOverflow(page, label)
 }
-
-async function assertModel(page, agentID, expectedText) {
-  const selector = page.locator(".tdw-agent-control select")
-  await selector.selectOption(agentID)
-  const trigger = page.locator(".tdw-model-trigger")
-  await trigger.waitFor({ state: "visible" })
-  await trigger.getByText(expectedText, { exact: false }).waitFor({ state: "visible", timeout: 10_000 })
-  assert.equal(await page.locator(".tdw-field-note").count(), 0, `${agentID}: model catalog fallback is visible`)
+async function assertStartupFeedback(browser) {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  await page.route(/http:\/\/127\.0\.0\.1:440[12]\/v1\/machine/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1_200))
+    await route.continue()
+  })
+  await page.addInitScript(({ key, fixtures, user, password }) => {
+    localStorage.setItem(key, JSON.stringify(fixtures.map((fixture) => ({
+      id: fixture.id,
+      name: fixture.name,
+      config: { backend: "opencode", host: "127.0.0.1", port: fixture.port, username: user, password }
+    }))))
+  }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
+  const startup = page.getByRole("status")
+  await startup.getByText("Connecting to your machines…", { exact: true }).waitFor({ state: "visible" })
+  await startup.getByText(/Discovering Projects, installed coding agents and native Sessions/).waitFor({ state: "visible" })
+  await assertNoDocumentOverflow(page, "startup feedback")
+  await page.waitForLoadState("networkidle")
+  await context.close()
 }
+
 
 async function runMobileAudit(browser) {
   const context = await browser.newContext({
@@ -304,43 +306,21 @@ async function runMobileAudit(browser) {
   }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
 
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
-  await enterCompatibilityConversations(page, true)
-  await assertMobileList(page, "portrait")
+  await assertMobileHome(page, "portrait")
 
-  const linuxMachine = page.locator(".tdw-machine-section .tdw-side-row", { hasText: "Linux Test" })
-  await linuxMachine.click()
-  await page.getByText("Linux conversation", { exact: true }).waitFor({ state: "visible" })
-  assert.ok((await linuxMachine.getAttribute("class"))?.includes("active"), "Linux machine did not become active")
-
-  const windowsMachine = page.locator(".tdw-machine-section .tdw-side-row", { hasText: "Windows Test" })
-  await windowsMachine.click()
-  await page.getByText("Windows conversation", { exact: true }).waitFor({ state: "visible" })
-  assert.ok((await windowsMachine.getAttribute("class"))?.includes("active"), "Windows machine did not become active")
-
-  await page.getByRole("button", { name: /Windows conversation/ }).click()
-  await page.locator(".tdw-main.mobile-open").waitFor({ state: "visible" })
-  await boundingBoxInside(page, ".tdw-main.mobile-open", "portrait conversation detail")
-  await boundingBoxInside(page, ".tdw-conversation-toolbar", "portrait agent/model toolbar")
-  await boundingBoxInside(page, ".uw-composer-shell", "portrait composer")
-  await assertNoDocumentOverflow(page, "portrait conversation detail")
-
-  await assertModel(page, "pi", "PI Model")
-  await assertModel(page, "codex", "Codex CLI Model")
-  await assertModel(page, "claude", "Claude Code Model")
-  await assertModel(page, "omp", "Oh My Pi Model")
-  await assertModel(page, "opencode", "OpenCode Model")
+  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Settings/ }).click()
+  const settings = page.locator(".hr-session-settings-page")
+  await settings.waitFor({ state: "visible" })
+  assert.equal(await settings.locator("select").nth(0).locator("option").count(), 3, "portrait Settings theme choices regressed")
+  assert.ok(await settings.locator("select").nth(1).locator("option").count() >= 4, "portrait Settings language choices regressed")
+  await boundingBoxInside(page, ".hr-session-settings-page", "portrait Settings page")
+  await assertNoDocumentOverflow(page, "portrait Settings page")
+  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Sessions/ }).click()
+  await settings.waitFor({ state: "hidden" })
 
   await page.setViewportSize({ width: 844, height: 390 })
   await page.waitForTimeout(150)
-  assert.equal(await page.evaluate(() => matchMedia("(pointer: coarse)").matches), true, "landscape: coarse pointer was lost")
-  await page.locator(".tdw-mobile-back").waitFor({ state: "visible" })
-  await boundingBoxInside(page, ".tdw-main.mobile-open", "landscape conversation detail")
-  await boundingBoxInside(page, ".tdw-conversation-toolbar", "landscape agent/model toolbar")
-  await boundingBoxInside(page, ".uw-composer-shell", "landscape composer")
-  await assertNoDocumentOverflow(page, "landscape conversation detail")
-
-  await page.locator(".tdw-mobile-back").click()
-  await assertMobileList(page, "landscape list")
+  await assertMobileHome(page, "landscape")
 
   await page.locator(".hr-mobile-nav").getByRole("button", { name: /Machines/ }).click()
   await page.locator(".uw-machine-manager").waitFor({ state: "visible" })
@@ -348,13 +328,6 @@ async function runMobileAudit(browser) {
   await page.getByText("Linux Test", { exact: true }).first().waitFor({ state: "visible" })
   await boundingBoxInside(page, ".uw-machine-manager", "landscape Machines page")
   await assertNoDocumentOverflow(page, "landscape Machines page")
-
-  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Conversations/ }).click()
-  await page.locator(".hr-mobile-nav").getByRole("button", { name: /Settings/ }).click()
-  await page.locator(".hr-mobile-settings-page").waitFor({ state: "visible" })
-  await boundingBoxInside(page, ".hr-mobile-settings-page", "landscape Settings page")
-  await assertNoDocumentOverflow(page, "landscape Settings page")
-
   await context.close()
 }
 
@@ -369,25 +342,30 @@ async function runDesktopAudit(browser) {
     }))))
   }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
   await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
-  await enterCompatibilityConversations(page, false)
-  await page.locator(".tdw-topbar").waitFor({ state: "visible" })
+  await assertSessionFirstHome(page, false)
+  await page.locator(".hr-native-machine-group", { hasText: "Windows Test" }).waitFor({ state: "visible" })
+  await page.locator(".hr-native-machine-group", { hasText: "Linux Test" }).waitFor({ state: "visible" })
+  assert.equal(await page.locator(".hr-native-machine-group").count(), 2, "desktop: every configured machine must be visible")
   await boundingBoxInside(page, ".tdw-topbar", "desktop topbar")
-  await boundingBoxInside(page, ".tdw-project-column", "desktop workspace")
-  await boundingBoxInside(page, ".tdw-main", "desktop main")
+  await boundingBoxInside(page, ".hr-native-workspace-list", "desktop Session list")
+  await boundingBoxInside(page, ".hr-native-workspace-detail", "desktop main")
+  await page.getByText("2/2 machines", { exact: true }).waitFor({ state: "visible" })
   await assertNoDocumentOverflow(page, "desktop initial")
 
-  const desktopDrawer = page.locator(".tdw-thread-column")
-  await desktopDrawer.waitFor({ state: "attached" })
-  assert.equal(await desktopDrawer.isVisible(), false, "desktop conversation drawer should start hidden")
-  const conversationsButton = page.locator(".tdw-tasks-toggle")
-  await conversationsButton.click()
-  await desktopDrawer.waitFor({ state: "visible" })
-  await waitForDrawerSettled(page, ".tdw-thread-column")
-  await boundingBoxInside(page, ".tdw-thread-column", "desktop conversation drawer")
-  await assertNoDocumentOverflow(page, "desktop drawer open")
-  assert.equal(await conversationsButton.getAttribute("aria-expanded"), "true", "desktop Conversations toggle did not report open")
-  await page.locator(".tdw-task-drawer-close").click()
-  await desktopDrawer.waitFor({ state: "hidden" })
+  await page.getByRole("button", { name: "Settings" }).click()
+  const settings = page.locator(".hr-session-settings-page")
+  await settings.waitFor({ state: "visible" })
+  await boundingBoxInside(page, ".hr-session-settings-page", "desktop Settings")
+  assert.equal(await settings.locator("select").nth(0).locator("option").count(), 3, "desktop Settings theme choices regressed")
+  assert.ok(await settings.locator("select").nth(1).locator("option").count() >= 4, "desktop Settings language choices regressed")
+  await settings.locator("header button").click()
+  await settings.waitFor({ state: "hidden" })
+
+  await page.getByRole("button", { name: /Machines/ }).click()
+  await page.locator(".uw-machine-manager").waitFor({ state: "visible" })
+  await boundingBoxInside(page, ".uw-machine-manager", "desktop Machines")
+  await assertNoDocumentOverflow(page, "desktop Machines")
+  await page.locator(".uw-manager-close").click()
 
   const overlap = await page.evaluate(() => {
     const context = document.querySelector(".tdw-context-path")?.getBoundingClientRect()
@@ -408,12 +386,14 @@ try {
   preview = startPreview()
   await waitForHttp(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
+  await assertStartupFeedback(browser)
+  console.log("v3 browser smoke: startup feedback passed")
   console.log("v3 browser smoke: mobile audit start")
   await runMobileAudit(browser)
   console.log("v3 browser smoke: mobile audit passed")
   await runDesktopAudit(browser)
   console.log("v3 browser smoke: desktop audit passed")
-  console.log("v3 browser smoke: Session-first entry, portrait, landscape, multi-machine, model toolbar and desktop geometry passed")
+  console.log("v3 browser smoke: Session-first startup, portrait, landscape, multi-machine, Settings and desktop geometry passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   stopPreview(preview)

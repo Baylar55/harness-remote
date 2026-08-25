@@ -9,13 +9,6 @@
   background: var(--tdw-bg, #0f1115);
 }
 
-/* ConversationWorkspace stays mounted during the Session-first migration so switching back keeps its
-   local state, but it must not remain a second interactive surface underneath Sessions. Some of its
-   desktop controls create their own stacking contexts, so z-index alone is not a sufficient boundary. */
-.uw-standalone-host:has(> .hr-native-workspace) > .hr-control-plane:not(.hr-native-workspace) {
-  visibility: hidden;
-  pointer-events: none;
-}
 
 .hr-native-workspace-body {
   display: grid;
@@ -506,26 +499,8 @@
   font-size: 11px;
 }
 
-/* Compatibility escape hatch while Conversation remains mounted during Session-first migration. */
-.hr-session-launcher {
-  position: fixed;
-  right: 18px;
-  bottom: 18px;
-  z-index: 7;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 9px 13px;
-  border: 1px solid var(--tdw-border, rgba(127, 127, 127, 0.28));
-  border-radius: 999px;
-  background: var(--tdw-panel, #181b22);
-  color: var(--tdw-text, #f5f6f8);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, .24);
-  cursor: pointer;
-}
 
 @media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
-  .hr-session-launcher { display: none; }
   .hr-native-workspace-body { grid-template-columns: 1fr; }
   .hr-native-workspace-list { border-right: 0; }
   .hr-native-workspace-detail {
