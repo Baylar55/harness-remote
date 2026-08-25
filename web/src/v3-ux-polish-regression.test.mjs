@@ -77,9 +77,19 @@ assert.match(read("components/taskdesk-message-content.tsx"), /status === "runni
 assert.match(overrides, /prefers-reduced-motion/)
 
 // An existing Conversation may have Project-specific provider/model configuration. The integrated
-// product/UI audit must not erase the capability audit's server-resolved Conversation scope.
-assert.match(conversation, /taskClient\.listAgentModels\(baseConfig, targetAgentID, \{ workThreadId: task\.id \}\)/)
-assert.match(conversation, /\[targetAgentID, task\.id, task\.workspace\.path, baseConfig\]/)
+// product/UI audit must not erase the capability audit's server-resolved Conversation scope, so the
+// Work Thread scope stays the default. A native-Session surface overrides it with the daemon's real
+// machine-scoped catalog identity instead of rewriting the shared taskClient for every consumer.
+assert.match(conversation, /taskClient\.listAgentModels\(baseConfig, targetAgentID, modelScope \?\? \{ workThreadId: task\.id \}\)/)
+// The effect must key on the scope's value, never a caller's object identity, or a fresh scope
+// object per render would restart model discovery on every render.
+assert.match(conversation, /\[targetAgentID, task\.id, task\.workspace\.path, baseConfig, modelScopeKey\]/)
+assert.match(conversation, /const modelScopeKey = modelScope \?/)
+assert.doesNotMatch(
+  read("native-session-v3-adapter.ts"),
+  /taskClient\.listAgentModels\s*=/,
+  "the native Session adapter must not reassign the shared model catalog client"
+)
 
 assert.match(readme, /normal public port is \*\*4097\*\*/)
 assert.match(readme, /normally on loopback port \*\*4096\*\*/)

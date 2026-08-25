@@ -5,7 +5,6 @@ import { sendNativeSessionPrompt } from "./native-session-prompt"
 import { stopNativeSession } from "./native-session-stop"
 import {
   taskClient,
-  type AgentModelScope,
   type MachineTask,
   type MachineTaskRun,
   type TaskContinueInput
@@ -404,12 +403,6 @@ function installAdapter(): void {
     if (!entry) return originalGetWorkThread(config, taskId)
     await refreshStatus(entry)
     return projectedTask(entry)
-  }
-
-  const originalListAgentModels = taskClient.listAgentModels.bind(taskClient)
-  taskClient.listAgentModels = async function patchedListAgentModels(config, agentId, scope: AgentModelScope = {}) {
-    const entry = scope.workThreadId ? projections.get(scope.workThreadId) : undefined
-    return originalListAgentModels(config, agentId, entry ? {} : scope)
   }
 
   const originalContinueTask = taskClient.continueTask.bind(taskClient)

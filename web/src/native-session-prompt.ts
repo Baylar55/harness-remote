@@ -15,6 +15,16 @@ export type PendingNativeSessionPrompt = {
 }
 
 const STORAGE_PREFIX = "harness-remote.native-session-prompt.v1"
+/**
+ * How long an unresolved delivery may keep blocking a different prompt for the same Session.
+ *
+ * The record exists so a retry after a lost response converges on the same daemon ledger entry
+ * instead of duplicating a turn. It must not become permanent: the native transcript is the real
+ * authority, and an ambiguous record that never expires made one failed delivery brick the Session
+ * for every later prompt - which is exactly what a model change produces, because a new model makes
+ * the next request differ from the stored one.
+ */
+const PENDING_DELIVERY_TTL_MS = 10 * 60 * 1000
 const HANDOFF_SENT_PREFIX = "harness-remote.native-session-handoff-context.v1"
 const HANDOFF_CONTEXT_MAX_CHARS = 12_000
 const HANDOFF_MESSAGE_MAX_CHARS = 1_500
@@ -163,7 +173,10 @@ export async function sendNativeSessionPrompt(
   if (!normalized) throw new Error("A text prompt is required")
   const requestedModel = normalizeModel(model)
 
-  const existing = loadPendingNativeSessionPrompt(target)
+  const stored = loadPendingNativeSessionPrompt(target)
+  // A record whose retry window has passed is superseded rather than blocking forever.
+  const existing = stored && Date.now() - stored.createdAt <= PENDING_DELIVERY_TTL_MS ? stored : null
+  if (stored && !existing) clearPendingNativeSessionPrompt(target)
   if (existing && (existing.text !== normalized || !sameModel(existing.model, requestedModel))) {
     throw new Error("A previous prompt still has an unresolved delivery status. Retry that exact prompt and model selection before sending a different request.")
   }
@@ -188,7 +201,14 @@ export async function sendNativeSessionPrompt(
   let status: NativeSessionPromptStatus
   if (isDesktopPlatform()) {
     const result = await desktopRequestResult(target.config, { path, method: "POST", body })
-    if (!result.ok) throw new Error(result.error.message)
+    if (!result.ok) {
+      // The desktop transport distinguishes a daemon answer from a transport failure, so only an
+      // `http` outcome proves the mutation was refused rather than possibly dispatched.
+      if (result.error.code === "http" && Number(result.error.status) >= 400) {
+        clearPendingNativeSessionPrompt(target)
+      }
+      throw new Error(result.error.message)
+    }
     status = parseStatus(result.response.data)
   } else {
     const headers: Record<string, string> = {
@@ -213,7 +233,10 @@ export async function sendNativeSessionPrompt(
       } catch {
         throw new Error(`Cannot reach ${target.config.host}:${target.config.port}. Prompt delivery status is unknown; retry will use the same request id.`)
       }
-      if (response.status >= 400) throw new Error(errorDetail(response.data, response.status))
+      if (response.status >= 400) {
+        clearPendingNativeSessionPrompt(target)
+        throw new Error(errorDetail(response.data, response.status))
+      }
       status = parseStatus(response.data)
     } else {
       let response: Response
@@ -227,7 +250,10 @@ export async function sendNativeSessionPrompt(
         const raw = await response.text()
         data = raw ? JSON.parse(raw) : undefined
       } catch {}
-      if (!response.ok) throw new Error(errorDetail(data, response.status))
+      if (!response.ok) {
+        clearPendingNativeSessionPrompt(target)
+        throw new Error(errorDetail(data, response.status))
+      }
       status = parseStatus(data)
     }
   }

@@ -5,7 +5,7 @@ import {
   nativeSessionIsWorking,
   registerNativeSessionV3Adapter
 } from "../native-session-v3-adapter"
-import type { MachineTask } from "../taskClient"
+import type { AgentModelScope, MachineTask } from "../taskClient"
 import type { MachineAgentHost } from "../types"
 import { LoadingIcon } from "../Icons"
 import { WorkThreadConversation } from "./work-thread-conversation"
@@ -27,6 +27,14 @@ function visualState(task: MachineTask, attention = false): NativeSessionVisualS
 
 
 export { nativeSessionIsWorking }
+
+/**
+ * The daemon owns one model catalog per machine + harness, which is what its capability contract
+ * reports as `cacheScope: "machine"`. A native Session therefore asks for exactly that catalog and
+ * must not invent a Work Thread identity the daemon has never heard of. Keeping this constant module
+ * scoped also keeps the object identity stable across renders.
+ */
+const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
 
 /**
  * Thin Session-first adapter around the mature HR3 conversation controller.
@@ -100,6 +108,7 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
         task={task}
         baseConfig={target.config}
         agents={[agent]}
+        modelScope={NATIVE_SESSION_MODEL_SCOPE}
         onTaskUpdate={handleTaskUpdate}
         onWorkspaceRefresh={onSessionRefresh}
         onAttentionChange={handleAttentionChange}

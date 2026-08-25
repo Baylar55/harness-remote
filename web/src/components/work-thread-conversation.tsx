@@ -4,6 +4,7 @@ import { mergeLatestMessagePage, prependOlderMessagePage } from "../message-page
 import type { SavedServerProfile } from "../serverProfiles"
 import {
   taskClient,
+  type AgentModelScope,
   type MachineTask,
   type MachineTaskRun
 } from "../taskClient"
@@ -68,6 +69,13 @@ type Props = {
   onTaskUpdate: (task: MachineTask) => void
   onWorkspaceRefresh?: () => void
   onAttentionChange?: (needsAttention: boolean) => void
+  /**
+   * Which catalog identity this conversation's model picker should ask for. Defaults to the Work
+   * Thread, which is what a Task-backed conversation means. A native-Session surface passes the
+   * daemon's real catalog scope instead of a synthetic thread id, so it does not have to rewrite
+   * this shared client for every other consumer.
+   */
+  modelScope?: AgentModelScope
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
@@ -258,7 +266,8 @@ export function WorkThreadConversation({
   agents,
   onTaskUpdate,
   onWorkspaceRefresh,
-  onAttentionChange
+  onAttentionChange,
+  modelScope
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${task.id}`
   const [feeds, setFeeds] = useState<Record<string, SessionFeed>>({})
@@ -276,6 +285,9 @@ export function WorkThreadConversation({
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [targetModelKey, setTargetModelKey] = useState(modelKey(lastModelForAgent(task, agentForRun(task, task.run))))
+  // The catalog effect must depend on the scope's value, not a caller's object identity: a fresh
+  // object per render would restart model discovery on every render.
+  const modelScopeKey = modelScope ? `${modelScope.workThreadId ?? ""}|${modelScope.projectId ?? ""}` : ""
   const loadGeneration = useRef(0)
   const modelGeneration = useRef(0)
   const draftRef = useRef(draft)
@@ -547,7 +559,7 @@ export function WorkThreadConversation({
     setModels([])
     setModelsLoading(true)
     setModelError(null)
-    void taskClient.listAgentModels(baseConfig, targetAgentID, { workThreadId: task.id }).then((catalog) => {
+    void taskClient.listAgentModels(baseConfig, targetAgentID, modelScope ?? { workThreadId: task.id }).then((catalog) => {
       if (modelGeneration.current !== current) return
       setModels(catalog.models)
       const prior = lastModelForAgent(taskRef.current, targetAgentID)
@@ -565,7 +577,7 @@ export function WorkThreadConversation({
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, task.id, task.workspace.path, baseConfig])
+  }, [targetAgentID, task.id, task.workspace.path, baseConfig, modelScopeKey])
 
   // Only a model verified by the current live catalog is sent explicitly. A null selection is
   // intentional: the controller distinguishes it from an omitted field, which means reuse the
