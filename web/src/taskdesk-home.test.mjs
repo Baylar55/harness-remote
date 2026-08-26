@@ -132,7 +132,9 @@ test("Session UI preserves stable autoscroll memoized rows and mobile keyboard b
 
   assert.match(source, /const MessageBubble = memo/)
   assert.match(source, /NEAR_BOTTOM_PX = 96/)
-  assert.match(source, /previousHeight/)
+  assert.match(source, /nearBottomRef\.current = false/)
+  assert.match(source, /window\.cancelAnimationFrame\(followFrameRef\.current\)/)
+  assert.doesNotMatch(source, /previousHeight/)
   assert.match(source, /\[messages, loading, ready, sending\]/)
   assert.match(source, /window\.requestAnimationFrame/)
   assert.match(mobileCss, /env\(safe-area-inset-bottom/)
