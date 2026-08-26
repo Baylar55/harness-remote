@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { existsSync, readFileSync } from "node:fs"
 import test from "node:test"
 
+// Re-run the UI regression gate against the current Session-first checkpoint before merging #309.
 const read = (name) => readFileSync(new URL(name, import.meta.url), "utf8")
 const hook = read("./useDialogDismiss.ts")
 const standalone = read("./components/standalone-universal-workspace.tsx")
