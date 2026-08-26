@@ -747,11 +747,25 @@ export function WorkThreadConversation({
   // Only the turn that is actually running carries the live status row, and only once its bubble is
   // on screen - before that the pending bubble is showing the very same row.
   const liveRunID = working && !hasAttention && currentRunHasAssistantSignal ? task.run?.id : undefined
+
   const waitingLabel = hasAttention
     ? "Waiting for your input"
     : preparingReply
       ? `${pendingAgentLabel} is getting started`
       : `${currentLabel} is working`
+
+  /**
+   * Exactly one row, on exactly one bubble.
+   *
+   * A Run's id is on every row the Run produced, the synthetic user message included, so matching on
+   * the id alone put the status row inside the user's own bubble as well as the reply's. The status
+   * of a turn belongs to the reply, so the role is part of the match - and `liveRunID` is already
+   * mutually exclusive with the pending bubble, which is the only other place this row can appear.
+   */
+  const activityForMessage = (message: WorkThreadMessage): string | undefined =>
+    liveRunID && message.info.role === "assistant" && message.taskdesk?.runId === liveRunID
+      ? waitingLabel
+      : undefined
 
   useEffect(() => {
     onAttentionChangeRef.current?.(hasAttention)
@@ -818,7 +832,7 @@ export function WorkThreadConversation({
           <WorkThreadBubble
             key={message.info.id}
             message={message as WorkThreadMessage}
-            activity={liveRunID && (message as WorkThreadMessage).taskdesk?.runId === liveRunID ? waitingLabel : undefined}
+            activity={activityForMessage(message as WorkThreadMessage)}
           />
         )}
       />
