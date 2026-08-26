@@ -29,7 +29,7 @@ import {
   type WorkThreadAgentMeta
 } from "../work-thread-timeline"
 import { ModelPicker, modelOptionKey } from "./model-picker"
-import { ActivityStatus, TaskDeskConversation } from "./taskdesk-conversation"
+import { TaskDeskConversation } from "./taskdesk-conversation"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 import { WorkThreadAttention } from "./work-thread-attention"
 
@@ -257,15 +257,14 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message, activity }: {
         {isUser ? "You" : icon ? <img src={icon} alt="" /> : label.slice(0, 2).toUpperCase()}
       </div>
       <div className="uw-message-body">
+        {/* One identity row per reply, and the live state is *in* it: the same avatar and the same
+            line the reply will carry when it is finished, reading "<agent> is working" while it is
+            not. A separate status row under this one would be a second name for the same turn. */}
         <header>
-          <strong>{label}</strong>
+          <strong className={activity ? "uw-message-working" : undefined} {...(activity ? { role: "status", "aria-live": "polite" as const } : {})}>{activity || label}</strong>
           <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>
         </header>
         <TaskDeskMessageContent message={message} />
-        {/* The live status of a turn belongs to the turn's own bubble. Rendered last inside the
-            body, it is the same row the pending bubble showed a moment earlier, in the same place,
-            so reasoning and tool cards fill in above it instead of replacing it. */}
-        {activity ? <ActivityStatus label={activity} agentLabel={label} /> : null}
       </div>
     </article>
   )

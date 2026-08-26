@@ -59,7 +59,11 @@ test("long conversations retain v2-style jump-to-top and jump-to-bottom affordan
 })
 
 test("shared conversation owns working state presentation", () => {
-  assert.match(component, /uw-session-typing/)
+  // The wait is one identity row - the agent's avatar and the line beside it - and never a second
+  // avatar or a second name for the same turn.
+  assert.match(component, /uw-message uw-message-agent uw-message-pending/)
+  assert.match(component, /uw-message-working/)
+  assert.doesNotMatch(component, /uw-session-typing/)
   assert.match(component, /waiting/)
   assert.match(component, /sending/)
   assert.match(component, /Loading conversation/)
