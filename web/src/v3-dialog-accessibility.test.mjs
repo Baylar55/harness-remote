@@ -27,12 +27,12 @@ test("an open model popover inside a Session dialog owns Escape first", () => {
   assert.match(standalone, /modelPickerTrigger\.click\(\)/)
 })
 
-test("the Session-first shell dialogs all use the shared dismissal behaviour", () => {
+test("the active Session-first shell dialogs use the shared dismissal behaviour", () => {
   assert.match(standalone, /useDialogDismiss\(dialogRef, onClose\)/)
   assert.match(standalone, /useDialogDismiss\(pageRef, onClose, \{ autoFocus: false \}\)/)
   assert.match(actions, /useDialogDismiss\(renameRef, close/)
   assert.match(actions, /useDialogDismiss\(deleteRef, close/)
-  assert.match(handoff, /useDialogDismiss/)
+  assert.match(handoff, /return null/)
 })
 
 test("no blocking native dialog is used for destructive Session-first actions", () => {
