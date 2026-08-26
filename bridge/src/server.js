@@ -201,7 +201,11 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     if (backend !== "claude") return status
     const pendingRequests = acp.diagnostics?.()?.pendingRequests ?? []
     const lastActivityAt = Math.max(liveSessionActivity.get(sessionID) ?? 0, Number(fallbackActivityAt) || 0)
-    return corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt)
+    const corroborated = corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt)
+    // The transcript is part of the same presentation: a Session that is reported idle must not keep
+    // its Activity sections on Working, which is what correcting the status alone left on screen.
+    if (status?.type === "busy" && corroborated.type === "idle") service.settleReportedIdleActivity(sessionID)
+    return corroborated
   }
   const listVisibleSessions = async (directory) => {
     let sessions = await service.listSessions(directory)
