@@ -157,4 +157,32 @@ assert.deepEqual(
   'a stale old user-model envelope must never beat the newer OpenCode assistant model'
 )
 
+// --- 7. OpenCode assistant envelopes may omit the variant ----------------------------------------
+const flatAssistantModel = lastNativeMessageModel([
+  {
+    info: {
+      id: 'variant-user',
+      role: 'user',
+      time: { created: 3 },
+      model: { providerID: 'anthropic', modelID: 'claude-sonnet-4-6', variant: 'high' }
+    },
+    parts: [{ id: 'variant-user:text', type: 'text', text: 'use high reasoning' }]
+  },
+  {
+    info: {
+      id: 'variant-assistant',
+      role: 'assistant',
+      time: { created: 4, completed: 5 },
+      providerID: 'anthropic',
+      modelID: 'claude-sonnet-4-6'
+    },
+    parts: [{ id: 'variant-assistant:text', type: 'text', text: 'done' }]
+  }
+])
+assert.deepEqual(
+  flatAssistantModel,
+  { providerID: 'anthropic', modelID: 'claude-sonnet-4-6', variant: 'high' },
+  'a flat OpenCode assistant envelope must inherit the matching immediately preceding user variant'
+)
+
 console.log('native-session model lifecycle regressions: OK')
