@@ -13,7 +13,21 @@
      way both references do. Surplus window width becomes margin, not longer lines.
      Earlier attempts missed on both sides: 900px with a separate 66ch prose cap gave 81 characters
      with a code block twice its width beside it, and removing the cap gave 143. */
-  --hrsf-content-width: min(880px, 100%);
+  --hrsf-content-max: 880px;
+  --hrsf-content-width: min(var(--hrsf-content-max), 100%);
+  /* The horizontal inset the transcript and the composer both sit inside, declared once so the two
+     can be aligned on the same edge from a single number. */
+  --hrsf-gutter: clamp(18px, 3vw, 34px);
+  /* Optical centring.
+   *
+   * The reading column used to be centred inside the detail pane, which is what every reference
+   * client does - but those clients sit next to a ~260px rail, and this one next to a rail that is
+   * both wider and resizable. Centring in the pane therefore pushed the whole conversation to the
+   * right of the window's own centre by half the rail's width, and on a wide monitor that read as
+   * "the text is stuck to the right". Offsetting by half the rail centres the column on the window
+   * instead; `max(0px, ...)` below stops the offset from ever pulling the column past the pane's
+   * gutter when the window is too narrow to afford it. Zero on mobile, where there is no rail. */
+  --hrsf-optical-shift: calc(var(--hrsf-rail-width) / 2);
   background: var(--td3-bg);
 }
 
@@ -178,29 +192,45 @@
   color: var(--td3-muted);
 }
 
+/* State filter: a segmented control, not three loose pills.
+   The three views are mutually exclusive and always all three present, so they share one track and
+   split it evenly - which also stops "Attention" from being the only one that fits when a count
+   reaches three digits. */
 .hr-native-session-filters {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--td3-border-soft);
+  border-radius: 10px;
+  background: var(--td3-sunken-soft);
 }
 
 .hr-native-session-filters button {
-  min-height: 30px;
-  display: inline-flex;
+  min-width: 0;
+  min-height: 28px;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 5px;
-  padding: 0 9px;
+  padding: 0 6px;
   border: 1px solid transparent;
   border-radius: 8px;
   color: var(--td3-muted);
   background: transparent;
   font: inherit;
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
+  transition: color .12s ease, background-color .12s ease;
+}
+
+.hr-native-session-filters button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hr-native-session-filters button:hover,
@@ -210,14 +240,20 @@
   outline: 0;
 }
 
+.hr-native-session-filters button:focus-visible {
+  border-color: var(--td3-blue-border);
+}
+
 .hr-native-session-filters button.active {
   border-color: var(--td3-border-soft);
   color: var(--td3-text);
-  background: var(--td3-raise-2);
+  background: var(--td3-control);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
 }
 
 .hr-native-session-filters b {
   min-width: 16px;
+  flex: none;
   padding: 1px 5px;
   border-radius: 999px;
   color: inherit;
@@ -225,24 +261,72 @@
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
-.hr-native-session-filters select {
+
+.hr-native-session-filters button.active b {
+  background: var(--td3-raise-3);
+}
+
+/* Scope filters: real dropdowns.
+   A bare <select> squeezed into a flex row rendered as a bordered box with no visible value and no
+   visible caret, which is indistinguishable from an empty text field. The chip owns the border, a
+   leading icon names what is being scoped, and the caret is always drawn - the select itself is a
+   transparent layer on top so the native menu still opens from anywhere in the chip. */
+.hr-native-session-scopes {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 6px;
+}
+
+.hr-native-scope {
+  position: relative;
+  min-width: 0;
   min-height: 30px;
-  max-width: 132px;
-  margin-left: auto;
-  padding: 0 25px 0 8px;
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) 12px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
   border: 1px solid var(--td3-border-soft);
-  border-radius: 8px;
-  color: var(--td3-text-2);
+  border-radius: 9px;
+  color: var(--td3-muted);
   background: var(--td3-control);
-  font: inherit;
-  font-size: 10px;
   cursor: pointer;
 }
 
-.hr-native-session-filters select:focus-visible {
-  outline: 0;
+.hr-native-scope:hover {
+  border-color: var(--td3-border-strong);
+}
+
+.hr-native-scope:focus-within {
   border-color: var(--td3-blue-border);
   box-shadow: 0 0 0 2px var(--td3-blue-soft);
+}
+
+.hr-native-scope > svg {
+  display: block;
+  pointer-events: none;
+}
+
+.hr-native-scope select {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  color: var(--td3-text-2);
+  /* `taskdesk-workthreads.css` pins `background-color` on every select with `!important` so the
+     native option popover stays themed, and that wins here. The chip is painted with the same
+     `--td3-control`, so the select's own fill lands seamlessly inside it. */
+  background: transparent;
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 
@@ -744,7 +828,9 @@
   gap: 14px;
   padding: 10px 16px;
   border-bottom-color: var(--td3-border-soft);
-  background: var(--td3-panel);
+  /* Chrome, like the top bar and the conversation toolbar - not `--td3-panel`, which is the rail's
+     surface and made the header read as a third tone stacked on the chat's own. */
+  background: var(--td3-chrome);
 }
 
 .hr-native-session-eyebrow {
@@ -752,13 +838,152 @@
   font-size: 10px;
 }
 
-.hr-native-workspace-session-header h1 {
+.hr-native-session-heading h1 {
   margin: 2px 0;
   font-size: 17px;
   letter-spacing: -.015em;
 }
 
-.hr-native-workspace-session-header small {
+/* Inline rename.
+   Read and edit share one box: same font, same size, same baseline, same left edge. The only thing
+   that changes on activation is the field treatment, so committing or cancelling never moves the
+   header - and therefore never moves the conversation under it. */
+/* The heading takes the room the actions do not need, so a long Session name uses the header's
+   width instead of stopping at the width of the eyebrow above it. */
+.hr-native-session-heading {
+  flex: 1 1 auto;
+}
+
+.hr-native-session-title {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.hr-native-session-title-button {
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /* The negative inline start pulls the button's padding back so the title's glyphs stay on the
+     same left edge as the eyebrow above and the directory below it. */
+  margin-inline-start: -7px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-button > span {
+  min-width: 0;
+  overflow: hidden;
+  /* `.hr-native-workspace-session-header span` paints every span in this header muted; the title is
+     the one piece of text in it that is not secondary. */
+  color: var(--td3-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hr-native-session-title-button > svg {
+  flex: none;
+  opacity: 0;
+  color: var(--td3-muted);
+  transition: opacity .12s ease;
+}
+
+.hr-native-session-title-button:hover {
+  border-color: var(--td3-border-soft);
+  background: var(--td3-raise-1);
+}
+
+.hr-native-session-title-button:focus-visible {
+  outline: 0;
+  border-color: var(--td3-blue-border);
+  box-shadow: 0 0 0 2px var(--td3-blue-soft);
+}
+
+.hr-native-session-title-button:hover > svg,
+.hr-native-session-title-button:focus-visible > svg {
+  opacity: 1;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-field {
+  width: min(680px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: -7px;
+  padding: 1px 4px 1px 6px;
+  border: 1px solid var(--td3-blue-border);
+  border-radius: 8px;
+  background: var(--td3-field);
+  box-shadow: 0 0 0 2px var(--td3-blue-soft);
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-field input {
+  min-width: 0;
+  flex: 1;
+  padding: 2px 0;
+  border: 0;
+  outline: 0;
+  color: var(--td3-text);
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--td3-muted);
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-actions button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-actions button:first-child:hover,
+.hr-native-workspace-session-header .hr-native-session-title-actions button:first-child:focus-visible {
+  color: var(--td3-green-text);
+  background: var(--td3-green-soft);
+  outline: 0;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-actions button:last-child:hover,
+.hr-native-workspace-session-header .hr-native-session-title-actions button:last-child:focus-visible {
+  color: var(--td3-text-2);
+  background: var(--td3-raise-2);
+  outline: 0;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title.busy .hr-native-session-title-field {
+  opacity: .7;
+}
+
+.hr-native-workspace-session-header .hr-native-session-title-error {
+  display: block;
+  margin-top: 3px;
+  color: var(--td3-red-text) !important;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* The directory line under the title, and only that: the header also hosts the Session's action
+   dialogs, whose prose has to wrap. */
+.hr-native-session-heading > small {
   max-width: min(76vw, 880px);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -888,17 +1113,27 @@
   background: var(--td3-scrim);
 }
 
+/* Deleting a Session is a modal decision, so it is shown as a modal dialog.
+ *
+ * It was written as a popover anchored under the trash button - `position: absolute` against the
+ * header's action row - while behaving as a modal: full-viewport scrim, `aria-modal`, a Tab trap.
+ * That put an irreversible confirmation in the top-right corner of the window, hard against the
+ * header chrome it was overlapping, where its own width had nowhere to go. Centred on the viewport
+ * it has room, it is where the eye already is, and it matches the scrim that is already behind it. */
 .hr-session-action-panel {
-  position: absolute;
+  position: fixed;
   z-index: 60;
-  top: calc(100% + 7px);
-  right: 0;
-  width: min(340px, calc(100vw - 24px));
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(78vh, 560px);
+  overflow-y: auto;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid var(--td3-border-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--td3-panel-2);
   box-shadow: var(--td3-shadow-panel);
   text-align: left;
@@ -908,29 +1143,41 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .hr-session-action-heading > div {
   min-width: 0;
 }
 
+.hr-session-action-heading > .tdw-icon-button {
+  flex: none;
+}
+
+/* Every one of these is stated rather than inherited. This dialog is a child of the Session header,
+   whose own type rules used to reach in here and clip the sentence explaining what is about to be
+   deleted; the dialog's prose is its whole point and must always wrap. */
 .hr-session-action-heading strong,
 .hr-session-action-heading small {
   display: block;
+  max-width: none;
+  overflow: visible;
   color: var(--td3-text);
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .hr-session-action-heading strong {
-  font-size: 12.5px;
+  font-size: 14px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .hr-session-action-heading small {
-  margin-top: 3px;
+  margin-top: 6px;
   color: var(--td3-muted);
-  font-size: 10px;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .hr-session-action-field {
@@ -974,8 +1221,13 @@
 
 .hr-session-action-buttons {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.hr-session-action-buttons > .tdw-button {
+  min-height: 34px;
 }
 
 /* Deleting a native Session is irreversible from Harness Remote, so the confirming button must not
@@ -988,7 +1240,22 @@
 
 .hr-native-startup {
   width: min(680px, calc(100% - 36px));
-  justify-self: center;
+  margin-inline: auto;
+}
+
+/* The icon is the state's mark, so it is given a mark's shape rather than being left as a loose
+   glyph above the text: centred with the copy, in a tinted round badge that carries the state's own
+   colour (blue while connecting, red when unreachable). */
+.hr-native-startup > svg {
+  box-sizing: content-box;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 6px;
+  padding: 13px;
+  border: 1px solid var(--td3-border-soft);
+  border-radius: 50%;
+  color: var(--td3-muted);
+  background: var(--td3-raise-1);
 }
 
 .hr-native-startup > span {
@@ -1038,12 +1305,24 @@
   font-size: 10px;
 }
 
+.hr-native-startup.ready > svg,
 .hr-native-startup.connecting > svg {
+  border-color: var(--td3-blue-border-soft);
   color: var(--td3-blue-text);
+  background: var(--td3-blue-soft-2);
 }
 
-.hr-native-startup.offline > svg {
+.hr-native-startup.offline > svg,
+/* The eyebrow names the state, so it wears the state's colour rather than the accent every other
+   state uses - a red mark over a blue "MACHINES UNAVAILABLE" reads as two different messages. */
+.hr-native-startup.offline > span {
+  border-color: var(--td3-red-border);
   color: var(--td3-red-text);
+  background: var(--td3-red-soft);
+}
+
+.hr-native-startup.offline > span {
+  background: none;
 }
 
 .hr-session-settings-backdrop {
@@ -1236,13 +1515,38 @@
   font-size: 10px;
 }
 
+/* One surface from the session header down to the composer.
+ *
+ * The conversation used to paint three different tones inside a pane that reads as one thing: the
+ * transcript on `--td3-bg`, the band around the composer on `--td3-panel` (inherited from
+ * `work-thread-detail.css`, which styles the Work Thread detail pane, not this one) and the app
+ * behind both on `--td3-bg` again. That produced a hard horizontal seam just above the composer and
+ * a chat area that did not match the rest of the window. The conversation now inherits the page
+ * surface end to end, and the only lifted element is the composer card itself - which is what makes
+ * an input read as an input. */
+.hr-native-session-observer .tdw-work-thread-conversation,
+.hr-native-session-observer .uw-conversation-core,
+.hr-native-session-observer .uw-transcript-shell {
+  background: transparent;
+}
+
 .hr-native-session-observer .uw-transcript {
-  padding: 18px clamp(18px, 3vw, 34px) 24px;
-  background: var(--td3-bg);
+  padding: 18px var(--hrsf-gutter) 24px;
+  background: transparent;
+}
+
+/* Every element that belongs to the reading column shares one edge, including the optical shift.
+   Listing them together is deliberate: a row that opts out of the shift lands on a different left
+   edge than the message above it, which is worse than no shift at all. */
+.hr-native-session-observer .uw-message,
+.hr-native-session-observer .tdw-conversation-event,
+.hr-native-session-observer .uw-history-loader,
+.hr-native-session-observer .uw-empty-panel {
+  width: min(var(--hrsf-content-max), 100%);
+  margin-inline: max(0px, calc((100% - var(--hrsf-content-max)) / 2 - var(--hrsf-optical-shift))) auto;
 }
 
 .hr-native-session-observer .uw-message {
-  width: min(var(--hrsf-content-width), 100%);
   grid-template-columns: 28px minmax(0, 1fr);
   gap: 10px;
   margin-bottom: 18px;
@@ -1304,8 +1608,11 @@
   background: var(--td3-blue-soft);
 }
 
+/* Activity is a section of the reply, not a footnote to it. Capping it at 760px inside an 880px
+   column left it visibly narrower than the prose, the tables and the code blocks stacked directly
+   above and below it - the one element in the transcript that did not reach the column's edge. */
 .hr-native-session-observer .uw-activity-group {
-  width: min(760px, 100%);
+  width: 100%;
   margin-top: 8px;
   border-color: var(--td3-border-soft);
   border-radius: 8px;
@@ -1373,10 +1680,12 @@
 }
 
 .hr-native-session-observer .uw-composer-shell {
-  /* The same horizontal inset the transcript uses, so the composer's edges land exactly on the
-     message rows' edges instead of overhanging them by the difference between two insets. */
-  width: min(var(--hrsf-content-width), calc(100% - 2 * clamp(18px, 3vw, 34px)));
+  /* The same horizontal inset and the same optical shift the transcript rows use, so the composer's
+     edges land exactly on the message rows' edges. The composer's containing block is the pane
+     itself rather than the transcript's padding box, so the gutter is added back explicitly here. */
+  width: min(var(--hrsf-content-max), calc(100% - 2 * var(--hrsf-gutter)));
   margin: 0 auto 12px;
+  margin-inline: calc(var(--hrsf-gutter) + max(0px, (100% - 2 * var(--hrsf-gutter) - var(--hrsf-content-max)) / 2 - var(--hrsf-optical-shift))) auto;
   border-color: var(--td3-border);
   border-radius: 12px;
   background: var(--td3-panel-2);
@@ -1411,7 +1720,40 @@
   box-shadow: none;
 }
 
+/* The turn's live state, written into the reply's own name.
+   It is deliberately only a colour and a slow pulse: this is the same line, in the same place, that
+   will read the agent's name when the turn ends, and a badge or a spinner beside it would be the
+   second marker for one turn that this whole row exists to avoid. */
+.hr-native-session-observer .uw-message-body > header strong.uw-message-working {
+  color: var(--td3-blue-text);
+  animation: hrsf-working-pulse 1.9s ease-in-out infinite;
+}
+
+@keyframes hrsf-working-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .58; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hr-native-session-observer .uw-message-body > header strong.uw-message-working {
+    animation: none;
+  }
+}
+
+/* The reply before it has produced anything is only that one row, so the body must not keep the gap
+   it leaves for content that is not there yet. */
+.hr-native-session-observer .uw-message-pending .uw-message-body > header {
+  margin-bottom: 0;
+}
+
 @media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
+  /* The rail is a full-screen sheet here rather than a column beside the chat, so there is nothing
+     for the reading column to be offset against and the shift has to go back to zero. */
+  .hr-native-workspace {
+    --hrsf-optical-shift: 0px;
+    --hrsf-gutter: 8px;
+  }
+
   .hr-native-workspace:has(.hr-native-workspace-detail.mobile-open) > .tdw-topbar {
     display: none !important;
   }
@@ -1433,8 +1775,26 @@
     padding: max(7px, env(safe-area-inset-top)) 9px 7px 47px;
   }
 
-  .hr-native-workspace-session-header h1 {
+  .hr-native-session-heading h1 {
     font-size: 15px;
+  }
+
+  /* A pencil that only appears on hover names nothing on a touch screen, where there is no hover. */
+  .hr-native-session-title-button > svg {
+    opacity: 1;
+  }
+
+  .hr-native-workspace-session-header .hr-native-session-title-field {
+    width: 100%;
+  }
+
+  .hr-native-workspace-session-header .hr-native-session-title-field input {
+    font-size: 16px;
+  }
+
+  .hr-native-workspace-session-header .hr-native-session-title-actions button {
+    width: 34px;
+    height: 34px;
   }
 
   .hr-native-home {
@@ -1460,8 +1820,9 @@
   }
 
   .hr-native-session-filters button {
-    min-height: 38px;
-    padding-inline: 11px;
+    min-height: 36px;
+    padding-inline: 8px;
+    font-size: 11.5px;
   }
 
   .hr-native-machine-heading {
@@ -1491,7 +1852,8 @@
   .hr-native-project-more {
     min-height: 44px;
   }
-  .hr-native-session-filters select { min-height: 38px; max-width: 126px; font-size: 11px; }
+  .hr-native-scope { min-height: 40px; }
+  .hr-native-scope select { font-size: 12px; }
   .hr-session-settings-backdrop {
     inset: 0 0 var(--hr-mobile-nav-height);
     display: block;
@@ -1531,8 +1893,18 @@
   }
   .hr-native-session-stats { display: none; }
   .hr-session-action-panel {
-    right: -4px;
-    width: min(340px, calc(100vw - 16px));
+    width: min(420px, calc(100vw - 20px));
+  }
+
+  /* An irreversible confirmation is modal, so the app nav must not stay live above its scrim - the
+     same guard the shell's other modal sheets already get. */
+  .uw-standalone-host:has(.hr-session-action-backdrop) .hr-mobile-nav {
+    display: none !important;
+  }
+
+  .hr-session-action-buttons > .tdw-button {
+    flex: 1 1 140px;
+    justify-content: center;
   }
   /* These two are the only Session mutations reachable from a phone, and 34px misses the platform
      target guidance the rest of the mobile chrome already follows. */

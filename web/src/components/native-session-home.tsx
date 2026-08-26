@@ -12,7 +12,7 @@ import { nativeSessionDisplayTitle } from "../native-session-title"
 import { useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
-import { ChatIcon, ChevronDownIcon, LoadingIcon, PlusIcon, SearchIcon, ServerIcon } from "../Icons"
+import { AgentIcon, ChatIcon, ChevronDownIcon, LoadingIcon, PlusIcon, SearchIcon, ServerIcon } from "../Icons"
 import "../native-session-home.css"
 
 type Source = {
@@ -56,6 +56,8 @@ type Props = {
   onAttentionCountChange?: (count: number) => void
   selectedKey?: string
   selectedState?: SessionPresentationState
+  /** Fires when native Session discovery has settled at least once for the current machines. */
+  onDiscoveredChange?: (discovered: boolean) => void
 }
 
 const SESSION_HOME_REFRESH_MS = 30_000
@@ -233,12 +235,19 @@ function nativeCreateAgents(snapshot: MachineSnapshot): MachineAgentHost[] {
   return snapshot.agents.filter(canCreateNativeSession)
 }
 
-export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttentionCountChange, selectedKey, selectedState }: Props) {
+export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttentionCountChange, onDiscoveredChange, selectedKey, selectedState }: Props) {
   const t = useTranslator()
   const [records, setRecords] = useState<RecordWithMachine[]>([])
   const [projectsByMachine, setProjectsByMachine] = useState<Record<string, MachineProject[]>>({})
   const [loading, setLoading] = useState(false)
-  const [loaded, setLoaded] = useState(false)
+  /**
+   * Which set of machines the list has actually been discovered for, rather than a bare "has ever
+   * loaded". Adding the first machine used to leave the flag from the empty state standing, so the
+   * workspace was told the Sessions were in while they were still being read. Keyed by machine, a
+   * genuinely new set of machines is a fresh discovery; a refresh of the same set is not, so the
+   * ten-second cycle never drops the list back to a loading state.
+   */
+  const [loadedSignature, setLoadedSignature] = useState<string | null>(null)
   const [revision, setRevision] = useState(0)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(() => new Set())
@@ -260,6 +269,9 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
   // native discovery clears these bridge states and becomes authoritative again.
   const [presentationOverrides, setPresentationOverrides] = useState<Record<string, SessionPresentationState>>({})
 
+  const machineSignature = sources.map(({ machine }) => machine.id).join("|")
+  const loaded = loadedSignature === machineSignature
+
   useEffect(() => {
     if (!selectedKey || !selectedState) return
     setPresentationOverrides((current) => current[selectedKey] === selectedState
@@ -276,7 +288,7 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
       setRecords([])
       setProjectsByMachine({})
       setPresentationOverrides({})
-      setLoaded(true)
+      setLoadedSignature(machineSignature)
       setLoading(false)
       return
     }
@@ -305,11 +317,13 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
       // remembered only to span the gap between a detail event and this discovery cycle.
       setPresentationOverrides({})
       setRecords(results.flatMap((result) => result.records).sort(sessionActivityCompare))
-      setLoaded(true)
+      setLoadedSignature(machineSignature)
     }).catch((reason) => {
       // Preserve an already loaded list, but never present a failed refresh as a genuinely empty machine.
       if (!cancelled) {
-        setLoaded(true)
+        // A failed pass still counts as settled: the notice above the list explains it, and the
+        // workspace must not sit on a waiting screen for a machine that is not coming back.
+        setLoadedSignature(machineSignature)
         setDiscoveryError(reason instanceof Error ? reason.message : String(reason))
       }
     }).finally(() => {
@@ -395,6 +409,10 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
   useEffect(() => {
     onAttentionCountChange?.(attentionCount)
   }, [attentionCount, onAttentionCountChange])
+
+  useEffect(() => {
+    onDiscoveredChange?.(loaded)
+  }, [loaded, onDiscoveredChange])
 
   const filteredGroups = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -526,9 +544,11 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
       <div className="hr-native-home-heading">
         <div>
           <h2>{t("nav.sessions")}</h2>
-          <span>{activeCount
-            ? t("sf.workingShown", { working: activeCount, shown: scopedRecords.length })
-            : t("sf.recentCount", { count: scopedRecords.length })}</span>
+          <span>{!loaded
+            ? t("sf.findingSessions")
+            : activeCount
+              ? t("sf.workingShown", { working: activeCount, shown: scopedRecords.length })
+              : t("sf.recentCount", { count: scopedRecords.length })}</span>
         </div>
         {/* Rename and Delete live in the chat header of the open Session, and refreshing is owned by
             the workspace top bar plus the automatic discovery cycle. The Session list keeps exactly
@@ -551,26 +571,41 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
               aria-label={t("sf.searchSessionsLabel")}
             />
           </label>
+          {/* Two different kinds of control, so two different shapes.
+              State is a segmented control: three mutually exclusive views of the same list, always
+              visible, each carrying its own count. Scope is a pair of dropdowns. Sharing one
+              horizontally scrolling row made the selects collapse to a 35px stub with their value
+              clipped away, which is what made them read as empty text fields rather than menus. */}
           <div className="hr-native-session-filters" role="group" aria-label={t("sf.filterSessions")}>
-            {sources.length > 1 ? (
-              <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)} aria-label={t("sf.filterByMachine")}>
-                <option value="">{t("sf.allMachinesCount", { count: records.length })}</option>
-                {machineChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
-              </select>
-            ) : null}
             <button type="button" className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")} aria-pressed={filter === "all"}>
-              {t("sf.filterAll")} <b>{scopedRecords.length}</b>
+              <span>{t("sf.filterAll")}</span> <b>{scopedRecords.length}</b>
             </button>
             <button type="button" className={filter === "working" ? "active" : ""} onClick={() => setFilter("working")} aria-pressed={filter === "working"}>
-              {t("sf.filterLive")} <b>{activeCount}</b>
+              <span>{t("sf.filterLive")}</span> <b>{activeCount}</b>
             </button>
             <button type="button" className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")} aria-pressed={filter === "attention"}>
-              {t("sf.filterAttention")} <b>{attentionCount}</b>
+              <span>{t("sf.filterAttention")}</span> <b>{attentionCount}</b>
             </button>
-            <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} aria-label={t("sf.filterByAgent")}>
-              <option value="">{t("sf.allHarnesses")}</option>
-              {agentChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
-            </select>
+          </div>
+          <div className="hr-native-session-scopes">
+            {sources.length > 1 ? (
+              <label className="hr-native-scope">
+                <ServerIcon size={13} />
+                <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)} aria-label={t("sf.filterByMachine")}>
+                  <option value="">{t("sf.allMachinesCount", { count: records.length })}</option>
+                  {machineChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
+                </select>
+                <ChevronDownIcon size={12} />
+              </label>
+            ) : null}
+            <label className="hr-native-scope">
+              <AgentIcon size={13} />
+              <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} aria-label={t("sf.filterByAgent")}>
+                <option value="">{t("sf.allHarnesses")}</option>
+                {agentChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
+              </select>
+              <ChevronDownIcon size={12} />
+            </label>
           </div>
         </div>
       ) : null}
@@ -649,7 +684,7 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
                 <span className="hr-native-machine-metrics">
                   {machineAttentionCount ? <b>{t("sf.attentionCount", { count: machineAttentionCount })}</b> : null}
                   {workingCount ? <em>{t("sf.liveCount", { count: workingCount })}</em> : null}
-                  <small>{state === "online" ? sessionCount : state === "loading" ? "…" : t("sf.offline")}</small>
+                  <small>{state === "online" ? (loaded ? sessionCount : "…") : state === "loading" ? "…" : t("sf.offline")}</small>
                   <i className="hr-native-machine-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i>
                 </span>
               </button>
@@ -657,8 +692,13 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
               <>
                 {projects.length === 0 ? (
                   <div className="hr-native-machine-empty">
-                    {state === "loading" ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
-                    <span>{state === "loading" ? t("sf.discoveringProjects") : state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
+                    {/* A reachable machine whose Sessions have not been read yet is not a machine
+                        with no Sessions. Until the first discovery pass settles it says so, rather
+                        than reporting an emptiness it has not established. */}
+                    {state === "loading" || (state === "online" && !loaded) ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
+                    <span>{state === "loading" || (state === "online" && !loaded)
+                      ? t("sf.discoveringProjects")
+                      : state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
                   </div>
                 ) : null}
 

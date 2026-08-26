@@ -24,6 +24,7 @@ import { useTranslator } from "../useTranslator"
 import { NativeSessionActions } from "./native-session-actions"
 import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
+import { NativeSessionTitle } from "./native-session-rename"
 import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
 import "../taskdesk-workthreads.css"
 import "../taskdesk-mobile-navigation.css"
@@ -296,6 +297,9 @@ function NativeSessionsWorkspace({
   // return an identical snapshot, so the Session list needs an explicit signal to re-read its
   // Sessions after a rename or delete instead of waiting up to 30s for its own refresh.
   const [listRevision, setListRevision] = useState(0)
+  // Machines answering is only the first half of starting up; the Session list is the half the user
+  // is actually waiting for. See the startup states below.
+  const [sessionsDiscovered, setSessionsDiscovered] = useState(machines.length === 0)
   const [railWidth, setRailWidth] = useState<number | null>(loadRailWidth)
   const refreshGeneration = useRef(0)
 
@@ -404,6 +408,21 @@ function NativeSessionsWorkspace({
       : t("sf.policyRulesLabel", { count: selectedPermissionRules.length })
     : ""
 
+  /**
+   * Startup has two halves and the pane must not pretend the second one is over.
+   *
+   * "machines": still asking the configured machines whether they are there.
+   * "sessions": they have answered and their Sessions are being read.
+   * "ready": both are done - only now can the pane speak about opening a Session, or about none of
+   * the machines being reachable, without contradicting the rail next to it.
+   *
+   * Only the first pass is a startup: once discovery has settled, the ten-second refresh keeps
+   * `loaded` and `sessionsDiscovered` true, so a background cycle never throws the user back to a
+   * waiting screen.
+   */
+  const startupPhase: "machines" | "sessions" | "ready" =
+    !loaded || loadingCount > 0 ? "machines" : !sessionsDiscovered ? "sessions" : "ready"
+
   function openSession(target: NativeSessionSurfaceTarget) {
     setSelectedState(undefined)
     setSelected(target)
@@ -456,6 +475,7 @@ function NativeSessionsWorkspace({
             onOpen={openSession}
             refreshToken={listRevision}
             onAttentionCountChange={onAttentionCountChange}
+            onDiscoveredChange={setSessionsDiscovered}
             selectedKey={selected?.key}
             selectedState={selectedState}
           />
@@ -497,7 +517,7 @@ function NativeSessionsWorkspace({
                     <i aria-hidden="true">/</i>
                     <strong>{selectedProject}</strong>
                   </div>
-                  <h1>{selected.title}</h1>
+                  <NativeSessionTitle target={selected} onRenamed={handleSessionRenamed} />
                   <small title={selected.directory}>
                     {selected.external ? t("sf.startedInHarness") : t("sf.createdInHarnessRemote")}
                     {selected.directory ? ` · ${selected.directory}` : ""}
@@ -519,7 +539,7 @@ function NativeSessionsWorkspace({
                       {Number(selected.cost) > 0 ? <span title={t("sf.reportedCost")}>${Number(selected.cost).toFixed(2)}</span> : null}
                     </div>
                   ) : null}
-                  <NativeSessionActions target={selected} onRenamed={handleSessionRenamed} onDeleted={handleSessionDeleted} />
+                  <NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />
                   <NativeSessionHandoffControl source={selected} agents={selectedRuntime?.snapshot?.agents || []} onOpen={openSession} />
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>
@@ -536,13 +556,20 @@ function NativeSessionsWorkspace({
               <p>{t("sf.addFirstMachineBody")}</p>
               <button type="button" className="tdw-button primary" onClick={onManageMachines}><ServerIcon size={15} /> {t("sf.addMachine")}</button>
             </div>
-          ) : !loaded || (onlineCount === 0 && loadingCount > 0) ? (
+          ) : startupPhase !== "ready" ? (
+            /* One waiting state that names which half of startup is still running, held until both
+               halves are done. It used to end as soon as the machines answered, so the pane invited
+               the user to open a Session while the rail beside it was still empty and, for a moment,
+               still showing the machine that had failed - which reads as a failed startup rather
+               than one in progress. */
             <div className="hr-native-workspace-empty hr-native-startup connecting" role="status" aria-live="polite">
               <LoadingIcon size={28} />
               <span>{t("sf.preparing")}</span>
-              <strong>{t("sf.connectingMachines")}</strong>
-              <p>{t("sf.connectingBody")}</p>
-              <small>{t("sf.configuredMachines", { count: machines.length })}</small>
+              <strong>{startupPhase === "machines" ? t("sf.connectingMachines") : t("sf.loadingSessions")}</strong>
+              <p>{startupPhase === "machines" ? t("sf.connectingBody") : t("sf.loadingSessionsBody")}</p>
+              <small>{startupPhase === "machines"
+                ? t("sf.configuredMachines", { count: machines.length })
+                : t("sf.onlineCount", { count: onlineCount })}</small>
             </div>
           ) : onlineCount === 0 ? (
             <div className="hr-native-workspace-empty hr-native-startup offline">

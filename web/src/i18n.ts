@@ -377,6 +377,8 @@ type TranslationKey =
   | 'sf.enterSessionName'
   | 'sf.renaming'
   | 'sf.rename'
+  | 'sf.renameHint'
+  | 'sf.renameSessionNamed'
   | 'sf.deleteSessionTitle'
   | 'sf.deleteSubtitle'
   | 'sf.closeDelete'
@@ -403,6 +405,8 @@ type TranslationKey =
   | 'sf.preparing'
   | 'sf.connectingMachines'
   | 'sf.connectingBody'
+  | 'sf.loadingSessions'
+  | 'sf.loadingSessionsBody'
   | 'sf.configuredMachines'
   | 'sf.machinesUnavailable'
   | 'sf.couldNotConnect'
@@ -840,6 +844,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': 'Enter a Session name.',
     'sf.renaming': 'Renaming…',
     'sf.rename': 'Rename',
+    'sf.renameHint': 'Enter to save · Esc to cancel',
+    'sf.renameSessionNamed': 'Rename Session: {title}',
     'sf.deleteSessionTitle': 'Delete “{title}”?',
     'sf.deleteSubtitle': 'This deletes the native Session from {agent}. This cannot be undone from Harness Remote.',
     'sf.closeDelete': 'Close Delete Session',
@@ -866,6 +872,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': 'Preparing Harness Remote',
     'sf.connectingMachines': 'Connecting to your machines…',
     'sf.connectingBody': 'Discovering Projects, installed coding agents and native Sessions. An ACP harness may need a few seconds to start.',
+    'sf.loadingSessions': 'Loading Sessions',
+    'sf.loadingSessionsBody': 'Reading the native Sessions the connected machines\' coding agents own.',
     'sf.configuredMachines': '{count} configured machines',
     'sf.machinesUnavailable': 'Machines unavailable',
     'sf.couldNotConnect': 'Harness Remote could not connect',
@@ -1303,6 +1311,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': 'Inserisci un nome per la sessione.',
     'sf.renaming': 'Rinomina…',
     'sf.rename': 'Rinomina',
+    'sf.renameHint': 'Invio per salvare · Esc per annullare',
+    'sf.renameSessionNamed': 'Rinomina sessione: {title}',
     'sf.deleteSessionTitle': 'Eliminare “{title}”?',
     'sf.deleteSubtitle': 'Elimina la sessione nativa da {agent}. L\'operazione non è annullabile da Harness Remote.',
     'sf.closeDelete': 'Chiudi Elimina sessione',
@@ -1329,6 +1339,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': 'Preparazione di Harness Remote',
     'sf.connectingMachines': 'Connessione alle tue macchine…',
     'sf.connectingBody': 'Individuazione di progetti, coding agent installati e sessioni native. Un harness ACP può richiedere alcuni secondi per avviarsi.',
+    'sf.loadingSessions': 'Caricamento sessioni',
+    'sf.loadingSessionsBody': 'Lettura delle sessioni native possedute dai coding agent di ogni macchina.',
     'sf.configuredMachines': '{count} macchine configurate',
     'sf.machinesUnavailable': 'Macchine non raggiungibili',
     'sf.couldNotConnect': 'Harness Remote non è riuscito a connettersi',
@@ -1718,6 +1730,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': '請輸入工作階段名稱。',
     'sf.renaming': '重新命名中…',
     'sf.rename': '重新命名',
+    'sf.renameHint': '按 Enter 儲存 · 按 Esc 取消',
+    'sf.renameSessionNamed': '重新命名工作階段：{title}',
     'sf.deleteSessionTitle': '要刪除「{title}」嗎？',
     'sf.deleteSubtitle': '這會從 {agent} 刪除原生工作階段，且無法從 Harness Remote 復原。',
     'sf.closeDelete': '關閉刪除工作階段',
@@ -1744,6 +1758,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': '正在準備 Harness Remote',
     'sf.connectingMachines': '正在連線到你的機器…',
     'sf.connectingBody': '正在探索專案、已安裝的編碼代理與原生工作階段。ACP harness 可能需要幾秒鐘啟動。',
+    'sf.loadingSessions': '載入工作階段',
+    'sf.loadingSessionsBody': '正在讀取各機器的程式代理所擁有的原生工作階段。',
     'sf.configuredMachines': '已設定 {count} 部機器',
     'sf.machinesUnavailable': '機器無法使用',
     'sf.couldNotConnect': 'Harness Remote 無法連線',
@@ -2178,6 +2194,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': '请输入会话名称。',
     'sf.renaming': '重命名中…',
     'sf.rename': '重命名',
+    'sf.renameHint': '按 Enter 保存 · 按 Esc 取消',
+    'sf.renameSessionNamed': '重命名会话：{title}',
     'sf.deleteSessionTitle': '要删除“{title}”吗？',
     'sf.deleteSubtitle': '这会从 {agent} 删除原生会话，且无法从 Harness Remote 撤销。',
     'sf.closeDelete': '关闭删除会话',
@@ -2204,6 +2222,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': '正在准备 Harness Remote',
     'sf.connectingMachines': '正在连接你的机器…',
     'sf.connectingBody': '正在发现项目、已安装的编码代理和原生会话。ACP harness 可能需要几秒钟启动。',
+    'sf.loadingSessions': '加载会话',
+    'sf.loadingSessionsBody': '正在读取各机器的编码代理所拥有的原生会话。',
     'sf.configuredMachines': '已配置 {count} 台机器',
     'sf.machinesUnavailable': '机器不可用',
     'sf.couldNotConnect': 'Harness Remote 无法连接',

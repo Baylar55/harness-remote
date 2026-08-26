@@ -12,6 +12,7 @@ const modelRecovery = read('./native-session-model.ts')
 const observer = read('./components/native-session-observer.tsx')
 const home = read('./components/native-session-home.tsx')
 const actions = read('./components/native-session-actions.tsx')
+const rename = read('./components/native-session-rename.tsx')
 const workThread = read('./components/work-thread-conversation.tsx')
 const liveRefresh = read('./taskdesk-session-live-refresh.ts')
 const timeline = read('./work-thread-timeline.ts')
@@ -49,12 +50,13 @@ assert.ok(home.includes('canCreateNativeSession'), 'Session Home must expose onl
 assert.ok(home.includes('aria-label={t("sf.filterByMachine")}') && home.includes('t("sf.allMachinesCount"'), 'multi-machine navigation must offer an explicit All/single-machine filter')
 
 // Rename/Delete act on the open native Session in its header, not on whichever row happens to be
-// selected in the navigation rail.
+// selected in the navigation rail. Rename is an inline edit of that header's heading; Delete keeps
+// its confirmation panel, because it is not reversible.
 assert.equal(home.includes('api.renameSession('), false, 'Session navigation must not own rename mutations')
 assert.equal(home.includes('api.deleteSession('), false, 'Session navigation must not own delete mutations')
-assert.ok(actions.includes('api.renameSession(target.config, target.sessionID'), 'open Session action must rename the real native Session')
+assert.ok(rename.includes('api.renameSession(target.config, target.sessionID'), 'open Session action must rename the real native Session')
 assert.ok(actions.includes('api.deleteSession(target.config, target.sessionID'), 'open Session action must delete the real native Session')
-assert.ok(actions.includes('target.renameSupported') && actions.includes('target.deleteSupported'), 'native metadata actions must follow harness capabilities')
+assert.ok(rename.includes('target.renameSupported') && actions.includes('target.deleteSupported'), 'native metadata actions must follow harness capabilities')
 assert.ok(actions.includes('t("sf.keepSession")') && actions.includes('t("sf.deleteSession")'), 'native deletion must use an inline translated confirmation')
 assert.equal(actions.includes('window.confirm'), false, 'native deletion must not use a blocking browser dialog')
 
@@ -140,6 +142,7 @@ for (const retiredPath of [
 assert.match(handoff, /export function NativeSessionHandoffControl\(_props: Props\)\s*\{\s*return null\s*\}/, 'cross-agent handoff UI must remain disabled during single-Session stabilization')
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
 assert.ok(standalone.includes('<NativeSessionHome'), 'Session-first navigation must remain native discovery based')
-assert.ok(standalone.includes('<NativeSessionActions target={selected} onRenamed={handleSessionRenamed} onDeleted={handleSessionDeleted} />'), 'open Session header must own rename/delete actions')
+assert.ok(standalone.includes('<NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />'), 'open Session header must own the delete action')
+assert.ok(standalone.includes('<NativeSessionTitle target={selected} onRenamed={handleSessionRenamed} />'), 'open Session header must own rename as an inline edit of its own heading')
 
 console.log('session-first v3-first architecture guards passed')

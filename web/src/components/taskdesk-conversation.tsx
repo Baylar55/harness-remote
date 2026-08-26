@@ -5,6 +5,20 @@ import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
+const HARNESS_ICON_FILES: Record<string, string> = {
+  codex: "codex.svg",
+  claude: "claude.svg",
+  opencode: "opencode.svg",
+  omp: "omp.svg",
+  pi: "pi.svg"
+}
+
+function harnessIconUrl(backend: string | undefined): string | undefined {
+  if (!backend) return undefined
+  const file = HARNESS_ICON_FILES[backend.toLowerCase()]
+  return file ? `${import.meta.env.BASE_URL}harness-icons/${file}` : undefined
+}
+
 const NEAR_BOTTOM_PX = 96
 const COMPOSER_MAX_HEIGHT_PX = 180
 const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
@@ -79,23 +93,32 @@ const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { mes
   )
 })
 
-const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, workingLabel }: { agentLabel: string; workingLabel?: string }) {
-  const [elapsed, setElapsed] = useState(0)
-
-  useEffect(() => {
-    const started = Date.now()
-    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1_000)), 1_000)
-    return () => window.clearInterval(timer)
-  }, [])
-
+/**
+ * The reply, before it has any content.
+ *
+ * The wait used to be staged in its own containers: a "getting started" card appeared, was removed,
+ * and an agent message of a different shape took its place - and then said the same thing a second
+ * time in a status row underneath its own name. Two avatars, two names, one turn.
+ *
+ * There is one identity row per reply and the wait happens *in* it. The row is the agent's avatar
+ * and the line beside it; while the turn is live that line reads "<agent> is getting started" and
+ * then "<agent> is working", and when the turn ends it reads the agent's name. Content, reasoning
+ * and tool cards fill in underneath the row that is already there. Nothing is added, removed or
+ * duplicated as the turn progresses - one line changes what it says.
+ */
+const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, agentBackend, workingLabel }: { agentLabel: string; agentBackend?: string; workingLabel?: string }) {
+  const icon = harnessIconUrl(agentBackend)
   return (
-    <div className="uw-session-typing" role="status" aria-live="polite" aria-label={`Waiting for ${agentLabel} response`}>
-      <span className="uw-thinking-orb" aria-hidden="true"><i /><i /><i /></span>
-      <span className="uw-thinking-copy">
-        <strong>{workingLabel || `${agentLabel} is working`}</strong>
-        <small>{elapsed < 2 ? "Starting…" : `${elapsed}s`}</small>
-      </span>
-    </div>
+    <article className="uw-message uw-message-agent uw-message-pending">
+      <div className="uw-avatar uw-avatar-agent" aria-hidden="true">
+        {icon ? <img src={icon} alt="" /> : agentLabel.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="uw-message-body">
+        <header>
+          <strong className="uw-message-working" role="status" aria-live="polite">{workingLabel || `${agentLabel} is working`}</strong>
+        </header>
+      </div>
+    </article>
   )
 })
 
@@ -124,6 +147,7 @@ function transcriptPropsEqual(previous: TranscriptProps, next: TranscriptProps):
 const ConversationTranscript = memo(function ConversationTranscript({
   messages,
   agentLabel,
+  agentBackend,
   loading = false,
   waiting = false,
   ready = true,
@@ -263,7 +287,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
                 ))}
           </>
         )}
-        {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
+        {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} agentBackend={agentBackend} workingLabel={workingLabel} /> : null}
       </div>
 
       {jumpAffordances.top || jumpAffordances.bottom ? (

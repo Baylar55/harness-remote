@@ -76,12 +76,18 @@ test("native Session metadata actions belong to the open Session, not the naviga
   const standalone = read("./components/standalone-universal-workspace.tsx")
   const home = read("./components/native-session-home.tsx")
   const actions = read("./components/native-session-actions.tsx")
+  const rename = read("./components/native-session-rename.tsx")
 
   assert.match(standalone, /<NativeSessionActions target=\{selected\}/)
-  assert.match(actions, /api\.renameSession/)
   assert.match(actions, /api\.deleteSession/)
-  assert.match(actions, /target\.renameSupported/)
   assert.match(actions, /target\.deleteSupported/)
+  // Rename edits the heading the header already shows, so it lives on that heading rather than in a
+  // panel that covers it. It still writes through the owning harness, and still only when the
+  // harness reports that it can.
+  assert.match(standalone, /<NativeSessionTitle target=\{selected\}/)
+  assert.match(rename, /api\.renameSession/)
+  assert.match(rename, /target\.renameSupported/)
+  assert.doesNotMatch(actions, /api\.renameSession/)
   assert.doesNotMatch(home, /api\.renameSession/)
   assert.doesNotMatch(home, /api\.deleteSession/)
 })
