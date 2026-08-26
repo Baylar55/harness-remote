@@ -5,6 +5,10 @@ import test from "node:test"
 import { AcpService } from "../src/acp-service.js"
 import { HARNESS_PROFILES, resolveAcpLaunch } from "../src/harness-profiles.js"
 import { detectBackends, resolveLaunchPlan } from "../src/launcher.js"
+import {
+  CLAUDE_REPORTED_BUSY_STALE_MS,
+  corroborateClaudeSessionStatus
+} from "../src/server.js"
 import { TaskLauncher } from "../src/task-launcher.js"
 
 test("Claude remains a first-class v3 ACP backend", () => {
@@ -16,6 +20,63 @@ test("Claude remains a first-class v3 ACP backend", () => {
   assert.equal(profile.capabilities.prompt, true)
   assert.equal(profile.capabilities.models, true)
   assert.equal(profile.capabilities.todos, true)
+})
+
+test("Claude public status stops reporting a finished stale turn as Working", () => {
+  const now = 1_800_000_000_000
+  const busy = { type: "busy" }
+  const recentPrompt = [{
+    method: "session/prompt",
+    sessionID: "claude-session",
+    idleMs: 5_000
+  }]
+  assert.deepEqual(
+    corroborateClaudeSessionStatus(
+      busy,
+      "claude-session",
+      recentPrompt,
+      now - CLAUDE_REPORTED_BUSY_STALE_MS - 1,
+      now
+    ),
+    busy
+  )
+
+  const stalePrompt = [{
+    method: "session/prompt",
+    sessionID: "claude-session",
+    idleMs: CLAUDE_REPORTED_BUSY_STALE_MS + 1
+  }]
+  assert.deepEqual(
+    corroborateClaudeSessionStatus(
+      busy,
+      "claude-session",
+      stalePrompt,
+      now - CLAUDE_REPORTED_BUSY_STALE_MS - 1,
+      now
+    ),
+    { type: "idle" }
+  )
+
+  assert.deepEqual(
+    corroborateClaudeSessionStatus(
+      busy,
+      "claude-session",
+      [],
+      now - CLAUDE_REPORTED_BUSY_STALE_MS + 1,
+      now
+    ),
+    busy
+  )
+  assert.deepEqual(
+    corroborateClaudeSessionStatus(
+      { type: "idle" },
+      "claude-session",
+      stalePrompt,
+      now - CLAUDE_REPORTED_BUSY_STALE_MS * 2,
+      now
+    ),
+    { type: "idle" }
+  )
 })
 
 test("machine discovery detects Claude and can select it as the daemon primary", () => {
