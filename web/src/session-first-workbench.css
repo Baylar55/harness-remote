@@ -1240,7 +1240,22 @@
 
 .hr-native-startup {
   width: min(680px, calc(100% - 36px));
-  justify-self: center;
+  margin-inline: auto;
+}
+
+/* The icon is the state's mark, so it is given a mark's shape rather than being left as a loose
+   glyph above the text: centred with the copy, in a tinted round badge that carries the state's own
+   colour (blue while connecting, red when unreachable). */
+.hr-native-startup > svg {
+  box-sizing: content-box;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 6px;
+  padding: 13px;
+  border: 1px solid var(--td3-border-soft);
+  border-radius: 50%;
+  color: var(--td3-muted);
+  background: var(--td3-raise-1);
 }
 
 .hr-native-startup > span {
@@ -1290,12 +1305,24 @@
   font-size: 10px;
 }
 
+.hr-native-startup.ready > svg,
 .hr-native-startup.connecting > svg {
+  border-color: var(--td3-blue-border-soft);
   color: var(--td3-blue-text);
+  background: var(--td3-blue-soft-2);
 }
 
-.hr-native-startup.offline > svg {
+.hr-native-startup.offline > svg,
+/* The eyebrow names the state, so it wears the state's colour rather than the accent every other
+   state uses - a red mark over a blue "MACHINES UNAVAILABLE" reads as two different messages. */
+.hr-native-startup.offline > span {
+  border-color: var(--td3-red-border);
   color: var(--td3-red-text);
+  background: var(--td3-red-soft);
+}
+
+.hr-native-startup.offline > span {
+  background: none;
 }
 
 .hr-session-settings-backdrop {

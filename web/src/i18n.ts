@@ -404,6 +404,8 @@ type TranslationKey =
   | 'sf.preparing'
   | 'sf.connectingMachines'
   | 'sf.connectingBody'
+  | 'sf.loadingSessions'
+  | 'sf.loadingSessionsBody'
   | 'sf.configuredMachines'
   | 'sf.machinesUnavailable'
   | 'sf.couldNotConnect'
@@ -868,6 +870,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': 'Preparing Harness Remote',
     'sf.connectingMachines': 'Connecting to your machines…',
     'sf.connectingBody': 'Discovering Projects, installed coding agents and native Sessions. An ACP harness may need a few seconds to start.',
+    'sf.loadingSessions': 'Loading Sessions',
+    'sf.loadingSessionsBody': 'Reading the native Sessions the connected machines\' coding agents own.',
     'sf.configuredMachines': '{count} configured machines',
     'sf.machinesUnavailable': 'Machines unavailable',
     'sf.couldNotConnect': 'Harness Remote could not connect',
@@ -1332,6 +1336,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': 'Preparazione di Harness Remote',
     'sf.connectingMachines': 'Connessione alle tue macchine…',
     'sf.connectingBody': 'Individuazione di progetti, coding agent installati e sessioni native. Un harness ACP può richiedere alcuni secondi per avviarsi.',
+    'sf.loadingSessions': 'Caricamento sessioni',
+    'sf.loadingSessionsBody': 'Lettura delle sessioni native possedute dai coding agent di ogni macchina.',
     'sf.configuredMachines': '{count} macchine configurate',
     'sf.machinesUnavailable': 'Macchine non raggiungibili',
     'sf.couldNotConnect': 'Harness Remote non è riuscito a connettersi',
@@ -1748,6 +1754,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': '正在準備 Harness Remote',
     'sf.connectingMachines': '正在連線到你的機器…',
     'sf.connectingBody': '正在探索專案、已安裝的編碼代理與原生工作階段。ACP harness 可能需要幾秒鐘啟動。',
+    'sf.loadingSessions': '載入工作階段',
+    'sf.loadingSessionsBody': '正在讀取各機器的程式代理所擁有的原生工作階段。',
     'sf.configuredMachines': '已設定 {count} 部機器',
     'sf.machinesUnavailable': '機器無法使用',
     'sf.couldNotConnect': 'Harness Remote 無法連線',
@@ -2209,6 +2217,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.preparing': '正在准备 Harness Remote',
     'sf.connectingMachines': '正在连接你的机器…',
     'sf.connectingBody': '正在发现项目、已安装的编码代理和原生会话。ACP harness 可能需要几秒钟启动。',
+    'sf.loadingSessions': '加载会话',
+    'sf.loadingSessionsBody': '正在读取各机器的编码代理所拥有的原生会话。',
     'sf.configuredMachines': '已配置 {count} 台机器',
     'sf.machinesUnavailable': '机器不可用',
     'sf.couldNotConnect': 'Harness Remote 无法连接',

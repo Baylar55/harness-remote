@@ -115,10 +115,16 @@
   min-height: 0;
 }
 
+/* `place-content: center` centres the grid's tracks, not the items inside them, so every child sat
+   at the start of a column as wide as the widest one - which is why the icon appeared pinned to the
+   left of a centred paragraph. Content is centred on both axes, and the block itself is centred in
+   the pane by its own auto margins rather than by `justify-self`, which does nothing in the flex
+   column this sits in. */
 .hr-native-workspace-empty {
   flex: 1;
   display: grid;
-  place-content: center;
+  align-content: center;
+  justify-items: center;
   gap: 8px;
   padding: 28px;
   text-align: center;
