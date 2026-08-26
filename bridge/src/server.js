@@ -12,6 +12,31 @@ const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const MAX_ATTACHMENT_TOTAL_BYTES = 15 * 1024 * 1024
 const MAX_MESSAGE_PAGE = 500
 
+/**
+ * Claude's ACP adapter can leave the service bookkeeping flag active after the visible turn has
+ * stopped producing protocol traffic. The prompt watchdog itself gives up after 300s, so this
+ * reporting grace is deliberately longer: it cannot make a legitimately active Claude turn idle
+ * before the transport would already consider that turn stale.
+ */
+export const CLAUDE_REPORTED_BUSY_STALE_MS = 360_000
+
+/**
+ * Correct only Claude's public presentation status. Internal AcpService busy state remains untouched
+ * because it also protects queueing, transcript merge and cache semantics.
+ */
+export function corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt, now = Date.now()) {
+  if (!status || status.type !== "busy") return status
+  let newestProtocolActivity = 0
+  for (const pending of Array.isArray(pendingRequests) ? pendingRequests : []) {
+    if (pending?.method !== "session/prompt" || pending.sessionID !== sessionID) continue
+    if (!Number.isFinite(pending.idleMs)) continue
+    newestProtocolActivity = Math.max(newestProtocolActivity, now - Math.max(0, pending.idleMs))
+  }
+  const newestActivity = Math.max(newestProtocolActivity, Number(lastActivityAt) || 0)
+  if (!newestActivity || now - newestActivity < CLAUDE_REPORTED_BUSY_STALE_MS) return status
+  return { ...status, type: "idle" }
+}
+
 /** base64 carries 3 bytes per 4 characters, so measure it rather than decoding megabytes to count them. */
 function base64ByteLength(value) {
   const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0
@@ -83,7 +108,7 @@ function sameListedDirectory(left, right) {
   return normalize(left) === normalize(right)
 }
 
-function listedSessionView(session, service, liveUpdatedAt = 0) {
+function listedSessionView(session, status, liveUpdatedAt = 0) {
   const listedUpdated = Date.parse(session.updatedAt ?? "")
   const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
   const timestamp = Math.max(listedTimestamp, liveUpdatedAt)
@@ -94,7 +119,7 @@ function listedSessionView(session, service, liveUpdatedAt = 0) {
     time: { created: timestamp, updated: timestamp },
     summary: { additions: 0, deletions: 0, files: 0 },
     model: undefined,
-    status: service.status(session.sessionId)
+    status
   }
 }
 
@@ -160,8 +185,21 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
       liveSessionActivity.set(event.sessionId, Date.now())
     }
   })
+  const publicSessionStatus = (sessionID, fallbackActivityAt = 0) => {
+    const status = service.status(sessionID)
+    if (backend !== "claude") return status
+    const pendingRequests = acp.diagnostics?.()?.pendingRequests ?? []
+    const lastActivityAt = Math.max(liveSessionActivity.get(sessionID) ?? 0, Number(fallbackActivityAt) || 0)
+    return corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt)
+  }
   const listVisibleSessions = async (directory) => {
-    const sessions = await service.listSessions(directory)
+    let sessions = await service.listSessions(directory)
+    if (backend === "claude") {
+      sessions = sessions.map((session) => ({
+        ...session,
+        status: publicSessionStatus(session.id, session.time?.updated)
+      }))
+    }
     if (!hiddenSessionIDs?.size) return sessions
     return sessions.filter((session) => !hiddenSessionIDs.has(session.id))
   }
@@ -177,7 +215,16 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     return sessions
       .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
       .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
-      .map((session) => listedSessionView(session, service, liveSessionActivity.get(session.sessionId) ?? 0))
+      .map((session) => {
+        const liveUpdatedAt = liveSessionActivity.get(session.sessionId) ?? 0
+        const listedUpdated = Date.parse(session.updatedAt ?? "")
+        const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
+        return listedSessionView(
+          session,
+          publicSessionStatus(session.sessionId, Math.max(liveUpdatedAt, listedTimestamp)),
+          liveUpdatedAt
+        )
+      })
   }
 
   const server = http.createServer(async (request, response) => {
