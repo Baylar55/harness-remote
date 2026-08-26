@@ -1,4 +1,5 @@
 import { api } from "./api"
+import { nativeSessionDisplayTitle } from "./native-session-title"
 import type { BackendKind, MachineAgentHost, MessageEnvelope, ModelSelection, ServerConfig, Session, SessionStatus } from "./types"
 
 export type NativeSessionRecord = {
@@ -63,6 +64,10 @@ export type NativeSessionSurfaceTarget = {
   status?: SessionStatus
   external: boolean
   modelsSupported: boolean
+  /** Native metadata mutations are exposed by the owning harness contract. The chat header shows
+   * Rename/Delete only for a Session whose harness actually implements them. */
+  renameSupported: boolean
+  deleteSupported: boolean
   model: ModelSelection | null
   parentID?: string
   summary?: Session["summary"]
@@ -147,7 +152,7 @@ export function nativeSessionSurfaceTarget(
     machineID,
     sessionID: ref.sessionID,
     directory: ref.directory,
-    title: record.session.title?.trim() || "Untitled Session",
+    title: nativeSessionDisplayTitle(record.session.title),
     agentID: ref.agentID,
     agentLabel: record.agentLabel,
     backend: record.backend,
@@ -160,6 +165,8 @@ export function nativeSessionSurfaceTarget(
     status: record.status,
     external,
     modelsSupported: record.modelsSupported,
+    renameSupported: record.renameSupported,
+    deleteSupported: record.deleteSupported,
     model: sessionModel(record.session),
     parentID: record.session.parentID,
     summary: record.session.summary,

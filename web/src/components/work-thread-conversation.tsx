@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
+import { createCoalescedTailRefresh } from "../coalesced-tail-refresh"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "../message-pages"
 import type { SavedServerProfile } from "../serverProfiles"
 import {
@@ -306,7 +307,7 @@ export function WorkThreadConversation({
   const modelSelectionTouchedRef = useRef(false)
   const sendInFlightRef = useRef(false)
   const stopInFlightRef = useRef(false)
-  const tailInFlightRef = useRef(false)
+  const tailRefreshRef = useRef(createCoalescedTailRefresh())
   const attentionInFlightRef = useRef(false)
   const reconcileInFlightRef = useRef(false)
   const taskRef = useRef(task)
@@ -368,7 +369,6 @@ export function WorkThreadConversation({
     modelSelectionTouchedRef.current = false
     sendInFlightRef.current = false
     stopInFlightRef.current = false
-    tailInFlightRef.current = false
     attentionInFlightRef.current = false
     reconcileInFlightRef.current = false
   }, [task.id])
@@ -446,7 +446,6 @@ export function WorkThreadConversation({
   const hasMore = Object.values(feeds).some((feed) => feed.hasMore && feed.before)
 
   const refreshCurrentTail = useCallback(async (sourceTask?: MachineTask) => {
-    if (tailInFlightRef.current) return
     const currentTask = sourceTask ?? taskRef.current
     const run = currentTask.run
     const session = runSessionID(run)
@@ -459,24 +458,23 @@ export function WorkThreadConversation({
       directory: run?.directory || currentTask.workspace.path,
       config: configForAgent(baseConfig, currentAgents, agentID)
     }
-    tailInFlightRef.current = true
-    try {
-      const page = await api.loadMessagePage(target.config, session, target.directory, undefined, INITIAL_PAGE_SIZE, false)
-      setFeeds((current) => {
-        const existing = current[session]
-        if (!existing) return { ...current, [session]: { messages: page.messages, before: page.before, hasMore: page.hasMore } }
-        const messages = mergeLatestMessagePage(existing.messages, page.messages)
-        const hasMore = existing.hasMore || page.hasMore
-        const before = existing.before || page.before
-        if (messages === existing.messages && hasMore === existing.hasMore && before === existing.before) return current
-        return { ...current, [session]: { ...existing, messages, hasMore, before } }
-      })
-    } catch {
-      // Live refresh is opportunistic. The existing transcript remains visible and the slow
-      // reconciliation path will retry without clearing or replacing it.
-    } finally {
-      tailInFlightRef.current = false
-    }
+    await tailRefreshRef.current(async () => {
+      try {
+        const page = await api.loadMessagePage(target.config, session, target.directory, undefined, INITIAL_PAGE_SIZE, false)
+        setFeeds((current) => {
+          const existing = current[session]
+          if (!existing) return { ...current, [session]: { messages: page.messages, before: page.before, hasMore: page.hasMore } }
+          const messages = mergeLatestMessagePage(existing.messages, page.messages)
+          const hasMore = existing.hasMore || page.hasMore
+          const before = existing.before || page.before
+          if (messages === existing.messages && hasMore === existing.hasMore && before === existing.before) return current
+          return { ...current, [session]: { ...existing, messages, hasMore, before } }
+        })
+      } catch {
+        // Live refresh is opportunistic. The existing transcript remains visible and the slow
+        // reconciliation path will retry without clearing or replacing it.
+      }
+    })
   }, [baseConfig])
 
   const refreshAttention = useCallback(async (sourceTask?: MachineTask) => {

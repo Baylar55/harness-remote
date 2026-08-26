@@ -37,23 +37,50 @@ function assistantMessageModel(info: NativeMessageInfo): ModelSelection | null {
   return { providerID, modelID, ...(variant ? { variant } : {}) }
 }
 
+function priorUserVariant(
+  messages: MessageEnvelope[],
+  assistantIndex: number,
+  assistantModel: ModelSelection
+): string | undefined {
+  for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.info.role !== "user") continue
+    const info = message.info as NativeMessageInfo
+    const model = userMessageModel(info)
+    if (!model) return undefined
+    if (model.providerID !== assistantModel.providerID || model.modelID !== assistantModel.modelID) return undefined
+    return model.variant
+  }
+  return undefined
+}
+
 /**
  * Recover the most recent model-bearing native message, not merely the most recent message of one
  * role. Newer OpenCode versions put model identity on assistant envelopes while older versions also
  * put it on user turns. Scanning role-by-role let an old user envelope beat a newer assistant one and
  * made reopening a Session fall back to the catalog default even though its actual model was present.
+ *
+ * Some OpenCode versions omit the reasoning variant from the assistant envelope even though the
+ * immediately preceding user turn records it. When the assistant confirms the same provider/model,
+ * inherit only that adjacent turn's variant instead of dropping it or searching older unrelated turns.
  */
 export function lastNativeMessageModel(messages: MessageEnvelope[]): ModelSelection | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     const info = message?.info as NativeMessageInfo | undefined
     if (!info) continue
-    const model = message.info.role === "user"
-      ? userMessageModel(info)
-      : message.info.role === "assistant"
-        ? assistantMessageModel(info)
-        : null
-    if (model) return model
+    if (message.info.role === "user") {
+      const model = userMessageModel(info)
+      if (model) return model
+      continue
+    }
+    if (message.info.role === "assistant") {
+      const model = assistantMessageModel(info)
+      if (!model) continue
+      if (model.variant) return model
+      const variant = priorUserVariant(messages, index, model)
+      return variant ? { ...model, variant } : model
+    }
   }
   return null
 }
