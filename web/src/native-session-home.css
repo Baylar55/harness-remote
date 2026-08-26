@@ -45,13 +45,16 @@
   min-width: 0;
 }
 
-.hr-native-workspace-session-header span,
-.hr-native-workspace-session-header small {
+/* Scoped to the heading block, not to every descendant of the header. The header also hosts the
+   Session's action dialogs, and a blanket `span`/`small` rule reached inside them - which is how a
+   confirmation dialog ended up with a subtitle that refused to wrap. */
+.hr-native-session-heading span,
+.hr-native-session-heading small {
   display: block;
   color: var(--tdw-muted, #9299a8);
 }
 
-.hr-native-workspace-session-header h1 {
+.hr-native-session-heading h1 {
   margin: 2px 0 3px;
   font-size: 18px;
   line-height: 1.25;
@@ -517,11 +520,11 @@
     padding: 8px 10px 8px 48px;
   }
   .hr-native-workspace-session-header code { display: none; }
-  .hr-native-workspace-session-header h1 {
+  .hr-native-session-heading h1 {
     margin-block: 1px 2px;
     font-size: 16px;
   }
-  .hr-native-workspace-session-header small {
+  .hr-native-session-heading > small {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

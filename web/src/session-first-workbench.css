@@ -838,7 +838,7 @@
   font-size: 10px;
 }
 
-.hr-native-workspace-session-header h1 {
+.hr-native-session-heading h1 {
   margin: 2px 0;
   font-size: 17px;
   letter-spacing: -.015em;
@@ -981,7 +981,9 @@
   font-weight: 600;
 }
 
-.hr-native-workspace-session-header small {
+/* The directory line under the title, and only that: the header also hosts the Session's action
+   dialogs, whose prose has to wrap. */
+.hr-native-session-heading > small {
   max-width: min(76vw, 880px);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1111,17 +1113,27 @@
   background: var(--td3-scrim);
 }
 
+/* Deleting a Session is a modal decision, so it is shown as a modal dialog.
+ *
+ * It was written as a popover anchored under the trash button - `position: absolute` against the
+ * header's action row - while behaving as a modal: full-viewport scrim, `aria-modal`, a Tab trap.
+ * That put an irreversible confirmation in the top-right corner of the window, hard against the
+ * header chrome it was overlapping, where its own width had nowhere to go. Centred on the viewport
+ * it has room, it is where the eye already is, and it matches the scrim that is already behind it. */
 .hr-session-action-panel {
-  position: absolute;
+  position: fixed;
   z-index: 60;
-  top: calc(100% + 7px);
-  right: 0;
-  width: min(340px, calc(100vw - 24px));
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(78vh, 560px);
+  overflow-y: auto;
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid var(--td3-border-strong);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--td3-panel-2);
   box-shadow: var(--td3-shadow-panel);
   text-align: left;
@@ -1131,29 +1143,41 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
 }
 
 .hr-session-action-heading > div {
   min-width: 0;
 }
 
+.hr-session-action-heading > .tdw-icon-button {
+  flex: none;
+}
+
+/* Every one of these is stated rather than inherited. This dialog is a child of the Session header,
+   whose own type rules used to reach in here and clip the sentence explaining what is about to be
+   deleted; the dialog's prose is its whole point and must always wrap. */
 .hr-session-action-heading strong,
 .hr-session-action-heading small {
   display: block;
+  max-width: none;
+  overflow: visible;
   color: var(--td3-text);
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .hr-session-action-heading strong {
-  font-size: 12.5px;
+  font-size: 14px;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .hr-session-action-heading small {
-  margin-top: 3px;
+  margin-top: 6px;
   color: var(--td3-muted);
-  font-size: 10px;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .hr-session-action-field {
@@ -1197,8 +1221,13 @@
 
 .hr-session-action-buttons {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.hr-session-action-buttons > .tdw-button {
+  min-height: 34px;
 }
 
 /* Deleting a native Session is irreversible from Harness Remote, so the confirming button must not
@@ -1719,7 +1748,7 @@
     padding: max(7px, env(safe-area-inset-top)) 9px 7px 47px;
   }
 
-  .hr-native-workspace-session-header h1 {
+  .hr-native-session-heading h1 {
     font-size: 15px;
   }
 
@@ -1837,8 +1866,18 @@
   }
   .hr-native-session-stats { display: none; }
   .hr-session-action-panel {
-    right: -4px;
-    width: min(340px, calc(100vw - 16px));
+    width: min(420px, calc(100vw - 20px));
+  }
+
+  /* An irreversible confirmation is modal, so the app nav must not stay live above its scrim - the
+     same guard the shell's other modal sheets already get. */
+  .uw-standalone-host:has(.hr-session-action-backdrop) .hr-mobile-nav {
+    display: none !important;
+  }
+
+  .hr-session-action-buttons > .tdw-button {
+    flex: 1 1 140px;
+    justify-content: center;
   }
   /* These two are the only Session mutations reachable from a phone, and 34px misses the platform
      target guidance the rest of the mobile chrome already follows. */
