@@ -71,9 +71,10 @@ test("older pages prepend without duplicating the cursor boundary", () => {
   assert.equal(merged[2], currentC)
 })
 
-test("Session conversation exposes bounded older-history loading through the shared conversation core", () => {
+test("Session conversation exposes bounded older-history loading without snapping back to the live tail", () => {
   const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
   const conversation = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
+  const historyStyles = readFileSync(new URL("./taskdesk-history-loader.css", import.meta.url), "utf8")
 
   assert.match(workspace, /api\.loadMessagePage\(item\.config, item\.session\.id, item\.session\.directory\)/)
   assert.match(workspace, /silent \? mergeLatestMessagePage\(current\.messages, messagePage\.messages\) : messagePage\.messages/)
@@ -82,9 +83,16 @@ test("Session conversation exposes bounded older-history loading through the sha
   assert.match(workspace, /onLoadOlder=\{loadOlderMessages\}/)
   assert.match(workspace, /hasMore=\{messageHasMore\}/)
 
-  assert.match(conversation, /Load older messages/)
-  assert.match(conversation, /const previousHeight = transcript\?\.scrollHeight \?\? 0/)
-  assert.match(conversation, /const previousTop = transcript\?\.scrollTop \?\? 0/)
-  assert.match(conversation, /current\.scrollTop = previousTop \+ \(current\.scrollHeight - previousHeight\)/)
+  assert.match(conversation, /taskdesk-history-loader\.css/)
+  assert.match(conversation, /className="uw-history-load"/)
+  assert.match(conversation, /Earlier messages/)
+  assert.match(conversation, /nearBottomRef\.current = false/)
+  assert.match(conversation, /window\.cancelAnimationFrame\(followFrameRef\.current\)/)
   assert.match(conversation, /preservingOlderRef\.current = true/)
+  assert.match(conversation, /current\.scrollTop = Math\.max\(0, Math\.min\(previousTop, current\.scrollHeight - current\.clientHeight\)\)/)
+  assert.doesNotMatch(conversation, /current\.scrollTop = previousTop \+ \(current\.scrollHeight - previousHeight\)/)
+
+  assert.match(historyStyles, /\.uw-history-loader::before/)
+  assert.match(historyStyles, /\.uw-history-load/)
+  assert.match(historyStyles, /overflow-anchor: none/)
 })

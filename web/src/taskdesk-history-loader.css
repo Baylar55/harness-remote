@@ -1,0 +1,76 @@
+/* Paginated chat history is a secondary transcript affordance, not a primary action. Keep it quiet,
+   in the reading flow, and visually distinct from the composer and toolbar buttons. */
+.uw-history-loader {
+  width: min(1040px, 100%);
+  margin: 0 auto 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0 6px;
+  overflow-anchor: none;
+}
+
+.uw-history-loader::before,
+.uw-history-loader::after {
+  content: "";
+  min-width: 20px;
+  height: 1px;
+  flex: 1;
+  background: var(--td3-border-soft);
+}
+
+.uw-history-load {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--td3-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1;
+  letter-spacing: .01em;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.uw-history-load:hover,
+.uw-history-load:focus-visible {
+  color: var(--td3-text);
+  background: var(--td3-raise-1);
+}
+
+.uw-history-load:focus-visible {
+  outline: 2px solid var(--td3-blue-border);
+  outline-offset: 2px;
+}
+
+.uw-history-load:disabled {
+  cursor: default;
+  opacity: .7;
+}
+
+.uw-history-load svg {
+  flex: none;
+}
+
+@media (pointer: coarse) {
+  .uw-history-load {
+    min-height: 36px;
+    padding-inline: 12px;
+  }
+}
+
+@media (max-width: 780px) {
+  .uw-history-loader {
+    width: 100%;
+    margin-bottom: 10px;
+    gap: 8px;
+  }
+}
