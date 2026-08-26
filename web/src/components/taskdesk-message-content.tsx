@@ -114,10 +114,15 @@ function ToolPartCard({ part }: { part: MessagePart }) {
         onToggle={(event) => setOpen(event.currentTarget.open)}
       >
         <summary>
-          <span className="uw-tool-icon">{status === "completed" ? "✓" : status === "error" ? "!" : "⋯"}</span>
+          {/* `incomplete` is the bridge's marker for a call whose turn ended before the harness
+              reported an outcome: it is finished work with nothing to show, so it takes neither the
+              running ellipsis nor the failure mark. */}
+          <span className="uw-tool-icon">
+            {status === "completed" ? "✓" : status === "error" ? "!" : status === "incomplete" ? "–" : "⋯"}
+          </span>
           <span className="uw-tool-title">{state?.title || part.tool || "Tool"}</span>
           {command ? <code>{command.length > 90 ? `${command.slice(0, 90)}…` : command}</code> : null}
-          <span className="uw-tool-status">{status}</span>
+          <span className="uw-tool-status">{status === "incomplete" ? "no result" : status}</span>
         </summary>
         {/* The truncated body is what is on screen, but the copy carries the whole output: a stack
             trace clipped at 4000 characters is the half you cannot paste anywhere useful. */}

@@ -1102,6 +1102,15 @@ function ToolPartView({
               …
             </span>
           )}
+          {status === "incomplete" && (
+            <span
+              className="message-tool-status-incomplete"
+              title={t('action.toolIncomplete')}
+              aria-label={t('action.toolIncomplete')}
+            >
+              –
+            </span>
+          )}
         </span>
       </button>
 

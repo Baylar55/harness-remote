@@ -260,6 +260,7 @@ type TranslationKey =
   | 'action.usedSkillNamed'
   | 'action.toolFailed'
   | 'action.running'
+  | 'action.toolIncomplete'
   | 'action.preparingTool'
   | 'action.showDiffFor'
   | 'action.actionsFallback'
@@ -674,6 +675,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'action.usedSkillNamed': 'Used skill: {name}',
     'action.toolFailed': 'Tool failed',
     'action.running': 'Running…',
+    'action.toolIncomplete': 'No result reported',
     'action.preparingTool': 'Preparing {tool}',
     'action.showDiffFor': 'Show diff for {file}',
     'action.actionsFallback': 'Actions',
@@ -1136,6 +1138,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'action.usedSkillNamed': 'Usata skill: {name}',
     'action.toolFailed': 'Tool fallito',
     'action.running': 'In esecuzione…',
+    'action.toolIncomplete': 'Nessun risultato riportato',
     'action.preparingTool': 'Preparazione di {tool}',
     'action.showDiffFor': 'Mostra diff per {file}',
     'action.actionsFallback': 'Azioni',
@@ -1598,6 +1601,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'action.usedSkillNamed': '已使用技能：{name}',
     'action.toolFailed': '工具失敗',
     'action.running': '執行中…',
+    'action.toolIncomplete': '未回報結果',
     'action.preparingTool': '正在準備 {tool}',
     'action.showDiffFor': '顯示 {file} 的差異',
     'action.actionsFallback': '動作',
@@ -2057,6 +2061,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'action.usedSkillNamed': '已使用技能：{name}',
     'action.toolFailed': '工具失败',
     'action.running': '运行中…',
+    'action.toolIncomplete': '未报告结果',
     'action.preparingTool': '正在准备 {tool}',
     'action.showDiffFor': '显示 {file} 的差异',
     'action.actionsFallback': '操作',

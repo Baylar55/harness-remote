@@ -223,6 +223,43 @@ export function isHarnessInjectedText(text) {
   return HARNESS_INJECTED_BLOCK.test(text)
 }
 
+/** The two tool-call states that mean "still running" on the wire and in the transcript. */
+const UNSETTLED_TOOL_STATUSES = new Set(["pending", "running"])
+
+/**
+ * An Activity section in the conversation reads as Working purely from the parts inside it: a tool
+ * call still at `pending`/`running`, or a reasoning part with a start and no end. Both are only ever
+ * true while the turn that produced them is live, and both are left open by the adapters — Claude's
+ * in particular. It drops the closing `tool_call_update` for calls still open when a turn ends, is
+ * cancelled or fails, and for calls replayed out of a loaded session's history. So a finished Claude
+ * conversation kept individual Activity sections spinning on Working for good, in the persisted
+ * snapshot too, while the Session itself correctly read idle.
+ *
+ * A tool call with no reported outcome is closed as `incomplete`: neither success nor failure may be
+ * invented for it, since `completed` would claim a result that never arrived and `error` would
+ * accuse a tool that most likely ran. Historical parts close their reasoning at its own start
+ * instead of at `now`, because a snapshot reopened days later must not report the outage as time
+ * the agent spent thinking.
+ */
+export function settleUnfinishedActivity(messages, { now = Date.now(), historical = false } = {}) {
+  let settled = 0
+  for (const message of Array.isArray(messages) ? messages : []) {
+    for (const part of message?.parts ?? []) {
+      if (part?.type === "tool" && part.state && UNSETTLED_TOOL_STATUSES.has(part.state.status)) {
+        part.state.status = "incomplete"
+        if (part.state.time && !part.state.time.end) part.state.time.end = now
+        settled += 1
+        continue
+      }
+      if (part?.type === "reasoning" && part.time?.start && !part.time.end) {
+        part.time.end = historical ? part.time.start : now
+        settled += 1
+      }
+    }
+  }
+  return settled
+}
+
 // The app groups the picker by source and offers a skill-only filter, so the
 // `skill:` prefix OMP puts on skill commands has to survive as structured data
 // rather than staying buried in the name.
@@ -870,6 +907,8 @@ export class AcpService {
       if (this.#turnGenerations.get(sessionID) !== generation) return
       this.#active.delete(sessionID)
       this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+      // The turn is over, so no activity it started is still running, whatever the adapter said.
+      this.#settleActivity(sessionID)
       this.#emit("session.updated", sessionID)
       this.#persistSnapshot(sessionID)
       void this.#runNextQueued(sessionID)
@@ -936,6 +975,8 @@ export class AcpService {
     this.#cancelledSessions.add(sessionID)
     this.#active.delete(sessionID)
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+    // A cancelled turn gets no closing tool_call_update at all, so settle before it is published.
+    this.#settleActivity(sessionID)
     this.#acp.notify("session/cancel", { sessionId: sessionID })
     this.#emit("session.updated", sessionID)
     this.#persistSnapshot(sessionID)
@@ -962,7 +1003,14 @@ export class AcpService {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
-      if (Array.isArray(snapshot.messages)) this.#messages.set(sessionID, mergeFragmentedPiSnapshot(snapshot.messages))
+      if (Array.isArray(snapshot.messages)) {
+        const restored = mergeFragmentedPiSnapshot(snapshot.messages)
+        // A snapshot written mid-turn keeps that turn's open tool calls at `running`. The turn did
+        // not survive the restart, so reopening the Session must not present them as live work; the
+        // rewrite is left to the next persist rather than forcing one on every restore.
+        if (settleUnfinishedActivity(restored, { historical: true })) this.#dirtySnapshots.add(sessionID)
+        this.#messages.set(sessionID, restored)
+      }
       if (Array.isArray(snapshot.todos)) this.#todos.set(sessionID, snapshot.todos)
       if (!this.#preferListedTitles && typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
       if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
@@ -1004,6 +1052,34 @@ export class AcpService {
   /** A queued prompt is still outstanding work, so the session must not read as idle between turns. */
   #isBusy(sessionID) {
     return this.#active.has(sessionID) || Boolean(this.#queues.get(sessionID)?.length)
+  }
+
+  /**
+   * Close the session's still-open activity, which is only ever correct while no turn of its own is
+   * live — see settleUnfinishedActivity. Silent while a replay is still being assembled: that path
+   * publishes the transcript itself once it is whole.
+   */
+  #settleActivity(sessionID, { emit = true, historical = false } = {}) {
+    if (this.#active.has(sessionID)) return 0
+    const settled = settleUnfinishedActivity(this.#messages.get(sessionID) ?? [], { historical })
+    if (settled && emit) this.#emit("message.updated", sessionID)
+    return settled
+  }
+
+  /**
+   * The status layer in front of this service can establish that a Session is idle while the service
+   * still holds its own busy flag — Claude's adapter leaves that flag set when it stops answering a
+   * turn it never finished. The transcript must not contradict that conclusion: a Session presented
+   * as idle cannot keep an Activity section on Working, so whoever corrects the status settles the
+   * activity the abandoned turn left open through here. A tool_call_update that does arrive later
+   * still overwrites the part, so this can only ever be as premature as the status it follows.
+   */
+  settleReportedIdleActivity(sessionID) {
+    const settled = settleUnfinishedActivity(this.#messages.get(sessionID) ?? [])
+    if (!settled) return 0
+    this.#emit("message.updated", sessionID)
+    this.#persistSnapshot(sessionID)
+    return settled
   }
 
   /**
@@ -1133,6 +1209,10 @@ export class AcpService {
       this.#rememberConfigOptions(sessionID, result.configOptions)
       const replayedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
       this.#messages.set(sessionID, replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
+      // Replayed history is finished work by definition, and the adapter does not always close the
+      // tool calls in it. Settling before the signature check keeps the restored (already settled)
+      // snapshot and this replay comparable, so an unchanged history still reads as unchanged.
+      this.#settleActivity(sessionID, { emit: false, historical: true })
       const replayedTodos = this.#todos.get(sessionID) ?? []
       this.#todos.set(sessionID, replaceHistory ? replayedTodos : mergeTodos(previousTodos, replayedTodos))
       if (semanticHistorySignature(this.#messages.get(sessionID) ?? []) !== previousMessageSnapshot) {
@@ -1267,6 +1347,13 @@ export class AcpService {
           parts: []
         }
         messages.push(message)
+      }
+      // A reasoning part is closed by the part that follows it, but only the message-chunk path did
+      // that: reasoning followed by a tool call — Claude's normal shape — stayed open forever, which
+      // is enough on its own to keep that Activity section reading Working after the turn ended.
+      const openReasoning = message.parts.at(-1)
+      if (openReasoning?.type === "reasoning" && openReasoning.time && !openReasoning.time.end) {
+        openReasoning.time.end = Date.now()
       }
       message.parts.push({
         id: update.toolCallId,

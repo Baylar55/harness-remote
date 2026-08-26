@@ -166,6 +166,12 @@ the configured browsing roots to anyone who has the bridge credentials. Treat th
 full access to the Claude Code account on that host, and use a trusted LAN, VPN or TLS-terminating
 proxy rather than exposing the bridge directly to the Internet.
 
+**Not assumed:** that every `tool_call` the adapter opens is closed by a `tool_call_update`. It is
+observed to leave calls open — those still running when a turn ends, is cancelled or fails, and those
+replayed out of a loaded session's history — so `AcpService` settles a Session's open tool calls and
+reasoning as soon as the turn behind them is no longer live (`settleUnfinishedActivity`). Without it
+an Activity section in a finished conversation reads `Working` for good, snapshot included.
+
 **Watch:** the pinned adapter version, bare model ids, ACP session update and permission-request
 shapes, and whether session visibility or image capability changes. The app intentionally does not
 expose agent selection, server slash commands or VCS/diff for this backend.
