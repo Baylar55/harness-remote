@@ -7,11 +7,18 @@ import {
 } from "./native-session-discovery"
 import type { MachineAgentHost, ServerConfig } from "./types"
 
-/** Native create is enabled only for transports that have passed the Session-first contract gate. */
+/**
+ * Native create uses the same mature /session route for every harness transport that can own a
+ * writable Session. ACP's implementation is deliberately generic (`session/new`) and OpenCode owns
+ * the equivalent HTTP lifecycle, so the UI must not hide OMP, Claude or Codex behind an old rollout
+ * gate that was only meant for the first Session-first validation pass.
+ */
 export function canCreateNativeSession(agent: MachineAgentHost): boolean {
-  const validatedTransport = (agent.backend === "pi" && agent.transport === "acp")
-    || (agent.backend === "opencode" && agent.transport === "http")
-  return validatedTransport && agent.capabilities?.sessions !== false
+  const supportedTransport = agent.transport === "acp" || agent.transport === "http"
+  return supportedTransport
+    && agent.state !== "unavailable"
+    && agent.capabilities?.sessions !== false
+    && agent.capabilities?.prompt !== false
 }
 
 /**
@@ -35,7 +42,7 @@ export async function createNativeSessionTarget({
   title?: string
 }): Promise<{ target: NativeSessionSurfaceTarget; record: NativeSessionRecord }> {
   if (!canCreateNativeSession(agent)) {
-    throw new Error("New Session is currently enabled only for PI and OpenCode while native create parity is validated.")
+    throw new Error("This harness does not expose writable native Sessions on its current transport.")
   }
   if (!directory.trim()) throw new Error("Choose a Project before creating a Session.")
 
