@@ -29,7 +29,7 @@ import {
   type WorkThreadAgentMeta
 } from "../work-thread-timeline"
 import { ModelPicker, modelOptionKey } from "./model-picker"
-import { TaskDeskConversation } from "./taskdesk-conversation"
+import { ActivityStatus, TaskDeskConversation } from "./taskdesk-conversation"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 import { WorkThreadAttention } from "./work-thread-attention"
 
@@ -239,7 +239,7 @@ function ConversationStatePill({
   return <span className={`tdw-conversation-state ${state}`} title={outcome && detail ? detail : undefined}><i aria-hidden="true" /><span>{text}</span></span>
 }
 
-const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: WorkThreadMessage }) {
+const WorkThreadBubble = memo(function WorkThreadBubble({ message, activity }: { message: WorkThreadMessage; activity?: string }) {
   const meta = message.taskdesk
   if (message.info.role === CONVERSATION_EVENT_ROLE) {
     return (
@@ -262,6 +262,10 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message }: { message: 
           <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>
         </header>
         <TaskDeskMessageContent message={message} />
+        {/* The live status of a turn belongs to the turn's own bubble. Rendered last inside the
+            body, it is the same row the pending bubble showed a moment earlier, in the same place,
+            so reasoning and tool cards fill in above it instead of replacing it. */}
+        {activity ? <ActivityStatus label={activity} agentLabel={label} /> : null}
       </div>
     </article>
   )
@@ -286,6 +290,9 @@ export function WorkThreadConversation({
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [draft, setDraft] = useState(() => localStorage.getItem(draftStorageKey) || "")
   const [sending, setSending] = useState(false)
+  // The prompt that has been sent but is not yet in the transcript, with the Run that was current
+  // when it was sent. See `visibleTimeline`.
+  const [pendingPrompt, setPendingPrompt] = useState<{ text: string; priorRunID: string | null } | null>(null)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
@@ -363,6 +370,7 @@ export function WorkThreadConversation({
     setModelError(null)
     setQuestions([])
     setPermissions([])
+    setPendingPrompt(null)
     setTargetAgentID(currentAgentID)
     setTargetModelKey(currentTaskModelKey)
     observedTaskModelKeyRef.current = currentTaskModelKey
@@ -432,6 +440,37 @@ export function WorkThreadConversation({
     () => buildWorkThreadTimeline(task, messagesBySession, agentsByID),
     [conversationSignature, messagesBySession, agentsByID]
   )
+
+  /**
+   * What the user just sent, shown from the moment they send it.
+   *
+   * Sending used to clear the composer and then show nothing until `continueTask` came back with a
+   * Run, at which point the message appeared - and appeared again, remounted, once that Run carried
+   * a real id and the timeline's key for its row changed from the run's index to that id. On screen
+   * that reads as the message flashing in, being removed and being redrawn. The optimistic row
+   * closes the gap: same bubble, same place, keyed once. It stands down the moment the real row
+   * exists - either because the text is in the transcript or because a new Run is on the Task, which
+   * is what that row is built from - so the two are never on screen together.
+   */
+  const settledPrompt = pendingPrompt
+    && (Boolean(task.run?.id && task.run.id !== pendingPrompt.priorRunID)
+      || timeline.some((message) => message.info.role === "user"
+        && message.parts.some((part) => part.type === "text" && part.text?.trim() === pendingPrompt.text)))
+
+  const visibleTimeline = useMemo(() => {
+    if (!pendingPrompt || settledPrompt) return timeline
+    const id = `work-thread:${task.id}:pending-user`
+    return [...timeline, {
+      info: { id, role: "user", sessionID: `work-thread:${task.id}`, time: { created: Date.now() } },
+      parts: [{ id: `${id}:text`, messageID: id, type: "text", text: pendingPrompt.text }],
+      taskdesk: { kind: "synthetic-user" as const }
+    } as WorkThreadMessage]
+  }, [timeline, pendingPrompt, settledPrompt, task.id])
+
+  useEffect(() => {
+    if (settledPrompt) setPendingPrompt(null)
+  }, [settledPrompt])
+
   const currentRunHasAssistantSignal = useMemo(() => {
     const runID = task.run?.id
     if (!runID) return false
@@ -650,6 +689,7 @@ export function WorkThreadConversation({
     setSending(true)
     setError(null)
     setDraft("")
+    setPendingPrompt({ text, priorRunID: taskRef.current.run?.id ?? null })
     try {
       const latest = await taskClient.getWorkThread(baseConfig, task.id)
       if (isActive(latest)) {
@@ -668,6 +708,9 @@ export function WorkThreadConversation({
       await refreshCurrentTail(next)
       void refreshAttention(next)
     } catch (reason) {
+      // The prompt goes back to the composer, so it must also stop standing in for a turn that was
+      // never accepted.
+      setPendingPrompt(null)
       setDraft((current) => current ? `${text}\n${current}` : text)
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -698,6 +741,12 @@ export function WorkThreadConversation({
   const hasAttention = questions.length > 0 || permissions.length > 0
   const preparingReply = sending || (working && !currentRunHasAssistantSignal)
   const pendingAgentLabel = sending ? agentLabel(agents, targetAgentID) : currentLabel
+  // The pending bubble is the reply that is coming, so it wears the identity of the agent that is
+  // about to answer rather than the one that answered last.
+  const pendingAgentBackend = (sending ? agents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
+  // Only the turn that is actually running carries the live status row, and only once its bubble is
+  // on screen - before that the pending bubble is showing the very same row.
+  const liveRunID = working && !hasAttention && currentRunHasAssistantSignal ? task.run?.id : undefined
   const waitingLabel = hasAttention
     ? "Waiting for your input"
     : preparingReply
@@ -744,9 +793,9 @@ export function WorkThreadConversation({
       {error ? <div className="tdw-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
 
       <TaskDeskConversation
-        messages={timeline}
-        agentLabel={currentLabel}
-        agentBackend={currentAgent?.backend}
+        messages={visibleTimeline}
+        agentLabel={pendingAgentLabel}
+        agentBackend={pendingAgentBackend}
         loading={loading}
         ready={!loading}
         waiting={working}
@@ -765,7 +814,13 @@ export function WorkThreadConversation({
         placeholder={`Message ${agentLabel(agents, targetAgentID)}…`}
         emptyText="Start the conversation. You can continue with another coding agent at any time."
         footerHint={hasAttention ? "Your input is required before the agent can continue" : working ? "The agent is working on your last message" : undefined}
-        renderMessage={(message) => <WorkThreadBubble key={message.info.id} message={message as WorkThreadMessage} />}
+        renderMessage={(message) => (
+          <WorkThreadBubble
+            key={message.info.id}
+            message={message as WorkThreadMessage}
+            activity={liveRunID && (message as WorkThreadMessage).taskdesk?.runId === liveRunID ? waitingLabel : undefined}
+          />
+        )}
       />
     </div>
   )

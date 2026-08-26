@@ -24,6 +24,7 @@ import { useTranslator } from "../useTranslator"
 import { NativeSessionActions } from "./native-session-actions"
 import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
+import { NativeSessionTitle } from "./native-session-rename"
 import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
 import "../taskdesk-workthreads.css"
 import "../taskdesk-mobile-navigation.css"
@@ -497,7 +498,7 @@ function NativeSessionsWorkspace({
                     <i aria-hidden="true">/</i>
                     <strong>{selectedProject}</strong>
                   </div>
-                  <h1>{selected.title}</h1>
+                  <NativeSessionTitle target={selected} onRenamed={handleSessionRenamed} />
                   <small title={selected.directory}>
                     {selected.external ? t("sf.startedInHarness") : t("sf.createdInHarnessRemote")}
                     {selected.directory ? ` · ${selected.directory}` : ""}
@@ -519,7 +520,7 @@ function NativeSessionsWorkspace({
                       {Number(selected.cost) > 0 ? <span title={t("sf.reportedCost")}>${Number(selected.cost).toFixed(2)}</span> : null}
                     </div>
                   ) : null}
-                  <NativeSessionActions target={selected} onRenamed={handleSessionRenamed} onDeleted={handleSessionDeleted} />
+                  <NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />
                   <NativeSessionHandoffControl source={selected} agents={selectedRuntime?.snapshot?.agents || []} onOpen={openSession} />
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>

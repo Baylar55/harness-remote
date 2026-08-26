@@ -376,6 +376,8 @@ type TranslationKey =
   | 'sf.enterSessionName'
   | 'sf.renaming'
   | 'sf.rename'
+  | 'sf.renameHint'
+  | 'sf.renameSessionNamed'
   | 'sf.deleteSessionTitle'
   | 'sf.deleteSubtitle'
   | 'sf.closeDelete'
@@ -838,6 +840,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': 'Enter a Session name.',
     'sf.renaming': 'Renaming…',
     'sf.rename': 'Rename',
+    'sf.renameHint': 'Enter to save · Esc to cancel',
+    'sf.renameSessionNamed': 'Rename Session: {title}',
     'sf.deleteSessionTitle': 'Delete “{title}”?',
     'sf.deleteSubtitle': 'This deletes the native Session from {agent}. This cannot be undone from Harness Remote.',
     'sf.closeDelete': 'Close Delete Session',
@@ -1300,6 +1304,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': 'Inserisci un nome per la sessione.',
     'sf.renaming': 'Rinomina…',
     'sf.rename': 'Rinomina',
+    'sf.renameHint': 'Invio per salvare · Esc per annullare',
+    'sf.renameSessionNamed': 'Rinomina sessione: {title}',
     'sf.deleteSessionTitle': 'Eliminare “{title}”?',
     'sf.deleteSubtitle': 'Elimina la sessione nativa da {agent}. L\'operazione non è annullabile da Harness Remote.',
     'sf.closeDelete': 'Chiudi Elimina sessione',
@@ -1714,6 +1720,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': '請輸入工作階段名稱。',
     'sf.renaming': '重新命名中…',
     'sf.rename': '重新命名',
+    'sf.renameHint': '按 Enter 儲存 · 按 Esc 取消',
+    'sf.renameSessionNamed': '重新命名工作階段：{title}',
     'sf.deleteSessionTitle': '要刪除「{title}」嗎？',
     'sf.deleteSubtitle': '這會從 {agent} 刪除原生工作階段，且無法從 Harness Remote 復原。',
     'sf.closeDelete': '關閉刪除工作階段',
@@ -2173,6 +2181,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.enterSessionName': '请输入会话名称。',
     'sf.renaming': '重命名中…',
     'sf.rename': '重命名',
+    'sf.renameHint': '按 Enter 保存 · 按 Esc 取消',
+    'sf.renameSessionNamed': '重命名会话：{title}',
     'sf.deleteSessionTitle': '要删除“{title}”吗？',
     'sf.deleteSubtitle': '这会从 {agent} 删除原生会话，且无法从 Harness Remote 撤销。',
     'sf.closeDelete': '关闭删除会话',

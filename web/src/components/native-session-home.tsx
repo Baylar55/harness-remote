@@ -12,7 +12,7 @@ import { nativeSessionDisplayTitle } from "../native-session-title"
 import { useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
-import { ChatIcon, ChevronDownIcon, LoadingIcon, PlusIcon, SearchIcon, ServerIcon } from "../Icons"
+import { AgentIcon, ChatIcon, ChevronDownIcon, LoadingIcon, PlusIcon, SearchIcon, ServerIcon } from "../Icons"
 import "../native-session-home.css"
 
 type Source = {
@@ -551,26 +551,41 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
               aria-label={t("sf.searchSessionsLabel")}
             />
           </label>
+          {/* Two different kinds of control, so two different shapes.
+              State is a segmented control: three mutually exclusive views of the same list, always
+              visible, each carrying its own count. Scope is a pair of dropdowns. Sharing one
+              horizontally scrolling row made the selects collapse to a 35px stub with their value
+              clipped away, which is what made them read as empty text fields rather than menus. */}
           <div className="hr-native-session-filters" role="group" aria-label={t("sf.filterSessions")}>
-            {sources.length > 1 ? (
-              <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)} aria-label={t("sf.filterByMachine")}>
-                <option value="">{t("sf.allMachinesCount", { count: records.length })}</option>
-                {machineChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
-              </select>
-            ) : null}
             <button type="button" className={filter === "all" ? "active" : ""} onClick={() => setFilter("all")} aria-pressed={filter === "all"}>
-              {t("sf.filterAll")} <b>{scopedRecords.length}</b>
+              <span>{t("sf.filterAll")}</span> <b>{scopedRecords.length}</b>
             </button>
             <button type="button" className={filter === "working" ? "active" : ""} onClick={() => setFilter("working")} aria-pressed={filter === "working"}>
-              {t("sf.filterLive")} <b>{activeCount}</b>
+              <span>{t("sf.filterLive")}</span> <b>{activeCount}</b>
             </button>
             <button type="button" className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")} aria-pressed={filter === "attention"}>
-              {t("sf.filterAttention")} <b>{attentionCount}</b>
+              <span>{t("sf.filterAttention")}</span> <b>{attentionCount}</b>
             </button>
-            <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} aria-label={t("sf.filterByAgent")}>
-              <option value="">{t("sf.allHarnesses")}</option>
-              {agentChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
-            </select>
+          </div>
+          <div className="hr-native-session-scopes">
+            {sources.length > 1 ? (
+              <label className="hr-native-scope">
+                <ServerIcon size={13} />
+                <select value={machineFilter} onChange={(event) => setMachineFilter(event.target.value)} aria-label={t("sf.filterByMachine")}>
+                  <option value="">{t("sf.allMachinesCount", { count: records.length })}</option>
+                  {machineChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
+                </select>
+                <ChevronDownIcon size={12} />
+              </label>
+            ) : null}
+            <label className="hr-native-scope">
+              <AgentIcon size={13} />
+              <select value={agentFilter} onChange={(event) => setAgentFilter(event.target.value)} aria-label={t("sf.filterByAgent")}>
+                <option value="">{t("sf.allHarnesses")}</option>
+                {agentChoices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label} · {choice.count}</option>)}
+              </select>
+              <ChevronDownIcon size={12} />
+            </label>
           </div>
         </div>
       ) : null}

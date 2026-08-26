@@ -5,6 +5,20 @@ import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
+const HARNESS_ICON_FILES: Record<string, string> = {
+  codex: "codex.svg",
+  claude: "claude.svg",
+  opencode: "opencode.svg",
+  omp: "omp.svg",
+  pi: "pi.svg"
+}
+
+function harnessIconUrl(backend: string | undefined): string | undefined {
+  if (!backend) return undefined
+  const file = HARNESS_ICON_FILES[backend.toLowerCase()]
+  return file ? `${import.meta.env.BASE_URL}harness-icons/${file}` : undefined
+}
+
 const NEAR_BOTTOM_PX = 96
 const COMPOSER_MAX_HEIGHT_PX = 180
 const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
@@ -79,7 +93,45 @@ const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { mes
   )
 })
 
-const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, workingLabel }: { agentLabel: string; workingLabel?: string }) {
+/**
+ * The reply, before it has any content.
+ *
+ * This used to be a free-standing card of its own shape, which meant the wait was staged in three
+ * different containers: a "getting started" card appeared, was removed, and an agent message with a
+ * different avatar, a different width and a different border took its place, with the working state
+ * restated inside it. The user watched the surface rebuild itself twice before a single token
+ * arrived.
+ *
+ * It is now the agent's own message bubble - same avatar, same name, same column, same geometry -
+ * holding a live activity row instead of content. When the first token lands, the real bubble takes
+ * over in place and continues to carry that same activity row (see `ActivityStatus` below) until the
+ * turn ends. Nothing is destroyed and rebuilt: one container fills in.
+ */
+const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, agentBackend, workingLabel }: { agentLabel: string; agentBackend?: string; workingLabel?: string }) {
+  const icon = harnessIconUrl(agentBackend)
+  return (
+    <article className="uw-message uw-message-agent uw-message-pending">
+      <div className="uw-avatar uw-avatar-agent" aria-hidden="true">
+        {icon ? <img src={icon} alt="" /> : agentLabel.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="uw-message-body">
+        <header>
+          <strong>{agentLabel}</strong>
+        </header>
+        <div className="uw-message-parts">
+          <ActivityStatus label={workingLabel || `${agentLabel} is working`} agentLabel={agentLabel} />
+        </div>
+      </div>
+    </article>
+  )
+})
+
+/**
+ * The one live line for a turn in progress. Rendered inside the pending bubble before the reply
+ * exists and inside the reply itself once it does, so the indicator stays in one place for the whole
+ * wait rather than moving between containers as the turn progresses.
+ */
+export const ActivityStatus = memo(function ActivityStatus({ label, agentLabel }: { label: string; agentLabel: string }) {
   const [elapsed, setElapsed] = useState(0)
 
   useEffect(() => {
@@ -92,7 +144,7 @@ const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, workingL
     <div className="uw-session-typing" role="status" aria-live="polite" aria-label={`Waiting for ${agentLabel} response`}>
       <span className="uw-thinking-orb" aria-hidden="true"><i /><i /><i /></span>
       <span className="uw-thinking-copy">
-        <strong>{workingLabel || `${agentLabel} is working`}</strong>
+        <strong>{label}</strong>
         <small>{elapsed < 2 ? "Starting…" : `${elapsed}s`}</small>
       </span>
     </div>
@@ -124,6 +176,7 @@ function transcriptPropsEqual(previous: TranscriptProps, next: TranscriptProps):
 const ConversationTranscript = memo(function ConversationTranscript({
   messages,
   agentLabel,
+  agentBackend,
   loading = false,
   waiting = false,
   ready = true,
@@ -263,7 +316,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
                 ))}
           </>
         )}
-        {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} workingLabel={workingLabel} /> : null}
+        {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} agentBackend={agentBackend} workingLabel={workingLabel} /> : null}
       </div>
 
       {jumpAffordances.top || jumpAffordances.bottom ? (
