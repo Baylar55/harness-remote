@@ -1,60 +1,13 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import test from "node:test"
-import {
-  agentLabel,
-  modelLabel,
-  normalizeTaskStatus,
-  sortTasksByActivity,
-  taskStatusLabel,
-  taskTitle
-} from "./taskdeskHomeModel.ts"
 
-function task(overrides = {}) {
-  return {
-    id: "task-1",
-    machineId: "machine-1",
-    projectId: "project-1",
-    project: { name: "Harness Remote", path: "/repo", kind: "git" },
-    agentId: "codex",
-    prompt: "Fix the authentication regression\nMore context",
-    model: { providerID: "openai", modelID: "gpt-test", variant: "high" },
-    status: "running",
-    workspace: { mode: "project", path: "/repo" },
-    run: null,
-    createdAt: "2026-08-18T10:00:00.000Z",
-    updatedAt: "2026-08-18T11:00:00.000Z",
-    ...overrides
-  }
-}
-
-test("legacy persisted records remain readable while the product vocabulary changes", () => {
-  assert.equal(normalizeTaskStatus("created"), "preparing")
-  assert.equal(normalizeTaskStatus("pending"), "queued")
-  assert.equal(normalizeTaskStatus("busy"), "running")
-  assert.equal(normalizeTaskStatus("needs_attention"), "waiting")
-  assert.equal(normalizeTaskStatus("succeeded"), "completed")
-  assert.equal(normalizeTaskStatus("error"), "failed")
-  assert.equal(normalizeTaskStatus("aborted"), "cancelled")
-  assert.equal(normalizeTaskStatus("custom-state"), "unknown")
-  assert.equal(taskStatusLabel("custom-state"), "custom-state")
-
-  const value = task()
-  assert.equal(taskTitle(value), "Fix the authentication regression")
-  assert.equal(modelLabel(value), "gpt-test · high")
-  assert.equal(agentLabel([
-    { id: "codex", label: "Codex CLI", backend: "codex", transport: "acp", managed: false, state: "available", capabilities: {} }
-  ], value.agentId), "Codex CLI")
-  assert.deepEqual(sortTasksByActivity([
-    task({ id: "older", updatedAt: "2026-08-18T09:00:00.000Z" }),
-    task({ id: "newer", updatedAt: "2026-08-18T12:00:00.000Z" })
-  ]).map((item) => item.id), ["newer", "older"])
-})
+const read = (name) => readFileSync(new URL(name, import.meta.url), "utf8")
 
 test("Harness Remote boots directly into the Session-first control plane", () => {
-  const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
-  const machineStorage = readFileSync(new URL("./workspaceMachines.ts", import.meta.url), "utf8")
-  const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
+  const main = read("./main.tsx")
+  const machineStorage = read("./workspaceMachines.ts")
+  const standalone = read("./components/standalone-universal-workspace.tsx")
 
   assert.match(main, /function HarnessRemoteBoundary\(\)/)
   assert.match(main, /loadWorkspaceMachines/)
@@ -65,138 +18,111 @@ test("Harness Remote boots directly into the Session-first control plane", () =>
   assert.match(standalone, /<NativeSessionHome/)
   assert.match(standalone, /<NativeSessionObserver/)
   assert.doesNotMatch(standalone, /ConversationWorkspace/)
-  assert.doesNotMatch(standalone, /primarySection/)
-  assert.doesNotMatch(standalone, />Conversations</)
   assert.doesNotMatch(standalone, /TaskDeskWorkspace/)
   assert.doesNotMatch(standalone, /legacyView/)
+  assert.doesNotMatch(standalone, />Conversations</)
+})
+
+test("the removed Conversation-first product UI stays deleted", () => {
+  assert.equal(existsSync(new URL("./components/conversation-workspace.tsx", import.meta.url)), false)
+  assert.equal(existsSync(new URL("./components/conversation-detail.tsx", import.meta.url)), false)
+  assert.equal(existsSync(new URL("./v3-conversation-detail.test.mjs", import.meta.url)), false)
+
+  const standalone = read("./components/standalone-universal-workspace.tsx")
+  assert.doesNotMatch(standalone, /New conversation/i)
+  assert.doesNotMatch(standalone, /Conversation filters/i)
+  assert.doesNotMatch(standalone, /ConversationSettingsModal/)
 })
 
 test("primary product surface is Machine -> Project -> native Session", () => {
-  const shell = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
-  const home = readFileSync(new URL("./components/native-session-home.tsx", import.meta.url), "utf8")
-  const observer = readFileSync(new URL("./components/native-session-observer.tsx", import.meta.url), "utf8")
-  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
+  const shell = read("./components/standalone-universal-workspace.tsx")
+  const home = read("./components/native-session-home.tsx")
+  const observer = read("./components/native-session-observer.tsx")
+  const sharedChat = read("./components/work-thread-conversation.tsx")
 
   assert.match(shell, /const \[runtimes, setRuntimes\]/)
   assert.match(shell, /state: "loading" \| "online" \| "offline"/)
-  assert.match(shell, /<NativeSessionHome sources=\{runtimes\}/)
+  assert.match(shell, /<NativeSessionHome[\s\S]*sources=\{runtimes\}/)
   assert.match(shell, /<NativeSessionObserver/)
   assert.match(home, /hr-native-machine-group/)
   assert.match(home, /hr-native-project-group/)
   assert.match(home, /hr-native-session-row/)
   assert.match(home, /sessionTreeRows/)
   assert.match(observer, /<WorkThreadConversation/)
-  assert.match(conversation, /buildWorkThreadTimeline/)
-  assert.match(conversation, /<TaskDeskConversation/)
-  assert.doesNotMatch(shell, />New conversation</)
-  assert.doesNotMatch(shell, />Conversations</)
+  assert.match(sharedChat, /buildWorkThreadTimeline/)
+  assert.match(sharedChat, /<TaskDeskConversation/)
 })
 
-test("Workspace keeps machines projects coding agents filters models and settings", () => {
-  const shell = readFileSync(new URL("./components/conversation-workspace.tsx", import.meta.url), "utf8")
-  const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
-  const picker = readFileSync(new URL("./components/model-picker.tsx", import.meta.url), "utf8")
+test("Session-first workspace keeps machines projects harness filters models and settings", () => {
+  const standalone = read("./components/standalone-universal-workspace.tsx")
+  const home = read("./components/native-session-home.tsx")
+  const observer = read("./components/native-session-observer.tsx")
+  const picker = read("./components/model-picker.tsx")
 
-  assert.match(shell, /selectedMachineID/)
-  assert.match(shell, /tdw-machine-section/)
-  assert.match(shell, /tdw-project-section/)
-  assert.match(shell, /tdw-harness-section/)
-  assert.match(shell, /tdw-filter-section/)
-  assert.match(shell, /Conversation filters/)
-  assert.match(shell, /ConversationSettingsModal/)
-  assert.match(shell, /persistThemePreference/)
-  assert.match(shell, /persistLanguage/)
-  assert.match(shell, /<ModelPicker models=\{models\}/)
-  assert.match(picker, /Search model, provider, variant/)
   assert.match(standalone, /MachineManager/)
   assert.match(standalone, /discoverMachine/)
+  assert.match(standalone, /persistThemePreference/)
+  assert.match(standalone, /persistLanguage/)
+  assert.match(home, /machineFilter/)
+  assert.match(home, /agentFilter/)
+  assert.match(home, /createNativeSessionTarget/)
+  assert.match(home, /New Session|sf\.newSession/)
+  assert.match(observer, /NATIVE_SESSION_MODEL_SCOPE/)
+  assert.match(observer, /deferModelFallback/)
+  assert.match(picker, /Search model, provider, variant/)
 })
 
-test("new conversations use the real project directory and never create a hidden worktree", () => {
-  const shell = readFileSync(new URL("./components/conversation-workspace.tsx", import.meta.url), "utf8")
-  const store = readFileSync(new URL("../../bridge/src/task-store.js", import.meta.url), "utf8")
-  const controller = readFileSync(new URL("../../bridge/src/task-run-controller.js", import.meta.url), "utf8")
+test("native Session metadata actions belong to the open Session, not the navigation rail", () => {
+  const standalone = read("./components/standalone-universal-workspace.tsx")
+  const home = read("./components/native-session-home.tsx")
+  const actions = read("./components/native-session-actions.tsx")
 
-  assert.match(shell, /taskClient\.createTask/)
-  assert.match(shell, /taskClient\.launch/)
-  assert.doesNotMatch(shell, /prepareWorktree/)
-  assert.doesNotMatch(shell, /createCheckpoint/)
-  assert.match(shell, /No hidden worktree is created/)
-  assert.match(store, /workspace: \{ mode: "project", path: project\.path \}/)
-  assert.match(controller, /directory: task\.workspace\.path/)
+  assert.match(standalone, /<NativeSessionActions target=\{selected\}/)
+  assert.match(actions, /api\.renameSession/)
+  assert.match(actions, /api\.deleteSession/)
+  assert.match(actions, /target\.renameSupported/)
+  assert.match(actions, /target\.deleteSupported/)
+  assert.doesNotMatch(home, /api\.renameSession/)
+  assert.doesNotMatch(home, /api\.deleteSession/)
 })
 
-test("one Conversation can continue through another agent and model", () => {
-  const source = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
-  const timeline = readFileSync(new URL("./work-thread-timeline.ts", import.meta.url), "utf8")
-  const controller = readFileSync(new URL("../../bridge/src/task-run-controller.js", import.meta.url), "utf8")
+test("new Session creates a real harness-owned Session in the selected Project", () => {
+  const create = read("./native-session-create.ts")
 
-  assert.match(source, /taskClient\.continueTask\(baseConfig, task\.id, \{/)
-  assert.match(source, /agentId: targetAgentID/)
-  assert.match(source, /providerID: selectedModel\.providerID/)
-  assert.match(source, /modelID: selectedModel\.modelID/)
-  assert.match(source, /<ModelPicker compact/)
-  assert.match(timeline, /Continued with \$\{label\}/)
-  assert.match(timeline, /Model changed to \$\{model\}/)
-  assert.match(controller, /formatTaskHandoff/)
-  assert.match(controller, /latestRunForAgent/)
-  assert.match(controller, /resumeSession/)
-  assert.match(controller, /createSession/)
+  assert.match(create, /api\.createSession\(config, title\?\.trim\(\) \|\| undefined, undefined, directory\)/)
+  assert.match(create, /writerOwned: true/)
+  assert.doesNotMatch(create, /createTask/)
+  assert.doesNotMatch(create, /createCheckpoint/)
+  assert.doesNotMatch(create, /prepareWorktree/)
 })
 
-test("native Sessions are linked, inspectable and not replaced by a second Session page", () => {
-  const detail = readFileSync(new URL("./components/conversation-detail.tsx", import.meta.url), "utf8")
-  const standalone = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
+test("Session chat keeps bounded paging live events attention Stop and startup feedback", () => {
+  const chat = read("./components/work-thread-conversation.tsx")
+  const shared = read("./components/taskdesk-conversation.tsx")
+  const parts = read("./conversation-parts.ts")
+  const overrides = read("./conversation-control-plane-overrides.css")
+  const messageContent = read("./components/taskdesk-message-content.tsx")
 
-  assert.match(detail, /Native continuity/)
-  assert.match(detail, /native Session/)
-  assert.match(detail, /Continued with/)
-  assert.match(detail, /Session ID/)
-  assert.match(detail, /Working directory/)
-  assert.doesNotMatch(standalone, /<UniversalWorkspace/)
-  assert.doesNotMatch(standalone, /Advanced/)
-  assert.doesNotMatch(standalone, /Classic/)
-})
-
-test("conversation chat keeps bounded paging live events attention Stop and startup feedback", () => {
-  const conversation = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
-  const shared = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
-  const parts = readFileSync(new URL("./conversation-parts.ts", import.meta.url), "utf8")
-  const overrides = readFileSync(new URL("./conversation-control-plane-overrides.css", import.meta.url), "utf8")
-  const messageContent = readFileSync(new URL("./components/taskdesk-message-content.tsx", import.meta.url), "utf8")
-  const abort = readFileSync(new URL("../../bridge/src/work-thread-abort.js", import.meta.url), "utf8")
-
-  assert.match(conversation, /INITIAL_PAGE_SIZE = 200/)
-  assert.match(conversation, /OLDER_PAGE_SIZE = 500/)
-  assert.match(conversation, /ACTIVE_RECONCILE_MS = 5_000/)
-  assert.match(conversation, /startTaskDeskSessionLiveRefresh/)
-  assert.match(conversation, /currentRunHasAssistantSignal/)
-  assert.match(conversation, /preparingReply/)
-  assert.match(conversation, /api\.loadQuestions/)
-  assert.match(conversation, /api\.loadPermissions/)
-  assert.match(conversation, /onStop=\{working \? stop : undefined\}/)
+  assert.match(chat, /INITIAL_PAGE_SIZE = 200/)
+  assert.match(chat, /OLDER_PAGE_SIZE = 500/)
+  assert.match(chat, /ACTIVE_RECONCILE_MS = 5_000/)
+  assert.match(chat, /startTaskDeskSessionLiveRefresh/)
+  assert.match(chat, /currentRunHasAssistantSignal/)
+  assert.match(chat, /preparingReply/)
+  assert.match(chat, /api\.loadQuestions/)
+  assert.match(chat, /api\.loadPermissions/)
+  assert.match(chat, /onStop=\{working \? stop : undefined\}/)
   assert.match(shared, /ThinkingIndicator/)
   assert.match(shared, /sending \|\| \(waiting && showWaitingIndicator\)/)
   assert.match(parts, /if \(forceRunning\) return "running"/)
   assert.doesNotMatch(parts, /state\?\.status === "error"\)\) return "error"/)
   assert.match(overrides, /uw-activity-group\.uw-tool-running/)
-  // A running activity still reads as "Working", but the word is component copy now instead of a
-  // CSS `content` pseudo-element that left the raw protocol status as the element's real text.
   assert.match(messageContent, /status === "running" \? "Working" : status/)
-  assert.match(abort, /service\.abort\(sessionID\)/)
 })
 
-test("Changes stay grounded in the project workspace and current native Session", () => {
-  const detail = readFileSync(new URL("./components/conversation-detail.tsx", import.meta.url), "utf8")
-  assert.match(detail, /taskClient\.inspectWorkspace/)
-  assert.match(detail, /api\.loadDiff/)
-  assert.match(detail, /Project workspace/)
-  assert.match(detail, /No project changes/)
-})
-
-test("conversation UI preserves stable autoscroll memoized rows and mobile keyboard behavior", () => {
-  const source = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
-  const mobileCss = readFileSync(new URL("./taskdesk-mobile-navigation.css", import.meta.url), "utf8")
+test("Session UI preserves stable autoscroll memoized rows and mobile keyboard behavior", () => {
+  const source = read("./components/taskdesk-conversation.tsx")
+  const mobileCss = read("./taskdesk-mobile-navigation.css")
 
   assert.match(source, /const MessageBubble = memo/)
   assert.match(source, /NEAR_BOTTOM_PX = 96/)
