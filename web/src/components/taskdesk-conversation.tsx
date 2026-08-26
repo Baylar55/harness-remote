@@ -3,6 +3,7 @@ import type { MessageEnvelope } from "../types"
 import { ChatIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
+import "../taskdesk-history-loader.css"
 import { TaskDeskMessageContent } from "./taskdesk-message-content"
 
 const HARNESS_ICON_FILES: Record<string, string> = {
@@ -213,15 +214,27 @@ const ConversationTranscript = memo(function ConversationTranscript({
     const requestOlder = loadOlderRef.current
     if (!requestOlder || !hasMore || loadingOlder) return
     const transcript = transcriptRef.current
-    const previousHeight = transcript?.scrollHeight ?? 0
     const previousTop = transcript?.scrollTop ?? 0
+
+    // History loading is an explicit move away from the live tail. Cancel any already-scheduled
+    // follow frame before it can race the prepend and snap the transcript back to the newest turn.
+    nearBottomRef.current = false
     preservingOlderRef.current = true
+    if (followFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(followFrameRef.current)
+      followFrameRef.current = undefined
+    }
+
     try {
       await requestOlder()
       window.requestAnimationFrame(() => {
         const current = transcriptRef.current
         if (current) {
-          current.scrollTop = previousTop + (current.scrollHeight - previousHeight)
+          // The history affordance is reached at the top of the transcript. Keep the same top-relative
+          // position so the newly prepended messages are actually revealed. Compensating by their
+          // added height could put a short initial page straight back at the bottom of the chat.
+          current.scrollTop = Math.max(0, Math.min(previousTop, current.scrollHeight - current.clientHeight))
+          nearBottomRef.current = false
           refreshJumpAffordances(current)
         }
         preservingOlderRef.current = false
@@ -272,9 +285,16 @@ const ConversationTranscript = memo(function ConversationTranscript({
           <>
             {hasMore ? (
               <div className="uw-history-loader">
-                <button type="button" className="uw-button uw-button-ghost" disabled={loadingOlder} onClick={() => void loadOlder()}>
-                  {loadingOlder ? <LoadingIcon size={15} /> : null}
-                  {loadingOlder ? "Loading older messages…" : "Load older messages"}
+                <button
+                  type="button"
+                  className="uw-history-load"
+                  disabled={loadingOlder}
+                  onClick={() => void loadOlder()}
+                  title={loadingOlder ? "Loading earlier messages" : "Load earlier messages"}
+                  aria-label={loadingOlder ? "Loading earlier messages" : "Load earlier messages"}
+                >
+                  {loadingOlder ? <LoadingIcon size={13} /> : <JumpToTopIcon size={13} />}
+                  <span>{loadingOlder ? "Loading…" : "Earlier messages"}</span>
                 </button>
               </div>
             ) : null}
