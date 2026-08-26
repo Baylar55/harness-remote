@@ -23,18 +23,29 @@ export const CLAUDE_REPORTED_BUSY_STALE_MS = 360_000
 /**
  * Correct only Claude's public presentation status. Internal AcpService busy state remains untouched
  * because it also protects queueing, transcript merge and cache semantics.
+ *
+ * The previous version also trusted the bridge's Session activity timestamp. That timestamp is
+ * deliberately refreshed by generic session.updated events, including reconciliation work, so a
+ * historical Session could look "recent" forever even though Claude had no prompt in flight. For
+ * Claude the live transport request is the narrow corroboration signal we actually need: if there is
+ * no pending session/prompt, a leftover busy flag is stale presentation state and must read idle.
  */
-export function corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt, now = Date.now()) {
+export function corroborateClaudeSessionStatus(status, sessionID, pendingRequests, _lastActivityAt, now = Date.now()) {
   if (!status || status.type !== "busy") return status
+  const prompts = (Array.isArray(pendingRequests) ? pendingRequests : []).filter(
+    (pending) => pending?.method === "session/prompt" && pending.sessionID === sessionID
+  )
+  if (prompts.length === 0) return { ...status, type: "idle" }
+
   let newestProtocolActivity = 0
-  for (const pending of Array.isArray(pendingRequests) ? pendingRequests : []) {
-    if (pending?.method !== "session/prompt" || pending.sessionID !== sessionID) continue
+  for (const pending of prompts) {
     if (!Number.isFinite(pending.idleMs)) continue
     newestProtocolActivity = Math.max(newestProtocolActivity, now - Math.max(0, pending.idleMs))
   }
-  const newestActivity = Math.max(newestProtocolActivity, Number(lastActivityAt) || 0)
-  if (!newestActivity || now - newestActivity < CLAUDE_REPORTED_BUSY_STALE_MS) return status
-  return { ...status, type: "idle" }
+  if (newestProtocolActivity && now - newestProtocolActivity >= CLAUDE_REPORTED_BUSY_STALE_MS) {
+    return { ...status, type: "idle" }
+  }
+  return status
 }
 
 /** base64 carries 3 bytes per 4 characters, so measure it rather than decoding megabytes to count them. */

@@ -65,7 +65,7 @@ test("Claude public status stops reporting a finished stale turn as Working", ()
       now - CLAUDE_REPORTED_BUSY_STALE_MS + 1,
       now
     ),
-    busy
+    { type: "idle" }
   )
   assert.deepEqual(
     corroborateClaudeSessionStatus(
