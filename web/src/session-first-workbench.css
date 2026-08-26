@@ -2,8 +2,18 @@
    A coding-agent control surface: dense session supervision, one native transcript, one composer. */
 
 .hr-native-workspace {
-  --hrsf-rail-width: clamp(320px, 27vw, 390px);
-  --hrsf-content-width: 900px;
+  /* Measured at 1875px: the old clamp resolved to 390px and the widest row content reached 237px,
+     so 39% of the rail was margin while its type sat at 10-11.5px. Width per unit of type is what
+     reads as "small text in a big column" - 390/11.5 was 34, against ~21 for a comparable sidebar.
+     Narrowing the rail and raising its type one step (below) lands that ratio at 340/13 = 26. */
+  --hrsf-rail-width: clamp(300px, 22vw, 356px);
+  /* One column for everything, sized from the clients this is measured against rather than from a
+     rule of thumb. Prose at 15px: ChatGPT's reading column is 96 characters, Claude Code's is 132.
+     880px lands at 112 - between them - and prose, code, tables and the composer all share it, the
+     way both references do. Surplus window width becomes margin, not longer lines.
+     Earlier attempts missed on both sides: 900px with a separate 66ch prose cap gave 81 characters
+     with a code block twice its width beside it, and removing the cap gave 143. */
+  --hrsf-content-width: min(880px, 100%);
   background: var(--td3-bg);
 }
 
@@ -14,6 +24,19 @@
   padding-inline: 16px;
   border-bottom-color: var(--td3-border-soft);
   background: var(--td3-chrome);
+}
+
+/* The brand mark is the real app icon, so the letter tile that used to stand in for it must not
+   paint a coloured square behind the artwork. */
+.hr-native-workspace .hr-logo.hr-app-icon {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 9px;
+  background: transparent;
+  object-fit: contain;
 }
 
 .hr-native-workspace .hr-brand strong {
@@ -230,29 +253,60 @@
 }
 
 .hr-native-machine-heading {
+  width: 100%;
   min-height: 34px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin: 0 3px 5px;
-  padding: 7px 3px 6px;
+  /* A full-width control cannot carry a horizontal margin without overflowing the Session rail, so
+     the inset the header used to get from its margin now comes from its own padding. */
+  margin: 0 0 5px;
+  padding: 7px 6px 6px;
+  border: 0;
   border-bottom: 1px solid var(--td3-border-soft);
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.hr-native-machine-heading > div,
-.hr-native-machine-heading > div > span,
-.hr-native-machine-heading > span {
+.hr-native-machine-heading:hover {
+  border-bottom-color: var(--td3-border);
+}
+
+/* Pressed feedback without moving the row: a transform here would shift the whole machine group. */
+.hr-native-machine-heading:active {
+  background: var(--td3-raise-2);
+}
+
+.hr-native-machine-heading:hover .hr-native-machine-chevron {
+  color: var(--td3-text-2);
+}
+
+/* The heading is now the collapse control for a whole machine, so keyboard focus needs a real
+   indicator rather than the hover tint. */
+.hr-native-machine-heading:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--td3-blue-border);
+  outline-offset: 1px;
+}
+
+.hr-native-machine-identity,
+.hr-native-machine-identity > span,
+.hr-native-machine-metrics {
   min-width: 0;
   display: flex;
   align-items: center;
 }
 
-.hr-native-machine-heading > div {
+.hr-native-machine-identity {
   gap: 7px;
 }
 
-.hr-native-machine-heading > div > i {
+.hr-native-machine-identity > i {
   width: 7px;
   height: 7px;
   flex: none;
@@ -260,24 +314,24 @@
   background: var(--td3-muted);
 }
 
-.hr-native-machine-heading > div > i[data-state="online"] {
+.hr-native-machine-identity > i[data-state="online"] {
   background: var(--td3-green);
   box-shadow: 0 0 0 3px var(--td3-green-soft);
 }
 
-.hr-native-machine-heading > div > i[data-state="loading"] {
+.hr-native-machine-identity > i[data-state="loading"] {
   background: var(--td3-blue-text);
   box-shadow: 0 0 0 3px var(--td3-blue-soft);
   animation: tdw-connect-dot 1.35s ease-in-out infinite;
 }
 
-.hr-native-machine-heading > div > i[data-state="offline"] {
+.hr-native-machine-identity > i[data-state="offline"] {
   background: var(--td3-red);
   box-shadow: 0 0 0 3px var(--td3-red-soft);
 }
 
 
-.hr-native-machine-heading > div > span {
+.hr-native-machine-identity > span {
   align-items: baseline;
   gap: 7px;
   overflow: hidden;
@@ -292,37 +346,67 @@
 
 .hr-native-machine-heading strong {
   color: var(--td3-text);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 780;
 }
 
 .hr-native-machine-heading small {
   color: var(--td3-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
-.hr-native-machine-heading > span {
+.hr-native-machine-metrics {
   flex: none;
   justify-content: flex-end;
   gap: 6px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
-.hr-native-machine-heading > span b {
+.hr-native-machine-metrics b {
   color: var(--td3-yellow-text);
 }
 
-.hr-native-machine-heading > span em {
+.hr-native-machine-metrics em {
   color: var(--td3-green-text);
   font-style: normal;
   font-weight: 700;
 }
 
-.hr-native-machine-heading > span small {
+.hr-native-machine-metrics small {
   min-width: 20px;
   color: var(--td3-muted);
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* U+2304 was the collapse affordance in both headings. It is a text glyph, so it renders only if
+   the resolved font happens to carry it - on Windows without Inter installed the stack falls through
+   to a face that does not, and the control simply had no visible marker. A real SVG also lets the
+   arrow match the stroke weight of every other icon in the rail. */
+.hr-native-machine-chevron,
+.hr-native-project-chevron {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td3-text-3);
+  font-style: normal;
+  transition: transform .14s ease;
+}
+
+.hr-native-machine-chevron svg,
+.hr-native-project-chevron svg {
+  display: block;
+}
+
+.hr-native-machine-group.collapsed .hr-native-machine-chevron {
+  transform: rotate(-90deg);
+}
+
+.hr-native-machine-group.collapsed .hr-native-machine-heading {
+  margin-bottom: 0;
 }
 .hr-native-machine-empty {
   min-height: 48px;
@@ -394,14 +478,14 @@
 }
 
 .hr-native-project-heading strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 760;
 }
 
 .hr-native-project-heading small {
   max-width: 265px;
   margin-top: 1px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hr-native-project-heading > span:last-child {
@@ -432,6 +516,11 @@
 
 .hr-native-project-group.collapsed .hr-native-project-heading > span:last-child i {
   transform: rotate(-90deg);
+}
+
+.hr-native-project-heading:hover .hr-native-project-chevron,
+.hr-native-machine-heading:hover .hr-native-machine-chevron {
+  color: var(--td3-text);
 }
 
 .hr-native-home-list {
@@ -517,7 +606,7 @@
 }
 
 .hr-native-session-copy strong {
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 680;
   line-height: 1.25;
 }
@@ -585,13 +674,13 @@
 
 .hr-native-session-copy small {
   margin-top: 3px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hr-native-session-meta {
-  min-width: 62px;
+  min-width: 66px;
   gap: 2px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hr-native-session-status {
@@ -615,7 +704,7 @@
   border-color: var(--td3-border-soft);
   border-radius: 10px;
   background: var(--td3-raise-1);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .10);
+  box-shadow: var(--td3-shadow-panel);
 }
 
 .hr-native-workspace-session-header {
@@ -643,6 +732,226 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
+}
+
+/* Continue-with-another-agent sits beside Rename/Delete in the chat header and reuses their panel
+   chrome, because it is the same kind of action: it acts on the Session that is open. */
+/* The rail divider. 10px of grab area over a 1px visual line, the same proportion the 2.x shell
+   used, sitting in the grid gap so it never overlaps either pane's content. */
+.hr-rail-resizer {
+  position: relative;
+  z-index: 4;
+  width: 10px;
+  margin-inline: -5px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.hr-rail-resizer::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background .14s ease;
+}
+
+.hr-rail-resizer:hover::after,
+.hr-rail-resizer:active::after,
+.hr-rail-resizer:focus-visible::after {
+  background: var(--td3-blue-border);
+}
+
+.hr-rail-resizer:focus-visible {
+  outline: 2px solid var(--td3-blue-border);
+  outline-offset: -2px;
+}
+
+/* A count the rail cannot show once the chat is full-screen. */
+.hr-mobile-nav-badge {
+  position: absolute;
+  top: 4px;
+  left: calc(50% + 6px);
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 9px;
+  color: var(--td3-on-accent);
+  background: var(--td3-red);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+
+.hr-mobile-nav button {
+  position: relative;
+}
+
+.hr-session-handoff {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.hr-session-handoff-trigger {
+  min-height: 30px;
+  gap: 6px;
+  padding-inline: 11px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.hr-session-handoff .hr-session-action-panel {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(340px, calc(100vw - 24px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--td3-border-strong);
+  border-radius: 12px;
+  background: var(--td3-panel-2);
+  box-shadow: var(--td3-shadow-panel);
+  text-align: left;
+}
+
+.hr-session-handoff .hr-session-action-field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--td3-border);
+  border-radius: 9px;
+  color: var(--td3-text);
+  background: var(--td3-control);
+  font: inherit;
+  font-size: 13px;
+}
+
+.hr-session-actions {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hr-session-action-danger:hover,
+.hr-session-action-danger:focus-visible {
+  color: var(--td3-red-text);
+}
+
+/* The rename/delete panel traps Tab and owns Escape, so it really is modal. Give it the scrim the
+   rest of the shell's dialogs use rather than letting the workspace underneath look operable. */
+.hr-session-action-backdrop {
+  position: fixed;
+  z-index: 55;
+  inset: 0;
+  background: var(--td3-scrim);
+}
+
+.hr-session-action-panel {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 7px);
+  right: 0;
+  width: min(340px, calc(100vw - 24px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--td3-border-strong);
+  border-radius: 12px;
+  background: var(--td3-panel-2);
+  box-shadow: var(--td3-shadow-panel);
+  text-align: left;
+}
+
+.hr-session-action-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hr-session-action-heading > div {
+  min-width: 0;
+}
+
+.hr-session-action-heading strong,
+.hr-session-action-heading small {
+  display: block;
+  color: var(--td3-text);
+}
+
+.hr-session-action-heading strong {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.hr-session-action-heading small {
+  margin-top: 3px;
+  color: var(--td3-muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.hr-session-action-field {
+  display: grid;
+  gap: 5px;
+}
+
+.hr-session-action-field > span {
+  color: var(--td3-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.hr-session-action-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--td3-border);
+  border-radius: 9px;
+  color: var(--td3-text);
+  background: var(--td3-control);
+  font: inherit;
+  font-size: 13px;
+}
+
+.hr-session-action-field input:focus-visible {
+  outline: 0;
+  border-color: var(--td3-blue-border);
+  box-shadow: 0 0 0 2px var(--td3-blue-soft);
+}
+
+.hr-session-action-error {
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: var(--td3-red-text);
+  background: var(--td3-red-soft);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.hr-session-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Deleting a native Session is irreversible from Harness Remote, so the confirming button must not
+   look like the neutral one next to it. */
+.hr-native-workspace .tdw-button.danger {
+  border-color: var(--td3-red-border);
+  color: var(--td3-red-text);
+  background: var(--td3-red-soft);
 }
 
 .hr-native-startup {
@@ -712,7 +1021,7 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  background: rgba(0, 0, 0, .45);
+  background: var(--td3-scrim);
   backdrop-filter: blur(3px);
 }
 
@@ -728,7 +1037,7 @@
   border-radius: 14px;
   color: var(--td3-text);
   background: var(--td3-panel-2);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .34);
+  box-shadow: var(--td3-shadow-panel);
 }
 
 .hr-session-settings-page > header {
@@ -928,13 +1237,34 @@
   font-size: 11.5px;
 }
 
+/* The reading measure, and deliberately not in `ch`.
+ *
+ * `ch` is the advance of "0" in the *resolved* font, and this app's stack is
+ * `Inter, ..., "Segoe UI Variable Text", ...` with Inter used only when it happens to be installed.
+ * So the same `66ch` produced a 588px column on a machine with Inter and roughly 580px on Windows
+ * without it - the reading measure silently differed per machine, which is why two people measuring
+ * the same build disagreed about how wide it was. Every other cap in this surface is px or %.
+ *
+ * The width itself: every coding client this is compared against - Claude Code, Codex, the rest -
+ * lets prose use the column, and holding it to a 65-75 character band left the paragraph at under
+ * half the width of the code block directly beneath it. That asymmetry is what reads as "cramped",
+ * far more than the line length does. Prose now shares one edge with code, tables and the composer.
+ * Dial this single value back if long lines ever start costing more than the alignment buys.
+ *
+ * Declared on the conversation element itself, not on this wrapper: `taskdesk-conversation.css`
+ * sets `--hr-chat-measure` on `.tdw-work-thread-conversation`, so a value inherited from an
+ * ancestor loses to that element's own declaration and never applies. */
+.hr-native-session-observer .tdw-work-thread-conversation {
+  --hr-chat-measure: 100%;
+}
+
 .hr-native-session-observer .uw-markdown {
-  font-size: 14.5px;
-  line-height: 1.58;
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .hr-native-session-observer .uw-message-user .uw-message-body {
-  max-width: calc(var(--hr-chat-measure) + 24px);
+  max-width: 100%;
   padding: 8px 11px 9px;
   border: 0;
   border-left: 2px solid var(--td3-blue-text);
@@ -955,6 +1285,55 @@
   padding-inline: 9px;
 }
 
+/* `taskdesk-conversation.css` states the rule this surface never implemented: only block prose is
+   held to the reading measure, while tables, code blocks and diffs take the full body width. Nothing
+   granted them that width, so a shrink-to-fit table rendered at 391px - narrower than the 588px
+   paragraph above it, and the narrowest element on a 1485px pane. Each one is also its own scroll
+   container, so a wide table never makes the page body scroll sideways. */
+.hr-native-session-observer .uw-markdown > table,
+.hr-native-session-observer .uw-markdown > .uw-code-block,
+.hr-native-session-observer .uw-markdown > pre {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.hr-native-session-observer .uw-markdown > table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-spacing: 0;
+  font-size: 13.5px;
+}
+
+.hr-native-session-observer .uw-markdown > table th,
+.hr-native-session-observer .uw-markdown > table td {
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--td3-border-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.hr-native-session-observer .uw-markdown > table th {
+  color: var(--td3-text-2);
+  background: var(--td3-raise-1);
+  border-bottom: 1px solid var(--td3-border);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Figures line up only when their digits share an advance, which is the whole reason a coding
+   agent's output ends up in a table in the first place. */
+.hr-native-session-observer .uw-markdown > table td {
+  color: var(--td3-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.hr-native-session-observer .uw-markdown > table tr:last-child td {
+  border-bottom: 0;
+}
+
 .hr-native-session-observer .uw-reasoning {
   border-color: var(--td3-border-soft);
   border-radius: 7px;
@@ -962,17 +1341,19 @@
 }
 
 .hr-native-session-observer .uw-composer-shell {
-  width: min(var(--hrsf-content-width), calc(100% - 48px));
+  /* The same horizontal inset the transcript uses, so the composer's edges land exactly on the
+     message rows' edges instead of overhanging them by the difference between two insets. */
+  width: min(var(--hrsf-content-width), calc(100% - 2 * clamp(18px, 3vw, 34px)));
   margin: 0 auto 12px;
   border-color: var(--td3-border);
   border-radius: 12px;
   background: var(--td3-panel-2);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .12), inset 0 1px 0 var(--td3-raise-1);
+  box-shadow: var(--td3-shadow-panel), inset 0 1px 0 var(--td3-raise-1);
 }
 
 .hr-native-session-observer .uw-composer-shell:focus-within {
   border-color: var(--td3-blue-border);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .14), 0 0 0 2px var(--td3-blue-soft);
+  box-shadow: var(--td3-shadow-panel), 0 0 0 2px var(--td3-blue-soft);
 }
 
 .hr-native-session-observer .uw-composer-shell textarea {
@@ -1051,14 +1432,14 @@
     min-height: 38px;
   }
 
-  .hr-native-machine-heading > div > span {
+  .hr-native-machine-identity > span {
     align-items: flex-start;
     flex-direction: column;
     gap: 0;
   }
 
-  .hr-native-machine-heading > span b,
-  .hr-native-machine-heading > span em {
+  .hr-native-machine-metrics b,
+  .hr-native-machine-metrics em {
     display: none;
   }
 
@@ -1113,6 +1494,16 @@
     display: none;
   }
   .hr-native-session-stats { display: none; }
+  .hr-session-action-panel {
+    right: -4px;
+    width: min(340px, calc(100vw - 16px));
+  }
+  /* These two are the only Session mutations reachable from a phone, and 34px misses the platform
+     target guidance the rest of the mobile chrome already follows. */
+  .hr-session-actions > .tdw-icon-button { width: 44px; height: 44px; }
+  .hr-session-actions { gap: 6px; }
+  .hr-session-action-field input { min-height: 44px; font-size: 16px; }
+  .hr-session-action-buttons > .tdw-button { min-height: 44px; }
   .hr-native-session-row[data-depth="1"] { width: calc(100% - 10px); margin-left: 10px; }
   .hr-native-session-row[data-depth="2"] { width: calc(100% - 20px); margin-left: 20px; }
   .hr-native-session-row[data-depth="3"] { width: calc(100% - 30px); margin-left: 30px; }
@@ -1193,7 +1584,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hr-native-session-row,
-  .hr-native-workspace-detail {
+  .hr-native-workspace-detail,
+  .hr-native-machine-chevron {
     transition: none !important;
   }
 }
