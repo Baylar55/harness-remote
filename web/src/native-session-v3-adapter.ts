@@ -449,7 +449,11 @@ function installAdapter(): void {
       throw new Error("Cross-agent continuation is disabled until single-Session parity is validated")
     }
     await ensureWriter(entry)
-    const model = body.model === undefined ? entry.currentModel : body.model
+    // The shared v3 controller emits null while its model picker is still catching up with native
+    // transcript enrichment. For a native Session that is not an explicit new catalog selection;
+    // preserve the model already recovered from the authoritative Session instead of silently
+    // switching the next turn to the harness default. A concrete ModelSelection still wins.
+    const model = body.model ?? entry.currentModel
     const result = await sendNativeSessionPrompt(entry.target, prompt, model)
     if (result.status !== "accepted") {
       throw new Error(`Prompt delivery is ${result.status}. Retry the same prompt to reconcile the existing request id.`)
