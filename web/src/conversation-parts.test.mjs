@@ -102,3 +102,33 @@ test("an unfinished reasoning fragment keeps Activity live", () => {
   assert.equal(groups[0].kind, "activity")
   assert.equal(groups[0].status, "running")
 })
+
+test("an abandoned tool call stops holding its Activity section on Working", () => {
+  const groups = groupConversationParts([
+    part("reasoning", "reasoning", { text: "thinking", time: { start: 1, end: 2 } }),
+    part("tool-1", "tool", { tool: "Read", state: { status: "completed" } }),
+    // The bridge settles a call its turn never closed as `incomplete`, and a historical Session that
+    // finished long ago must read as finished: only live wire states keep an Activity on Working.
+    part("tool-2", "tool", { tool: "Bash", state: { status: "incomplete" } })
+  ])
+
+  assert.equal(groups.length, 1)
+  assert.equal(groups[0].kind, "activity")
+  assert.equal(groups[0].status, "completed")
+})
+
+test("a live tool call still holds its Activity section on Working", () => {
+  for (const status of ["pending", "running", "in_progress"]) {
+    const groups = groupConversationParts([part("tool", "tool", { tool: "Bash", state: { status } })])
+    assert.equal(groups[0].status, "running", status)
+  }
+})
+
+test("a tool call that reports no status at all is not read as live work", () => {
+  const groups = groupConversationParts([
+    part("tool", "tool", { tool: "Read", state: {} }),
+    part("tool-2", "tool", { tool: "Read" })
+  ])
+
+  assert.equal(groups[0].status, "completed")
+})

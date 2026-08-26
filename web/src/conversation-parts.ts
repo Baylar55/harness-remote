@@ -13,13 +13,21 @@ export function isConversationActivityPart(part: MessagePart): boolean {
   return part.type === "reasoning" || part.type === "tool"
 }
 
+/**
+ * The wire states that mean a tool call is still open. This is deliberately an allow-list: reading
+ * "anything that is not completed or error" as running let a single state the harness never closes —
+ * or the `incomplete` the bridge stamps on a call its turn abandoned — keep one Activity section on
+ * Working forever, in a Session that had long finished.
+ */
+const LIVE_TOOL_STATUSES = new Set(["pending", "running", "in_progress"])
+
 function activityStatus(parts: MessagePart[], forceRunning = false): "running" | "completed" | "error" {
   // A failed tool call is local technical activity, not the state of the whole assistant turn.
   // While the native Run is alive the Activity stays visibly Working; once the Run ends, the
   // individual tool card retains its error while the Activity itself can complete normally.
   // A real turn failure is rendered separately from message.info.error by TaskDeskMessageContent.
   if (forceRunning) return "running"
-  if (parts.some((part) => part.type === "tool" && part.state?.status && part.state.status !== "completed" && part.state.status !== "error")) return "running"
+  if (parts.some((part) => part.type === "tool" && LIVE_TOOL_STATUSES.has(part.state?.status ?? ""))) return "running"
   if (parts.some((part) => part.type === "reasoning" && part.time?.start && !part.time.end)) return "running"
   return "completed"
 }
