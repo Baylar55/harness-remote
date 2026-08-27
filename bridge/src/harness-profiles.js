@@ -26,6 +26,16 @@ export const HARNESS_PROFILES = {
     args: ["acp"],
     permissionMode: "allow",
     historyLoader: createOmpHistoryLoader(),
+    // OMP's journal is the only place a message has a stable identity. Its ACP stream mints a new
+    // `messageId` for every live message and mints new ones again on every `session/load` replay,
+    // so a Session read once from each source is one conversation with two sets of ids. The journal
+    // is therefore the transcript until this bridge takes the writer, and this bridge's own stream
+    // is the transcript from then on - never both at once. See AcpService#journalPageWhileOwned.
+    journalPageWhileOwned: false,
+    // A transcript that already came from the journal must not be asked for again over ACP, so an
+    // owned OMP Session is opened with `session/resume` rather than the replaying `session/load`.
+    // Reloading on refresh would reintroduce exactly that replay.
+    reloadOnHistoryRefresh: false,
     // OMP exposes thinking as a real ACP config option. We probe only ids the running adapter
     // actually advertises; this list is a routing hint, never a source of invented variants.
     modelVariantConfigIDs: ["thinking"],

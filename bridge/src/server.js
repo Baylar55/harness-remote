@@ -181,7 +181,9 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     ...serviceOptions,
     actionProviders: profile.actionProviders,
     preferListedTitles: profile.preferListedTitles,
-    nativeRenameCommand: profile.nativeRenameCommand
+    nativeRenameCommand: profile.nativeRenameCommand,
+    journalPageWhileOwned: profile.journalPageWhileOwned !== false,
+    modelVariantConfigIDs: profile.modelVariantConfigIDs ?? []
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
   const liveSessionActivity = new Map()

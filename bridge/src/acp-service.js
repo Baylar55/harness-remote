@@ -321,6 +321,8 @@ export class AcpService {
   #replaySettleMs
   #preferListedTitles
   #nativeRenameCommand
+  #journalPageWhileOwned
+  #modelVariantConfigIDs
   constructor(acp, {
     snapshotDirectory,
     historyLoader,
@@ -329,6 +331,24 @@ export class AcpService {
     replaySettleMs = 0,
     preferListedTitles = false,
     nativeRenameCommand,
+    /**
+     * Whether a paged read of a Session this bridge owns may still be answered from the harness's
+     * journal instead of from the stream this bridge is holding.
+     *
+     * It may for every harness whose journal and whose ACP stream describe a message with the same
+     * identity. OMP is the one that does not: its journal keys a message by the entry id it wrote,
+     * while its ACP stream mints a fresh `messageId` per live message and a fresh one again on
+     * every replay. Answering one read from each source therefore hands the app two different ids
+     * for one reply, and an app that reconciles pages by id has no way to tell that apart from two
+     * replies - which is what made a second turn look blank until the conversation was reopened.
+     */
+    journalPageWhileOwned = true,
+    /**
+     * Config-option ids this harness uses for the reasoning variant that belongs to a model.
+     * Only used to report the Session's current selection; a variant is still applied against an
+     * id the running adapter actually advertised.
+     */
+    modelVariantConfigIDs = [],
     actionProviders = []
   } = {}) {
     this.#acp = acp
@@ -339,6 +359,8 @@ export class AcpService {
     this.#replaySettleMs = replaySettleMs
     this.#preferListedTitles = preferListedTitles
     this.#nativeRenameCommand = nativeRenameCommand
+    this.#journalPageWhileOwned = journalPageWhileOwned
+    this.#modelVariantConfigIDs = modelVariantConfigIDs
     this.#actionProviders = actionProviders
     acp.on("notification", (notification) => this.#handleNotification(notification))
   }
@@ -576,7 +598,7 @@ export class AcpService {
 
   async messagePage(sessionID, { limit = 100, before, refresh = false } = {}) {
     const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
-    if (typeof this.#historyLoader?.page === "function" && !refresh && !this.#isBusy(sessionID)) {
+    if (this.#journalPageAvailable(sessionID) && !refresh && !this.#isBusy(sessionID)) {
       try {
         let pageOptions = { limit: boundedLimit, before }
         if (this.#historyLoader.pageRequiresActiveLeaf) {
@@ -599,10 +621,54 @@ export class AcpService {
       : messages.length
     const end = requestedEnd >= 0 ? requestedEnd : messages.length
     const start = Math.max(0, end - boundedLimit)
+    const model = this.#configuredModelSelection(sessionID)
     return {
       messages: messages.slice(start, end),
       before: start > 0 ? messages[start]?.info?.id ?? null : null,
-      hasMore: start > 0
+      hasMore: start > 0,
+      ...(model ? { model } : {})
+    }
+  }
+
+  /**
+   * Whether this exact Session's paged read may be served from the harness's own journal.
+   *
+   * A loader that declares itself authoritative answers every read from the journal, so paging from
+   * it is the same source. Otherwise the journal is the authority only while this bridge is not the
+   * writer - and a harness may opt out of journal paging even then, see `journalPageWhileOwned`.
+   */
+  #journalPageAvailable(sessionID) {
+    if (typeof this.#historyLoader?.page !== "function") return false
+    if (this.#historyLoader.authoritativeHistory === true) return true
+    if (this.#journalBacked(sessionID)) return true
+    return this.#journalPageWhileOwned
+  }
+
+  /**
+   * The model this Session is configured with, for the harnesses whose owned pages no longer come
+   * from the journal that used to report it.
+   *
+   * The value is the one the adapter itself last returned for the `model` config option, so it
+   * costs no I/O and cannot disagree with what the next prompt would run on. It is addressed the
+   * way the app addresses models everywhere, `provider/model`; a harness whose ids carry no
+   * provider reports nothing here rather than inventing one.
+   */
+  #configuredModelSelection(sessionID) {
+    if (this.#journalPageWhileOwned) return undefined
+    const options = this.#configOptions.get(sessionID)
+    const current = options?.find((item) => item.id === "model")?.currentValue
+    if (typeof current !== "string") return undefined
+    const separator = current.indexOf("/")
+    if (separator <= 0 || separator === current.length - 1) return undefined
+    // The reasoning variant belongs to the selection: reporting the model without it would let the
+    // app carry the next turn on with the variant silently dropped.
+    const variant = this.#modelVariantConfigIDs
+      .map((configId) => options?.find((item) => item.id === configId)?.currentValue)
+      .find((value) => typeof value === "string" && value)
+    return {
+      providerID: current.slice(0, separator),
+      modelID: current.slice(separator + 1),
+      ...(variant ? { variant } : {})
     }
   }
 
@@ -782,6 +848,13 @@ export class AcpService {
       ? model
       : option?.options?.find((candidate) => candidate.value === model.slice(model.indexOf("/") + 1))?.value
     if (!value) throw new Error(`Harness model is not available: ${model}`)
+    // Continuing on the model the Session already holds is not a model change. Sending it anyway
+    // made every prompt mutate the Session's configuration, which a harness is entitled to journal
+    // and to announce - so simply carrying on read as though the user had switched models.
+    if (option?.currentValue === value) {
+      await this.#setModelVariant(sessionID, variant)
+      return
+    }
     const changed = await this.#acp.request("session/set_config_option", { sessionId: sessionID, configId: "model", value })
     // Adopt the options the adapter reports for the model it now holds. A harness whose dependent
     // controls differ per model - PI advertises a different thinkingLevel range for each one, from a
@@ -1026,8 +1099,13 @@ export class AcpService {
     const writing = (async () => {
       await mkdir(this.#snapshotDirectory, { recursive: true })
       while (this.#dirtySnapshots.delete(sessionID)) {
+        // A transcript the journal can rebuild is not written into the snapshot: the snapshot would
+        // only be able to restore it under this process's own ids, and the next read replaces it
+        // from the journal anyway. That covers a harness whose journal is authoritative, a Session
+        // this bridge does not write, and a harness whose stream only ever seeds from the journal.
         const journalOwnsTranscript = Boolean(
-          this.#historyLoader && (this.#historyLoader.authoritativeHistory || this.#journalBacked(sessionID))
+          this.#historyLoader
+          && (this.#historyLoader.authoritativeHistory || this.#journalBacked(sessionID) || this.#journalSeedsOwnedTranscript())
         )
         const snapshot = JSON.stringify({
           version: 1,
@@ -1155,7 +1233,31 @@ export class AcpService {
         const persistedMessages = await this.#historyLoader(sessionID, {
           activeSessionLeaf: authoritativeState?.activeSessionLeaf
         })
-        if (persistedMessages.length > 0 || authoritativeState) {
+        if (this.#journalSeedsOwnedTranscript()) {
+          // The journal is the whole conversation while nothing here is writing it, and the seed
+          // for the stream once something is. Merging the two would union two id spaces for the
+          // same messages, which is exactly what the single-source page rule above avoids, so the
+          // journal is taken whole or not at all:
+          //  - while it is the authority, on every read;
+          //  - once more as this bridge takes the writer, so the last thing the harness wrote on
+          //    its own is not missed;
+          //  - when the caller says the branch itself changed, which is what an undo or redo is;
+          //  - and to refill a transcript the cache dropped, which would otherwise read as empty.
+          const seedFromJournal = this.#journalBacked(sessionID)
+            || replaceHistory
+            || !this.#acpOpenSessions.has(sessionID)
+            || previousMessages.length === 0
+          if (seedFromJournal) {
+            previousMessages = mergeFragmentedPiSnapshot(persistedMessages)
+            this.#messages.set(sessionID, previousMessages)
+          }
+          if (this.#journalBacked(sessionID) && !requireConfigOptions) {
+            this.#todos.set(sessionID, [])
+            this.#loaded.add(sessionID)
+            this.#persistSnapshot(sessionID)
+            return
+          }
+        } else if (persistedMessages.length > 0 || authoritativeState) {
           previousMessages = authoritativeState
             ? persistedMessages
             : mergeExternalHistory(persistedMessages, previousMessages)
@@ -1168,28 +1270,19 @@ export class AcpService {
             return
           }
         }
-        // OMP's journal deliberately refuses to guess a branch when its optional
-        // extension did not publish an active leaf.  Replaying through ACP is not
-        // a safe fallback for an externally-owned Session: it can take minutes
-        // (or acquire the Session) merely to render an empty attachment-only
-        // transcript.  Such a Session stays observational until the user takes
-        // ownership by sending a prompt or explicitly asks for its config.
-        if (
-          this.#journalBacked(sessionID) &&
-          !requireConfigOptions &&
-          this.#historyLoader.deferAcpReplayWithoutActiveLeaf === true &&
-          authoritativeState?.activeSessionLeaf === undefined
-        ) {
-          this.#messages.set(sessionID, previousMessages)
-          this.#todos.set(sessionID, [])
-          this.#loaded.add(sessionID)
-          this.#persistSnapshot(sessionID)
-          return
-        }
-      } catch {
+      } catch (error) {
         this.#emit("session.error", sessionID, { message: "Harness session history could not be read" })
+        // A harness whose ACP load is a replay has no second source to fall back on, so an
+        // unreadable journal has to be reported as a failed read. Answering with an empty
+        // transcript instead is how a Session that is merely unreadable came to look deleted.
+        if (this.#historyLoader.journalOnly === true) {
+          this.#messages.set(sessionID, previousMessages)
+          this.#todos.set(sessionID, previousTodos)
+          throw error
+        }
       }
     }
+    if (await this.#openWithoutReplay(sessionID, session)) return
     this.#replaying.add(sessionID)
     this.#messages.set(sessionID, [])
     this.#todos.set(sessionID, [])
@@ -1227,6 +1320,47 @@ export class AcpService {
     } finally {
       this.#replaying.delete(sessionID)
     }
+  }
+
+  /**
+   * Whether the journal seeds this harness's owned transcript instead of being merged into it.
+   *
+   * True for exactly the harnesses that opted out of journal paging while owned: those are the ones
+   * whose journal ids and stream ids are different identities for the same message, so the two are
+   * used one after the other - journal until this bridge starts writing, its own stream from then
+   * on - rather than reconciled against each other on every read.
+   */
+  #journalSeedsOwnedTranscript() {
+    return this.#historyLoader?.authoritativeHistory !== true && !this.#journalPageWhileOwned
+  }
+
+  /**
+   * Open one stored Session on the ACP connection without asking for its transcript back.
+   *
+   * `session/load` is defined to replay: OMP answers it by re-emitting every stored message as a
+   * notification under a freshly minted id, including the developer, hook and tool-output records
+   * it flattens into `user_message_chunk`s. For a Session whose transcript already came from the
+   * journal that replay is pure cost - minutes of notifications on a long conversation - and pure
+   * harm, because the ids it invents do not match the ones the app was just given, and the
+   * pseudo-user messages in it are not turns anyone typed.
+   *
+   * ACP's own answer to this is `session/resume`, which opens the same stored Session and returns
+   * the same `configOptions` with no replay at all. It is used only when the running adapter
+   * advertised it, so an older build of the same harness still opens through `session/load`.
+   */
+  async #openWithoutReplay(sessionID, session) {
+    if (!this.#journalSeedsOwnedTranscript()) return false
+    if (!this.#acp.sessionCapabilities?.resume) return false
+    const result = await this.#acp.request(
+      "session/resume",
+      { sessionId: sessionID, cwd: session.cwd, mcpServers: [] },
+      300_000
+    )
+    this.#acpOpenSessions.add(sessionID)
+    this.#rememberConfigOptions(sessionID, result?.configOptions)
+    this.#loaded.add(sessionID)
+    this.#persistSnapshot(sessionID)
+    return true
   }
 
   async #refreshSessions() {
