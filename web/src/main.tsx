@@ -33,9 +33,6 @@ import "./session-first-workbench.css"
 installAppPreferences()
 installCompletionAudioGuard()
 
-const searchParams = new URLSearchParams(window.location.search)
-const conversationTestMode = import.meta.env.DEV && searchParams.get("taskdesk-test") === "1"
-const sessionFirstPreviewMode = import.meta.env.DEV && searchParams.get("session-first-preview") === "1"
 
 function HarnessRemoteBoundary() {
   const [revision, setRevision] = useState(0)
@@ -54,26 +51,13 @@ function HarnessRemoteBoundary() {
   )
 }
 
-async function renderApp() {
-  let content: React.ReactNode = <HarnessRemoteBoundary />
-  if (conversationTestMode) {
-    const { TaskDeskTestPage } = await import("./TaskDeskTestPage")
-    content = <TaskDeskTestPage />
-  } else if (sessionFirstPreviewMode) {
-    const { SessionFirstPreviewPage } = await import("./SessionFirstPreviewPage")
-    content = <SessionFirstPreviewPage machines={loadWorkspaceMachines()} />
-  }
-
-  ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <ErrorBoundary resetKeys={SERVER_STORAGE_KEYS}>
-        {content}
-      </ErrorBoundary>
-    </React.StrictMode>
-  )
-}
-
-void renderApp()
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <ErrorBoundary resetKeys={SERVER_STORAGE_KEYS}>
+      <HarnessRemoteBoundary />
+    </ErrorBoundary>
+  </React.StrictMode>
+)
 
 if (import.meta.env.DEV && !Capacitor.isNativePlatform() && !window.harnessDesktop?.platform.isDesktop) {
   if ("serviceWorker" in navigator) {
