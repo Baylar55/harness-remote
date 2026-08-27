@@ -41,8 +41,10 @@ test("composer keystrokes do not walk or rerender the long transcript", () => {
 test("shared conversation owns paging and scroll preservation", () => {
   assert.match(component, /hasMore/)
   assert.match(component, /onLoadOlder/)
-  assert.match(component, /previousHeight/)
-  assert.match(component, /current\.scrollHeight - previousHeight/)
+  // Older pages are revealed by keeping the same top-relative position rather than by compensating
+  // for their added height, which could drop a short first page straight back to the newest turn.
+  assert.match(component, /previousTop/)
+  assert.match(component, /Math\.min\(previousTop, current\.scrollHeight - current\.clientHeight\)/)
   assert.match(component, /NEAR_BOTTOM_PX/)
   assert.match(component, /nearBottomRef/)
 })

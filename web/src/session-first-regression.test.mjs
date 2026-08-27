@@ -39,8 +39,8 @@ assert.ok(continuation.includes('client.claimSession(target.config, target.direc
 assert.equal(continuation.includes('createSession('), false, 'same-Session continuation must not create a replacement Session')
 
 assert.ok(create.includes('api.createSession(config'), 'New Session must reuse the existing native /session create primitive')
-assert.ok(create.includes('agent.backend === "pi" && agent.transport === "acp"'), 'PI native create must remain on its validated ACP transport')
-assert.ok(create.includes('agent.backend === "opencode" && agent.transport === "http"'), 'OpenCode native create must remain on its validated managed HTTP transport')
+assert.ok(create.includes('agent.transport === "acp" || agent.transport === "http"'), 'native create must stay on the two validated transports')
+assert.ok(create.includes('agent.capabilities?.sessions !== false') && create.includes('agent.capabilities?.prompt !== false'), 'native create must follow the harness capability contract rather than a per-harness rollout gate')
 assert.ok(create.includes('writerOwned: true'), 'a freshly created native Session must enter the v3 controller as already writable')
 assert.equal(create.includes('createTask('), false, 'native create must not create a Task')
 assert.equal(create.includes('Conversation'), true, 'native create comments must explicitly document the no-Conversation boundary')

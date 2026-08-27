@@ -257,19 +257,23 @@ async function newSessionAudit(page, label) {
   const group = page.getByRole("group", { name: "Create native Session" })
   await group.waitFor({ state: "visible" })
 
+  // New Session is machine-scoped: one machine is chosen first and the Projects and agents offered
+  // are that machine's. The Project list is therefore one machine's Projects, not both machines'.
+  const machine = group.getByLabel("Filter by machine")
   const project = group.getByLabel("Project")
   const agent = group.getByLabel("Coding agent")
   const title = group.getByLabel("Title optional")
   const cancel = group.getByRole("button", { name: "Cancel" })
   const create = group.getByRole("button", { name: /Create Session/ })
-  for (const [locator, name] of [[project, "Project"], [agent, "Coding agent"], [title, "Title"], [cancel, "Cancel"], [create, "Create Session"]]) {
+  for (const [locator, name] of [[machine, "Machine"], [project, "Project"], [agent, "Coding agent"], [title, "Title"], [cancel, "Cancel"], [create, "Create Session"]]) {
     await locator.waitFor({ state: "visible" })
     await locator.scrollIntoViewIfNeeded()
     await insideViewport(page, locator, `${label} ${name}`)
   }
 
-  assert.equal(await project.locator("option").count(), 2, `${label}: New Session must expose Projects from both machines`)
-  assert.equal(await agent.locator("option").count(), 2, `${label}: New Session must expose the supported native create agents`)
+  assert.equal(await machine.locator("option").count(), 2, `${label}: New Session must offer every configured machine`)
+  assert.equal(await project.locator("option").count(), 1, `${label}: New Session must expose the selected machine's Projects`)
+  assert.ok(await agent.locator("option").count() >= 2, `${label}: New Session must expose the machine's native create agents`)
   await title.fill("Session-first UI audit")
   assert.equal(await create.isDisabled(), false, `${label}: a valid Project and agent must enable Create Session`)
   await noOverflow(page, `${label} New Session`)
