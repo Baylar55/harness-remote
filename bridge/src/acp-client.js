@@ -33,6 +33,7 @@ export class AcpClient extends EventEmitter {
   #starting
   #agentInfo
   #promptCapabilities = {}
+  #sessionCapabilities = {}
   #stderr = ""
   #stderrPartial = ""
 
@@ -55,6 +56,18 @@ export class AcpClient extends EventEmitter {
    */
   get promptCapabilities() {
     return this.#promptCapabilities
+  }
+
+  /**
+   * Which session operations the agent advertised in `initialize`.
+   *
+   * ACP lets an agent offer `session/resume` next to `session/load`, and the two are not
+   * interchangeable: an agent that advertises `resume` opens a stored Session without replaying it.
+   * The bridge only ever sends a method the running adapter said it has, so an older build of the
+   * same harness keeps working on the method it does advertise.
+   */
+  get sessionCapabilities() {
+    return this.#sessionCapabilities
   }
 
   /** PID identifies extension runtime state published by this exact ACP process. */
@@ -151,6 +164,7 @@ export class AcpClient extends EventEmitter {
       }, remaining("initialize"))
       this.#agentInfo = initialized.agentInfo
       this.#promptCapabilities = initialized.agentCapabilities?.promptCapabilities ?? {}
+      this.#sessionCapabilities = initialized.agentCapabilities?.sessionCapabilities ?? {}
       // The bridge always runs beside a harness the user already configured, so prefer a method
       // that uses those credentials. PI's adapter offers `anthropic-api-key` first and
       // `pi-stored-credentials` last: picking the first would claim an API key from an

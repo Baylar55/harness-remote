@@ -166,19 +166,33 @@ function sameModel(left: ModelSelection | null, right: ModelSelection | null): b
     && (left.variant || "") === (right.variant || ""))
 }
 
+/** Backends whose transcript reads report the Session's own current model on the page itself. */
+const PAGE_MODEL_BACKENDS = new Set(["opencode", "codex", "omp"])
+
 /**
  * Model enrichment is not a mount-only read. A user can leave immediately after Send, before the
  * new native envelope is durable, then return while the reply is still streaming. Every current-tail
  * page can therefore advance the projection from stale/default metadata to the model on the newest
  * native turn.
+ *
+ * A Run minted before that answer arrived carries no model at all, and the timeline reads two
+ * adjacent Runs whose models differ as a model change - which is how continuing on the very same
+ * model announced "Model changed to ..." in the conversation. Enrichment therefore fills in the
+ * Runs that never had one; a Run that recorded a different model keeps it, because that one is a
+ * real change the user made.
  */
 function reconcileNativeSessionModel(entry: ProjectionEntry, page: MessagePage, before?: string): void {
-  if (before || (entry.target.backend !== "opencode" && entry.target.backend !== "codex")) return
+  if (before || !PAGE_MODEL_BACKENDS.has(entry.target.backend)) return
   const model = page.model ?? (entry.target.backend === "opencode" ? lastNativeMessageModel(page.messages) : null)
   if (!model) return
 
   let changed = !sameModel(entry.currentModel, model)
   entry.currentModel = model
+  for (const run of entry.runs.values()) {
+    if (run.model) continue
+    run.model = model
+    changed = true
+  }
   const latestUser = [...page.messages].reverse().find((message) => message.info.role === "user" && message.info.id)
   if (latestUser) {
     const run = entry.runs.get(`${projectionID(entry.target)}:native-user:${latestUser.info.id}`)

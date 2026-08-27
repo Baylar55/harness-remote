@@ -839,14 +839,14 @@ test("replays ACP history when extension state is unavailable", async () => {
   assert.deepEqual(await service.actions("session-1"), [])
 })
 
-test("keeps an external OMP session observational when its journal has no active leaf", async () => {
+test("keeps an external OMP session observational when its journal is empty", async () => {
   const acp = new ExtensionActionAcp()
   const historyLoader = async () => []
-  historyLoader.deferAcpReplayWithoutActiveLeaf = true
-  const service = new AcpService(acp, { historyLoader })
+  historyLoader.page = async () => ({ messages: [], before: null, hasMore: false })
+  const service = new AcpService(acp, { historyLoader, journalPageWhileOwned: false })
 
   // The Session-first UI uses the paged endpoint, not `messages()` directly.
-  // Keep this on that path so a missing active leaf cannot turn opening a row
+  // Keep this on that path so an empty journal cannot turn opening a row
   // into a minutes-long `session/load` that serializes all OMP requests.
   assert.deepEqual((await service.messagePage("session-1", { limit: 100 })).messages, [])
   assert.equal(acp.loads, 0, "a read-only OMP open must not fall back to a blocking ACP replay")
@@ -855,11 +855,16 @@ test("keeps an external OMP session observational when its journal has no active
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
   const bridge = await startServer()
   try {
-    const renamed = await fetch(`${bridge.baseURL}/session/session-1`, {
+    // Naming a Session is a command sent into it, so the rename opens it first. This adapter holds
+    // its first open until it is released, exactly as a slow harness would.
+    const renaming = fetch(`${bridge.baseURL}/session/session-1`, {
       method: "PATCH",
       headers: jsonHeaders(),
       body: JSON.stringify({ title: "Renamed from mobile" })
     })
+    await bridge.acp.loadStarted
+    bridge.acp.releaseLoad()
+    const renamed = await renaming
     assert.equal(renamed.status, 200)
     assert.equal((await renamed.json()).title, "Renamed from mobile")
     assert.equal((await readJSON(bridge.baseURL, "/session"))[0].title, "Renamed from mobile")
