@@ -108,6 +108,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   const profile = harnessProfile(backend)
   const service = new AcpService(acp, {
     ...serviceOptions,
+    maxCachedTranscripts: config?.maxCachedTranscripts ?? serviceOptions?.maxCachedTranscripts,
     actionProviders: profile.actionProviders,
     preferListedTitles: profile.preferListedTitles,
     nativeRenameCommand: profile.nativeRenameCommand

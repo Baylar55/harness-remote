@@ -18,6 +18,14 @@ function parsePort(value) {
   return port
 }
 
+function parsePositiveInteger(value, option) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${option} must be a positive integer`)
+  }
+  return parsed
+}
+
 function parseArgumentList(value, fallback) {
   if (value === undefined) return [...fallback]
   let parsed
@@ -61,7 +69,10 @@ export function parseConfig(args, environment = process.env) {
     roots: root ? [root] : [],
     corsOrigins: cors ? [cors] : [],
     logRequests: environmentValue(environment, "LOG_REQUESTS") === "1",
-    stateDirectory: environmentValue(environment, "STATE_DIR") ?? path.join(homedir(), ".harness-remote")
+    stateDirectory: environmentValue(environment, "STATE_DIR") ?? path.join(homedir(), ".harness-remote"),
+    ...(environmentValue(environment, "MAX_CACHED_TRANSCRIPTS")
+      ? { maxCachedTranscripts: parsePositiveInteger(environmentValue(environment, "MAX_CACHED_TRANSCRIPTS"), "HARNESS_REMOTE_MAX_CACHED_TRANSCRIPTS") }
+      : {})
   }
   let acpCommandOverridden = acpCommand !== undefined
   let acpArgsOverridden = acpArgs !== undefined
@@ -122,6 +133,10 @@ export function parseConfig(args, environment = process.env) {
         config.stateDirectory = requireValue(args, index, option)
         index += 1
         break
+      case "--max-cached-transcripts":
+        config.maxCachedTranscripts = parsePositiveInteger(requireValue(args, index, option), option)
+        index += 1
+        break
       case "--help":
         config.help = true
         break
@@ -140,5 +155,5 @@ export function parseConfig(args, environment = process.env) {
 }
 
 export function usage() {
-  return `Usage: harness-remote-bridge [options]\n\nOptions:\n  --backend <name>       ACP backend: omp or pi (default: omp)\n  --host <host>          Bind host (default: 127.0.0.1)\n  --port <port>          Bind port (default: 4097)\n  --username <username>  Enable HTTP Basic Auth\n  --password <password>  Enable HTTP Basic Auth\n  --acp-command <path>   ACP adapter command (default depends on backend)\n  --acp-arg <arg>        ACP adapter argument; repeatable\n  --root <path>          Allowed worktree root; repeatable\n  --cors <origin>        Allow browser requests from this exact origin; repeatable\n  --state-dir <path>     Persist bridge session snapshots\n  --log-requests         Log request method, path, and query\n  --help                 Show this help`
+  return `Usage: harness-remote-bridge [options]\n\nOptions:\n  --backend <name>       ACP backend: omp or pi (default: omp)\n  --host <host>          Bind host (default: 127.0.0.1)\n  --port <port>          Bind port (default: 4097)\n  --username <username>  Enable HTTP Basic Auth\n  --password <password>  Enable HTTP Basic Auth\n  --acp-command <path>   ACP adapter command (default depends on backend)\n  --acp-arg <arg>        ACP adapter argument; repeatable\n  --root <path>          Allowed worktree root; repeatable\n  --cors <origin>        Allow browser requests from this exact origin; repeatable\n  --state-dir <path>     Persist bridge session snapshots\n  --max-cached-transcripts <n> Max in-memory session transcripts (default: 8)\n  --log-requests         Log request method, path, and query\n  --help                 Show this help\n`
 }
