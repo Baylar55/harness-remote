@@ -406,7 +406,9 @@ export class AcpService {
     const session = {
       sessionId: result.sessionId,
       cwd: directory,
-      title: title || "Remote session",
+      // No invented placeholder: an unnamed Session is named by the harness itself from its first
+      // message, and until then the caller's own fallback is the honest label.
+      ...(title ? { title } : {}),
       updatedAt: new Date().toISOString(),
       _meta: { messageCount: 0 }
     }
