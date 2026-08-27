@@ -24,6 +24,9 @@ import path from "node:path"
  *   chunk is always delivered before the response.
  * - `SessionManager#recordEntry` appends each entry to the JSONL as it is created; an assistant
  *   message is written once, when it ends.
+ * - `#emitBootstrapUpdates` advertises the slash commands after every new/load/resume, and
+ *   `/rename` is one of them: it calls `setSessionName(title, "user")`, which rewrites the title
+ *   slot, appends a `title_change` entry and marks the name user-set.
  */
 export class FakeOmpAcp extends EventEmitter {
   constructor({ sessionRoot, cwd = "/repo", models = ["anthropic/claude-sonnet-4", "openai/gpt-5.6"] } = {}) {
@@ -39,16 +42,21 @@ export class FakeOmpAcp extends EventEmitter {
     this.promptCapabilities = { image: true, embeddedContext: true }
     this.sessionCapabilities = { list: {}, fork: {}, resume: {}, close: {} }
     this.agentInfo = { name: "oh-my-pi", title: "Oh My Pi", version: "18.0.7" }
+    this.availableCommands = [
+      { name: "rename", description: "Rename the current session", input: { hint: "<title>" } },
+      { name: "model", description: "Show current model selection" }
+    ]
     this.turns = []
   }
 
   /** Register a stored Session whose journal already exists, as if OMP had written it elsewhere. */
   async seedSession(sessionId, { entries = [], title = "Stored session", version = 3, withTitleSlot = true } = {}) {
+    // OMP writes the fixed-width slot even when the Session has no name yet.
     const file = path.join(this.sessionRoot, `2026-08-26_${sessionId}.jsonl`)
     await mkdir(this.sessionRoot, { recursive: true })
     const lines = []
     if (withTitleSlot) {
-      const slot = { type: "title", v: 1, title, updatedAt: "2026-08-26T10:00:00.000Z", pad: "" }
+      const slot = { type: "title", v: 1, title: title ?? "", updatedAt: "2026-08-26T10:00:00.000Z", pad: "" }
       const encoded = JSON.stringify(slot)
       lines.push(`${encoded}${" ".repeat(Math.max(0, 256 - encoded.length - 1))}`)
     }
@@ -56,13 +64,13 @@ export class FakeOmpAcp extends EventEmitter {
       type: "session",
       ...(version >= 2 ? { version } : {}),
       id: sessionId,
-      title,
+      ...(title ? { title } : {}),
       timestamp: "2026-08-26T10:00:00.000Z",
       cwd: this.cwd
     }))
     for (const entry of entries) lines.push(JSON.stringify(entry))
     await writeFile(file, `${lines.join("\n")}\n`)
-    this.sessions.set(sessionId, { file, entries: [...entries], model: this.models[0], thinking: "off" })
+    this.sessions.set(sessionId, { file, title, entries: [...entries], model: this.models[0], thinking: "off" })
     return file
   }
 
@@ -97,6 +105,14 @@ export class FakeOmpAcp extends EventEmitter {
         options: [{ value: "off", name: "Off" }, { value: "high", name: "High" }]
       }
     ]
+  }
+
+  /** `#emitBootstrapUpdates`: the command catalog every open advertises. */
+  #bootstrap(sessionId) {
+    this.#notify(sessionId, {
+      sessionUpdate: "available_commands_update",
+      availableCommands: this.availableCommands
+    })
   }
 
   #notify(sessionId, update) {
@@ -134,8 +150,9 @@ export class FakeOmpAcp extends EventEmitter {
     switch (method) {
       case "session/new": {
         const sessionId = `omp-${this.sessions.size + 1}`
-        await this.seedSession(sessionId, { title: "New session" })
+        await this.seedSession(sessionId, { title: undefined })
         this.openSessions.add(sessionId)
+        this.#bootstrap(sessionId)
         return { sessionId, configOptions: this.#configOptions(sessionId) }
       }
       case "session/load": {
@@ -166,11 +183,13 @@ export class FakeOmpAcp extends EventEmitter {
               .join("")
           if (text) this.#notify(params.sessionId, { sessionUpdate: "user_message_chunk", content: { type: "text", text }, messageId })
         }
+        this.#bootstrap(params.sessionId)
         return { configOptions: this.#configOptions(params.sessionId) }
       }
       case "session/resume": {
         this.#record(params.sessionId)
         this.openSessions.add(params.sessionId)
+        this.#bootstrap(params.sessionId)
         return { configOptions: this.#configOptions(params.sessionId) }
       }
       case "session/set_config_option": {
@@ -212,6 +231,21 @@ export class FakeOmpAcp extends EventEmitter {
       .filter((part) => part.type === "text")
       .map((part) => part.text)
       .join("")
+    // A slash command is consumed before the model sees it: `/rename` renames the Session, answers
+    // with a confirmation line, and journals a `title_change` entry rather than a conversation turn.
+    if (promptText.startsWith("/rename ")) {
+      const title = promptText.slice("/rename ".length).trim()
+      if (title) {
+        session.title = title
+        await this.#append(sessionId, { type: "title_change", timestamp: new Date().toISOString(), title, source: "user" })
+      }
+      this.#notify(sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: `Session renamed to ${title}.` },
+        messageId: randomUUID()
+      })
+      return { stopReason: "end_turn" }
+    }
     await this.#append(sessionId, {
       type: "message",
       timestamp: new Date().toISOString(),

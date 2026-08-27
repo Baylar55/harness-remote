@@ -855,11 +855,16 @@ test("keeps an external OMP session observational when its journal is empty", as
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
   const bridge = await startServer()
   try {
-    const renamed = await fetch(`${bridge.baseURL}/session/session-1`, {
+    // Naming a Session is a command sent into it, so the rename opens it first. This adapter holds
+    // its first open until it is released, exactly as a slow harness would.
+    const renaming = fetch(`${bridge.baseURL}/session/session-1`, {
       method: "PATCH",
       headers: jsonHeaders(),
       body: JSON.stringify({ title: "Renamed from mobile" })
     })
+    await bridge.acp.loadStarted
+    bridge.acp.releaseLoad()
+    const renamed = await renaming
     assert.equal(renamed.status, 200)
     assert.equal((await renamed.json()).title, "Renamed from mobile")
     assert.equal((await readJSON(bridge.baseURL, "/session"))[0].title, "Renamed from mobile")

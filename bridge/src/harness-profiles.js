@@ -32,6 +32,12 @@ export const HARNESS_PROFILES = {
     // is therefore the transcript until this bridge takes the writer, and this bridge's own stream
     // is the transcript from then on - never both at once. See AcpService#journalPageWhileOwned.
     journalPageWhileOwned: false,
+    // OMP stores a Session's name itself - `/rename` calls `setSessionName(title, "user")`, which
+    // writes the title slot and marks it user-set so OMP's own auto-titling leaves it alone. A name
+    // kept only in this bridge's snapshot was invisible in the Session index, which reads the
+    // harness's lightweight listing, and gone entirely for a Session reopened from OMP.
+    nativeRenameCommand: "rename",
+    preferListedTitles: true,
     // A transcript that already came from the journal must not be asked for again over ACP, so an
     // owned OMP Session is opened with `session/resume` rather than the replaying `session/load`.
     // Reloading on refresh would reintroduce exactly that replay.

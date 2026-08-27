@@ -37,7 +37,8 @@ advertise `session/resume`.
 | One `messageId` per live assistant message, cleared when that message ends | `#getLiveMessageId`, `#clearLiveAssistantMessageAfterEvent` | a turn that calls a tool legitimately streams under two ids |
 | `session/prompt` resolves only after the end-of-turn updates are flushed and awaited | `AcpAgent.#trackPromptEvent` on `agent_end` | the answer is complete when the turn goes idle; no settle delay is needed |
 | `initialize` advertises `promptCapabilities.image`, and prompts accept `{type:"image", mimeType, data}` | `AcpAgent.initialize`, `#convertPromptBlocks` | the composer's attachment picker |
-| `session/list` returns `title`, `updatedAt` and `_meta.messageCount` | `AcpAgent.#toSessionInfo` | Session list metadata |
+| `session/list` returns `title`, `updatedAt` and `_meta.messageCount` | `AcpAgent.#toSessionInfo` | Session list metadata, and the Session index the app reads |
+| `/rename <title>` calls `setSessionName(title, "user")`, which rewrites the title slot, appends a `title_change` entry and marks the name user-set so auto-titling leaves it alone | `builtin-lifecycle.ts`, `SessionManager.setSessionName` | a Session's name is stored by OMP rather than only in this bridge; it is sent only when the command catalog advertises `rename` |
 | `available_commands_update` and `session_info_update` are pushed after new/load/resume | `#emitBootstrapUpdates` | optional extension actions are discovered from the command catalog |
 
 **The journal format, from `session-entries.ts`, `session-manager.ts` and `session-migrations.ts`:**

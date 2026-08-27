@@ -29,6 +29,7 @@ async function harness({ sessionRoot } = {}) {
     replaySettleMs: profile.replaySettleMs,
     preferListedTitles: profile.preferListedTitles,
     journalPageWhileOwned: profile.journalPageWhileOwned !== false,
+    nativeRenameCommand: profile.nativeRenameCommand,
     modelVariantConfigIDs: profile.modelVariantConfigIDs ?? []
   })
   return { root, acp, service, cleanup: () => rm(root, { recursive: true, force: true }) }
@@ -427,5 +428,73 @@ test("an unreadable journal is reported rather than answered with an empty conve
     assert.equal(acp.calls("session/resume").length, 0, "and neither is acquiring the writer")
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test("the name a Session is created with is stored by OMP, not only here", async () => {
+  const { root, acp, service, cleanup } = await harness()
+  try {
+    const created = await service.createSession({ directory: "/repo", title: "Rebuild the ACP path" })
+    assert.equal(created.title, "Rebuild the ACP path")
+
+    const renames = acp.calls("session/prompt").filter(([, params]) => params.prompt?.[0]?.text?.startsWith("/rename "))
+    assert.equal(renames.length, 1, "session/new carries no title, so the name is handed over as the harness's own command")
+    assert.equal((await acp.listSessions())[0].title, "Rebuild the ACP path", "OMP itself must know the name")
+    assert.deepEqual(await tail(service, created.id), [], "naming a Session is not a turn in it")
+
+    acp.queueTurn({ text: ["Answer"] })
+    await service.promptAndWait(created.id, "Prompt 1")
+    assert.equal((await service.listSessions())[0].title, "Rebuild the ACP path", "and it survives the first turn")
+
+    // A second bridge over the same OMP sees the name because OMP is where it lives, not because
+    // this process remembered it.
+    const second = new AcpService(new AcpPromptEchoFilter(acp), {
+      historyLoader: createOmpHistoryLoader(root),
+      reloadOnHistoryRefresh: profile.reloadOnHistoryRefresh,
+      preferListedTitles: profile.preferListedTitles,
+      journalPageWhileOwned: false,
+      nativeRenameCommand: profile.nativeRenameCommand
+    })
+    assert.equal((await second.listSessions())[0].title, "Rebuild the ACP path")
+  } finally {
+    await cleanup()
+  }
+})
+
+test("renaming a Session later persists the same way and leaves no trace in the conversation", async () => {
+  const { acp, service, cleanup } = await harness()
+  try {
+    const sessionID = (await service.createSession({ directory: "/repo" })).id
+    acp.queueTurn({ text: ["Answer"] })
+    await service.promptAndWait(sessionID, "Prompt 1")
+    const before = await tail(service, sessionID)
+
+    const renamed = await service.renameSession(sessionID, "Named after the fact")
+    assert.equal(renamed.title, "Named after the fact")
+    assert.equal((await acp.listSessions())[0].title, "Named after the fact")
+    assert.equal((await service.listSessions())[0].title, "Named after the fact")
+    assert.deepEqual(await tail(service, sessionID), before, "the harness's confirmation line is not conversation")
+    assert.equal(service.status(sessionID).type, "idle", "renaming must not leave the Session reading as Working")
+
+    acp.queueTurn({ text: ["Second answer"] })
+    await service.promptAndWait(sessionID, "Prompt 2")
+    assert.equal((await service.listSessions())[0].title, "Named after the fact", "and later turns keep it")
+  } finally {
+    await cleanup()
+  }
+})
+
+test("a Session named in OMP itself keeps that name here", async () => {
+  const { acp, service, cleanup } = await harness()
+  try {
+    await acp.seedSession("stored-named", {
+      title: "Written in the OMP TUI",
+      entries: [
+        { type: "message", id: "e1", parentId: null, timestamp: "2026-08-26T10:00:00.000Z", message: { role: "user", content: "Question" } }
+      ]
+    })
+    assert.equal((await service.listSessions()).find((session) => session.id === "stored-named").title, "Written in the OMP TUI")
+  } finally {
+    await cleanup()
   }
 })

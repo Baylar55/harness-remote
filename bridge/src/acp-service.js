@@ -415,7 +415,10 @@ export class AcpService {
     this.#todos.set(session.sessionId, [])
     this.#loaded.add(session.sessionId)
     this.#ownedSessions.add(session.sessionId)
-    if (title) this.#titles.set(session.sessionId, title)
+    if (title) {
+      this.#titles.set(session.sessionId, title)
+      await this.#applyNativeSessionName(session.sessionId, title)
+    }
     if (model) await this.setModel(session.sessionId, model)
     this.#emit("session.created", session.sessionId)
     this.#persistSnapshot(session.sessionId)
@@ -504,24 +507,8 @@ export class AcpService {
       )
     }
 
-    if (this.#nativeRenameCommand) {
-      await this.#load(sessionID, true)
-      const messagesBefore = structuredClone(this.#messages.get(sessionID) ?? [])
-      const todosBefore = structuredClone(this.#todos.get(sessionID) ?? [])
-      const wasActive = this.#active.has(sessionID)
-      if (!wasActive) this.#active.add(sessionID)
-      try {
-        await this.#acp.request("session/prompt", {
-          sessionId: sessionID,
-          prompt: [{ type: "text", text: `/${this.#nativeRenameCommand} ${normalized}` }]
-        }, 300_000)
-      } finally {
-        if (!wasActive) this.#active.delete(sessionID)
-        this.#messages.set(sessionID, messagesBefore)
-        this.#todos.set(sessionID, todosBefore)
-        this.#chunkMessageIDs.delete(`${sessionID}:user`)
-        this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
-      }
+    if (await this.#nativeRenameAvailable(sessionID)) {
+      await this.#sendNativeSessionName(sessionID, normalized)
       this.#titles.delete(sessionID)
       await this.#refreshSessions()
       const session = this.#sessions.get(sessionID)
@@ -545,6 +532,69 @@ export class AcpService {
       normalized,
       Boolean(this.#historyLoader && !this.#ownedSessions.has(sessionID))
     )
+  }
+
+  /**
+   * Whether this exact Session can be named through the harness's own rename command.
+   *
+   * A name Harness Remote only keeps for itself is invisible everywhere else: the Session index the
+   * app reads is the harness's own lightweight listing, and a Session reopened from the harness has
+   * never heard of it. Asking the harness to store the name is what makes it survive - but only a
+   * command the running build actually advertises may be sent, because an unrecognised slash
+   * command is not an error, it is a prompt the model would try to answer.
+   */
+  async #nativeRenameAvailable(sessionID) {
+    if (!this.#nativeRenameCommand) return false
+    // The command is delivered into this exact Session, so the Session has to be open on this
+    // connection before it can be asked for - and its command catalog only arrives with that open.
+    await this.#loadForConfigOptions(sessionID)
+    if (!this.#commandCatalogs.has(sessionID)) await this.#waitForCommandCatalog(sessionID)
+    return (this.#commandCatalogs.get(sessionID) ?? []).some((command) => command.name === this.#nativeRenameCommand)
+  }
+
+  /**
+   * Run the harness's rename command without letting it show up as a turn.
+   *
+   * The command is delivered the only way a slash command can be, as a prompt, and the harness
+   * answers it with a confirmation line. That line is not conversation, so the transcript and todos
+   * are captured before and restored after; the session is marked active meanwhile so the harness's
+   * own output is not mistaken for unsolicited streaming.
+   */
+  async #sendNativeSessionName(sessionID, title) {
+    const messagesBefore = structuredClone(this.#messages.get(sessionID) ?? [])
+    const todosBefore = structuredClone(this.#todos.get(sessionID) ?? [])
+    const wasActive = this.#active.has(sessionID)
+    if (!wasActive) this.#active.add(sessionID)
+    try {
+      await this.#acp.request("session/prompt", {
+        sessionId: sessionID,
+        prompt: [{ type: "text", text: `/${this.#nativeRenameCommand} ${title}` }]
+      }, 300_000)
+    } finally {
+      if (!wasActive) this.#active.delete(sessionID)
+      this.#messages.set(sessionID, messagesBefore)
+      this.#todos.set(sessionID, todosBefore)
+      this.#chunkMessageIDs.delete(`${sessionID}:user`)
+      this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+    }
+  }
+
+  /**
+   * Give a Session the name it was created with, for a harness whose create call has no title.
+   *
+   * `session/new` carries no title in ACP, so a name chosen in the New Session panel would only
+   * ever have lived in this bridge. Creating the Session must not fail because naming it did, so a
+   * harness that cannot store the name keeps it here instead - which is exactly what it did before.
+   */
+  async #applyNativeSessionName(sessionID, title) {
+    try {
+      if (!await this.#nativeRenameAvailable(sessionID)) return
+      await this.#sendNativeSessionName(sessionID, title)
+      this.#titles.delete(sessionID)
+      await this.#refreshSessions()
+    } catch {
+      this.#titles.set(sessionID, title)
+    }
   }
 
   async deleteSession(sessionID) {
@@ -1415,18 +1465,24 @@ export class AcpService {
     return messageID
   }
 
-  /** ACP session listings may carry no title, so keep the creation title or derive one from the first prompt. */
+  /**
+   * ACP session listings may carry no title, so keep the creation title or derive one from the
+   * first prompt.
+   *
+   * A title held here is one someone set and the harness could not be asked to store - every path
+   * that does hand the name to the harness drops it again, so the listing stays the authority in
+   * the normal case. Until then it outranks the listing, otherwise renaming a Session on a harness
+   * that cannot store names would appear to do nothing at all.
+   */
   #titleFor(sessionID) {
-    const listed = this.#sessions.get(sessionID)?.title?.trim()
-    if (this.#preferListedTitles && listed) return listed
     const known = this.#titles.get(sessionID)
     if (known) return known
+    const listed = this.#sessions.get(sessionID)?.title?.trim()
+    if (this.#preferListedTitles && listed) return listed
     const firstPrompt = this.#messages.get(sessionID)?.find((message) => message.info.role === "user")
     const text = firstPrompt?.parts?.[0]?.text?.trim()
     if (!text) return undefined
-    const derived = text.split("\n")[0].slice(0, 60)
-    this.#titles.set(sessionID, derived)
-    return derived
+    return text.split("\n")[0].slice(0, 60)
   }
 
   #isAcknowledgedPromptChunk(sessionID, text) {
