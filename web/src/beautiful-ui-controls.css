@@ -980,3 +980,113 @@
     transition: none;
   }
 }
+
+/* =============================================================================
+ * Fifth pass: density.
+ *
+ * Measured in Chromium on a 1040px column, before this block: an agent turn
+ * carrying 21px of text occupied 101px, of which the copy control's own row was
+ * 40px and the identity row 28px. A one-line prompt occupied 71px and stretched
+ * the full 969px of the column. Four fifths of a session was chrome.
+ *
+ * What is deliberately NOT touched: `--hr-chat-measure: 100%` in
+ * `session-first-workbench.css`. That file documents at length why prose shares
+ * one edge with code, tables and the composer rather than sitting in a 65-75
+ * character band, and it is a product decision, not an oversight. Agent prose
+ * keeps the column. Only the prompt bubble stops pretending it needs it.
+ * ============================================================================= */
+
+/* ------------------------------------------------- the copy control's row */
+
+/* It was a 40px row under every message, holding one 28px button, present whether
+   or not anyone ever hovers it - the "empty lines" in a transcript. Out of flow it
+   costs nothing and lands on the identity row, which has nothing on its right but
+   space. Revealed on hover, and always visible where there is no hover to reveal
+   it with.
+
+   Anchored to the message body rather than the content group so it aligns with the
+   header. A turn with two content groups would stack two buttons in one spot, so
+   only the last group's - the final answer, the thing anyone actually copies -
+   is kept. */
+.tdw-work-thread-conversation .uw-message-body {
+  position: relative;
+}
+
+.tdw-work-thread-conversation .uw-message-content-group:not(:last-of-type) .uw-message-actions {
+  display: none;
+}
+
+.tdw-work-thread-conversation .uw-message-actions {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  margin: 0;
+  opacity: 0;
+  transition: opacity .15s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-message:hover .uw-message-actions,
+.tdw-work-thread-conversation .uw-message:focus-within .uw-message-actions {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .tdw-work-thread-conversation .uw-message-actions {
+    opacity: .55;
+  }
+}
+
+/* ------------------------------------------------------- the prompt bubble */
+
+/* A framed bubble says "this is a discrete utterance", and stretching it to the
+   full column says the opposite: a four-word prompt read as a wide empty panel
+   with a line of text in the corner. It now hugs its own content, which is what
+   the frame was for. Agent replies are unframed prose and keep the column. */
+.tdw-work-thread-conversation .uw-message-user .uw-message-body {
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.tdw-work-thread-conversation .uw-message-user .uw-markdown {
+  max-width: 100%;
+}
+
+/* ---------------------------------------------------------- vertical rhythm */
+
+.tdw-work-thread-conversation .uw-message {
+  margin-bottom: 12px;
+}
+
+.tdw-work-thread-conversation .uw-message-body > header {
+  min-height: 22px;
+  margin-bottom: 1px;
+}
+
+/* A turn's first paragraph does not need a gap above it: the identity row is the
+   gap. Same for the last one against the next turn's margin. */
+.tdw-work-thread-conversation .uw-message-content-group > .uw-markdown > :first-child {
+  margin-top: 0;
+}
+
+.tdw-work-thread-conversation .uw-message-content-group > .uw-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* A collapsed Activity header is a one-line summary of finished work, and it was
+   as tall as a control. Open, it keeps its full presence. */
+.tdw-work-thread-conversation .bui-activity:not([open]) > summary {
+  min-height: 38px;
+}
+
+.tdw-work-thread-conversation .uw-activity-group {
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tdw-work-thread-conversation .uw-message-actions {
+    transition: none;
+    opacity: 1;
+  }
+}
