@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { api } from "../api"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
 import {
@@ -58,6 +59,7 @@ function targetForInitialProjection(target: NativeSessionSurfaceTarget): NativeS
  */
 export function NativeSessionObserver({ target, onSessionRefresh, onStateChange }: Props) {
   const [task, setTask] = useState<MachineTask | null>(null)
+  const [attachmentsSupported, setAttachmentsSupported] = useState(false)
   const taskRef = useRef<MachineTask | null>(null)
   const attentionRef = useRef(false)
   const onStateChangeRef = useRef(onStateChange)
@@ -75,6 +77,15 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
     if (current) onStateChangeRef.current?.(visualState(current, attention))
   }, [])
 
+  useEffect(() => {
+    let disposed = false
+    setAttachmentsSupported(false)
+    void api.capabilities(target.config)
+      .then((capabilities) => { if (!disposed) setAttachmentsSupported(capabilities.attachments === true) })
+      .catch(() => { if (!disposed) setAttachmentsSupported(false) })
+    return () => { disposed = true }
+  }, [target.key, target.config.host, target.config.port, target.config.agentId])
+
   const agent = useMemo<MachineAgentHost>(() => ({
     id: target.agentID,
     label: target.agentLabel,
@@ -86,9 +97,10 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
       sessions: true,
       prompt: true,
       abort: target.canStop,
-      models: target.modelsSupported
+      models: target.modelsSupported,
+      attachments: attachmentsSupported
     }
-  }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported])
+  }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported])
 
   useEffect(() => {
     let disposed = false
