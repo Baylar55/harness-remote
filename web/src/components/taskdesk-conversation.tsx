@@ -375,7 +375,7 @@ export function TaskDeskConversation({
   const [commandIndex, setCommandIndex] = useState(0)
   const touchFirst = hasTouchFirstPointer()
   const commandToken = draft.startsWith("/") && !draft.includes("\n") ? draft.slice(1) : ""
-  const commandMenuOpen = Boolean(commandToken && !/\s/.test(commandToken) && commands.length)
+  const commandMenuOpen = Boolean(draft.startsWith("/") && !draft.includes("\n") && !/\s/.test(commandToken) && commands.length)
   const commandMatches = useMemo(() => {
     if (!commandMenuOpen) return []
     const query = commandToken.toLowerCase()
