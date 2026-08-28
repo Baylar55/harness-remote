@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm"
 import { copyToClipboard } from "../clipboard"
 import { activityLabel, groupConversationParts, type ConversationPartGroup } from "../conversation-parts"
 import { CheckIcon, CopyIcon } from "../Icons"
-import type { MessageEnvelope, MessagePart } from "../types"
+import type { MessageEnvelope, MessagePart, TodoItem } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
 const INTERNAL_PROTOCOL_PARTS = new Set(["step-start", "step-finish", "snapshot", "patch"])
@@ -88,6 +88,31 @@ function hasTerminalAssistantText(parts: MessagePart[]): boolean {
   return false
 }
 
+function parseTodos(value: unknown): TodoItem[] | null {
+  if (!Array.isArray(value)) return null
+  const items = value.filter(
+    (item): item is TodoItem => Boolean(item)
+      && typeof item === "object"
+      && typeof (item as TodoItem).content === "string"
+  )
+  return items.length ? items : null
+}
+
+function TodoListView({ items }: { items: TodoItem[] }) {
+  return (
+    <div className="uw-tool-todo-list" aria-label="Todo list">
+      {items.map((item, index) => (
+        <div className={`uw-tool-todo-item ${item.status || "pending"}`} key={item.id || `${index}:${item.content}`}>
+          <span className="uw-tool-todo-status" aria-hidden="true">
+            {item.status === "completed" ? "✓" : item.status === "in_progress" ? "◐" : "○"}
+          </span>
+          <span>{item.content}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
   const status = state?.status || "running"
@@ -100,6 +125,7 @@ function ToolPartCard({ part }: { part: MessagePart }) {
         ? input.path
         : ""
   const output = state?.error || state?.output || ""
+  const todos = (part.tool || "").toLowerCase() === "todowrite" ? parseTodos(input.todos) : null
   const [open, setOpen] = useState(status === "error")
 
   useEffect(() => {
@@ -126,7 +152,8 @@ function ToolPartCard({ part }: { part: MessagePart }) {
         </summary>
         {/* The truncated body is what is on screen, but the copy carries the whole output: a stack
             trace clipped at 4000 characters is the half you cannot paste anywhere useful. */}
-        {open && output ? (
+        {open && todos ? <TodoListView items={todos} /> : null}
+        {open && output && !todos ? (
           <div className="uw-code-block">
             <CopyButton text={output} label="Copy output" />
             <pre>{output.length > 4_000 ? `${output.slice(0, 4_000)}\n…` : output}</pre>
