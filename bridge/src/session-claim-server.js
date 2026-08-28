@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import http from "node:http"
 import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
 
-const SESSION_OPERATION_ROUTE = /^\/v1\/agents\/([^/]+)\/session\/([^/]+)\/(claim|prompt|stop|handoff)$/
+const SESSION_OPERATION_ROUTE = /^\/v1\/agents\/([^/]+)\/session\/([^/]+)\/(claim|prompt|command|stop|handoff)$/
 const ATTACHMENT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
@@ -23,6 +23,7 @@ function statusForSessionError(error) {
     "session_unavailable",
     "session_not_claimed",
     "session_prompt_rejected",
+    "session_command_rejected",
     "session_stop_rejected",
     // A variant the current model does not offer is a conflict about the user's choice, not a
     // server fault: the Session is fine and remains usable with another selection.
@@ -107,6 +108,16 @@ function promptInput(body) {
   return { ...common, text, model, variant, attachments }
 }
 
+function commandInput(body) {
+  const common = operationIdentityInput(body)
+  const command = typeof body.command === "string" ? body.command.replace(/^\/+/, "").trim() : ""
+  const argumentsText = typeof body.arguments === "string" ? body.arguments.trim() : ""
+  const model = promptModelInput(body)
+  const variant = typeof body.variant === "string" && body.variant.trim() ? body.variant.trim() : undefined
+  if (!command || command.length > 200) throw requestError("A valid command name is required")
+  return { ...common, command, arguments: argumentsText, model, variant }
+}
+
 function stopInput(body) {
   const common = operationIdentityInput(body)
   const operationToken = typeof body.operationToken === "string" ? body.operationToken.trim() : ""
@@ -164,6 +175,7 @@ export function createSessionClaimServer({
   config,
   claimSession,
   promptSession,
+  commandSession,
   stopSession,
   handoffSession,
   operationLedger,
@@ -196,15 +208,18 @@ export function createSessionClaimServer({
 
       if (!operationLedger) throw new Error("Native Session operation ledger is not configured")
       if (operation === "prompt" && typeof promptSession !== "function") throw new Error("Native Session prompt transport is not configured")
+      if (operation === "command" && typeof commandSession !== "function") throw new Error("Native Session command transport is not configured")
       if (operation === "stop" && typeof stopSession !== "function") throw new Error("Native Session stop transport is not configured")
       if (operation === "handoff" && typeof handoffSession !== "function") throw new Error("Native Session handoff transport is not configured")
 
       const body = await readJSONBody(request)
       const input = operation === "prompt"
         ? promptInput(body)
-        : operation === "stop"
-          ? stopInput(body)
-          : handoffInput(body)
+        : operation === "command"
+          ? commandInput(body)
+          : operation === "stop"
+            ? stopInput(body)
+            : handoffInput(body)
       if (operation === "handoff" && input.targetAgentID === agentID) {
         throw requestError("Cross-agent handoff requires a different target agent")
       }
@@ -222,9 +237,17 @@ export function createSessionClaimServer({
               digest: createHash("sha256").update(attachment.url).digest("hex")
             }))
           }
-        : operation === "stop"
-          ? { directory: input.directory, operationToken: input.operationToken }
-          : {
+        : operation === "command"
+          ? {
+              command: input.command,
+              arguments: input.arguments,
+              directory: input.directory,
+              model: input.model,
+              variant: input.variant ?? null
+            }
+          : operation === "stop"
+            ? { directory: input.directory, operationToken: input.operationToken }
+            : {
               directory: input.directory,
               targetAgentID: input.targetAgentID,
               model: input.model,
@@ -237,9 +260,11 @@ export function createSessionClaimServer({
         signature: mutationSignature(operation, signaturePayload),
         dispatch: () => operation === "prompt"
           ? promptSession(agentID, sessionID, input)
-          : operation === "stop"
-            ? stopSession(agentID, sessionID, input)
-            : handoffSession(agentID, sessionID, input)
+          : operation === "command"
+            ? commandSession(agentID, sessionID, input)
+            : operation === "stop"
+              ? stopSession(agentID, sessionID, input)
+              : handoffSession(agentID, sessionID, input)
       })
       const status = result.status === "accepted" ? 200 : 202
       writeJSON(response, status, {
