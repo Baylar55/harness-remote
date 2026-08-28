@@ -7,13 +7,10 @@
  * the audit made executable: each restored capability gets a guard, so it cannot be lost a second
  * time by the same route.
  *
- * Still outstanding, deliberately not asserted here because asserting a gap would lock it in:
- * prompt image attachments. `attachments.ts` and the bridge path behind it are both intact — the
- * bridge validates `file` parts, forwards them as ACP image blocks and reports the capability from
- * the live handshake — but 3.0 routes conversation turns through the task pipeline
- * (`/v1/tasks/:id/continue`), which carries `prompt` as a bare string. Restoring it needs the run
- * options, the run store and all three transports in `task-launcher.js` to carry attachments, so it
- * is a feature change across client and bridge rather than a UI fix.
+ * Prompt image attachments are restored on the active Session-first path. The live harness
+ * capability gates the paperclip, the shared v3 composer prepares the same bounded images as 2.x,
+ * and the native Session operation carries them through the daemon without routing them through the
+ * retired Task launch pipeline.
  */
 
 import assert from "node:assert/strict"
@@ -30,6 +27,10 @@ const content = read("components/taskdesk-message-content.tsx")
 const conversationCss = read("taskdesk-conversation.css")
 const mobileParity = read("v3-mobile-product-parity.css")
 const clipboard = read("clipboard.ts")
+const conversation = read("components/taskdesk-conversation.tsx")
+const workThread = read("components/work-thread-conversation.tsx")
+const nativePrompt = read("native-session-prompt.ts")
+const nativeObserver = read("components/native-session-observer.tsx")
 
 test("a conversation can be copied out of, as it could in 2.x", () => {
   // 3.0 shipped with no copy affordance anywhere: `clipboard.ts` existed but only the retired shell
@@ -84,4 +85,15 @@ test("code blocks stay outside the reading measure", () => {
   assert.match(conversationCss, /\.tdw-work-thread-conversation \.uw-code-block \{[^}]*position: relative;/)
   const measured = conversationCss.match(/\.tdw-work-thread-conversation \.uw-markdown > p,[\s\S]*?\n\}/)[0]
   assert.doesNotMatch(measured, /uw-code-block|> pre|> table/)
+})
+
+test("Session-first restores capability-gated image attachments without reviving the 2.x shell", () => {
+  assert.match(conversation, /fileToAttachment/)
+  assert.match(conversation, /accept="image\/\*"/)
+  assert.match(conversation, /attachmentsSupported \? \(/)
+  assert.match(workThread, /attachments: promptAttachments/)
+  assert.match(nativePrompt, /attachments: AttachmentPart\[\] = \[\]/)
+  assert.match(nativePrompt, /attachmentKeys/)
+  assert.match(nativeObserver, /api\.capabilities\(target\.config\)/)
+  assert.doesNotMatch(nativeObserver, /SessionComposer/)
 })
