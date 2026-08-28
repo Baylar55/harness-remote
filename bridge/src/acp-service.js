@@ -305,6 +305,8 @@ export class AcpService {
   #promptAcknowledgements = new Map()
   #titles = new Map()
   #deletedSessions = new Set()
+  #deletedSessionIndexLoaded = false
+  #deletedSessionIndexWrite = Promise.resolve()
   #queues = new Map()
   #active = new Set()
   #listeners = new Set()
@@ -385,6 +387,7 @@ export class AcpService {
   }
 
   async listSessions(directory) {
+    await this.#restoreDeletedSessionIndex()
     const sessions = await this.#refreshSessions()
     await Promise.all(sessions.map((session) => this.#restoreSnapshot(session.sessionId)))
     return sessions
@@ -603,6 +606,7 @@ export class AcpService {
     await this.#requireSession(sessionID)
     if (this.#isBusy(sessionID)) this.abort(sessionID)
     this.#deletedSessions.add(sessionID)
+    await this.#persistDeletedSessionIndex()
     this.#messages.delete(sessionID)
     this.#todos.delete(sessionID)
     this.#titles.delete(sessionID)
@@ -1115,6 +1119,58 @@ export class AcpService {
     while (this.#snapshotWrites.size > 0) {
       await Promise.all(this.#snapshotWrites.values())
     }
+    await this.#deletedSessionIndexWrite
+  }
+
+  /**
+   * Return the lightweight deletion tombstones used by Session-first discovery.
+   *
+   * The Session list deliberately avoids restoring every transcript snapshot because doing so can
+   * retain gigabytes of historical messages. Deletion therefore has its own tiny index: one read
+   * per process, no session/load, no history loader, and no ACP ownership changes.
+   */
+  async deletedSessionIDs() {
+    await this.#restoreDeletedSessionIndex()
+    return new Set(this.#deletedSessions)
+  }
+
+  #deletedSessionIndexPath() {
+    return path.join(this.#snapshotDirectory, "deleted-sessions.json")
+  }
+
+  async #restoreDeletedSessionIndex() {
+    if (!this.#snapshotDirectory || this.#deletedSessionIndexLoaded) return
+    this.#deletedSessionIndexLoaded = true
+    try {
+      const state = JSON.parse(await readFile(this.#deletedSessionIndexPath(), "utf8"))
+      if (state?.version !== 1 || !Array.isArray(state.sessionIDs)) return
+      for (const sessionID of state.sessionIDs) {
+        if (typeof sessionID === "string" && sessionID) this.#deletedSessions.add(sessionID)
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        this.#deletedSessionIndexLoaded = false
+        throw error
+      }
+    }
+  }
+
+  async #persistDeletedSessionIndex() {
+    if (!this.#snapshotDirectory) return
+    const previous = this.#deletedSessionIndexWrite
+    const writing = previous.catch(() => undefined).then(async () => {
+      await mkdir(this.#snapshotDirectory, { recursive: true })
+      const target = this.#deletedSessionIndexPath()
+      const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
+      const state = JSON.stringify({
+        version: 1,
+        sessionIDs: [...this.#deletedSessions].sort()
+      })
+      await writeFile(temporary, state, { mode: 0o600 })
+      await rename(temporary, target)
+    })
+    this.#deletedSessionIndexWrite = writing
+    await writing
   }
 
   #snapshotPath(sessionID) {
@@ -1225,6 +1281,7 @@ export class AcpService {
   }
 
   async #requireSession(sessionID) {
+    await this.#restoreDeletedSessionIndex()
     await this.#refreshSessions()
     await this.#restoreSnapshot(sessionID)
     if (this.#deletedSessions.has(sessionID) || !this.#sessions.has(sessionID)) {
