@@ -139,7 +139,11 @@ for (const retiredPath of [
   assert.equal(existsSync(new URL(retiredPath, import.meta.url)), false, `${retiredPath} must not return as a parallel Session-first chat path`)
 }
 
-assert.match(handoff, /export function NativeSessionHandoffControl\(_props: Props\)\s*\{\s*return null\s*\}/, 'cross-agent handoff UI must remain disabled during single-Session stabilization')
+assert.ok(handoff.includes('handoffNativeSession(source, agent.id, source.title)'), 'cross-agent continuation must use the idempotent native handoff primitive')
+assert.ok(handoff.includes('api.loadMessagePage(source.config, source.sessionID, source.directory, undefined, 100, false)'), 'handoff context reads must never force ACP history refresh or replay')
+assert.ok(handoff.includes('writerOwned: true') && handoff.includes('requiresExplicitClaim: false'), 'a handoff-created native Session must remain owned without a redundant ACP claim')
+assert.ok(handoff.includes('canCreateNativeSession(agent)'), 'handoff choices must follow the same validated native create capability gate')
+assert.equal(handoff.includes('createTask('), false, 'native handoff must not recreate the retired Task/Conversation path')
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
 assert.ok(standalone.includes('<NativeSessionHome'), 'Session-first navigation must remain native discovery based')
 assert.ok(standalone.includes('<NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />'), 'open Session header must own the delete action')

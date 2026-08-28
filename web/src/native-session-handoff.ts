@@ -122,7 +122,11 @@ export async function handoffNativeSession(
   let parsed: { status: NativeSessionHandoffStatus; result?: NativeSessionHandoffResult }
   if (isDesktopPlatform()) {
     const result = await desktopRequestResult(source.config, { path, method: "POST", body })
-    if (!result.ok) throw new Error(result.error.message)
+    if (!result.ok) {
+      const status = Number(result.error.status)
+      if (result.error.code === "http" && status >= 400 && status < 500) clearPending(source)
+      throw new Error(result.error.message)
+    }
     parsed = responseData(result.response.data)
   } else {
     const headers: Record<string, string> = {
@@ -147,7 +151,10 @@ export async function handoffNativeSession(
       } catch {
         throw new Error(`Cannot reach ${source.config.host}:${source.config.port}. Handoff delivery status is unknown; retry will use the same request id.`)
       }
-      if (response.status >= 400) throw new Error(errorDetail(response.data, response.status))
+      if (response.status >= 400) {
+        if (response.status < 500) clearPending(source)
+        throw new Error(errorDetail(response.data, response.status))
+      }
       parsed = responseData(response.data)
     } else {
       let response: Response
@@ -161,7 +168,10 @@ export async function handoffNativeSession(
         const raw = await response.text()
         data = raw ? JSON.parse(raw) : undefined
       } catch {}
-      if (!response.ok) throw new Error(errorDetail(data, response.status))
+      if (!response.ok) {
+        if (response.status < 500) clearPending(source)
+        throw new Error(errorDetail(data, response.status))
+      }
       parsed = responseData(data)
     }
   }
