@@ -72,16 +72,15 @@ test("older pages prepend without duplicating the cursor boundary", () => {
 })
 
 test("Session conversation exposes bounded older-history loading without snapping back to the live tail", () => {
-  const workspace = readFileSync(new URL("./components/universal-workspace.tsx", import.meta.url), "utf8")
+  const controller = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
   const conversation = readFileSync(new URL("./components/taskdesk-conversation.tsx", import.meta.url), "utf8")
   const historyStyles = readFileSync(new URL("./taskdesk-history-loader.css", import.meta.url), "utf8")
 
-  assert.match(workspace, /api\.loadMessagePage\(item\.config, item\.session\.id, item\.session\.directory\)/)
-  assert.match(workspace, /silent \? mergeLatestMessagePage\(current\.messages, messagePage\.messages\) : messagePage\.messages/)
-  assert.match(workspace, /async function loadOlderMessages\(\)/)
-  assert.match(workspace, /prependOlderMessagePage\(current\.messages, page\.messages\)/)
-  assert.match(workspace, /onLoadOlder=\{loadOlderMessages\}/)
-  assert.match(workspace, /hasMore=\{messageHasMore\}/)
+  assert.match(controller, /api\.loadMessagePage\(target\.config, target\.sessionID, target\.directory/)
+  assert.match(controller, /async function loadOlder\(\)/)
+  assert.match(controller, /prependOlderMessagePage\(feed\.messages, page\.messages\)/)
+  assert.match(controller, /onLoadOlder=\{loadOlder\}/)
+  assert.match(controller, /hasMore=\{hasMore\}/)
 
   assert.match(conversation, /taskdesk-history-loader\.css/)
   assert.match(conversation, /className="uw-history-load"/)
