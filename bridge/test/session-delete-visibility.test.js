@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -104,6 +104,61 @@ test("ACP deletion disappears from Session-first discovery and survives a daemon
     const fullList = await fullListResponse.json()
     assert.deepEqual(fullList.map((session) => session.id), ["session-to-keep"])
 
+    assert.deepEqual(secondAcp.requests, [])
+  } finally {
+    await close(secondServer)
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
+
+test("legacy deleted snapshot is migrated into the persistent Session-first deletion index", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-remote-delete-legacy-"))
+  const snapshotDirectory = path.join(stateDirectory, "omp")
+  const serviceOptions = { snapshotDirectory }
+  const sessionID = "session-to-delete"
+  const snapshotName = Buffer.from(sessionID).toString("base64url")
+  await mkdir(snapshotDirectory, { recursive: true })
+  await writeFile(path.join(snapshotDirectory, `${snapshotName}.json`), JSON.stringify({
+    version: 1,
+    messages: [],
+    todos: [],
+    title: "Delete me",
+    deleted: true
+  }))
+
+  const firstAcp = new FakeAcp()
+  const firstServer = createBridgeServer({ config, acp: firstAcp, serviceOptions })
+  const firstBase = await listen(firstServer)
+
+  try {
+    // The lightweight list intentionally does not read every legacy per-Session snapshot at startup,
+    // so this reproduces the real upgrade case: the old tombstone is not known until DELETE touches
+    // that Session.
+    const beforeResponse = await fetch(`${firstBase}/experimental/session`)
+    assert.equal(beforeResponse.status, 200)
+    const before = await beforeResponse.json()
+    assert.deepEqual(before.map((session) => session.id), ["session-to-delete", "session-to-keep"])
+
+    // Before this regression fix, restoring deleted:true here threw "Harness session not found"
+    // before deleted-sessions.json could be written. The Session disappeared only in memory and
+    // returned after restart.
+    const deleteResponse = await fetch(`${firstBase}/session/${sessionID}`, { method: "DELETE" })
+    assert.equal(deleteResponse.status, 200)
+    assert.equal(await deleteResponse.json(), true)
+    assert.deepEqual(firstAcp.requests, [])
+  } finally {
+    await close(firstServer)
+  }
+
+  const secondAcp = new FakeAcp()
+  const secondServer = createBridgeServer({ config, acp: secondAcp, serviceOptions })
+  const secondBase = await listen(secondServer)
+  try {
+    const restoredResponse = await fetch(`${secondBase}/experimental/session`)
+    assert.equal(restoredResponse.status, 200)
+    const restored = await restoredResponse.json()
+    assert.deepEqual(restored.map((session) => session.id), ["session-to-keep"])
     assert.deepEqual(secondAcp.requests, [])
   } finally {
     await close(secondServer)
