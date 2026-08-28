@@ -146,6 +146,7 @@ export type AgentModelScope = {
 export type TaskContinueInput = {
   prompt: string
   attachments?: AttachmentPart[]
+  command?: { name: string; arguments: string }
   agentId?: string
   model?: ModelSelection | null
   mode?: "fresh" | "resume"
@@ -232,6 +233,7 @@ function newClientRequestId(): string {
 function continueFingerprint(input: TaskContinueInput): string {
   return JSON.stringify({
     prompt: input.prompt,
+    command: input.command ?? null,
     agentId: input.agentId ?? null,
     model: input.model ?? null,
     mode: input.mode ?? null,

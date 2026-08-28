@@ -192,6 +192,7 @@ async function main() {
         abort: true,
         streaming: true,
         models: true,
+        commands: true,
         sessionRename: true,
         sessionDelete: true
       },

@@ -180,6 +180,7 @@ test("machine server wires registry, routing, native Session operations, task li
   assert.equal(claimOptions.innerServer, routedServer)
   assert.equal(typeof claimOptions.claimSession, "function")
   assert.equal(typeof claimOptions.promptSession, "function")
+  assert.equal(typeof claimOptions.commandSession, "function")
   assert.equal(typeof claimOptions.stopSession, "function")
   assert.equal(claimOptions.operationLedger, fakeLedger)
   assert.equal(launchOptions.innerServer, claimServer)
@@ -234,11 +235,17 @@ test("machine Session mutations acquire ACP ownership lazily and reuse it", asyn
     directory: "/repo",
     attachments: [{ mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aGVsbG8=" }]
   })
+  await claimOptions.commandSession("pi", "native-pi-1", {
+    command: "help",
+    arguments: "models",
+    directory: "/repo"
+  })
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   assert.deepEqual(calls, [
     ["claim", "pi", "native-pi-1"],
     ["stop", "pi", "native-pi-1"],
     ["prompt", "pi", "native-pi-1", "Continue once", [{ mime: "image/png", filename: "screen.png", data: "aGVsbG8=" }]],
+    ["prompt", "pi", "native-pi-1", "/help models", []],
     ["stop", "pi", "native-pi-1"]
   ])
   await assert.rejects(() => claimOptions.claimSession("opencode", "native-http-1"), (error) => error.code === "unsupported_agent")
@@ -256,15 +263,25 @@ test("machine Session mutations acquire ACP ownership lazily and reuse it", asyn
       directory: "/repo",
       attachments: [{ mime: "image/jpeg", filename: "screen.jpg", url: "data:image/jpeg;base64,aGVsbG8=" }]
     })
+    await claimOptions.commandSession("opencode", "native-http-1", {
+      command: "help",
+      arguments: "models",
+      directory: "/repo"
+    })
   } finally {
     globalThis.fetch = originalFetch
   }
-  assert.equal(requests.length, 1)
+  assert.equal(requests.length, 2)
   const openCodeBody = JSON.parse(requests[0].options.body)
   assert.deepEqual(openCodeBody.parts, [
     { type: "text", text: "Inspect this screenshot" },
     { type: "file", mime: "image/jpeg", filename: "screen.jpg", url: "data:image/jpeg;base64,aGVsbG8=" }
   ])
+  assert.match(requests[1].url, /\/session\/native-http-1\/command\?directory=/)
+  assert.deepEqual(JSON.parse(requests[1].options.body), {
+    command: "help",
+    arguments: "models"
+  })
 })
 
 test("machine Session claim fails if the native Session disappears before ownership is retained", async () => {
