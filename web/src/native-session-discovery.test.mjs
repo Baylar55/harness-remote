@@ -72,6 +72,7 @@ assert.equal(codexSessions[0].transport, 'acp')
 assert.equal(codexSessions[0].stopCapability, 'owned-session-native-cancel')
 assert.equal(codexSessions[0].abortSupported, true)
 assert.equal(codexSessions[0].modelsSupported, true)
+assert.equal(codexSessions[0].commandsSupported, false)
 assert.equal(codexSessions[0].renameSupported, false)
 assert.equal(codexSessions[0].deleteSupported, false)
 assert.equal(codexSessions[0].session.external, true)
@@ -101,6 +102,7 @@ assert.deepEqual(nativeSessionSurfaceTarget('machine-1', base, codexSessions[0])
   status: { type: 'busy' },
   external: true,
   modelsSupported: true,
+  commandsSupported: false,
   renameSupported: false,
   deleteSupported: false,
   model: { providerID: 'openai', modelID: 'gpt-5.6', variant: 'high' },
