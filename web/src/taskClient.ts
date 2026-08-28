@@ -2,6 +2,7 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import { unwrapPayload } from "./machinePayload"
 import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
+import type { AttachmentPart } from "./attachments"
 import type { ModelOption, ModelSelection, ServerConfig } from "./types"
 
 const BROWSER_MACHINE_REQUEST_TIMEOUT_MS = 12_000
@@ -144,6 +145,7 @@ export type AgentModelScope = {
 
 export type TaskContinueInput = {
   prompt: string
+  attachments?: AttachmentPart[]
   agentId?: string
   model?: ModelSelection | null
   mode?: "fresh" | "resume"

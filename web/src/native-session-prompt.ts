@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
+import type { AttachmentPart } from "./attachments"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
 import type { MessageEnvelope, ModelSelection } from "./types"
@@ -11,6 +12,7 @@ export type PendingNativeSessionPrompt = {
   text: string
   wireText?: string
   model?: ModelSelection | null
+  attachmentKeys?: string[]
   createdAt: number
 }
 
@@ -57,6 +59,19 @@ function sameModel(left?: ModelSelection | null, right?: ModelSelection | null):
   if (!left && !right) return true
   if (!left || !right) return false
   return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
+}
+
+function attachmentKeys(attachments: AttachmentPart[]): string[] {
+  return attachments.map((attachment) => [
+    attachment.mime,
+    attachment.filename,
+    String(attachment.url.length),
+    attachment.url.slice(-96)
+  ].join("\u0000"))
+}
+
+function sameAttachmentKeys(left: string[] = [], right: string[] = []): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
 function messageText(message: MessageEnvelope): string {
@@ -122,6 +137,9 @@ export function loadPendingNativeSessionPrompt(target: NativeSessionSurfaceTarge
       text: parsed.text,
       wireText: typeof parsed.wireText === "string" && parsed.wireText.trim() ? parsed.wireText : undefined,
       model: normalizeModel(parsed.model),
+      attachmentKeys: Array.isArray(parsed.attachmentKeys)
+        ? parsed.attachmentKeys.filter((value): value is string => typeof value === "string")
+        : [],
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now()
     }
   } catch {
@@ -167,24 +185,31 @@ function errorDetail(body: unknown, status: number): string {
 export async function sendNativeSessionPrompt(
   target: NativeSessionSurfaceTarget,
   text: string,
-  model?: ModelSelection | null
+  model?: ModelSelection | null,
+  attachments: AttachmentPart[] = []
 ): Promise<{ status: NativeSessionPromptStatus; clientRequestId: string }> {
   const normalized = text.trim()
   if (!normalized) throw new Error("A text prompt is required")
   const requestedModel = normalizeModel(model)
+  const requestedAttachmentKeys = attachmentKeys(attachments)
 
   const stored = loadPendingNativeSessionPrompt(target)
   // A record whose retry window has passed is superseded rather than blocking forever.
   const existing = stored && Date.now() - stored.createdAt <= PENDING_DELIVERY_TTL_MS ? stored : null
   if (stored && !existing) clearPendingNativeSessionPrompt(target)
-  if (existing && (existing.text !== normalized || !sameModel(existing.model, requestedModel))) {
-    throw new Error("A previous prompt still has an unresolved delivery status. Retry that exact prompt and model selection before sending a different request.")
+  if (existing && (
+    existing.text !== normalized
+    || !sameModel(existing.model, requestedModel)
+    || !sameAttachmentKeys(existing.attachmentKeys, requestedAttachmentKeys)
+  )) {
+    throw new Error("A previous prompt still has an unresolved delivery status. Retry that exact prompt, model and image selection before sending a different request.")
   }
   const pending = existing ?? {
     clientRequestId: requestID(),
     text: normalized,
     wireText: wirePrompt(target, normalized),
     model: requestedModel,
+    attachmentKeys: requestedAttachmentKeys,
     createdAt: Date.now()
   }
   persistPending(target, pending)
@@ -195,7 +220,8 @@ export async function sendNativeSessionPrompt(
     text: pending.wireText || pending.text,
     directory: target.directory,
     model: pending.model ? { providerID: pending.model.providerID, modelID: pending.model.modelID } : undefined,
-    variant: pending.model?.variant || undefined
+    variant: pending.model?.variant || undefined,
+    attachments
   }
 
   let status: NativeSessionPromptStatus

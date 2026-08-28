@@ -215,7 +215,7 @@ test("machine Session mutations acquire ACP ownership lazily and reuse it", asyn
     createServer: (options) => ({
       acpService: {
         async claimSession(sessionID) { calls.push(["claim", options.config.backend, sessionID]); return true },
-        async prompt(sessionID, text) { calls.push(["prompt", options.config.backend, sessionID, text]) },
+        async prompt(sessionID, text, _model, attachments) { calls.push(["prompt", options.config.backend, sessionID, text, attachments]) },
         async abort(sessionID) { calls.push(["stop", options.config.backend, sessionID]) }
       },
       emit() {}
@@ -229,16 +229,42 @@ test("machine Session mutations acquire ACP ownership lazily and reuse it", asyn
   })
 
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
-  await claimOptions.promptSession("pi", "native-pi-1", { text: "Continue once", directory: "/repo" })
+  await claimOptions.promptSession("pi", "native-pi-1", {
+    text: "Continue once",
+    directory: "/repo",
+    attachments: [{ mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aGVsbG8=" }]
+  })
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   assert.deepEqual(calls, [
     ["claim", "pi", "native-pi-1"],
     ["stop", "pi", "native-pi-1"],
-    ["prompt", "pi", "native-pi-1", "Continue once"],
+    ["prompt", "pi", "native-pi-1", "Continue once", [{ mime: "image/png", filename: "screen.png", data: "aGVsbG8=" }]],
     ["stop", "pi", "native-pi-1"]
   ])
   await assert.rejects(() => claimOptions.claimSession("opencode", "native-http-1"), (error) => error.code === "unsupported_agent")
   await assert.rejects(() => claimOptions.promptSession("missing", "native-1", { text: "x", directory: "/repo" }), (error) => error.code === "unknown_agent")
+
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), options })
+    return new Response(null, { status: 204 })
+  }
+  try {
+    await claimOptions.promptSession("opencode", "native-http-1", {
+      text: "Inspect this screenshot",
+      directory: "/repo",
+      attachments: [{ mime: "image/jpeg", filename: "screen.jpg", url: "data:image/jpeg;base64,aGVsbG8=" }]
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(requests.length, 1)
+  const openCodeBody = JSON.parse(requests[0].options.body)
+  assert.deepEqual(openCodeBody.parts, [
+    { type: "text", text: "Inspect this screenshot" },
+    { type: "file", mime: "image/jpeg", filename: "screen.jpg", url: "data:image/jpeg;base64,aGVsbG8=" }
+  ])
 })
 
 test("machine Session claim fails if the native Session disappears before ownership is retained", async () => {

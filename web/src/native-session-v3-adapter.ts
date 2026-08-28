@@ -468,7 +468,7 @@ function installAdapter(): void {
     // preserve the model already recovered from the authoritative Session instead of silently
     // switching the next turn to the harness default. A concrete ModelSelection still wins.
     const model = body.model ?? entry.currentModel
-    const result = await sendNativeSessionPrompt(entry.target, prompt, model)
+    const result = await sendNativeSessionPrompt(entry.target, prompt, model, body.attachments ?? [])
     if (result.status !== "accepted") {
       throw new Error(`Prompt delivery is ${result.status}. Retry the same prompt to reconcile the existing request id.`)
     }
