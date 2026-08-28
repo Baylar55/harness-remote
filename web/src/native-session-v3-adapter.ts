@@ -2,7 +2,7 @@ import { api, type MessagePage } from "./api"
 import { probeNativeSessionContinuation } from "./native-session-continuation"
 import { lastNativeMessageModel } from "./native-session-model"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
-import { sendNativeSessionPrompt } from "./native-session-prompt"
+import { sendNativeSessionCommand, sendNativeSessionPrompt } from "./native-session-prompt"
 import { stopNativeSession } from "./native-session-stop"
 import {
   taskClient,
@@ -468,9 +468,11 @@ function installAdapter(): void {
     // preserve the model already recovered from the authoritative Session instead of silently
     // switching the next turn to the harness default. A concrete ModelSelection still wins.
     const model = body.model ?? entry.currentModel
-    const result = await sendNativeSessionPrompt(entry.target, prompt, model, body.attachments ?? [])
+    const result = body.command
+      ? await sendNativeSessionCommand(entry.target, body.command.name, body.command.arguments, model)
+      : await sendNativeSessionPrompt(entry.target, prompt, model, body.attachments ?? [])
     if (result.status !== "accepted") {
-      throw new Error(`Prompt delivery is ${result.status}. Retry the same prompt to reconcile the existing request id.`)
+      throw new Error(`${body.command ? "Command" : "Prompt"} delivery is ${result.status}. Retry the same request to reconcile the existing request id.`)
     }
     return appendAcceptedRun(entry, prompt, model ?? null, result.clientRequestId)
   }
