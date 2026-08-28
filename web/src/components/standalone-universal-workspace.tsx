@@ -21,6 +21,7 @@ import {
 import { reuseList } from "../workspace-runtime-merge"
 import { useDialogDismiss } from "../useDialogDismiss"
 import { useTranslator } from "../useTranslator"
+import { CommandPalette, type PaletteCommand } from "./shell"
 import { NativeSessionActions } from "./native-session-actions"
 import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
@@ -301,12 +302,24 @@ function NativeSessionsWorkspace({
   // is actually waiting for. See the startup states below.
   const [sessionsDiscovered, setSessionsDiscovered] = useState(machines.length === 0)
   const [railWidth, setRailWidth] = useState<number | null>(loadRailWidth)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const refreshGeneration = useRef(0)
 
   useEffect(() => {
     if (railWidth === null) return
     try { localStorage.setItem(RAIL_WIDTH_STORAGE_KEY, String(railWidth)) } catch { /* private mode keeps the session's width */ }
   }, [railWidth])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        setPaletteOpen((open) => !open)
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   const resizeRail = useCallback((next: number) => {
     setRailWidth(clampRailWidth(next))
@@ -444,6 +457,37 @@ function NativeSessionsWorkspace({
     setListRevision((value) => value + 1)
   }
 
+  const paletteCommands = useMemo<PaletteCommand[]>(() => [
+    {
+      id: "machines",
+      group: "Workspace",
+      label: t("sf.machines"),
+      keywords: "server machine hosts",
+      run: onManageMachines
+    },
+    {
+      id: "settings",
+      group: "Workspace",
+      label: t("nav.settings"),
+      keywords: "preferences appearance language",
+      run: onManageSettings
+    },
+    {
+      id: "refresh",
+      group: "Sessions",
+      label: t("sf.refresh"),
+      keywords: "reload refresh sessions",
+      run: () => setRevision((value) => value + 1)
+    },
+    ...(selected ? [{
+      id: "back-to-sessions",
+      group: "Sessions",
+      label: t("sf.backToSessions"),
+      keywords: "close current session list",
+      run: () => setMobileDetailOpen(false)
+    }] : [])
+  ], [onManageMachines, onManageSettings, selected, t])
+
   return (
     <section className="tdw-shell hr-control-plane hr-native-workspace" aria-label={t("nav.sessions")}>
       <header className="tdw-topbar hr-topbar">
@@ -459,6 +503,7 @@ function NativeSessionsWorkspace({
             {loadingCount && !loaded ? t("sf.connecting") : t("sf.machineCount", { online: onlineCount, total: machines.length })}
           </span>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> {t("sf.machines")}</button>
+          <button type="button" className="palette-hint" onClick={() => setPaletteOpen(true)} title="Command palette"><span>⌘K</span></button>
           <button type="button" className="tdw-icon-button" onClick={onManageSettings} title={t("nav.settings")} aria-label={t("nav.settings")}><SettingsIcon size={16} /></button>
           <button type="button" className="tdw-icon-button hr-refresh-button" onClick={() => setRevision((value) => value + 1)} title={t("sf.refresh")} aria-label={refreshing ? t("sf.refreshingMachines") : t("sf.refresh")} aria-busy={refreshing} disabled={refreshing}>
             {refreshing ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
@@ -590,6 +635,17 @@ function NativeSessionsWorkspace({
           )}
         </main>
       </div>
+      {paletteOpen ? (
+        <CommandPalette
+          commands={paletteCommands}
+          placeholder="Type a command…"
+          emptyLabel="No matching commands"
+          navigateHint="navigate"
+          runHint="run"
+          closeHint="close"
+          onClose={() => setPaletteOpen(false)}
+        />
+      ) : null}
     </section>
   )
 }
@@ -609,6 +665,11 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
     let disposed = false
     let handle: { remove: () => Promise<void> } | undefined
     void CapacitorApp.addListener("backButton", () => {
+      const palette = document.querySelector<HTMLElement>(".palette-backdrop")
+      if (palette) {
+        palette.click()
+        return
+      }
       if (settingsOpen) {
         setSettingsOpen(false)
         return
