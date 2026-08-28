@@ -122,7 +122,10 @@ const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, agentBac
       </div>
       <div className="uw-message-body">
         <header>
-          <strong className="uw-message-working" role="status" aria-live="polite">{workingLabel || `${agentLabel} is working`}</strong>
+          <strong className="uw-message-working" role="status" aria-live="polite">
+            {workingLabel || `${agentLabel} is working`}
+            <span className="bui-typing" aria-hidden="true"><i /><i /><i /></span>
+          </strong>
         </header>
       </div>
     </article>

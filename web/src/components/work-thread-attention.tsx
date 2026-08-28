@@ -80,8 +80,11 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
   }
 
   return (
-    <section className="tdw-attention" aria-label="Agent needs your input" aria-live="polite">
-      <div className="tdw-attention-heading"><span>Needs your input</span><strong>The coding agent is waiting for a decision.</strong></div>
+    <section className="tdw-attention bui-approval" aria-label="Agent needs your input" aria-live="polite">
+      <div className="tdw-attention-heading">
+        <span><i className="bui-approval-dot" aria-hidden="true" />Needs your input</span>
+        <strong>The coding agent is waiting for a decision.</strong>
+      </div>
 
       {questions.map((request) => (
         <div className="tdw-attention-card" key={request.id}>
@@ -102,7 +105,10 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
                         onClick={() => toggleOption(request.id, index, option.label, Boolean(question.multiple))}
                         key={option.label}
                       >
-                        <strong>{option.label}</strong>
+                        <strong>
+                          <i className="bui-approval-check" aria-hidden="true">{selected.includes(option.label) ? "✓" : ""}</i>
+                          {option.label}
+                        </strong>
                         {option.description ? <span>{option.description}</span> : null}
                       </button>
                     ))}
@@ -131,9 +137,13 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
         <div className="tdw-attention-card" key={request.id}>
           <strong>Permission required</strong>
           <p>{request.permission}</p>
-          {request.patterns?.length ? <code>{request.patterns.join(" · ")}</code> : null}
+          {request.patterns?.length ? (
+            <div className="bui-approval-scopes" aria-label="Requested scope">
+              {request.patterns.map((pattern) => <code key={pattern}>{pattern}</code>)}
+            </div>
+          ) : null}
           <div className="tdw-attention-actions">
-            <button type="button" className="tdw-button secondary" disabled={submitting === request.id} onClick={() => void respondPermission(request, "reject")}>Deny</button>
+            <button type="button" className="tdw-button secondary bui-approval-deny" disabled={submitting === request.id} onClick={() => void respondPermission(request, "reject")}>Deny</button>
             <button type="button" className="tdw-button secondary" disabled={submitting === request.id} onClick={() => void respondPermission(request, "once")}>Allow once</button>
             <button type="button" className="tdw-button primary" disabled={submitting === request.id} onClick={() => void respondPermission(request, "always")}>Always allow</button>
           </div>

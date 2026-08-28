@@ -1,0 +1,1158 @@
+/* Beautiful UI controls, ported onto this app's own palette.
+ *
+ * The pattern language is the one Beautiful UI (beautifului.dev, MIT) established for AI-native
+ * surfaces: a tool call reads as a card with a kind, a cost and an outcome; a thinking state carries
+ * a clock and moves while it is live; a human-in-the-loop decision is a card you can act on with a
+ * thumb. None of their code is copied here - every rule below is written against the `--td3-*` tokens
+ * in `taskdesk-theme.css`, which is what keeps Light working and keeps the port free of Tailwind.
+ *
+ * Two rules this file lives by:
+ *
+ * - No literal colour. A hex here is a surface that stays dark on a light theme, which is exactly
+ *   the defect `taskdesk-theme.css` was written to end. `beautiful-ui-controls.test.mjs` enforces it.
+ * - Colour means status, never kind. The palette has five hues and there are seven tool kinds, so
+ *   the kind is carried by a glyph and the hue stays reserved for done/failed/working. Tinting by
+ *   kind would leave a failed call looking like a successful one of another kind.
+ *
+ * Loaded last in `main.tsx` so these rules settle specificity ties against the sheets they refine,
+ * without needing `!important` to do it.
+ */
+
+/* ---------------------------------------------------------------- tool call */
+
+/* The kind glyph rides inside the title rather than in a column of its own: the summary grids in
+   `universal-workspace.css` and `taskdesk-conversation.css` are laid out by column count, and a
+   fifth child would drop the status onto the next line at exactly the widths phones use. */
+.bui-tool > summary .bui-tool-kind {
+  display: inline-block;
+  width: 12px;
+  margin-right: 5px;
+  flex: none;
+  color: var(--td3-muted);
+  font-size: 10px;
+  font-weight: 400;
+  font-style: normal;
+  text-align: center;
+}
+
+/* Only the two kinds that change state on the machine get an accent. "This call wrote something"
+   is worth a glance up-front; "this call read something" is not, and tinting all seven would spend
+   the whole palette on information nobody acts on. */
+.bui-tool-edit > summary .bui-tool-kind,
+.bui-tool-run > summary .bui-tool-kind {
+  color: var(--td3-attention-text);
+}
+
+.bui-tool > summary .uw-tool-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+}
+
+/* Duration and status share one grid cell, so the cell has to do the spacing the grid used to. */
+.bui-tool-meta,
+.bui-activity > summary .bui-tool-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* Tabular figures: a clock that reflows the row every time it ticks past a 1 is worse than no
+   clock, and this one ticks once a second for the whole length of a turn. */
+.bui-tool-duration {
+  color: var(--td3-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.uw-tool-status {
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+/* Done is the common case and must recede; failed is the one that has to be findable by scrolling
+   past it. The icon already carries the hue, so the word beside it only needs the quieter half. */
+.uw-tool-completed > summary .uw-tool-status {
+  color: var(--td3-muted-2);
+}
+
+.uw-tool-error > summary .uw-tool-status {
+  color: var(--td3-red-text);
+  font-weight: 700;
+}
+
+.uw-tool-incomplete > summary .uw-tool-icon {
+  color: var(--td3-muted);
+  background: var(--td3-raise-3);
+}
+
+/* Touch: `universal-workspace.css` sizes the summary at 34px, below the 44px a thumb needs, and
+   these rows are the ones users open most. Pointer-coarse only, so the desktop density is kept. */
+@media (pointer: coarse) {
+  .bui-tool > summary,
+  .bui-activity > summary {
+    min-height: 44px;
+  }
+}
+
+/* ------------------------------------------------------- thinking / activity */
+
+/* The live header is the whole thinking state: while a turn is working this row is often the only
+   thing moving on screen. The sweep is on the title's own text, which is why it needs the clip. */
+.bui-activity.uw-tool-running > summary .uw-tool-title {
+  background: linear-gradient(
+    90deg,
+    var(--td3-text-3) 20%,
+    var(--td3-text) 42%,
+    var(--td3-text-3) 64%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: bui-thinking-sweep 2.4s linear infinite;
+}
+
+.bui-activity.uw-tool-running > summary .bui-tool-duration {
+  color: var(--td3-blue-text);
+}
+
+@keyframes bui-thinking-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* ------------------------------------------------------------- status pill */
+
+/* The pill already reported the right state; what it lacked was any sign of being live. The dot is
+   the smallest thing that can carry that, and it costs no layout. */
+.tdw-conversation-state.working i {
+  animation: bui-pill-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bui-pill-pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+
+/* ------------------------------------------------------------- approval card */
+
+/* This is the one card in the app the user cannot scroll past: the agent is stopped until it is
+   answered. It was rendering at the same weight as an inline notice, in 10px type, with three
+   identical buttons - on a phone, at the moment a decision matters most. */
+.bui-approval {
+  border-left: 3px solid var(--td3-attention-text);
+}
+
+.bui-approval .tdw-attention-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bui-approval-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--td3-attention-text);
+  animation: bui-pill-pulse 1.6s ease-in-out infinite;
+}
+
+.bui-approval .tdw-attention-heading strong {
+  font-size: 12px;
+}
+
+/* Reading size for the thing being decided. The question and the permission sentence were the
+   smallest text in the card and are the only part of it that has to be read word for word. */
+.bui-approval .tdw-attention-card p {
+  color: var(--td3-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bui-approval .tdw-attention-card legend,
+.bui-approval .tdw-attention-card > strong {
+  font-size: 11px;
+}
+
+/* One chip per scope. Joined into a single line, a permission over four paths was unreadable
+   exactly when it was widest. `anywhere` because a path is untrusted text and must not widen chat. */
+.bui-approval-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0 10px;
+}
+
+.bui-approval-scopes code {
+  max-width: 100%;
+  padding: 3px 7px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--td3-border-soft);
+  border-radius: 6px;
+  color: var(--td3-text-3);
+  background: var(--td3-sunken);
+  font-size: 10.5px;
+}
+
+/* An option and its description were rendering side by side, centred, and could not wrap. The cause
+   is the global `button` rule in `styles.css`: it makes every button an `inline-flex` centred on both
+   axes with `white-space: nowrap`, so `.tdw-attention-options button strong { display: block }` was
+   describing a flex item and could not produce a line break, and the `text-align: left` beside it had
+   nothing to act on either. Measured in Chromium at 737px: label at x=316, description at x=388, one
+   line. The column is the layout this markup was written for.
+   The `color` is hygiene rather than a fix - the button inherits `var(--text)`, which is the 2.x token
+   family, and resolves correctly only because `applyTheme` always writes `data-theme`. This card
+   should not be the one place in the port that depends on that. */
+.bui-approval .tdw-attention-options button {
+  min-height: 44px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 9px 10px;
+  color: var(--td3-text);
+  white-space: normal;
+}
+
+.bui-approval .tdw-attention-options button strong {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--td3-text);
+  font-size: 11px;
+  text-align: left;
+}
+
+.bui-approval .tdw-attention-options button span {
+  text-align: left;
+}
+
+.bui-approval-check {
+  width: 11px;
+  flex: none;
+  color: var(--td3-blue-text);
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
+}
+
+.bui-approval .tdw-attention-options button.selected {
+  border-color: var(--td3-blue-border);
+  box-shadow: inset 0 0 0 1px var(--td3-blue-border-soft);
+}
+
+/* Deny is the destructive half of the choice and read as one of three interchangeable buttons. */
+.bui-approval .bui-approval-deny {
+  color: var(--td3-red-text);
+  border-color: var(--td3-red-border);
+}
+
+/* On a phone the decision row is what the thumb reaches for, and three buttons at the default size
+   wrapped into an order that put "Always allow" under the fold. */
+@media (pointer: coarse) {
+  .bui-approval .tdw-attention-actions .tdw-button {
+    min-height: 44px;
+  }
+}
+
+/* ----------------------------------------------------------- reduced motion */
+
+/* Every animation above is decoration on a state that is already spelled out in text, so none of
+   them has anything to preserve when motion is refused. The gradient has to be unwound too: left
+   alone, a transparent text-fill with no sweep behind it renders an invisible title. */
+@media (prefers-reduced-motion: reduce) {
+  .bui-activity.uw-tool-running > summary .uw-tool-title {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+    color: var(--td3-text);
+    animation: none;
+  }
+
+  .tdw-conversation-state.working i,
+  .bui-approval-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* =============================================================================
+ * Second pass: the visible one.
+ *
+ * The first pass changed durations, status words and a glyph, and rendered as
+ * indistinguishable from what it replaced - correctly reported as "nothing new".
+ * Details are not a redesign. This pass moves the things that are actually seen:
+ * the type scale, the shape and depth of every card, the status as a chip rather
+ * than a word, Activity as a timeline instead of a flat list, and real motion.
+ *
+ * Same discipline as above: tokens only, no !important, every animation unwound
+ * under reduced motion.
+ * ============================================================================= */
+
+.tdw-work-thread-conversation {
+  --bui-radius: 14px;
+  --bui-radius-inner: 11px;
+  --bui-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+/* ------------------------------------------------------------- type scale */
+
+/* The transcript was 10px and 11px throughout - tool names, commands, reasoning
+   and statuses all at or just above the legibility floor. Nothing else in this
+   file matters as much as this block. */
+.tdw-work-thread-conversation .uw-activity-group > summary .uw-tool-title,
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-card > summary .uw-tool-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -.005em;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-card summary code {
+  font-size: 11.5px;
+}
+
+.tdw-work-thread-conversation .uw-reasoning .uw-markdown {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tdw-work-thread-conversation .uw-reasoning > strong {
+  margin-bottom: 7px;
+  font-size: 10.5px;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-card pre {
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------- shape and depth */
+
+.tdw-work-thread-conversation .bui-activity {
+  width: 100%;
+  border-color: var(--td3-border);
+  border-radius: var(--bui-radius);
+  background: var(--td3-card-raised);
+}
+
+.tdw-work-thread-conversation .bui-activity > summary {
+  min-height: 48px;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 11px;
+  padding: 0 14px;
+}
+
+.tdw-work-thread-conversation .bui-activity > summary .uw-tool-title {
+  font-size: 13px;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .bui-tool {
+  border-color: var(--td3-border);
+  border-radius: var(--bui-radius-inner);
+  background: var(--td3-sunken);
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .bui-tool > summary {
+  min-height: 42px;
+  gap: 10px;
+  padding-inline: 12px;
+}
+
+.tdw-work-thread-conversation .uw-reasoning {
+  padding: 12px 14px;
+  border-radius: var(--bui-radius-inner);
+  background: var(--td3-sunken);
+}
+
+/* The status glyph was a 17px circle carrying a 10px mark. At this size it reads
+   as an icon rather than as punctuation, which is what lets the chip beside it
+   stop having to repeat the outcome in bold. */
+.tdw-work-thread-conversation .bui-tool > summary .uw-tool-icon,
+.tdw-work-thread-conversation .bui-activity > summary .uw-tool-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The kind glyph becomes a badge rather than a bare character: at 12px, inline in
+   a title, it read as a typo. */
+.bui-tool > summary .bui-tool-kind {
+  width: 19px;
+  height: 19px;
+  display: inline-grid;
+  place-items: center;
+  margin-right: 9px;
+  border-radius: 6px;
+  background: var(--td3-raise-2);
+  font-size: 10px;
+}
+
+.bui-tool-edit > summary .bui-tool-kind,
+.bui-tool-run > summary .bui-tool-kind {
+  background: var(--td3-attention-soft);
+}
+
+/* ------------------------------------------------------------ status chips */
+
+/* A word in muted grey at the end of a row is not a state. A chip is - and it is
+   the one thing in a long Activity block worth finding by scanning. */
+.tdw-work-thread-conversation .bui-tool > summary .uw-tool-status,
+.tdw-work-thread-conversation .bui-activity > summary .uw-tool-status {
+  padding: 3.5px 9px;
+  border-radius: 999px;
+  color: var(--td3-muted);
+  background: var(--td3-raise-2);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: .01em;
+}
+
+.tdw-work-thread-conversation .uw-tool-completed > summary .uw-tool-status {
+  color: var(--td3-green-text);
+  background: var(--td3-green-soft);
+}
+
+.tdw-work-thread-conversation .uw-tool-error > summary .uw-tool-status {
+  color: var(--td3-red-text);
+  background: var(--td3-red-soft);
+}
+
+.tdw-work-thread-conversation .uw-tool-running > summary .uw-tool-status {
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft);
+}
+
+/* ---------------------------------------------------- Activity as a timeline */
+
+/* A turn is a sequence, and it was rendering as an undifferentiated stack of
+   rows. The rail is what makes "six things happened, in this order, and the
+   fourth failed" readable without opening anything. */
+.tdw-work-thread-conversation .bui-activity .uw-activity-parts {
+  position: relative;
+  padding: 14px 14px 16px 34px;
+  background: transparent;
+}
+
+.tdw-work-thread-conversation .bui-activity .uw-activity-parts::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 18px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--td3-border-strong);
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-stack {
+  display: grid;
+  gap: 7px;
+}
+
+/* ------------------------------------------------------------------ motion */
+
+/* Tool rows arrive one at a time in the real thing, so they arrive one at a time
+   here. Eight steps is where a stagger stops reading as sequence and starts
+   reading as lag, so the ninth row onward shares the last delay. */
+@keyframes bui-rise {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-stack > .uw-tool-card,
+.tdw-work-thread-conversation .uw-activity-parts > .uw-reasoning {
+  animation: bui-rise .3s var(--bui-ease) both;
+}
+
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(1) { animation-delay: 30ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(2) { animation-delay: 70ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(3) { animation-delay: 110ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(4) { animation-delay: 150ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(5) { animation-delay: 190ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(6) { animation-delay: 230ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(n + 7) { animation-delay: 270ms; }
+
+.tdw-work-thread-conversation .bui-tool > summary,
+.tdw-work-thread-conversation .bui-activity > summary {
+  transition: background var(--motion-fast, .16s) var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .bui-tool > summary:hover {
+  background: var(--td3-raise-1);
+}
+
+/* -------------------------------------------------------- approval card v2 */
+
+.bui-approval {
+  border-left-width: 4px;
+  padding: 14px;
+}
+
+.bui-approval .tdw-attention-card {
+  padding: 14px;
+  border-radius: var(--bui-radius);
+  background: var(--td3-card-raised);
+}
+
+.bui-approval .tdw-attention-heading {
+  margin-bottom: 11px;
+}
+
+.bui-approval .tdw-attention-heading strong {
+  font-size: 13px;
+}
+
+.bui-approval .tdw-attention-card > strong,
+.bui-approval .tdw-attention-card legend {
+  font-size: 12px;
+}
+
+.bui-approval .tdw-attention-card p {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.bui-approval-scopes code {
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.bui-approval .tdw-attention-actions {
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bui-approval .tdw-attention-actions .tdw-button {
+  min-height: 40px;
+  padding: 0 15px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.bui-approval .tdw-attention-options button {
+  border-radius: 10px;
+}
+
+.bui-approval .tdw-attention-options button strong {
+  font-size: 12px;
+}
+
+.bui-approval .tdw-attention-options button span {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* ------------------------------------------- reduced motion, second pass */
+
+@media (prefers-reduced-motion: reduce) {
+  .tdw-work-thread-conversation .uw-activity-parts .uw-tool-stack > .uw-tool-card,
+  .tdw-work-thread-conversation .uw-activity-parts > .uw-reasoning {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .tdw-work-thread-conversation .bui-tool > summary,
+  .tdw-work-thread-conversation .bui-activity > summary {
+    transition: none;
+  }
+}
+
+/* =============================================================================
+ * Third pass: the rest of the conversation surface.
+ *
+ * Same method as the second: move what is seen, resolve everything through
+ * tokens, unwind every animation under reduced motion.
+ * ============================================================================= */
+
+/* ------------------------------------------------------------- message rows */
+
+/* The identity row was 10px for both the name and the time, under a 15.5px reply.
+   The header of a message should not be the smallest text in it. */
+.tdw-work-thread-conversation .uw-message-body > header {
+  min-height: 28px;
+  margin-bottom: 3px;
+  gap: 9px;
+}
+
+.tdw-work-thread-conversation .uw-message-body > header strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -.005em;
+}
+
+.tdw-work-thread-conversation .uw-message-body > header time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A circle holding two initials is a contact avatar. These are two agents and a
+   person inside a tool, so the mark is a rounded square - the shape every editor
+   uses for an identity that is not a face. */
+.tdw-work-thread-conversation .uw-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 10.5px;
+}
+
+.tdw-work-thread-conversation .uw-avatar-agent {
+  color: var(--td3-blue-text);
+  border-color: var(--td3-blue-border-soft);
+  background: var(--td3-blue-soft);
+}
+
+.tdw-work-thread-conversation .uw-avatar img {
+  width: 17px;
+  height: 17px;
+}
+
+/* Each turn arrives once. Without this a reply appears as a jump-cut, which is
+   the single most common reason a fast chat UI feels cheap. */
+@keyframes bui-message-in {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tdw-work-thread-conversation .uw-message {
+  animation: bui-message-in .34s var(--bui-ease) both;
+}
+
+/* The copy control sits under the reply and was a bare icon at rest. */
+.tdw-work-thread-conversation .uw-copy-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--td3-muted);
+  transition: color var(--motion-fast, .16s) var(--bui-ease),
+    background var(--motion-fast, .16s) var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-copy-button:hover {
+  color: var(--td3-text);
+  background: var(--td3-raise-2);
+}
+
+.tdw-work-thread-conversation .uw-copy-button.copied {
+  color: var(--td3-green-text);
+  background: var(--td3-green-soft);
+}
+
+/* ---------------------------------------------------------------- composer */
+
+/* The primary input of the product. It already had a good shell; what it lacked
+   was the weight to read as the thing you type into, and its own controls were
+   10px. */
+.tdw-work-thread-conversation .uw-composer-shell {
+  border-radius: 16px;
+  border-color: var(--td3-border-strong);
+  transition: border-color .18s var(--bui-ease), box-shadow .18s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell:focus-within {
+  border-color: var(--td3-blue-border);
+}
+
+.tdw-work-thread-conversation .uw-composer-footer {
+  min-height: 44px;
+  padding: 6px 9px 9px 13px;
+}
+
+.tdw-work-thread-conversation .uw-composer-footer > span,
+.tdw-work-thread-conversation .uw-composer-footer small {
+  font-size: 11px;
+}
+
+/* The working directory is the one piece of state in the composer that answers
+   "where will this run", so it reads as a value rather than as a caption. */
+.tdw-work-thread-conversation .uw-composer-directory {
+  padding: 3px 8px;
+  flex: 0 1 auto;
+  border-radius: 7px;
+  color: var(--td3-text-3);
+  background: var(--td3-raise-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+}
+
+.tdw-work-thread-conversation .uw-composer-shell .uw-button {
+  min-height: 34px;
+  border-radius: 10px;
+  transition: transform .12s var(--bui-ease), background .16s var(--bui-ease),
+    border-color .16s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell .uw-button:active:not(:disabled) {
+  transform: scale(.97);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell .uw-button-label {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+/* Attachment chips read as file names, not as prose. */
+.tdw-work-thread-conversation .uw-composer-attachments {
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment {
+  padding: 4px 5px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--td3-border);
+  background: var(--td3-raise-2);
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment strong {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- toolbar and pickers */
+
+/* "Continue with" and Model are how a Session changes hands between harnesses -
+   the most consequential controls on the screen, labelled at 10px next to a
+   30px-tall select. */
+.tdw-work-thread-conversation .tdw-agent-control label > span {
+  font-size: 10.5px;
+  color: var(--td3-text-3);
+}
+
+.tdw-work-thread-conversation .tdw-agent-control select {
+  min-height: 34px;
+  border-radius: 10px;
+  border-color: var(--td3-border-strong);
+  background-color: var(--td3-control);
+  font-size: 11.5px;
+  transition: border-color .16s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .tdw-agent-control select:hover:not(:disabled) {
+  border-color: var(--td3-blue-border-soft);
+}
+
+/* The live-state pill sits beside them and was flat. */
+.tdw-work-thread-conversation .tdw-conversation-state {
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tdw-work-thread-conversation .tdw-conversation-state.working {
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft);
+}
+
+/* ------------------------------------------- reduced motion, third pass */
+
+@media (prefers-reduced-motion: reduce) {
+  .tdw-work-thread-conversation .uw-message {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .tdw-work-thread-conversation .uw-copy-button,
+  .tdw-work-thread-conversation .uw-composer-shell,
+  .tdw-work-thread-conversation .uw-composer-shell .uw-button,
+  .tdw-work-thread-conversation .tdw-agent-control select {
+    transition: none;
+  }
+
+  .tdw-work-thread-conversation .uw-composer-shell .uw-button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* =============================================================================
+ * Fourth pass: the waiting states, and real icons.
+ *
+ * A still screenshot cannot show any of this, which is most of why the first
+ * three passes read as a font change. Everything below moves.
+ * ============================================================================= */
+
+/* ------------------------------------------------------------------ icons */
+
+/* The kind and status marks are SVG now rather than borrowed characters, so the
+   badge centres a box instead of a glyph sitting on a text baseline. */
+.bui-tool > summary .bui-tool-kind svg,
+.tdw-work-thread-conversation .uw-tool-icon svg {
+  display: block;
+}
+
+.bui-tool > summary .bui-tool-kind {
+  color: var(--td3-muted-2);
+}
+
+.bui-tool-edit > summary .bui-tool-kind,
+.bui-tool-run > summary .bui-tool-kind {
+  color: var(--td3-attention-text);
+}
+
+/* A rule, not a mark: `incomplete` is finished work that produced no result. */
+.bui-status-none {
+  width: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentcolor;
+}
+
+/* ---------------------------------------------------------------- spinner */
+
+/* One turning ring per running call. A conic gradient masked to a ring costs the
+   compositor a single rotation - no per-frame rasterising, which matters once six
+   of these are on screen on a phone. */
+.bui-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.75px solid var(--td3-border-strong);
+  border-top-color: currentcolor;
+  animation: bui-spin .75s linear infinite;
+}
+
+@keyframes bui-spin {
+  to { transform: rotate(1turn); }
+}
+
+.tdw-work-thread-conversation .uw-tool-running > summary .uw-tool-icon {
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft);
+}
+
+/* ------------------------------------------------- running progress on a card */
+
+/* An indeterminate sweep along the bottom edge of a call that is still going. It
+   is the difference between "this row is working" and "this row is stuck", which
+   a static spinner in the corner does not settle. */
+.tdw-work-thread-conversation .uw-tool-running.bui-tool > summary {
+  position: relative;
+}
+
+.tdw-work-thread-conversation .uw-tool-running.bui-tool > summary::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--td3-blue) 45%,
+    var(--td3-blue) 55%,
+    transparent
+  );
+  background-size: 45% 100%;
+  background-repeat: no-repeat;
+  animation: bui-sweep 1.5s var(--bui-ease) infinite;
+}
+
+@keyframes bui-sweep {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
+/* ------------------------------------------------------------- typing dots */
+
+/* The pending row - the one thing on screen between sending a prompt and the
+   first token - was a sentence and nothing else. */
+.bui-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
+  vertical-align: baseline;
+}
+
+.bui-typing i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--td3-blue-text);
+  animation: bui-bounce 1.1s var(--bui-ease) infinite;
+}
+
+.bui-typing i:nth-child(2) { animation-delay: .15s; }
+.bui-typing i:nth-child(3) { animation-delay: .3s; }
+
+@keyframes bui-bounce {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* The label beside them breathes rather than sitting still. */
+.tdw-work-thread-conversation .uw-message-working {
+  animation: bui-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes bui-breathe {
+  0%, 100% { opacity: .72; }
+  50% { opacity: 1; }
+}
+
+/* ------------------------------------------------------- expand / collapse */
+
+/* A details element snaps open. Where the engine can animate its content box it
+   now grows into place instead; where it cannot, nothing changes and the panel
+   opens exactly as it did before. */
+@supports selector(::details-content) {
+  .tdw-work-thread-conversation .bui-tool,
+  .tdw-work-thread-conversation .bui-activity {
+    interpolate-size: allow-keywords;
+  }
+
+  .tdw-work-thread-conversation .bui-tool::details-content,
+  .tdw-work-thread-conversation .bui-activity::details-content {
+    height: 0;
+    overflow: clip;
+    opacity: 0;
+    transition: height .26s var(--bui-ease), opacity .2s var(--bui-ease),
+      content-visibility .26s allow-discrete;
+  }
+
+  .tdw-work-thread-conversation .bui-tool[open]::details-content,
+  .tdw-work-thread-conversation .bui-activity[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------------------- skeletons */
+
+/* Loading older history was a bare button and a pause. A shimmering placeholder
+   is what tells the user the pause is a fetch and not a dead end. */
+.tdw-work-thread-conversation .uw-history-loader {
+  position: relative;
+}
+
+.tdw-work-thread-conversation .uw-history-loader::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin: 8px auto 0;
+  width: min(320px, 60%);
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--td3-raise-1),
+    var(--td3-raise-3) 50%,
+    var(--td3-raise-1)
+  );
+  background-size: 220% 100%;
+  animation: bui-shimmer 1.6s linear infinite;
+}
+
+@keyframes bui-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* ------------------------------------------ reduced motion, fourth pass */
+
+@media (prefers-reduced-motion: reduce) {
+  .bui-spinner,
+  .bui-typing i,
+  .tdw-work-thread-conversation .uw-message-working,
+  .tdw-work-thread-conversation .uw-tool-running.bui-tool > summary::after,
+  .tdw-work-thread-conversation .uw-history-loader::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  /* A ring with no rotation is a static ring, which still reads as "in progress". */
+  .bui-spinner {
+    border-top-color: currentcolor;
+  }
+
+  .tdw-work-thread-conversation .bui-tool::details-content,
+  .tdw-work-thread-conversation .bui-activity::details-content {
+    transition: none;
+  }
+}
+
+/* =============================================================================
+ * Fifth pass: density.
+ *
+ * Measured in Chromium on a 1040px column, before this block: an agent turn
+ * carrying 21px of text occupied 101px, of which the copy control's own row was
+ * 40px and the identity row 28px. A one-line prompt occupied 71px and stretched
+ * the full 969px of the column. Four fifths of a session was chrome.
+ *
+ * What is deliberately NOT touched: `--hr-chat-measure: 100%` in
+ * `session-first-workbench.css`. That file documents at length why prose shares
+ * one edge with code, tables and the composer rather than sitting in a 65-75
+ * character band, and it is a product decision, not an oversight. Agent prose
+ * keeps the column. Only the prompt bubble stops pretending it needs it.
+ * ============================================================================= */
+
+/* ------------------------------------------------- the copy control's row */
+
+/* It was a 40px row under every message, holding one 28px button, present whether
+   or not anyone ever hovers it - the "empty lines" in a transcript. Out of flow it
+   costs nothing and lands on the identity row, which has nothing on its right but
+   space. Revealed on hover, and always visible where there is no hover to reveal
+   it with.
+
+   Anchored to the message body rather than the content group so it aligns with the
+   header. A turn with two content groups would stack two buttons in one spot, so
+   only the last group's - the final answer, the thing anyone actually copies -
+   is kept. */
+.tdw-work-thread-conversation .uw-message-body {
+  position: relative;
+}
+
+.tdw-work-thread-conversation .uw-message-content-group:not(:last-of-type) .uw-message-actions {
+  display: none;
+}
+
+.tdw-work-thread-conversation .uw-message-actions {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  margin: 0;
+  opacity: 0;
+  transition: opacity .15s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-message:hover .uw-message-actions,
+.tdw-work-thread-conversation .uw-message:focus-within .uw-message-actions {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .tdw-work-thread-conversation .uw-message-actions {
+    opacity: .55;
+  }
+}
+
+/* ------------------------------------------------------- the prompt bubble */
+
+/* A framed bubble says "this is a discrete utterance", and stretching it to the
+   full column says the opposite: a four-word prompt read as a wide empty panel
+   with a line of text in the corner. It now hugs its own content, which is what
+   the frame was for. Agent replies are unframed prose and keep the column. */
+.tdw-work-thread-conversation .uw-message-user .uw-message-body {
+  width: fit-content;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.tdw-work-thread-conversation .uw-message-user .uw-markdown {
+  max-width: 100%;
+}
+
+/* ---------------------------------------------------------- vertical rhythm */
+
+.tdw-work-thread-conversation .uw-message {
+  margin-bottom: 12px;
+}
+
+.tdw-work-thread-conversation .uw-message-body > header {
+  min-height: 22px;
+  margin-bottom: 1px;
+}
+
+/* A turn's first paragraph does not need a gap above it: the identity row is the
+   gap. Same for the last one against the next turn's margin. */
+.tdw-work-thread-conversation .uw-message-content-group > .uw-markdown > :first-child {
+  margin-top: 0;
+}
+
+.tdw-work-thread-conversation .uw-message-content-group > .uw-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+/* A collapsed Activity header is a one-line summary of finished work, and it was
+   as tall as a control. Open, it keeps its full presence. */
+.tdw-work-thread-conversation .bui-activity:not([open]) > summary {
+  min-height: 38px;
+}
+
+.tdw-work-thread-conversation .uw-activity-group {
+  margin-top: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tdw-work-thread-conversation .uw-message-actions {
+    transition: none;
+    opacity: 1;
+  }
+}
+
+/* =============================================================================
+ * Sixth pass: two defects the fifth one introduced.
+ *
+ * Right-aligning the prompt bubble was half a change. The avatar stayed in the
+ * grid's first column, so a right-hugging bubble had its own mark stranded on the
+ * far left of the row. And the copy control, anchored to the message body at
+ * `top: -3px`, sits above that body's padding box - right for an unframed agent
+ * reply, but on a framed bubble it hangs half outside the frame.
+ * ============================================================================= */
+
+/* The mark goes away rather than across. Mirroring the row means overriding
+   `grid-template-columns`, and `session-first-workbench.css` sets that with
+   `!important` under `(max-width: 780px)` - so a mirrored template would hold on
+   a desktop and collapse the bubble into a 28px column on a phone. Removing it
+   needs no template change and loses nothing: the identity row inside the bubble
+   already says "You", so the mark was the third place the same word appeared, and
+   the column it held becomes width the prompt can use. The agent keeps its mark -
+   there it carries the harness icon, which is the one thing that varies. */
+.tdw-work-thread-conversation .uw-message-user > .uw-avatar {
+  display: none;
+}
+
+.tdw-work-thread-conversation .uw-message-user > .uw-message-body {
+  grid-column: 1 / -1;
+}
+
+/* The prompt's copy control belongs inside the frame, on the identity row, inset
+   by the bubble's own padding - not three pixels above the frame's top edge.
+   The header reserves its width with padding rather than the control being placed
+   in space that happens to be free: an absolutely positioned box adds nothing to
+   a `fit-content` width, so on a two-word prompt the bubble would size to the text
+   and the control would land on top of the timestamp. */
+.tdw-work-thread-conversation .uw-message-user .uw-message-body > header {
+  padding-right: 32px;
+}
+
+.tdw-work-thread-conversation .uw-message-user .uw-message-actions {
+  top: 7px;
+  right: 10px;
+}
+
+.tdw-work-thread-conversation .uw-message-user .uw-copy-button {
+  width: 22px;
+  height: 22px;
+}
+
+/* A 22px target is fine for a cursor and too small for a thumb, so on a touch
+   pointer the control keeps its size and the identity row grows to match it. */
+@media (pointer: coarse) {
+  .tdw-work-thread-conversation .uw-message-user .uw-copy-button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .tdw-work-thread-conversation .uw-message-user .uw-message-body > header {
+    min-height: 28px;
+    padding-right: 38px;
+  }
+}
+
+/* The agent's control keeps the identity row, where there is nothing to its right
+   but space. Two pixels, not three: it sits on that row rather than above it. */
+.tdw-work-thread-conversation .uw-message-agent .uw-message-actions {
+  top: -2px;
+}

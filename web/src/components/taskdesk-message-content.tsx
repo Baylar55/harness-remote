@@ -3,7 +3,10 @@ import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { copyToClipboard } from "../clipboard"
 import { activityLabel, groupConversationParts, type ConversationPartGroup } from "../conversation-parts"
-import { CheckIcon, CopyIcon } from "../Icons"
+import {
+  AlertIcon, CheckIcon, CommandIcon, CopyIcon, FolderIcon, PencilIcon, SearchIcon, ServerIcon,
+  SparkIcon, TaskListIcon
+} from "../Icons"
 import type { MessageEnvelope, MessagePart, TodoItem } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -113,6 +116,117 @@ function TodoListView({ items }: { items: TodoItem[] }) {
   )
 }
 
+/**
+ * Beautiful UI's tool-call pattern names the *kind* of work before the tool that did it: a file read
+ * and a shell command are different enough that one identical grey row for both is what makes a long
+ * Activity block unreadable. The harness only reports a tool name, so the kind is derived from it
+ * once, here, and every visual difference hangs off the class this returns.
+ */
+type ToolKind = "read" | "edit" | "run" | "search" | "web" | "task" | "tool"
+
+const TOOL_KINDS: Record<ToolKind, RegExp | null> = {
+  run: /(^|[-_])(bash|shell|exec|run|terminal|command|process)/,
+  edit: /(^|[-_])(write|edit|patch|apply|create|append|multiedit|replace)/,
+  read: /(^|[-_])(read|cat|view|open|list|ls|tree)/,
+  search: /(^|[-_])(grep|glob|search|find|rg|lookup)/,
+  web: /(^|[-_])(web|fetch|http|browser|url|crawl)/,
+  task: /(^|[-_])(task|agent|todo|plan|delegate)/,
+  tool: null
+}
+
+/**
+ * Real icons rather than the unicode glyphs this started with. A "\u25a4" is a character borrowed to
+ * look like a picture: it inherits the text metrics, sits on the text baseline, and renders as a
+ * different shape on every platform - which on Android was a box. These are the same stroked set the
+ * rest of the app already draws with.
+ */
+const TOOL_KIND_ICON: Record<ToolKind, (props: { size?: number }) => JSX.Element> = {
+  read: FolderIcon, edit: PencilIcon, run: CommandIcon, search: SearchIcon,
+  web: ServerIcon, task: TaskListIcon, tool: SparkIcon
+}
+
+function toolKind(tool: string | undefined): ToolKind {
+  const name = (tool || "").toLowerCase()
+  for (const [kind, pattern] of Object.entries(TOOL_KINDS) as [ToolKind, RegExp | null][]) {
+    if (pattern && pattern.test(name)) return kind
+  }
+  return "tool"
+}
+
+/**
+ * A call's cost is the second thing worth knowing after its name - "which step is slow" is otherwise
+ * unanswerable from a transcript. Sub-second calls stay unlabelled on purpose: a "0.4s" on every row
+ * is noise rather than information.
+ */
+function formatDuration(time: { start: number; end?: number } | undefined): string {
+  if (!time?.start || !time.end) return ""
+  const ms = time.end - time.start
+  if (!Number.isFinite(ms) || ms < 1_000 || ms > 86_400_000) return ""
+  if (ms < 60_000) return ms < 10_000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms / 1000)}s`
+  return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`
+}
+
+/**
+ * The protocol words were reaching the screen unchanged, so a finished call read "completed" and a
+ * failed one "error". Same rule as `activityStatusLabel` below, applied to the row that carries it.
+ */
+function toolStatusLabel(status: string): string {
+  if (status === "running") return "Working"
+  if (status === "completed") return "Done"
+  if (status === "error") return "Failed"
+  if (status === "incomplete") return "No result"
+  return status
+}
+
+/**
+ * The live Activity header is the only thing on screen while a turn is thinking, and "Working" with
+ * no clock behind it reads the same at two seconds as at two minutes. The elapsed time is taken from
+ * the harness's own part timestamps wherever it sends them, so a reopened Session shows the age of
+ * the work rather than the age of the render.
+ */
+function activityStartedAt(group: ActivityGroupValue): number | undefined {
+  for (const part of group.parts) {
+    const start = part.state?.time?.start ?? part.time?.start
+    if (typeof start === "number" && start > 0) return start
+  }
+  return undefined
+}
+
+function useElapsedLabel(startedAt: number | undefined, running: boolean): string {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!running || !startedAt) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000)
+    return () => window.clearInterval(timer)
+  }, [running, startedAt])
+
+  if (!running || !startedAt) return ""
+  const seconds = Math.floor((now - startedAt) / 1000)
+  // A harness that reports seconds where the type says milliseconds would otherwise render a clock
+  // reading in decades. Out-of-range means "no timestamp worth showing", not "show it anyway".
+  if (seconds < 2 || seconds > 86_400) return ""
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+/**
+ * `incomplete` is the bridge's marker for a call whose turn ended before the harness reported an
+ * outcome: finished work with nothing to show, so it takes neither the spinner nor the failure mark.
+ * The spinner is a bare span the stylesheet turns: an SVG that has to re-rasterise every frame is
+ * the wrong thing to put on a phone once six of them are on screen at once.
+ */
+function ToolStatusIcon({ status }: { status: string }): JSX.Element {
+  return (
+    <span className="uw-tool-icon" aria-hidden="true">
+      {status === "completed" ? <CheckIcon size={12} />
+        : status === "error" ? <AlertIcon size={12} />
+          : status === "incomplete" ? <span className="bui-status-none" />
+            : <span className="bui-spinner" />}
+    </span>
+  )
+}
+
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
   const status = state?.status || "running"
@@ -126,6 +240,9 @@ function ToolPartCard({ part }: { part: MessagePart }) {
         : ""
   const output = state?.error || state?.output || ""
   const todos = (part.tool || "").toLowerCase() === "todowrite" ? parseTodos(input.todos) : null
+  const kind = toolKind(part.tool)
+  const KindIcon = TOOL_KIND_ICON[kind]
+  const duration = formatDuration(state?.time)
   const [open, setOpen] = useState(status === "error")
 
   useEffect(() => {
@@ -135,7 +252,7 @@ function ToolPartCard({ part }: { part: MessagePart }) {
   return (
     <div className="uw-tool-stack">
       <details
-        className={`uw-tool-card uw-tool-${status}`}
+        className={`uw-tool-card uw-tool-${status} bui-tool bui-tool-${kind}`}
         open={open}
         onToggle={(event) => setOpen(event.currentTarget.open)}
       >
@@ -143,12 +260,18 @@ function ToolPartCard({ part }: { part: MessagePart }) {
           {/* `incomplete` is the bridge's marker for a call whose turn ended before the harness
               reported an outcome: it is finished work with nothing to show, so it takes neither the
               running ellipsis nor the failure mark. */}
-          <span className="uw-tool-icon">
-            {status === "completed" ? "✓" : status === "error" ? "!" : status === "incomplete" ? "–" : "⋯"}
+          <ToolStatusIcon status={status} />
+          <span className="uw-tool-title">
+            <span className="bui-tool-kind" aria-hidden="true">{KindIcon({ size: 12 })}</span>
+            {state?.title || part.tool || "Tool"}
           </span>
-          <span className="uw-tool-title">{state?.title || part.tool || "Tool"}</span>
           {command ? <code>{command.length > 90 ? `${command.slice(0, 90)}…` : command}</code> : null}
-          <span className="uw-tool-status">{status === "incomplete" ? "no result" : status}</span>
+          {/* Duration and status share one grid cell so the summary keeps the column count its
+              stylesheet lays out; a fifth child would put the status under the command instead. */}
+          <span className="bui-tool-meta">
+            {duration ? <span className="bui-tool-duration">{duration}</span> : null}
+            <span className="uw-tool-status">{toolStatusLabel(status)}</span>
+          </span>
         </summary>
         {/* The truncated body is what is on screen, but the copy carries the whole output: a stack
             trace clipped at 4000 characters is the half you cannot paste anywhere useful. */}
@@ -223,6 +346,8 @@ function activityStatusLabel(status: string): string {
 function ActivityGroup({ group }: { group: ActivityGroupValue }) {
   const [open, setOpen] = useState(group.status === "error")
   const previousStatus = useRef(group.status)
+  const running = group.status === "running"
+  const elapsed = useElapsedLabel(activityStartedAt(group), running)
 
   useEffect(() => {
     const prior = previousStatus.current
@@ -235,14 +360,17 @@ function ActivityGroup({ group }: { group: ActivityGroupValue }) {
 
   return (
     <details
-      className={`uw-tool-card uw-activity-group uw-tool-${group.status}`}
+      className={`uw-tool-card uw-activity-group uw-tool-${group.status} bui-activity`}
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
-        <span className="uw-tool-icon">{group.status === "completed" ? "✓" : group.status === "error" ? "!" : "⋯"}</span>
+        <ToolStatusIcon status={group.status} />
         <span className="uw-tool-title">{activityLabel(group)}</span>
-        <span className="uw-tool-status">{activityStatusLabel(group.status)}</span>
+        <span className="bui-tool-meta">
+          {elapsed ? <span className="bui-tool-duration">{elapsed}</span> : null}
+          <span className="uw-tool-status">{activityStatusLabel(group.status)}</span>
+        </span>
       </summary>
       {open ? (
         <div className="uw-activity-parts">

@@ -17,7 +17,7 @@ const LIVE_STYLESHEETS = [
   "universal-workspace-readable.css", "universal-workspace-readable-fixes.css",
   "taskdesk-conversation.css", "taskdesk-conversation-fixes.css",
   "taskdesk-mobile-navigation.css", "v3-polish.css", "universal-workspace.css",
-  "taskdesk-focus-layout.css"
+  "taskdesk-focus-layout.css", "beautiful-ui-controls.css"
 ]
 
 test("no live stylesheet declares text below the 10px legibility floor", () => {
