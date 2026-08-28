@@ -1,0 +1,281 @@
+/* Beautiful UI controls, ported onto this app's own palette.
+ *
+ * The pattern language is the one Beautiful UI (beautifului.dev, MIT) established for AI-native
+ * surfaces: a tool call reads as a card with a kind, a cost and an outcome; a thinking state carries
+ * a clock and moves while it is live; a human-in-the-loop decision is a card you can act on with a
+ * thumb. None of their code is copied here - every rule below is written against the `--td3-*` tokens
+ * in `taskdesk-theme.css`, which is what keeps Light working and keeps the port free of Tailwind.
+ *
+ * Two rules this file lives by:
+ *
+ * - No literal colour. A hex here is a surface that stays dark on a light theme, which is exactly
+ *   the defect `taskdesk-theme.css` was written to end. `beautiful-ui-controls.test.mjs` enforces it.
+ * - Colour means status, never kind. The palette has five hues and there are seven tool kinds, so
+ *   the kind is carried by a glyph and the hue stays reserved for done/failed/working. Tinting by
+ *   kind would leave a failed call looking like a successful one of another kind.
+ *
+ * Loaded last in `main.tsx` so these rules settle specificity ties against the sheets they refine,
+ * without needing `!important` to do it.
+ */
+
+/* ---------------------------------------------------------------- tool call */
+
+/* The kind glyph rides inside the title rather than in a column of its own: the summary grids in
+   `universal-workspace.css` and `taskdesk-conversation.css` are laid out by column count, and a
+   fifth child would drop the status onto the next line at exactly the widths phones use. */
+.bui-tool > summary .bui-tool-kind {
+  display: inline-block;
+  width: 12px;
+  margin-right: 5px;
+  flex: none;
+  color: var(--td3-muted);
+  font-size: 10px;
+  font-weight: 400;
+  font-style: normal;
+  text-align: center;
+}
+
+/* Only the two kinds that change state on the machine get an accent. "This call wrote something"
+   is worth a glance up-front; "this call read something" is not, and tinting all seven would spend
+   the whole palette on information nobody acts on. */
+.bui-tool-edit > summary .bui-tool-kind,
+.bui-tool-run > summary .bui-tool-kind {
+  color: var(--td3-attention-text);
+}
+
+.bui-tool > summary .uw-tool-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+}
+
+/* Duration and status share one grid cell, so the cell has to do the spacing the grid used to. */
+.bui-tool-meta,
+.bui-activity > summary .bui-tool-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* Tabular figures: a clock that reflows the row every time it ticks past a 1 is worse than no
+   clock, and this one ticks once a second for the whole length of a turn. */
+.bui-tool-duration {
+  color: var(--td3-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.uw-tool-status {
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+
+/* Done is the common case and must recede; failed is the one that has to be findable by scrolling
+   past it. The icon already carries the hue, so the word beside it only needs the quieter half. */
+.uw-tool-completed > summary .uw-tool-status {
+  color: var(--td3-muted-2);
+}
+
+.uw-tool-error > summary .uw-tool-status {
+  color: var(--td3-red-text);
+  font-weight: 700;
+}
+
+.uw-tool-incomplete > summary .uw-tool-icon {
+  color: var(--td3-muted);
+  background: var(--td3-raise-3);
+}
+
+/* Touch: `universal-workspace.css` sizes the summary at 34px, below the 44px a thumb needs, and
+   these rows are the ones users open most. Pointer-coarse only, so the desktop density is kept. */
+@media (pointer: coarse) {
+  .bui-tool > summary,
+  .bui-activity > summary {
+    min-height: 44px;
+  }
+}
+
+/* ------------------------------------------------------- thinking / activity */
+
+/* The live header is the whole thinking state: while a turn is working this row is often the only
+   thing moving on screen. The sweep is on the title's own text, which is why it needs the clip. */
+.bui-activity.uw-tool-running > summary .uw-tool-title {
+  background: linear-gradient(
+    90deg,
+    var(--td3-text-3) 20%,
+    var(--td3-text) 42%,
+    var(--td3-text-3) 64%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: bui-thinking-sweep 2.4s linear infinite;
+}
+
+.bui-activity.uw-tool-running > summary .bui-tool-duration {
+  color: var(--td3-blue-text);
+}
+
+@keyframes bui-thinking-sweep {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* ------------------------------------------------------------- status pill */
+
+/* The pill already reported the right state; what it lacked was any sign of being live. The dot is
+   the smallest thing that can carry that, and it costs no layout. */
+.tdw-conversation-state.working i {
+  animation: bui-pill-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bui-pill-pulse {
+  0%, 100% { opacity: .45; }
+  50% { opacity: 1; }
+}
+
+/* ------------------------------------------------------------- approval card */
+
+/* This is the one card in the app the user cannot scroll past: the agent is stopped until it is
+   answered. It was rendering at the same weight as an inline notice, in 10px type, with three
+   identical buttons - on a phone, at the moment a decision matters most. */
+.bui-approval {
+  border-left: 3px solid var(--td3-attention-text);
+}
+
+.bui-approval .tdw-attention-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bui-approval-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--td3-attention-text);
+  animation: bui-pill-pulse 1.6s ease-in-out infinite;
+}
+
+.bui-approval .tdw-attention-heading strong {
+  font-size: 12px;
+}
+
+/* Reading size for the thing being decided. The question and the permission sentence were the
+   smallest text in the card and are the only part of it that has to be read word for word. */
+.bui-approval .tdw-attention-card p {
+  color: var(--td3-text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.bui-approval .tdw-attention-card legend,
+.bui-approval .tdw-attention-card > strong {
+  font-size: 11px;
+}
+
+/* One chip per scope. Joined into a single line, a permission over four paths was unreadable
+   exactly when it was widest. `anywhere` because a path is untrusted text and must not widen chat. */
+.bui-approval-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 6px 0 10px;
+}
+
+.bui-approval-scopes code {
+  max-width: 100%;
+  padding: 3px 7px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--td3-border-soft);
+  border-radius: 6px;
+  color: var(--td3-text-3);
+  background: var(--td3-sunken);
+  font-size: 10.5px;
+}
+
+/* An option and its description were rendering side by side, centred, and could not wrap. The cause
+   is the global `button` rule in `styles.css`: it makes every button an `inline-flex` centred on both
+   axes with `white-space: nowrap`, so `.tdw-attention-options button strong { display: block }` was
+   describing a flex item and could not produce a line break, and the `text-align: left` beside it had
+   nothing to act on either. Measured in Chromium at 737px: label at x=316, description at x=388, one
+   line. The column is the layout this markup was written for.
+   The `color` is hygiene rather than a fix - the button inherits `var(--text)`, which is the 2.x token
+   family, and resolves correctly only because `applyTheme` always writes `data-theme`. This card
+   should not be the one place in the port that depends on that. */
+.bui-approval .tdw-attention-options button {
+  min-height: 44px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 9px 10px;
+  color: var(--td3-text);
+  white-space: normal;
+}
+
+.bui-approval .tdw-attention-options button strong {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--td3-text);
+  font-size: 11px;
+  text-align: left;
+}
+
+.bui-approval .tdw-attention-options button span {
+  text-align: left;
+}
+
+.bui-approval-check {
+  width: 11px;
+  flex: none;
+  color: var(--td3-blue-text);
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
+}
+
+.bui-approval .tdw-attention-options button.selected {
+  border-color: var(--td3-blue-border);
+  box-shadow: inset 0 0 0 1px var(--td3-blue-border-soft);
+}
+
+/* Deny is the destructive half of the choice and read as one of three interchangeable buttons. */
+.bui-approval .bui-approval-deny {
+  color: var(--td3-red-text);
+  border-color: var(--td3-red-border);
+}
+
+/* On a phone the decision row is what the thumb reaches for, and three buttons at the default size
+   wrapped into an order that put "Always allow" under the fold. */
+@media (pointer: coarse) {
+  .bui-approval .tdw-attention-actions .tdw-button {
+    min-height: 44px;
+  }
+}
+
+/* ----------------------------------------------------------- reduced motion */
+
+/* Every animation above is decoration on a state that is already spelled out in text, so none of
+   them has anything to preserve when motion is refused. The gradient has to be unwound too: left
+   alone, a transparent text-fill with no sweep behind it renders an invisible title. */
+@media (prefers-reduced-motion: reduce) {
+  .bui-activity.uw-tool-running > summary .uw-tool-title {
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+    color: var(--td3-text);
+    animation: none;
+  }
+
+  .tdw-conversation-state.working i,
+  .bui-approval-dot {
+    animation: none;
+    opacity: 1;
+  }
+}
