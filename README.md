@@ -44,20 +44,35 @@ npx github:giuliastro/harness-remote \
   --port 4097 \
   --username harness \
   --password "use-a-long-unique-password" \
-  --root "$HOME/Software"
+  --root "$HOME/Software" \
+  --cors http://localhost:5173
 ```
 
 `--root` is the directory boundary Harness Remote may browse when you select projects. Choose the folder that contains the repositories you intend to use.
 
 The launcher detects supported CLIs on `PATH`, starts the appropriate local runtime and prints the connection details. The public machine port is normally **4097**.
 
-### 2. Add the machine from Harness Remote
+### 2. Open the frontend
+
+For the web/PWA frontend, start it from a local Harness Remote checkout:
+
+```bash
+cd harness-remote/web
+npm ci
+npm run dev
+```
+
+Open the address Vite prints, normally `http://localhost:5173`. The launcher command above already permits that browser origin. If you host the frontend elsewhere, set `--cors` to that exact address when you start the machine.
+
+For desktop or Android, open the installed client instead, then continue below.
+
+### 3. Add the machine from Harness Remote
 
 On desktop, Android or web, open **Machines** and choose **Add machine**. Enter the address, port, username and password printed by the launcher, then select **Test connection**.
 
 One machine connection discovers its projects and the coding agents it exposes. You do not need a separate network endpoint for every harness.
 
-### 3. Open a project and start work
+### 4. Open a project and start work
 
 Choose a Project, pick the available agent and model, and begin a Conversation. The work runs in that Project's real directory. Use the **Sessions** view to inspect the native-session chain, and **Changes** to inspect the actual working tree.
 
