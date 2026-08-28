@@ -326,6 +326,55 @@ export function createMachineDaemonServer({
       throw daemonError("session_prompt_rejected", message)
     }
   }
+  const commandSession = async (agentID, sessionID, { command, arguments: argumentsText, directory, model, variant }) => {
+    const entry = daemon.hostEntry(agentID)
+    if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
+    const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
+    const resolvedModel = await resolvePromptModel(daemon, agentID, requestedModel, directory)
+    const text = argumentsText ? `/${command} ${argumentsText}` : `/${command}`
+
+    if (entry.kind === "acp") {
+      const service = acpService(agentID)
+      if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
+      await service.prompt(sessionID, text, modelWireName(resolvedModel), [], acpModelVariant(resolvedModel))
+      return
+    }
+
+    const host = entry.host
+    try {
+      await host.start?.()
+    } catch (error) {
+      throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${agentID} is unavailable`)
+    }
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : ""
+    const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session/${encodeURIComponent(sessionID)}/command${query}`
+    const headers = { Accept: "application/json", "Content-Type": "application/json" }
+    const authorization = internalAuthorization(host)
+    if (authorization) headers.Authorization = authorization
+    let response
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          command,
+          arguments: argumentsText,
+          model: resolvedModel ? `${resolvedModel.providerID}/${resolvedModel.modelID}` : undefined,
+          variant: resolvedModel?.variant || undefined
+        })
+      })
+    } catch {
+      throw daemonError("session_command_uncertain", `Command delivery for Session ${sessionID} is uncertain`, { ambiguous: true })
+    }
+    if (!response.ok) {
+      let detail = ""
+      try { detail = await response.text() } catch {}
+      const message = detail || `Running command on ${agentID} returned HTTP ${response.status}`
+      if (response.status >= 500) throw daemonError("session_command_uncertain", message, { ambiguous: true })
+      throw daemonError("session_command_rejected", message)
+    }
+  }
+
   const stopSession = async (agentID, sessionID, { directory }) => {
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
@@ -493,6 +542,7 @@ export function createMachineDaemonServer({
     config,
     claimSession,
     promptSession,
+    commandSession,
     stopSession,
     handoffSession,
     operationLedger: operations
