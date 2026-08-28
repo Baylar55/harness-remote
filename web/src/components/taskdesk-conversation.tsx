@@ -1,6 +1,6 @@
-import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { ATTACHMENT_MAX_COUNT, fileToAttachment, type AttachmentPart } from "../attachments"
-import type { MessageEnvelope } from "../types"
+import type { CommandInfo, MessageEnvelope } from "../types"
 import { ChatIcon, CloseIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, PaperclipIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
@@ -38,6 +38,7 @@ type Props = {
   onLoadOlder?: () => Promise<void> | void
   draft: string
   onDraftChange: (value: string) => void
+  commands?: CommandInfo[]
   attachments?: AttachmentPart[]
   attachmentsSupported?: boolean
   onAttachmentsChange?: (attachments: AttachmentPart[]) => void
@@ -350,6 +351,7 @@ export function TaskDeskConversation({
   onLoadOlder,
   draft,
   onDraftChange,
+  commands = [],
   attachments = [],
   attachmentsSupported = false,
   onAttachmentsChange,
@@ -370,7 +372,17 @@ export function TaskDeskConversation({
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const composerFrameRef = useRef<number | undefined>(undefined)
+  const [commandIndex, setCommandIndex] = useState(0)
   const touchFirst = hasTouchFirstPointer()
+  const commandToken = draft.startsWith("/") && !draft.includes("\n") ? draft.slice(1) : ""
+  const commandMenuOpen = Boolean(commandToken && !/\s/.test(commandToken) && commands.length)
+  const commandMatches = useMemo(() => {
+    if (!commandMenuOpen) return []
+    const query = commandToken.toLowerCase()
+    return commands
+      .filter((command) => command.name.toLowerCase().includes(query) || (command.description || "").toLowerCase().includes(query))
+      .slice(0, 8)
+  }, [commands, commandMenuOpen, commandToken])
   const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
   // A phone has no Ctrl or Cmd key, so telling a touch user to press Ctrl/Cmd+Enter named the one
   // way to send that they do not have. Enter inserts a newline there; the Send button is the action.
@@ -393,7 +405,33 @@ export function TaskDeskConversation({
     }
   }, [draft])
 
+  useEffect(() => {
+    setCommandIndex(0)
+  }, [commandToken])
+
+  function chooseCommand(command: CommandInfo) {
+    onDraftChange(`/${command.name} `)
+    window.requestAnimationFrame(() => composerRef.current?.focus())
+  }
+
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (commandMatches.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault()
+        setCommandIndex((index) => (index + 1) % commandMatches.length)
+        return
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault()
+        setCommandIndex((index) => (index - 1 + commandMatches.length) % commandMatches.length)
+        return
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault()
+        chooseCommand(commandMatches[Math.min(commandIndex, commandMatches.length - 1)])
+        return
+      }
+    }
     if (event.key !== "Enter") return
     if (touchFirst) {
       if (!event.ctrlKey && !event.metaKey) return
@@ -445,6 +483,24 @@ export function TaskDeskConversation({
 
             `enterKeyHint` labels the soft keyboard's action key. Enter inserts a newline on a touch
             device here, so promising "send" would name a behaviour that key does not have. */}
+        {commandMatches.length ? (
+          <div className="uw-command-suggestions" role="listbox" aria-label="Slash commands">
+            {commandMatches.map((command, index) => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === commandIndex}
+                className={index === commandIndex ? "active" : ""}
+                key={command.name}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseCommand(command)}
+              >
+                <strong>/${command.name}</strong>
+                {command.description ? <span>{command.description}</span> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <textarea
           ref={composerRef}
           value={draft}
