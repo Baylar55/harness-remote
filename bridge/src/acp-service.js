@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import {
   listExtensionActions,
@@ -295,8 +295,13 @@ export class AcpService {
   #chunkMessageIDs = new Map()
   #snapshotDirectory
   #restoredSnapshots = new Set()
+  #restoredMetadata = new Set()
   #dirtySnapshots = new Set()
   #snapshotWrites = new Map()
+  #transcriptAccessOrder = new Set()
+  #maxCachedTranscripts
+  #unlistedPolls = new Map()
+  static MAX_UNLISTED_POLLS = 5
   #preserveListedTimestamps
   #reloadOnHistoryRefresh
   #replaySettleMs
@@ -310,7 +315,8 @@ export class AcpService {
     replaySettleMs = 0,
     preferListedTitles = false,
     nativeRenameCommand,
-    actionProviders = []
+    actionProviders = [],
+    maxCachedTranscripts = 8
   } = {}) {
     this.#acp = acp
     this.#snapshotDirectory = snapshotDirectory
@@ -321,6 +327,7 @@ export class AcpService {
     this.#preferListedTitles = preferListedTitles
     this.#nativeRenameCommand = nativeRenameCommand
     this.#actionProviders = actionProviders
+    this.#maxCachedTranscripts = Math.max(1, maxCachedTranscripts)
     acp.on("notification", (notification) => this.#handleNotification(notification))
   }
 
@@ -331,7 +338,7 @@ export class AcpService {
 
   async listSessions(directory) {
     const sessions = await this.#refreshSessions()
-    await Promise.all(sessions.map((session) => this.#restoreSnapshot(session.sessionId)))
+    await Promise.all(sessions.map((session) => this.#restoreSnapshotMetadata(session.sessionId)))
     return sessions
       .filter((session) => !directory || sameDirectory(session.cwd, directory))
       .filter((session) => !this.#deletedSessions.has(session.sessionId))
@@ -362,6 +369,7 @@ export class AcpService {
     this.#ownedSessions.add(session.sessionId)
     if (title) this.#titles.set(session.sessionId, title)
     if (model) await this.setModel(session.sessionId, model)
+    this.#touchTranscript(session.sessionId)
     this.#emit("session.created", session.sessionId)
     this.#persistSnapshot(session.sessionId)
     return sessionView(session, "idle", this.#titleFor(session.sessionId))
@@ -379,6 +387,7 @@ export class AcpService {
    */
   async adoptTaskSession(sessionID, { title, prompt } = {}) {
     await this.#refreshSessions()
+    await this.#restoreSnapshot(sessionID)
     const session = this.#sessions.get(sessionID)
     if (!session || this.#deletedSessions.has(sessionID)) return false
     this.#ownedSessions.add(sessionID)
@@ -388,6 +397,7 @@ export class AcpService {
     if (prompt && !messages.some((message) => message.info?.role === "user" && message.parts?.some((part) => part.text === prompt))) {
       this.#recordPrompt(sessionID, prompt)
     }
+    this.#touchTranscript(sessionID)
     this.#persistSnapshot(sessionID)
     return true
   }
@@ -472,21 +482,8 @@ export class AcpService {
     await this.#requireSession(sessionID)
     if (this.#isBusy(sessionID)) this.abort(sessionID)
     this.#deletedSessions.add(sessionID)
-    this.#messages.delete(sessionID)
-    this.#todos.delete(sessionID)
-    this.#titles.delete(sessionID)
-    this.#configOptions.delete(sessionID)
-    this.#commandCatalogs.delete(sessionID)
-    for (const resolve of this.#commandCatalogWaiters.get(sessionID) ?? []) resolve()
-    this.#commandCatalogWaiters.delete(sessionID)
-    this.#actionStates.delete(sessionID)
-    this.#authoritativeActionStates.delete(sessionID)
-    this.#loaded.delete(sessionID)
-    this.#ownedSessions.delete(sessionID)
-    this.#adoptedSessions.delete(sessionID)
-    this.#promptAcknowledgements.delete(sessionID)
-    this.#chunkMessageIDs.delete(`${sessionID}:user`)
-    this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+    this.#sessions.delete(sessionID)
+    this.#cleanSessionState(sessionID)
     this.#emit("session.deleted", sessionID)
     this.#persistSnapshot(sessionID)
   }
@@ -506,6 +503,7 @@ export class AcpService {
         }
         this.#messages.set(sessionID, messages)
         this.#loaded.add(sessionID)
+        this.#touchTranscript(sessionID)
         this.#persistSnapshot(sessionID)
         return messages
       } catch {
@@ -514,9 +512,9 @@ export class AcpService {
     }
     const reloadHistory = refresh && this.#reloadOnHistoryRefresh
     await this.#load(sessionID, reloadHistory || this.#journalBacked(sessionID))
+    this.#touchTranscript(sessionID)
     return this.#messages.get(sessionID) ?? []
   }
-
   /**
    * Whether the harness's own on-disk history is the authority for this session rather than what
    * this process streamed. True for a session another client owns, and for an adopted task session
@@ -533,9 +531,9 @@ export class AcpService {
     await this.#restoreSnapshot(sessionID)
     if (this.#historyLoader && !this.#ownedSessions.has(sessionID)) return []
     await this.#load(sessionID)
+    this.#touchTranscript(sessionID)
     return this.#todos.get(sessionID) ?? []
   }
-
   async models(sessionID) {
     await this.#loadForConfigOptions(sessionID)
     const option = this.#configOptions.get(sessionID)?.find((item) => item.id === "model")
@@ -865,12 +863,41 @@ export class AcpService {
     return path.join(this.#snapshotDirectory, `${name}.json`)
   }
 
+  #applySnapshotHeader(sessionID, snapshot) {
+    if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
+    if (!this.#preferListedTitles && typeof snapshot.title === "string" && snapshot.title) {
+      this.#titles.set(sessionID, snapshot.title)
+    } else if (!this.#preferListedTitles && !this.#titles.has(sessionID) && Array.isArray(snapshot.messages)) {
+      const firstPrompt = snapshot.messages.find((m) => m?.info?.role === "user")
+      const text = firstPrompt?.parts?.[0]?.text?.trim()
+      if (text) {
+        const derived = text.split("\n")[0].slice(0, 60)
+        this.#titles.set(sessionID, derived)
+      }
+    }
+  }
+
+  async #restoreSnapshotMetadata(sessionID) {
+    if (!this.#snapshotDirectory || this.#restoredMetadata.has(sessionID)) return
+    this.#restoredMetadata.add(sessionID)
+    try {
+      const raw = await readFile(this.#snapshotPath(sessionID), "utf8")
+      const snapshot = JSON.parse(raw)
+      if (snapshot?.version !== 1) return
+      this.#applySnapshotHeader(sessionID, snapshot)
+    } catch (error) {
+      if (error?.code !== "ENOENT") this.#emit("session.error", sessionID, { message: "Stored session snapshot is unreadable" })
+    }
+  }
+
   async #restoreSnapshot(sessionID) {
     if (!this.#snapshotDirectory || this.#restoredSnapshots.has(sessionID)) return
     this.#restoredSnapshots.add(sessionID)
+    this.#restoredMetadata.add(sessionID)
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
+      this.#applySnapshotHeader(sessionID, snapshot)
       if (Array.isArray(snapshot.messages)) {
         // Heal poisoned snapshots that already contain the trailing assistant duplicate
         const healed = healPoisonedSnapshot(mergeFragmentedPiSnapshot(snapshot.messages))
@@ -879,8 +906,7 @@ export class AcpService {
         if (healed.length !== snapshot.messages.length) this.#dirtySnapshots.add(sessionID)
       }
       if (Array.isArray(snapshot.todos)) this.#todos.set(sessionID, snapshot.todos)
-      if (!this.#preferListedTitles && typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
-      if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
+      this.#touchTranscript(sessionID)
     } catch (error) {
       if (error?.code !== "ENOENT") this.#emit("session.error", sessionID, { message: "Stored session snapshot is unreadable" })
     }
@@ -892,19 +918,34 @@ export class AcpService {
     if (this.#snapshotWrites.has(sessionID)) return
     const writing = (async () => {
       await mkdir(this.#snapshotDirectory, { recursive: true })
+      const target = this.#snapshotPath(sessionID)
       while (this.#dirtySnapshots.delete(sessionID)) {
-        // Ensure we never persist the poisoned trailing duplicate
-        const rawMessages = this.#messages.get(sessionID) ?? []
+        const isDeleted = this.#deletedSessions.has(sessionID)
+        let rawMessages = this.#messages.get(sessionID)
+        let rawTodos = this.#todos.get(sessionID)
+        // If transcript was evicted from memory and not marked deleted, preserve existing on-disk messages and todos
+        if (rawMessages === undefined && rawTodos === undefined && !isDeleted) {
+          try {
+            const existing = JSON.parse(await readFile(target, "utf8"))
+            if (existing?.version === 1) {
+              if (Array.isArray(existing.messages)) rawMessages = existing.messages
+              if (Array.isArray(existing.todos)) rawTodos = existing.todos
+            }
+          } catch {}
+        }
+        rawMessages = rawMessages ?? []
+        rawTodos = rawTodos ?? []
         const healedMessages = healPoisonedSnapshot(rawMessages)
-        if (healedMessages.length !== rawMessages.length) this.#messages.set(sessionID, healedMessages)
+        if (this.#messages.has(sessionID) && healedMessages.length !== rawMessages.length) {
+          this.#messages.set(sessionID, healedMessages)
+        }
         const snapshot = JSON.stringify({
           version: 1,
-          messages: healedMessages,
-          todos: this.#todos.get(sessionID) ?? [],
+          messages: isDeleted ? [] : healedMessages,
+          todos: isDeleted ? [] : rawTodos,
           title: this.#titleFor(sessionID),
-          deleted: this.#deletedSessions.has(sessionID)
+          deleted: isDeleted
         })
-        const target = this.#snapshotPath(sessionID)
         const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
         await writeFile(temporary, snapshot, { mode: 0o600 })
         await rename(temporary, target)
@@ -913,8 +954,70 @@ export class AcpService {
       this.#emit("session.error", sessionID, { message: "Session snapshot could not be saved" })
     }).finally(() => {
       this.#snapshotWrites.delete(sessionID)
+      this.#evictTranscriptsIfNeeded()
     })
     this.#snapshotWrites.set(sessionID, writing)
+  }
+
+  #touchTranscript(sessionID) {
+    if (!sessionID) return
+    this.#transcriptAccessOrder.delete(sessionID)
+    this.#transcriptAccessOrder.add(sessionID)
+    this.#evictTranscriptsIfNeeded()
+  }
+
+  #isTranscriptPinned(sessionID) {
+    return this.#active.has(sessionID)
+      || Boolean(this.#queues.get(sessionID)?.length)
+      || this.#replaying.has(sessionID)
+      || this.#loads.has(sessionID)
+  }
+
+  #evictTranscriptsIfNeeded() {
+    if (this.#transcriptAccessOrder.size <= this.#maxCachedTranscripts) return
+    for (const sessionID of this.#transcriptAccessOrder) {
+      if (this.#transcriptAccessOrder.size <= this.#maxCachedTranscripts) break
+      if (this.#isTranscriptPinned(sessionID)) continue
+      // Dirty or in-flight snapshot writes defer eviction to avoid discarding unpersisted changes;
+      // the persistSnapshot finally-hook invokes evictTranscriptsIfNeeded once the disk write settles.
+      if (this.#dirtySnapshots.has(sessionID) || this.#snapshotWrites.has(sessionID)) continue
+
+      this.#transcriptAccessOrder.delete(sessionID)
+      this.#messages.delete(sessionID)
+      this.#todos.delete(sessionID)
+      this.#loaded.delete(sessionID)
+      this.#restoredSnapshots.delete(sessionID)
+    }
+  }
+
+  #cleanSessionState(sessionID) {
+    this.#messages.delete(sessionID)
+    this.#todos.delete(sessionID)
+    this.#configOptions.delete(sessionID)
+    this.#commandCatalogs.delete(sessionID)
+    for (const resolve of this.#commandCatalogWaiters.get(sessionID) ?? []) resolve()
+    this.#commandCatalogWaiters.delete(sessionID)
+    this.#actionStates.delete(sessionID)
+    this.#authoritativeActionStates.delete(sessionID)
+    this.#titles.delete(sessionID)
+    this.#loaded.delete(sessionID)
+    this.#ownedSessions.delete(sessionID)
+    this.#adoptedSessions.delete(sessionID)
+    this.#promptAcknowledgements.delete(sessionID)
+    this.#chunkMessageIDs.delete(`${sessionID}:user`)
+    this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+    this.#restoredSnapshots.delete(sessionID)
+    this.#restoredMetadata.delete(sessionID)
+    this.#transcriptAccessOrder.delete(sessionID)
+    this.#unlistedPolls.delete(sessionID)
+  }
+
+  #pruneSession(sessionID, unlinkSnapshot = false) {
+    this.#sessions.delete(sessionID)
+    this.#cleanSessionState(sessionID)
+    if (unlinkSnapshot && this.#snapshotDirectory && !this.#dirtySnapshots.has(sessionID) && !this.#snapshotWrites.has(sessionID)) {
+      rm(this.#snapshotPath(sessionID), { force: true }).catch(() => {})
+    }
   }
 
   /** A queued prompt is still outstanding work, so the session must not read as idle between turns. */
@@ -936,7 +1039,7 @@ export class AcpService {
 
   async #requireSession(sessionID) {
     await this.#refreshSessions()
-    await this.#restoreSnapshot(sessionID)
+    await this.#restoreSnapshotMetadata(sessionID)
     if (this.#deletedSessions.has(sessionID) || !this.#sessions.has(sessionID)) {
       throw new Error("Harness session not found")
     }
@@ -1037,6 +1140,7 @@ export class AcpService {
         this.#resetActionsForSessionChange(sessionID)
       }
       this.#loaded.add(sessionID)
+      this.#touchTranscript(sessionID)
       this.#persistSnapshot(sessionID)
     } catch (error) {
       this.#messages.set(sessionID, previousMessages)
@@ -1062,7 +1166,30 @@ export class AcpService {
           return normalized
         })
         for (const [sessionID, session] of this.#sessions) {
-          if (this.#ownedSessions.has(sessionID) && !listed.has(sessionID)) refreshed.push(session)
+          if (this.#deletedSessions.has(sessionID)) {
+            this.#pruneSession(sessionID)
+            continue
+          }
+          if (!listed.has(sessionID)) {
+            if (this.#ownedSessions.has(sessionID)) {
+              if (this.#isBusy(sessionID)) {
+                this.#unlistedPolls.delete(sessionID)
+                refreshed.push(session)
+              } else {
+                const polls = (this.#unlistedPolls.get(sessionID) ?? 0) + 1
+                if (polls > AcpService.MAX_UNLISTED_POLLS) {
+                  this.#pruneSession(sessionID, true)
+                } else {
+                  this.#unlistedPolls.set(sessionID, polls)
+                  refreshed.push(session)
+                }
+              }
+            } else {
+              this.#pruneSession(sessionID, true)
+            }
+          } else {
+            this.#unlistedPolls.delete(sessionID)
+          }
         }
         return refreshed
       }).finally(() => {
@@ -1093,6 +1220,7 @@ export class AcpService {
         }))
       ]
     })
+    this.#touchTranscript(sessionID)
     this.#promptAcknowledgements.set(sessionID, { text, received: "" })
     this.#emit("message.updated", sessionID)
     this.#persistSnapshot(sessionID)
@@ -1147,6 +1275,7 @@ export class AcpService {
       }))
       this.#todos.set(sessionId, todos)
       if (!replaying && session) session.updatedAt = new Date().toISOString()
+      if (!replaying) this.#touchTranscript(sessionId)
       if (!replaying) this.#emit("todo.updated", sessionId)
       if (!replaying) this.#persistSnapshot(sessionId)
       return
@@ -1179,6 +1308,7 @@ export class AcpService {
           time: { start: Date.now() }
         }
       })
+      if (!replaying) this.#touchTranscript(sessionId)
       if (!replaying) this.#emit("message.updated", sessionId)
       return
     }
@@ -1193,6 +1323,7 @@ export class AcpService {
       tool.state.status = update.status === "in_progress" ? "running" : update.status === "failed" ? "error" : update.status
       if (output) tool.state.output = typeof output === "string" ? output : JSON.stringify(output)
       if (tool.state.time && ["completed", "error"].includes(tool.state.status)) tool.state.time.end = Date.now()
+      if (!replaying) this.#touchTranscript(sessionId)
       if (!replaying) this.#emit("message.updated", sessionId)
       return
     }
@@ -1266,9 +1397,9 @@ export class AcpService {
         ...(partType === "reasoning" ? { time: { start: now } } : {})
       })
     }
+    if (!replaying) this.#touchTranscript(sessionId)
     if (!replaying) this.#emit("message.updated", sessionId)
   }
-
   #emit(type, sessionId, extra = {}) {
     const event = { type, sessionId, ...extra }
     for (const listener of this.#listeners) listener(event)
