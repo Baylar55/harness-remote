@@ -36,6 +36,14 @@ function modelWireName(model) {
   return model ? `${model.providerID}/${model.modelID}` : undefined
 }
 
+function acpPromptAttachments(attachments = []) {
+  return attachments.map((attachment) => {
+    const match = /^data:[^;,]+;base64,(.+)$/s.exec(attachment.url)
+    if (!match) throw daemonError("session_prompt_rejected", "An attachment must be a base64 data URL")
+    return { mime: attachment.mime, filename: attachment.filename, data: match[1] }
+  })
+}
+
 /** Only a variant the catalog actually resolved from adapter-advertised options is applied. */
 function acpModelVariant(model) {
   return model?.variant && model?.variantConfigId
@@ -260,7 +268,7 @@ export function createMachineDaemonServer({
     }
     claimedAcpSessions.add(nativeSessionKey(agentID, sessionID))
   }
-  const promptSession = async (agentID, sessionID, { text, directory, model, variant }) => {
+  const promptSession = async (agentID, sessionID, { text, directory, model, variant, attachments = [] }) => {
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
     const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
@@ -273,7 +281,7 @@ export function createMachineDaemonServer({
       // place that already loads configOptions, orders the model before its variant, and defers both
       // to dequeue when a turn is still running. Setting them here directly reordered the model
       // after the variant and mutated a live turn's configuration.
-      await service.prompt(sessionID, text, modelWireName(resolvedModel), [], acpModelVariant(resolvedModel))
+      await service.prompt(sessionID, text, modelWireName(resolvedModel), acpPromptAttachments(attachments), acpModelVariant(resolvedModel))
       return
     }
 
@@ -294,7 +302,15 @@ export function createMachineDaemonServer({
         method: "POST",
         headers,
         body: JSON.stringify({
-          parts: [{ type: "text", text }],
+          parts: [
+            { type: "text", text },
+            ...attachments.map((attachment) => ({
+              type: "file",
+              mime: attachment.mime,
+              filename: attachment.filename,
+              url: attachment.url
+            }))
+          ],
           model: resolvedModel ? { providerID: resolvedModel.providerID, modelID: resolvedModel.modelID } : undefined,
           variant: resolvedModel?.variant || undefined
         })
