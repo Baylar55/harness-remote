@@ -1,25 +1,57 @@
 # Harness Remote quick start
 
-The shortest setup path uses the `harness-remote` launcher.
+Harness Remote has two parts: a launcher on the machine where your repositories and coding agents
+live, and a client you open from web, desktop or Android. The launcher runs the work; the client
+lets you see and continue the native Sessions it exposes.
+
+## Start a machine and open the client
+
+Install Node.js 20+ and at least one supported coding-agent CLI on the machine with your code, then
+start Harness Remote:
 
 ```bash
-npx github:giuliastro/harness-remote
+npx github:giuliastro/harness-remote \
+  --host 0.0.0.0 \
+  --port 4097 \
+  --username harness \
+  --password "use-a-long-unique-password" \
+  --root "$HOME/Software" \
+  --cors http://localhost:5173
 ```
 
-From a local checkout the equivalent path is:
+`--root` is the directory boundary used when choosing Projects. The launcher prints the machine
+address and credentials you will enter in the client.
+
+To use the web/PWA frontend from a checkout:
 
 ```bash
-npm install
-npm start
+cd harness-remote/web
+npm ci
+npm run dev
 ```
 
-When installed as a repository/package binary, the command is:
+Open the URL Vite prints, normally `http://localhost:5173`, then choose **Machines** > **Add
+machine** and enter the address, port, username and password from the launcher. The `--cors` value
+above permits that browser origin; use the exact origin if you host the frontend elsewhere.
+
+Desktop and Android clients use the same machine address and credentials. Open the installed client
+and add the machine there; they do not need browser CORS configuration.
+
+From a local repository checkout, the equivalent launcher command is:
 
 ```bash
-harness-remote
+npm start -- \
+  --host 0.0.0.0 \
+  --port 4097 \
+  --username harness \
+  --password "use-a-long-unique-password" \
+  --root "$HOME/Software" \
+  --cors http://localhost:5173
 ```
 
-The root package intentionally remains private for now: this documents a real GitHub/repository launch path without claiming that an npm package has already been published.
+When installed as a repository/package binary, the command is `harness-remote`. The root package
+remains private: the GitHub/repository launch path is intentional and does not imply that an npm
+package has been published.
 
 ## What the one command does
 

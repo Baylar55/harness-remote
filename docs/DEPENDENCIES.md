@@ -97,7 +97,7 @@ This is the only dependency that is neither ours nor first-party, and the one to
 - **Adapter:** [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp),
   Apache-2.0, in [`VikashLoomba/agentprism-workflows`](https://github.com/VikashLoomba/agentprism-workflows)
   under `packages/pi-acp`. Single maintainer (`automatalabsteam`).
-- **Pinned to `0.2.5`** in `bridge/src/harness-profiles.js`.
+- **Pinned to `0.5.0`** in `bridge/src/harness-profiles.js`.
 - **It is young and moves fast:** first published 2026-07-16, eleven versions in the following ten
   days. Treat a bump as a change worth testing, not a routine refresh.
 
@@ -107,9 +107,9 @@ adapter over PI's own RPC mode instead. Several exist. The other widely referenc
 `@victor-software-house/pi-acp`, declares `engines.bun` and shells out to `bun`; this project runs
 on Node everywhere, which is why it is not used.
 
-**Why the version is pinned.** An unpinned `npx -y` default failed live with `notarget`: version
-`0.2.6` was in the npm index and tagged `latest` while its tarball was not yet fetchable. A
-floating default breaks whenever an upstream publish goes wrong.
+**Why the version is pinned.** A floating `npx` default can break when an upstream publish is
+incomplete or changes the adapter contract. The bridge uses the tested version declared in
+`harness-profiles.js` and upgrades it only with real-harness validation.
 
 **Assumed:**
 
@@ -121,31 +121,13 @@ floating default breaks whenever an upstream publish goes wrong.
 | Streams chunks with **no** `messageId` | replies would split into one message per token, or aggregate wrongly |
 | Emits no `agent_plan` | the todo panel stays empty |
 
-**The adapter embeds its own PI.** It depends on `@earendil-works/pi-coding-agent` pinned to a
-specific version (`0.82.1` in adapter 0.2.5), so the PI that actually runs is the one bundled with
-the adapter, not the `pi` on your PATH. Your local install still matters for configuration and
-credentials, which it reads from disk. Two consequences:
+**The adapter embeds its own PI.** The PI that actually runs is bundled with the adapter, not the
+`pi` on your PATH. Your local install still matters for configuration and credentials, which the
+adapter reads from disk. Two consequences:
 
 - updating `pi` locally does not change what the bridge runs;
 - the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
 
-**Assumed:**
-
-| Assumption | What breaks if it changes |
-|---|---|
-| Launched over stdio as an `npx`-installable `bin` | the `--acp-command` / `--acp-arg` defaults in the profile |
-| Offers a non-`env_var` auth method (`pi-stored-credentials`) | the bridge would fall back to an API key from an unset environment variable and fail at inference |
-| Asks `session/request_permission` before each tool call, offering an `allow_once` option | tool calls stop happening, silently — the failure mode is "reports success, changes nothing" |
-| Streams chunks with **no** `messageId` | replies would split into one message per token, or aggregate wrongly |
-| Emits no `agent_plan` | the todo panel stays empty |
-
-**The adapter embeds its own PI.** It depends on `@earendil-works/pi-coding-agent` pinned to a
-specific version (`0.82.1` in adapter 0.2.5), so the PI that actually runs is the one bundled with
-the adapter, not the `pi` on your PATH. Your local install still matters for configuration and
-credentials, which it reads from disk. Two consequences:
-
-- updating `pi` locally does not change what the bridge runs;
-- the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
 
 **Exit route.** If the adapter becomes unmaintained or unreliable, PI's own RPC mode
 (`packages/coding-agent/docs/rpc.md` in the PI repo) is the first-party alternative. It means

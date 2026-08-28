@@ -4,11 +4,12 @@ This document records the runtime contract Harness Remote 3.0 expects from each 
 
 The model list is only one part of that contract. Harness Remote also needs to know how a harness communicates, how tool activity is represented, which model controls are actually advertised, which component owns Session truth, and which lifecycle guarantees can be relied on.
 
-The machine snapshot exposes the same structured information as `agent.contract`. Boolean capability flags remain for compatibility, while the structured contract is the 3.0 direction.
+The machine snapshot exposes the same structured information as `agent.contract`. Boolean
+capability flags remain for compatibility, while the structured contract is the current direction.
 
 ## Product rule
 
-Harness Remote owns the **Conversation** continuity layer. The coding harness owns its **Native Session**.
+Harness Remote owns the **work-continuity** layer. The coding harness owns its **Native Session**.
 
 Harness Remote must not flatten harness-specific capabilities into a fake universal Session protocol. If a harness does not advertise a control, Harness Remote does not invent it.
 
@@ -24,30 +25,35 @@ Harness Remote must not flatten harness-specific capabilities into a fake univer
 
 ## Model discovery scope
 
-The promotion candidate deliberately keeps ACP model discovery **machine-scoped**:
+ACP model discovery is deliberately **machine-scoped**:
 
 ```text
 machine + harness
 ```
 
-This is the ownership model that was previously exercised successfully on real machines. A project/cwd-scoped ACP experiment was implemented during the parallel capability audit, but real Windows testing of the integrated candidate showed that PI, Codex and Claude all lost their model catalogs, including in newly created Conversations. The experiment was therefore rolled back from the promotion candidate rather than patched speculatively.
+This is the ownership model exercised successfully on real machines. A project/cwd-scoped ACP
+experiment caused PI, Codex and Claude to lose their model catalogs, including in newly created
+native Sessions, during Windows testing. It was therefore rolled back rather than patched
+speculatively.
 
-The web/Android client may still include `projectId` or `workThreadId` hints in model requests. They are compatibility metadata for a future project-aware implementation; they are **not model-catalog authority in this candidate**. The daemon does not accept a raw client cwd as model authority.
+The web/Android client may still include `projectId` or `workThreadId` hints in model requests.
+They are compatibility metadata for a future project-aware implementation; they are **not
+model-catalog authority**. The daemon does not accept a raw client cwd as model authority.
 
 For ACP harnesses, one daemon-owned prompt-less technical Session per harness adapter lifetime supplies the current `configOptions` model catalog. Discovery remains single-flight and bounded. Historical technical Session ids remain hidden but are not reloaded as current membership authority after daemon restart.
 
 OpenCode is also machine-scoped because its runtime provider inventory comes from the managed OpenCode host rather than an ACP Session.
 
-Project-aware ACP discovery remains a follow-up. It must not return to the release line until PI, Codex, Claude and OMP all pass real-harness tests on the exact implementation, including Windows where practical.
+Project-aware ACP discovery remains a follow-up. It must not return until PI, Codex, Claude and
+OMP all pass real-harness tests on the exact implementation, including Windows where practical.
 
 ## Lifecycle contract
 
-### Conversation
+### Work continuity
 
 Harness Remote owns:
 
-- stable Conversation identity;
-- Project association;
+- stable work identity and Project association;
 - ordered Native Session references;
 - current harness/model selection;
 - explicit handoff context between Native Sessions;
@@ -85,7 +91,7 @@ OpenCode uses HTTP for control. Harness Remote owns one upstream OpenCode global
 
 ### ACP harnesses
 
-OMP, PI, Codex and Claude are controlled through ACP adapters over stdio JSON-RPC. Session updates carry the harness-native activity through the ACP representation. Model discovery uses a separate prompt-less technical ACP connection from user-facing Session ownership so discovery cannot take over a Conversation Session.
+OMP, PI, Codex and Claude are controlled through ACP adapters over stdio JSON-RPC. Session updates carry the harness-native activity through the ACP representation. Model discovery uses a separate prompt-less technical ACP connection from user-facing Session ownership so discovery cannot take over a native Session.
 
 ## Variant and reasoning metadata
 
@@ -115,13 +121,13 @@ The 3.0 backend exposes diagnostics for model discovery and lifecycle investigat
 
 Diagnostics must not expose prompt bodies, credentials or generated authentication material.
 
-## Release validation still required
+## Release validation
 
-Before 3.0 promotion, validate the contract with real installed harnesses on one exact candidate SHA:
+Validate the contract with real installed harnesses for every release on one traceable build:
 
 1. discover/start each harness;
 2. load its live model catalog;
-3. create a Conversation;
+3. create a native Session;
 4. continue across multiple turns;
 5. run a long reasoning/tool turn;
 6. Stop a real turn;
@@ -131,4 +137,4 @@ Before 3.0 promotion, validate the contract with real installed harnesses on one
 10. background/foreground Android or interrupt the local network;
 11. prove listener, request, cache and subscription counts plateau.
 
-The final release matrix must distinguish what was **implemented**, what was **advertised by the harness**, and what was **verified on a real machine**.
+The release matrix must distinguish what was **implemented**, what was **advertised by the harness**, and what was **verified on a real machine**.

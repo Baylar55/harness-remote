@@ -192,7 +192,7 @@ npm run dev
 ## Documentation
 
 - [Quick start and launcher options](docs/QUICK_START.md)
-- [Harness Remote 3.0 product and architecture roadmap](docs/HARNESS_3_ROADMAP.md)
+- [Harness Remote product and architecture](docs/HARNESS_3_ROADMAP.md)
 - [3.0 harness capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md)
 - [Dependency and adapter notes](docs/DEPENDENCIES.md)
 - [Legacy and backend-specific reference](REFERENCE.md)

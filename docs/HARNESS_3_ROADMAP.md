@@ -1,8 +1,7 @@
-# Harness Remote 3.0 Product & Architecture Roadmap
+# Harness Remote product and architecture
 
-> **Canonical execution plan:** issue #197.
->
-> This document summarizes product direction and release sequencing. Issue #197 remains the release authority.
+This document describes the durable product model and engineering boundaries for Harness Remote as
+they ship on `main`.
 
 ## 1. Product thesis
 
@@ -16,7 +15,7 @@ Harness Remote does not try to become another coding agent or to replace the Ses
 
 ## 2. User-facing model
 
-The 3.0 product model is Session-first:
+The product model is built around native Sessions:
 
 ```text
 Machine
@@ -30,7 +29,8 @@ A Project is a real working directory/repository.
 
 A Native Session is the real Session owned by its harness.
 
-Task, Run and Conversation may remain in internal compatibility code, but they are not required user-facing abstractions.
+Older Task, Run and Conversation terms may remain in internal compatibility code, but they are not
+required user-facing abstractions.
 
 ## 3. Architecture boundary
 
@@ -62,7 +62,7 @@ Architecture rule:
 
 > If the harness already owns a capability well, Harness Remote should orchestrate it rather than clone it.
 
-## 4. Session-first UX
+## 4. Native Session UX
 
 Expected flow:
 
@@ -74,7 +74,7 @@ start a native Session anywhere
   -> continue it when native ownership permits
 ```
 
-No attach/import/Conversation step is required merely to read or resume a Session.
+No attach/import step is required merely to read or resume a Session.
 
 The main surfaces are:
 
@@ -170,7 +170,7 @@ Release-critical behavior:
 - listeners/subscriptions/cache state remain bounded;
 - typing and scrolling remain responsive in long Sessions.
 
-## 9. Supported release-candidate harnesses
+## 9. Supported harnesses
 
 The current 3.0 line supports:
 
@@ -182,17 +182,11 @@ The current 3.0 line supports:
 
 Capability differences are preserved rather than flattened into invented common behavior.
 
-## 10. Release candidate
+## 10. Current product surface
 
-Current release candidate:
+Harness Remote provides:
 
-```text
-checkpoint/v3-session-first-working-2026-08-25
-```
-
-The RC includes:
-
-- Session-first navigation and product model;
+- native Session navigation and product model;
 - native Session discovery/read/create/continue;
 - multi-machine Session creation;
 - stable Session list UX;
@@ -205,13 +199,10 @@ The RC includes:
 - Chromium product smokes;
 - signed debug APK production in CI.
 
-The current engineering assumption is that desktop/web and real-harness functionality are release-ready.
+## 11. Ongoing release standard
 
-## 11. Remaining release gate
-
-The remaining release blocker is **manual Android/mobile validation on the exact RC**.
-
-Minimum mobile gate:
+Every release must validate the product against real installed harnesses and on mobile devices. At a
+minimum, verify:
 
 1. connect to an existing machine;
 2. switch between machines if more than one is configured;
@@ -226,24 +217,11 @@ Minimum mobile gate:
 11. switch away and back without losing Session/model state;
 12. verify no obvious layout/navigation regression in portrait.
 
-Any fix found here must go only to the RC line and must pass the complete automated gate again.
+Fixes found by this validation must pass the complete automated suite again before release.
 
-## 12. Promotion sequence
+## 12. Product evolution
 
-1. Keep `main` on stable 2.x during RC validation.
-2. Test the exact 3.0 RC on Android.
-3. Fix only release-blocking defects discovered by that test.
-4. Re-run automated CI on the final exact SHA.
-5. Update release notes/version metadata if required.
-6. Prepare one dedicated Harness Remote 3.0 release PR from the final RC to `main`.
-7. Review the release diff and migration impact.
-8. Merge only after explicit final acceptance.
-9. Tag/publish the official 3.0 release and release artifacts.
-10. Update hosted/stable distribution surfaces that follow `main`.
-
-## 13. Non-blocking post-release cleanup
-
-These are useful but do not need to delay 3.0 if the RC is stable:
+The following work improves the product without changing its core contract:
 
 - remove obsolete internal Task/Run compatibility code where safe;
 - simplify old naming and dead migrations;
@@ -253,15 +231,13 @@ These are useful but do not need to delay 3.0 if the RC is stable:
 - expand real-harness CI/smoke coverage where practical;
 - add more coding agents only after existing adapters remain reliable.
 
-## 14. Protected recovery lines
+## 13. Recovery and compatibility
 
-Until the 3.0 release is complete:
+Keep stable branches and known-good release tags available as recovery points. Compatibility code
+may protect existing installations, but it must not determine the product experience or reintroduce
+retired user-facing abstractions.
 
-- do not rewrite or delete `main`;
-- do not rewrite or delete `archive/harness-3-2026-08-15`;
-- keep the current RC checkpoint available as a recovery point.
-
-## 15. Success criterion
+## 14. Success criterion
 
 Harness Remote 3.0 succeeds when a user can open the app and immediately recognize the native coding-agent Sessions they already work with, observe or continue them remotely, start new real Sessions, and switch agents without losing Project or work continuity.
 
