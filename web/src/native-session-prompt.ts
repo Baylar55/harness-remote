@@ -194,6 +194,12 @@ export async function sendNativeSessionPrompt(
   const requestedModel = normalizeModel(model)
   const requestedAttachmentKeys = attachmentKeys(attachments)
 
+  const pendingCommand = loadPendingNativeSessionCommand(target)
+  if (pendingCommand && Date.now() - pendingCommand.createdAt <= PENDING_DELIVERY_TTL_MS) {
+    throw new Error("A previous command still has an unresolved delivery status. Retry that exact command before sending a prompt.")
+  }
+  if (pendingCommand) clearPendingNativeSessionCommand(target)
+
   const stored = loadPendingNativeSessionPrompt(target)
   // A record whose retry window has passed is superseded rather than blocking forever.
   const existing = stored && Date.now() - stored.createdAt <= PENDING_DELIVERY_TTL_MS ? stored : null
@@ -347,6 +353,12 @@ export async function sendNativeSessionCommand(
   const normalizedArguments = argumentsText.trim()
   if (!normalizedCommand) throw new Error("A command name is required")
   const requestedModel = normalizeModel(model)
+
+  const pendingPrompt = loadPendingNativeSessionPrompt(target)
+  if (pendingPrompt && Date.now() - pendingPrompt.createdAt <= PENDING_DELIVERY_TTL_MS) {
+    throw new Error("A previous prompt still has an unresolved delivery status. Retry that exact prompt before running a command.")
+  }
+  if (pendingPrompt) clearPendingNativeSessionPrompt(target)
 
   const stored = loadPendingNativeSessionCommand(target)
   const existing = stored && Date.now() - stored.createdAt <= PENDING_DELIVERY_TTL_MS ? stored : null
