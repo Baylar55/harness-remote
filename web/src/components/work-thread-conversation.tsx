@@ -691,8 +691,11 @@ export function WorkThreadConversation({
     const text = draft.trim()
     const promptAttachments = attachments
     const slashMatch = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text)
-    const slashCommand = slashMatch && commands.some((command) => command.name === slashMatch[1])
-      ? { name: slashMatch[1], arguments: (slashMatch[2] || "").trim() }
+    const matchedCommand = slashMatch
+      ? commands.find((command) => command.name.toLowerCase() === slashMatch[1].toLowerCase())
+      : undefined
+    const slashCommand = slashMatch && matchedCommand
+      ? { name: matchedCommand.name, arguments: (slashMatch[2] || "").trim() }
       : undefined
     if ((!text && !promptAttachments.length) || sending || working || sendInFlightRef.current) return
     sendInFlightRef.current = true
