@@ -118,6 +118,55 @@ Usage: rg [OPTIONS] PATTERN [PATH ...]</pre></div>
       </section>
 
       <section class="cp-section">
+        <h2>Conversation surface</h2>
+        <p>Toolbar and pickers, message rows, and the composer. Pure CSS in this pass - no component markup changed.</p>
+
+        <div class="tdw-conversation-toolbar">
+          <div class="tdw-agent-control">
+            <label><span>Continue with</span>
+              <select><option>Claude Code</option><option>Codex</option><option>OpenCode</option></select>
+            </label>
+            <label class="tdw-model-control"><span>Model</span>
+              <select><option>claude-opus-5</option></select>
+            </label>
+          </div>
+          <span class="tdw-conversation-state working"><i aria-hidden="true"></i><span>Claude is working · 14s</span></span>
+        </div>
+        
+        <article class="uw-message uw-message-user">
+          <div class="uw-avatar uw-avatar-user" aria-hidden="true">You</div>
+          <div class="uw-message-body">
+            <header><strong>You</strong><time>09:41</time></header>
+            <div class="uw-markdown td3-markdown"><p>Porta i controlli sulla superficie della conversazione: bubble, composer e i picker.</p></div>
+          </div>
+        </article>
+        
+        <article class="uw-message uw-message-agent">
+          <div class="uw-avatar uw-avatar-agent" aria-hidden="true">CC</div>
+          <div class="uw-message-body">
+            <header><strong>Claude Code</strong><time>09:42</time></header>
+            <div class="uw-markdown td3-markdown"><p>Fatto. Il rail dell'Activity resta, e ora anche l'identit&agrave; della risposta ha un peso proprio.</p></div>
+            <div class="uw-message-actions"><button type="button" class="uw-copy-button" title="Copy message">&#9112;</button></div>
+          </div>
+        </article>
+        
+        <div class="uw-composer-shell">
+          <div class="uw-composer-attachments"><span class="uw-composer-attachment"><strong>screenshot-2026-08-28.png</strong><button type="button">&times;</button></span></div>
+          <textarea rows="3" placeholder="Continue with Claude Code…"></textarea>
+          <div class="uw-composer-footer">
+            <span class="uw-composer-directory">~/dev/harness-remote</span>
+            <div>
+              <button type="button" class="uw-button">&#128206;</button>
+              <small>The agent is working on your last message</small>
+              <button type="button" class="uw-button uw-button-danger"><span class="uw-button-label">Stop</span></button>
+              <button type="button" class="uw-button uw-button-primary"><span class="uw-button-label">Send</span></button>
+            </div>
+          </div>
+        </div>
+        
+      </section>
+
+      <section class="cp-section">
         <h2>Approval — permission</h2>
         <p>Each requested scope is its own chip, and Deny reads as the destructive choice.</p>
         <div class="cp-attn-host">

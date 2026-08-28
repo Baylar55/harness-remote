@@ -564,3 +564,211 @@
     transition: none;
   }
 }
+
+/* =============================================================================
+ * Third pass: the rest of the conversation surface.
+ *
+ * Same method as the second: move what is seen, resolve everything through
+ * tokens, unwind every animation under reduced motion.
+ * ============================================================================= */
+
+/* ------------------------------------------------------------- message rows */
+
+/* The identity row was 10px for both the name and the time, under a 15.5px reply.
+   The header of a message should not be the smallest text in it. */
+.tdw-work-thread-conversation .uw-message-body > header {
+  min-height: 28px;
+  margin-bottom: 3px;
+  gap: 9px;
+}
+
+.tdw-work-thread-conversation .uw-message-body > header strong {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -.005em;
+}
+
+.tdw-work-thread-conversation .uw-message-body > header time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A circle holding two initials is a contact avatar. These are two agents and a
+   person inside a tool, so the mark is a rounded square - the shape every editor
+   uses for an identity that is not a face. */
+.tdw-work-thread-conversation .uw-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 10.5px;
+}
+
+.tdw-work-thread-conversation .uw-avatar-agent {
+  color: var(--td3-blue-text);
+  border-color: var(--td3-blue-border-soft);
+  background: var(--td3-blue-soft);
+}
+
+.tdw-work-thread-conversation .uw-avatar img {
+  width: 17px;
+  height: 17px;
+}
+
+/* Each turn arrives once. Without this a reply appears as a jump-cut, which is
+   the single most common reason a fast chat UI feels cheap. */
+@keyframes bui-message-in {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tdw-work-thread-conversation .uw-message {
+  animation: bui-message-in .34s var(--bui-ease) both;
+}
+
+/* The copy control sits under the reply and was a bare icon at rest. */
+.tdw-work-thread-conversation .uw-copy-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--td3-muted);
+  transition: color var(--motion-fast, .16s) var(--bui-ease),
+    background var(--motion-fast, .16s) var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-copy-button:hover {
+  color: var(--td3-text);
+  background: var(--td3-raise-2);
+}
+
+.tdw-work-thread-conversation .uw-copy-button.copied {
+  color: var(--td3-green-text);
+  background: var(--td3-green-soft);
+}
+
+/* ---------------------------------------------------------------- composer */
+
+/* The primary input of the product. It already had a good shell; what it lacked
+   was the weight to read as the thing you type into, and its own controls were
+   10px. */
+.tdw-work-thread-conversation .uw-composer-shell {
+  border-radius: 16px;
+  border-color: var(--td3-border-strong);
+  transition: border-color .18s var(--bui-ease), box-shadow .18s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell:focus-within {
+  border-color: var(--td3-blue-border);
+}
+
+.tdw-work-thread-conversation .uw-composer-footer {
+  min-height: 44px;
+  padding: 6px 9px 9px 13px;
+}
+
+.tdw-work-thread-conversation .uw-composer-footer > span,
+.tdw-work-thread-conversation .uw-composer-footer small {
+  font-size: 11px;
+}
+
+/* The working directory is the one piece of state in the composer that answers
+   "where will this run", so it reads as a value rather than as a caption. */
+.tdw-work-thread-conversation .uw-composer-directory {
+  padding: 3px 8px;
+  flex: 0 1 auto;
+  border-radius: 7px;
+  color: var(--td3-text-3);
+  background: var(--td3-raise-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+}
+
+.tdw-work-thread-conversation .uw-composer-shell .uw-button {
+  min-height: 34px;
+  border-radius: 10px;
+  transition: transform .12s var(--bui-ease), background .16s var(--bui-ease),
+    border-color .16s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell .uw-button:active:not(:disabled) {
+  transform: scale(.97);
+}
+
+.tdw-work-thread-conversation .uw-composer-shell .uw-button-label {
+  font-size: 11.5px;
+  font-weight: 650;
+}
+
+/* Attachment chips read as file names, not as prose. */
+.tdw-work-thread-conversation .uw-composer-attachments {
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment {
+  padding: 4px 5px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--td3-border);
+  background: var(--td3-raise-2);
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment strong {
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- toolbar and pickers */
+
+/* "Continue with" and Model are how a Session changes hands between harnesses -
+   the most consequential controls on the screen, labelled at 10px next to a
+   30px-tall select. */
+.tdw-work-thread-conversation .tdw-agent-control label > span {
+  font-size: 10.5px;
+  color: var(--td3-text-3);
+}
+
+.tdw-work-thread-conversation .tdw-agent-control select {
+  min-height: 34px;
+  border-radius: 10px;
+  border-color: var(--td3-border-strong);
+  background-color: var(--td3-control);
+  font-size: 11.5px;
+  transition: border-color .16s var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .tdw-agent-control select:hover:not(:disabled) {
+  border-color: var(--td3-blue-border-soft);
+}
+
+/* The live-state pill sits beside them and was flat. */
+.tdw-work-thread-conversation .tdw-conversation-state {
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tdw-work-thread-conversation .tdw-conversation-state.working {
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft);
+}
+
+/* ------------------------------------------- reduced motion, third pass */
+
+@media (prefers-reduced-motion: reduce) {
+  .tdw-work-thread-conversation .uw-message {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .tdw-work-thread-conversation .uw-copy-button,
+  .tdw-work-thread-conversation .uw-composer-shell,
+  .tdw-work-thread-conversation .uw-composer-shell .uw-button,
+  .tdw-work-thread-conversation .tdw-agent-control select {
+    transition: none;
+  }
+
+  .tdw-work-thread-conversation .uw-composer-shell .uw-button:active:not(:disabled) {
+    transform: none;
+  }
+}
