@@ -215,7 +215,7 @@ test("machine Session mutations acquire ACP ownership lazily and reuse it", asyn
     createServer: (options) => ({
       acpService: {
         async claimSession(sessionID) { calls.push(["claim", options.config.backend, sessionID]); return true },
-        async prompt(sessionID, text) { calls.push(["prompt", options.config.backend, sessionID, text]) },
+        async prompt(sessionID, text, _model, attachments) { calls.push(["prompt", options.config.backend, sessionID, text, attachments]) },
         async abort(sessionID) { calls.push(["stop", options.config.backend, sessionID]) }
       },
       emit() {}
@@ -229,12 +229,16 @@ test("machine Session mutations acquire ACP ownership lazily and reuse it", asyn
   })
 
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
-  await claimOptions.promptSession("pi", "native-pi-1", { text: "Continue once", directory: "/repo" })
+  await claimOptions.promptSession("pi", "native-pi-1", {
+    text: "Continue once",
+    directory: "/repo",
+    attachments: [{ mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aGVsbG8=" }]
+  })
   await claimOptions.stopSession("pi", "native-pi-1", { directory: "/repo" })
   assert.deepEqual(calls, [
     ["claim", "pi", "native-pi-1"],
     ["stop", "pi", "native-pi-1"],
-    ["prompt", "pi", "native-pi-1", "Continue once"],
+    ["prompt", "pi", "native-pi-1", "Continue once", [{ mime: "image/png", filename: "screen.png", data: "aGVsbG8=" }]],
     ["stop", "pi", "native-pi-1"]
   ])
   await assert.rejects(() => claimOptions.claimSession("opencode", "native-http-1"), (error) => error.code === "unsupported_agent")
