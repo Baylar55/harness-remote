@@ -86,7 +86,7 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
       .then(async (capabilities) => {
         if (disposed) return
         setAttachmentsSupported(capabilities.attachments === true)
-        if (capabilities.commands === true) {
+        if (target.commandsSupported === true || capabilities.commands === true) {
           try {
             const available = await api.listCommands(target.config, target.sessionID)
             if (!disposed) setCommands(available)
