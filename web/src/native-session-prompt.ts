@@ -17,6 +17,7 @@ export type PendingNativeSessionPrompt = {
 }
 
 const STORAGE_PREFIX = "harness-remote.native-session-prompt.v1"
+const COMMAND_STORAGE_PREFIX = "harness-remote.native-session-command.v1"
 /**
  * How long an unresolved delivery may keep blocking a different prompt for the same Session.
  *
@@ -288,5 +289,151 @@ export async function sendNativeSessionPrompt(
     if (pending.wireText && pending.wireText !== pending.text) markHandoffSent(target)
     clearPendingNativeSessionPrompt(target)
   }
+  return { status, clientRequestId: pending.clientRequestId }
+}
+
+
+type PendingNativeSessionCommand = {
+  clientRequestId: string
+  command: string
+  arguments: string
+  model?: ModelSelection | null
+  createdAt: number
+}
+
+function commandStorageKey(target: NativeSessionSurfaceTarget): string {
+  return `${COMMAND_STORAGE_PREFIX}:${encodeURIComponent(target.machineID)}:${encodeURIComponent(target.agentID)}:${encodeURIComponent(target.sessionID)}`
+}
+
+function loadPendingNativeSessionCommand(target: NativeSessionSurfaceTarget): PendingNativeSessionCommand | null {
+  try {
+    const raw = localStorage.getItem(commandStorageKey(target))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PendingNativeSessionCommand>
+    if (typeof parsed.clientRequestId !== "string" || !parsed.clientRequestId) return null
+    if (typeof parsed.command !== "string" || !parsed.command.trim()) return null
+    return {
+      clientRequestId: parsed.clientRequestId,
+      command: parsed.command.trim(),
+      arguments: typeof parsed.arguments === "string" ? parsed.arguments : "",
+      model: normalizeModel(parsed.model),
+      createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now()
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistPendingCommand(target: NativeSessionSurfaceTarget, pending: PendingNativeSessionCommand) {
+  try { localStorage.setItem(commandStorageKey(target), JSON.stringify(pending)) } catch {}
+}
+
+function clearPendingNativeSessionCommand(target: NativeSessionSurfaceTarget) {
+  try { localStorage.removeItem(commandStorageKey(target)) } catch {}
+}
+
+/**
+ * Execute one harness-native slash command through the same durable Session-first mutation boundary
+ * used by ordinary prompts. ACP adapters still receive slash text through AcpService; managed
+ * OpenCode is dispatched to its native /command endpoint by the daemon.
+ */
+export async function sendNativeSessionCommand(
+  target: NativeSessionSurfaceTarget,
+  command: string,
+  argumentsText = "",
+  model?: ModelSelection | null
+): Promise<{ status: NativeSessionPromptStatus; clientRequestId: string }> {
+  const normalizedCommand = command.replace(/^\/+/, "").trim()
+  const normalizedArguments = argumentsText.trim()
+  if (!normalizedCommand) throw new Error("A command name is required")
+  const requestedModel = normalizeModel(model)
+
+  const stored = loadPendingNativeSessionCommand(target)
+  const existing = stored && Date.now() - stored.createdAt <= PENDING_DELIVERY_TTL_MS ? stored : null
+  if (stored && !existing) clearPendingNativeSessionCommand(target)
+  if (existing && (
+    existing.command !== normalizedCommand
+    || existing.arguments !== normalizedArguments
+    || !sameModel(existing.model, requestedModel)
+  )) {
+    throw new Error("A previous command still has an unresolved delivery status. Retry that exact command and model before running a different request.")
+  }
+
+  const pending = existing ?? {
+    clientRequestId: requestID(),
+    command: normalizedCommand,
+    arguments: normalizedArguments,
+    model: requestedModel,
+    createdAt: Date.now()
+  }
+  persistPendingCommand(target, pending)
+
+  const path = `/session/${encodeURIComponent(target.sessionID)}/command`
+  const body = {
+    clientRequestId: pending.clientRequestId,
+    command: pending.command,
+    arguments: pending.arguments,
+    directory: target.directory,
+    model: pending.model ? { providerID: pending.model.providerID, modelID: pending.model.modelID } : undefined,
+    variant: pending.model?.variant || undefined
+  }
+
+  let status: NativeSessionPromptStatus
+  if (isDesktopPlatform()) {
+    const result = await desktopRequestResult(target.config, { path, method: "POST", body })
+    if (!result.ok) {
+      if (result.error.code === "http" && Number(result.error.status) >= 400) clearPendingNativeSessionCommand(target)
+      throw new Error(result.error.message)
+    }
+    status = parseStatus(result.response.data)
+  } else {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...routingHeaders(target.config, { preflight: !Capacitor.isNativePlatform() })
+    }
+    if (hasCredentials(target.config)) headers.Authorization = authHeader(target.config)
+    const url = `${baseUrl(target.config)}${path}`
+
+    if (Capacitor.isNativePlatform()) {
+      let response
+      try {
+        response = await CapacitorHttp.request({
+          url,
+          method: "POST",
+          headers,
+          data: body,
+          connectTimeout: 12_000,
+          readTimeout: 30_000
+        })
+      } catch {
+        throw new Error(`Cannot reach ${target.config.host}:${target.config.port}. Command delivery status is unknown; retry will use the same request id.`)
+      }
+      if (response.status >= 400) {
+        clearPendingNativeSessionCommand(target)
+        throw new Error(errorDetail(response.data, response.status))
+      }
+      status = parseStatus(response.data)
+    } else {
+      let response: Response
+      try {
+        response = await fetch(url, { method: "POST", headers, body: JSON.stringify(body) })
+      } catch {
+        throw new Error(`Cannot reach ${target.config.host}:${target.config.port}. Command delivery status is unknown; retry will use the same request id.`)
+      }
+      let data: unknown = undefined
+      try {
+        const raw = await response.text()
+        data = raw ? JSON.parse(raw) : undefined
+      } catch {}
+      if (!response.ok) {
+        clearPendingNativeSessionCommand(target)
+        throw new Error(errorDetail(data, response.status))
+      }
+      status = parseStatus(data)
+    }
+  }
+
+  if (status === "accepted") clearPendingNativeSessionCommand(target)
   return { status, clientRequestId: pending.clientRequestId }
 }
