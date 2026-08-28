@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
+import type { AttachmentPart } from "../attachments"
 import { createCoalescedTailRefresh } from "../coalesced-tail-refresh"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "../message-pages"
 import type { SavedServerProfile } from "../serverProfiles"
@@ -288,6 +289,7 @@ export function WorkThreadConversation({
   const [loading, setLoading] = useState(true)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [draft, setDraft] = useState(() => localStorage.getItem(draftStorageKey) || "")
+  const [attachments, setAttachments] = useState<AttachmentPart[]>([])
   const [sending, setSending] = useState(false)
   // The prompt that has been sent but is not yet in the transcript, with the Run that was current
   // when it was sent. See `visibleTimeline`.
@@ -369,6 +371,7 @@ export function WorkThreadConversation({
     setModelError(null)
     setQuestions([])
     setPermissions([])
+    setAttachments([])
     setPendingPrompt(null)
     setTargetAgentID(currentAgentID)
     setTargetModelKey(currentTaskModelKey)
@@ -683,7 +686,8 @@ export function WorkThreadConversation({
 
   async function send() {
     const text = draft.trim()
-    if (!text || sending || working || sendInFlightRef.current) return
+    const promptAttachments = attachments
+    if ((!text && !promptAttachments.length) || sending || working || sendInFlightRef.current) return
     sendInFlightRef.current = true
     setSending(true)
     setError(null)
@@ -697,10 +701,12 @@ export function WorkThreadConversation({
       }
       const next = await taskClient.continueTask(baseConfig, task.id, {
         prompt: text,
+        attachments: promptAttachments,
         agentId: targetAgentID,
         model: selectedModel ? { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant } : null
       })
       localStorage.removeItem(draftStorageKey)
+      setAttachments([])
       onTaskUpdateRef.current(next)
       taskRef.current = next
       modelSelectionTouchedRef.current = false
@@ -710,7 +716,8 @@ export function WorkThreadConversation({
       // The prompt goes back to the composer, so it must also stop standing in for a turn that was
       // never accepted.
       setPendingPrompt(null)
-      setDraft((current) => current ? `${text}\n${current}` : text)
+      setDraft((current) => text ? (current ? `${text}\n${current}` : text) : current)
+      setAttachments(promptAttachments)
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       sendInFlightRef.current = false
@@ -737,6 +744,8 @@ export function WorkThreadConversation({
   }
 
   const currentLabel = agentLabel(agents, currentAgentID)
+  const attachmentAgent = agents.find((agent) => agent.id === targetAgentID)
+  const attachmentsSupported = attachmentAgent?.capabilities?.attachments === true
   const hasAttention = questions.length > 0 || permissions.length > 0
   const preparingReply = sending || (working && !currentRunHasAssistantSignal)
   const pendingAgentLabel = sending ? agentLabel(agents, targetAgentID) : currentLabel
@@ -819,6 +828,10 @@ export function WorkThreadConversation({
         onLoadOlder={loadOlder}
         draft={draft}
         onDraftChange={setDraft}
+        attachments={attachments}
+        attachmentsSupported={attachmentsSupported}
+        onAttachmentsChange={setAttachments}
+        onAttachmentError={setError}
         onSend={send}
         sending={preparingReply}
         sendDisabled={working || hasAttention}
