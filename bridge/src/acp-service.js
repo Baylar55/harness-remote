@@ -603,7 +603,19 @@ export class AcpService {
   }
 
   async deleteSession(sessionID) {
-    await this.#requireSession(sessionID)
+    // A Session deleted by a pre-index Harness Remote may already carry deleted:true only in its
+    // per-Session snapshot. Restoring that snapshot must migrate the tombstone into the lightweight
+    // deletion index instead of failing before the index can be written. This keeps DELETE
+    // idempotent across upgrades without issuing any new ACP request.
+    await this.#restoreDeletedSessionIndex()
+    await this.#refreshSessions()
+    await this.#restoreSnapshot(sessionID)
+    if (this.#deletedSessions.has(sessionID)) {
+      await this.#persistDeletedSessionIndex()
+      return
+    }
+    if (!this.#sessions.has(sessionID)) throw new Error("Harness session not found")
+
     if (this.#isBusy(sessionID)) this.abort(sessionID)
     this.#deletedSessions.add(sessionID)
     await this.#persistDeletedSessionIndex()
