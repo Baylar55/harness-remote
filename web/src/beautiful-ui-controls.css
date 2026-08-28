@@ -1090,3 +1090,69 @@
     opacity: 1;
   }
 }
+
+/* =============================================================================
+ * Sixth pass: two defects the fifth one introduced.
+ *
+ * Right-aligning the prompt bubble was half a change. The avatar stayed in the
+ * grid's first column, so a right-hugging bubble had its own mark stranded on the
+ * far left of the row. And the copy control, anchored to the message body at
+ * `top: -3px`, sits above that body's padding box - right for an unframed agent
+ * reply, but on a framed bubble it hangs half outside the frame.
+ * ============================================================================= */
+
+/* The mark goes away rather than across. Mirroring the row means overriding
+   `grid-template-columns`, and `session-first-workbench.css` sets that with
+   `!important` under `(max-width: 780px)` - so a mirrored template would hold on
+   a desktop and collapse the bubble into a 28px column on a phone. Removing it
+   needs no template change and loses nothing: the identity row inside the bubble
+   already says "You", so the mark was the third place the same word appeared, and
+   the column it held becomes width the prompt can use. The agent keeps its mark -
+   there it carries the harness icon, which is the one thing that varies. */
+.tdw-work-thread-conversation .uw-message-user > .uw-avatar {
+  display: none;
+}
+
+.tdw-work-thread-conversation .uw-message-user > .uw-message-body {
+  grid-column: 1 / -1;
+}
+
+/* The prompt's copy control belongs inside the frame, on the identity row, inset
+   by the bubble's own padding - not three pixels above the frame's top edge.
+   The header reserves its width with padding rather than the control being placed
+   in space that happens to be free: an absolutely positioned box adds nothing to
+   a `fit-content` width, so on a two-word prompt the bubble would size to the text
+   and the control would land on top of the timestamp. */
+.tdw-work-thread-conversation .uw-message-user .uw-message-body > header {
+  padding-right: 32px;
+}
+
+.tdw-work-thread-conversation .uw-message-user .uw-message-actions {
+  top: 7px;
+  right: 10px;
+}
+
+.tdw-work-thread-conversation .uw-message-user .uw-copy-button {
+  width: 22px;
+  height: 22px;
+}
+
+/* A 22px target is fine for a cursor and too small for a thumb, so on a touch
+   pointer the control keeps its size and the identity row grows to match it. */
+@media (pointer: coarse) {
+  .tdw-work-thread-conversation .uw-message-user .uw-copy-button {
+    width: 28px;
+    height: 28px;
+  }
+
+  .tdw-work-thread-conversation .uw-message-user .uw-message-body > header {
+    min-height: 28px;
+    padding-right: 38px;
+  }
+}
+
+/* The agent's control keeps the identity row, where there is nothing to its right
+   but space. Two pixels, not three: it sits on that row rather than above it. */
+.tdw-work-thread-conversation .uw-message-agent .uw-message-actions {
+  top: -2px;
+}
