@@ -371,7 +371,7 @@ export function TaskDeskConversation({
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const composerFrameRef = useRef<number | undefined>(undefined)
   const touchFirst = hasTouchFirstPointer()
-  const canSend = Boolean((draft.trim() || attachments.length) && !sending && !waiting && !sendDisabled && ready)
+  const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
   // A phone has no Ctrl or Cmd key, so telling a touch user to press Ctrl/Cmd+Enter named the one
   // way to send that they do not have. Enter inserts a newline there; the Send button is the action.
   const hint = footerHint ?? (touchFirst ? "Enter adds a line. Tap Send to send." : "Enter to send · Shift+Enter for a newline")
