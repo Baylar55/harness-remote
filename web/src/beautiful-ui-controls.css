@@ -279,3 +279,288 @@
     opacity: 1;
   }
 }
+
+/* =============================================================================
+ * Second pass: the visible one.
+ *
+ * The first pass changed durations, status words and a glyph, and rendered as
+ * indistinguishable from what it replaced - correctly reported as "nothing new".
+ * Details are not a redesign. This pass moves the things that are actually seen:
+ * the type scale, the shape and depth of every card, the status as a chip rather
+ * than a word, Activity as a timeline instead of a flat list, and real motion.
+ *
+ * Same discipline as above: tokens only, no !important, every animation unwound
+ * under reduced motion.
+ * ============================================================================= */
+
+.tdw-work-thread-conversation {
+  --bui-radius: 14px;
+  --bui-radius-inner: 11px;
+  --bui-ease: cubic-bezier(.2, .7, .3, 1);
+}
+
+/* ------------------------------------------------------------- type scale */
+
+/* The transcript was 10px and 11px throughout - tool names, commands, reasoning
+   and statuses all at or just above the legibility floor. Nothing else in this
+   file matters as much as this block. */
+.tdw-work-thread-conversation .uw-activity-group > summary .uw-tool-title,
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-card > summary .uw-tool-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -.005em;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-card summary code {
+  font-size: 11.5px;
+}
+
+.tdw-work-thread-conversation .uw-reasoning .uw-markdown {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tdw-work-thread-conversation .uw-reasoning > strong {
+  margin-bottom: 7px;
+  font-size: 10.5px;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-card pre {
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+/* --------------------------------------------------------- shape and depth */
+
+.tdw-work-thread-conversation .bui-activity {
+  width: 100%;
+  border-color: var(--td3-border);
+  border-radius: var(--bui-radius);
+  background: var(--td3-card-raised);
+}
+
+.tdw-work-thread-conversation .bui-activity > summary {
+  min-height: 48px;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 11px;
+  padding: 0 14px;
+}
+
+.tdw-work-thread-conversation .bui-activity > summary .uw-tool-title {
+  font-size: 13px;
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .bui-tool {
+  border-color: var(--td3-border);
+  border-radius: var(--bui-radius-inner);
+  background: var(--td3-sunken);
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .bui-tool > summary {
+  min-height: 42px;
+  gap: 10px;
+  padding-inline: 12px;
+}
+
+.tdw-work-thread-conversation .uw-reasoning {
+  padding: 12px 14px;
+  border-radius: var(--bui-radius-inner);
+  background: var(--td3-sunken);
+}
+
+/* The status glyph was a 17px circle carrying a 10px mark. At this size it reads
+   as an icon rather than as punctuation, which is what lets the chip beside it
+   stop having to repeat the outcome in bold. */
+.tdw-work-thread-conversation .bui-tool > summary .uw-tool-icon,
+.tdw-work-thread-conversation .bui-activity > summary .uw-tool-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* The kind glyph becomes a badge rather than a bare character: at 12px, inline in
+   a title, it read as a typo. */
+.bui-tool > summary .bui-tool-kind {
+  width: 19px;
+  height: 19px;
+  display: inline-grid;
+  place-items: center;
+  margin-right: 9px;
+  border-radius: 6px;
+  background: var(--td3-raise-2);
+  font-size: 10px;
+}
+
+.bui-tool-edit > summary .bui-tool-kind,
+.bui-tool-run > summary .bui-tool-kind {
+  background: var(--td3-attention-soft);
+}
+
+/* ------------------------------------------------------------ status chips */
+
+/* A word in muted grey at the end of a row is not a state. A chip is - and it is
+   the one thing in a long Activity block worth finding by scanning. */
+.tdw-work-thread-conversation .bui-tool > summary .uw-tool-status,
+.tdw-work-thread-conversation .bui-activity > summary .uw-tool-status {
+  padding: 3.5px 9px;
+  border-radius: 999px;
+  color: var(--td3-muted);
+  background: var(--td3-raise-2);
+  font-size: 10.5px;
+  font-weight: 750;
+  letter-spacing: .01em;
+}
+
+.tdw-work-thread-conversation .uw-tool-completed > summary .uw-tool-status {
+  color: var(--td3-green-text);
+  background: var(--td3-green-soft);
+}
+
+.tdw-work-thread-conversation .uw-tool-error > summary .uw-tool-status {
+  color: var(--td3-red-text);
+  background: var(--td3-red-soft);
+}
+
+.tdw-work-thread-conversation .uw-tool-running > summary .uw-tool-status {
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft);
+}
+
+/* ---------------------------------------------------- Activity as a timeline */
+
+/* A turn is a sequence, and it was rendering as an undifferentiated stack of
+   rows. The rail is what makes "six things happened, in this order, and the
+   fourth failed" readable without opening anything. */
+.tdw-work-thread-conversation .bui-activity .uw-activity-parts {
+  position: relative;
+  padding: 14px 14px 16px 34px;
+  background: transparent;
+}
+
+.tdw-work-thread-conversation .bui-activity .uw-activity-parts::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 18px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--td3-border-strong);
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-stack {
+  display: grid;
+  gap: 7px;
+}
+
+/* ------------------------------------------------------------------ motion */
+
+/* Tool rows arrive one at a time in the real thing, so they arrive one at a time
+   here. Eight steps is where a stagger stops reading as sequence and starts
+   reading as lag, so the ninth row onward shares the last delay. */
+@keyframes bui-rise {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tdw-work-thread-conversation .uw-activity-parts .uw-tool-stack > .uw-tool-card,
+.tdw-work-thread-conversation .uw-activity-parts > .uw-reasoning {
+  animation: bui-rise .3s var(--bui-ease) both;
+}
+
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(1) { animation-delay: 30ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(2) { animation-delay: 70ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(3) { animation-delay: 110ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(4) { animation-delay: 150ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(5) { animation-delay: 190ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(6) { animation-delay: 230ms; }
+.tdw-work-thread-conversation .uw-tool-stack > .uw-tool-card:nth-child(n + 7) { animation-delay: 270ms; }
+
+.tdw-work-thread-conversation .bui-tool > summary,
+.tdw-work-thread-conversation .bui-activity > summary {
+  transition: background var(--motion-fast, .16s) var(--bui-ease);
+}
+
+.tdw-work-thread-conversation .bui-tool > summary:hover {
+  background: var(--td3-raise-1);
+}
+
+/* -------------------------------------------------------- approval card v2 */
+
+.bui-approval {
+  border-left-width: 4px;
+  padding: 14px;
+}
+
+.bui-approval .tdw-attention-card {
+  padding: 14px;
+  border-radius: var(--bui-radius);
+  background: var(--td3-card-raised);
+}
+
+.bui-approval .tdw-attention-heading {
+  margin-bottom: 11px;
+}
+
+.bui-approval .tdw-attention-heading strong {
+  font-size: 13px;
+}
+
+.bui-approval .tdw-attention-card > strong,
+.bui-approval .tdw-attention-card legend {
+  font-size: 12px;
+}
+
+.bui-approval .tdw-attention-card p {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.bui-approval-scopes code {
+  padding: 4px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+}
+
+.bui-approval .tdw-attention-actions {
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bui-approval .tdw-attention-actions .tdw-button {
+  min-height: 40px;
+  padding: 0 15px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.bui-approval .tdw-attention-options button {
+  border-radius: 10px;
+}
+
+.bui-approval .tdw-attention-options button strong {
+  font-size: 12px;
+}
+
+.bui-approval .tdw-attention-options button span {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* ------------------------------------------- reduced motion, second pass */
+
+@media (prefers-reduced-motion: reduce) {
+  .tdw-work-thread-conversation .uw-activity-parts .uw-tool-stack > .uw-tool-card,
+  .tdw-work-thread-conversation .uw-activity-parts > .uw-reasoning {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .tdw-work-thread-conversation .bui-tool > summary,
+  .tdw-work-thread-conversation .bui-activity > summary {
+    transition: none;
+  }
+}
