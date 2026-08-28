@@ -4,7 +4,7 @@
 
 Harness Remote is a local-first control plane for AI coding agents. It connects to the machines where your repositories, CLIs, credentials and subscriptions already live, then gives you one place to start, supervise and continue work from desktop, web or Android.
 
-Use OpenCode, Claude Code, Codex CLI, Oh My Pi and PI without moving your source code or handing your provider credentials to another cloud service.
+Use OpenCode, Claude Code, Codex CLI, Oh My Pi and PI from your phone, desktop or browser, wherever you are, without moving your source code or handing your provider credentials to another cloud service.
 
 ![Harness Remote workspace: native Sessions across local coding agents](docs/images/rhv3.png)
 
