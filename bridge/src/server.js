@@ -228,10 +228,14 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   // its transcript. Invalid or missing harness timestamps stay at zero instead of pretending to be
   // freshly updated on every poll.
   const listVisibleSessionMetadata = async (directory) => {
-    const sessions = await acp.listSessions()
+    const [sessions, deletedSessionIDs] = await Promise.all([
+      acp.listSessions(),
+      service.deletedSessionIDs()
+    ])
     return sessions
       .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
       .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
+      .filter((session) => !deletedSessionIDs.has(session.sessionId))
       .map((session) => {
         const liveUpdatedAt = liveSessionActivity.get(session.sessionId) ?? 0
         const listedUpdated = Date.parse(session.updatedAt ?? "")
