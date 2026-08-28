@@ -38,6 +38,16 @@ function promptBody(overrides = {}) {
   }
 }
 
+function commandBody(overrides = {}) {
+  return {
+    clientRequestId: "command-request-1",
+    command: "help",
+    arguments: "models",
+    directory: "/repo",
+    ...overrides
+  }
+}
+
 function stopBody(overrides = {}) {
   return {
     clientRequestId: "stop-request-1",
@@ -49,6 +59,14 @@ function stopBody(overrides = {}) {
 
 async function postPrompt(port, body = promptBody()) {
   return fetch(`http://127.0.0.1:${port}/v1/agents/codex/session/native-123/prompt`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  })
+}
+
+async function postCommand(port, body = commandBody()) {
+  return fetch(`http://127.0.0.1:${port}/v1/agents/codex/session/native-123/command`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
@@ -119,6 +137,33 @@ test("replaying one accepted client request id dispatches one native prompt", as
     assert.equal((await first.json()).status, "accepted")
     assert.equal((await replay.json()).status, "accepted")
     assert.deepEqual(calls, [["codex", "native-123", "Continue the native session once", "/repo"]])
+  } finally {
+    await close(server)
+  }
+}))
+
+test("replaying one accepted slash command dispatches once and changed arguments conflict", async () => withLedger(async (operationLedger) => {
+  const calls = []
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async commandSession(agentID, sessionID, input) {
+      calls.push([agentID, sessionID, input.command, input.arguments, input.directory])
+    }
+  })
+  const port = await listen(server)
+  try {
+    const first = await postCommand(port)
+    const replay = await postCommand(port)
+    assert.equal(first.status, 200)
+    assert.equal(replay.status, 200)
+    assert.deepEqual(calls, [["codex", "native-123", "help", "models", "/repo"]])
+
+    const conflict = await postCommand(port, commandBody({ arguments: "agents" }))
+    assert.equal(conflict.status, 409)
+    assert.equal(calls.length, 1)
   } finally {
     await close(server)
   }
@@ -466,7 +511,7 @@ test("native Session operation routes accept POST only", async () => {
   })
   const port = await listen(server)
   try {
-    for (const action of ["claim", "prompt", "stop"]) {
+    for (const action of ["claim", "prompt", "command", "stop"]) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/agents/pi/session/native-1/${action}`)
       assert.equal(response.status, 405)
       assert.equal(response.headers.get("allow"), "POST, OPTIONS")
