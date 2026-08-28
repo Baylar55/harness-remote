@@ -8,7 +8,7 @@ import {
   registerNativeSessionV3Adapter
 } from "../native-session-v3-adapter"
 import type { AgentModelScope, MachineTask } from "../taskClient"
-import type { MachineAgentHost } from "../types"
+import type { CommandInfo, MachineAgentHost } from "../types"
 import { LoadingIcon } from "../Icons"
 import { WorkThreadConversation } from "./work-thread-conversation"
 import "../native-session-observer.css"
@@ -60,6 +60,7 @@ function targetForInitialProjection(target: NativeSessionSurfaceTarget): NativeS
 export function NativeSessionObserver({ target, onSessionRefresh, onStateChange }: Props) {
   const [task, setTask] = useState<MachineTask | null>(null)
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
+  const [commands, setCommands] = useState<CommandInfo[]>([])
   const taskRef = useRef<MachineTask | null>(null)
   const attentionRef = useRef(false)
   const onStateChangeRef = useRef(onStateChange)
@@ -80,9 +81,26 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
   useEffect(() => {
     let disposed = false
     setAttachmentsSupported(false)
+    setCommands([])
     void api.capabilities(target.config)
-      .then((capabilities) => { if (!disposed) setAttachmentsSupported(capabilities.attachments === true) })
-      .catch(() => { if (!disposed) setAttachmentsSupported(false) })
+      .then(async (capabilities) => {
+        if (disposed) return
+        setAttachmentsSupported(capabilities.attachments === true)
+        if (capabilities.commands === true) {
+          try {
+            const available = await api.listCommands(target.config, target.sessionID)
+            if (!disposed) setCommands(available)
+          } catch {
+            if (!disposed) setCommands([])
+          }
+        }
+      })
+      .catch(() => {
+        if (!disposed) {
+          setAttachmentsSupported(false)
+          setCommands([])
+        }
+      })
     return () => { disposed = true }
   }, [target.key, target.config.host, target.config.port, target.config.agentId])
 
@@ -98,9 +116,10 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
       prompt: true,
       abort: target.canStop,
       models: target.modelsSupported,
-      attachments: attachmentsSupported
+      attachments: attachmentsSupported,
+      commands: commands.length > 0
     }
-  }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported])
+  }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported, commands.length])
 
   useEffect(() => {
     let disposed = false
@@ -147,6 +166,7 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
         onTaskUpdate={handleTaskUpdate}
         onWorkspaceRefresh={onSessionRefresh}
         onAttentionChange={handleAttentionChange}
+        commands={commands}
       />
     </div>
   )
