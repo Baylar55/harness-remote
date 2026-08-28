@@ -3,7 +3,10 @@ import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { copyToClipboard } from "../clipboard"
 import { activityLabel, groupConversationParts, type ConversationPartGroup } from "../conversation-parts"
-import { CheckIcon, CopyIcon } from "../Icons"
+import {
+  AlertIcon, CheckIcon, CommandIcon, CopyIcon, FolderIcon, PencilIcon, SearchIcon, ServerIcon,
+  SparkIcon, TaskListIcon
+} from "../Icons"
 import type { MessageEnvelope, MessagePart } from "../types"
 
 const REMARK_PLUGINS = [remarkGfm]
@@ -106,8 +109,15 @@ const TOOL_KINDS: Record<ToolKind, RegExp | null> = {
   tool: null
 }
 
-const TOOL_KIND_GLYPH: Record<ToolKind, string> = {
-  read: "\u25a4", edit: "\u270e", run: "\u276f", search: "\u2315", web: "\u25cd", task: "\u25c7", tool: "\u25c6"
+/**
+ * Real icons rather than the unicode glyphs this started with. A "\u25a4" is a character borrowed to
+ * look like a picture: it inherits the text metrics, sits on the text baseline, and renders as a
+ * different shape on every platform - which on Android was a box. These are the same stroked set the
+ * rest of the app already draws with.
+ */
+const TOOL_KIND_ICON: Record<ToolKind, (props: { size?: number }) => JSX.Element> = {
+  read: FolderIcon, edit: PencilIcon, run: CommandIcon, search: SearchIcon,
+  web: ServerIcon, task: TaskListIcon, tool: SparkIcon
 }
 
 function toolKind(tool: string | undefined): ToolKind {
@@ -175,6 +185,23 @@ function useElapsedLabel(startedAt: number | undefined, running: boolean): strin
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
+/**
+ * `incomplete` is the bridge's marker for a call whose turn ended before the harness reported an
+ * outcome: finished work with nothing to show, so it takes neither the spinner nor the failure mark.
+ * The spinner is a bare span the stylesheet turns: an SVG that has to re-rasterise every frame is
+ * the wrong thing to put on a phone once six of them are on screen at once.
+ */
+function ToolStatusIcon({ status }: { status: string }): JSX.Element {
+  return (
+    <span className="uw-tool-icon" aria-hidden="true">
+      {status === "completed" ? <CheckIcon size={12} />
+        : status === "error" ? <AlertIcon size={12} />
+          : status === "incomplete" ? <span className="bui-status-none" />
+            : <span className="bui-spinner" />}
+    </span>
+  )
+}
+
 function ToolPartCard({ part }: { part: MessagePart }) {
   const state = part.state
   const status = state?.status || "running"
@@ -188,6 +215,7 @@ function ToolPartCard({ part }: { part: MessagePart }) {
         : ""
   const output = state?.error || state?.output || ""
   const kind = toolKind(part.tool)
+  const KindIcon = TOOL_KIND_ICON[kind]
   const duration = formatDuration(state?.time)
   const [open, setOpen] = useState(status === "error")
 
@@ -206,11 +234,9 @@ function ToolPartCard({ part }: { part: MessagePart }) {
           {/* `incomplete` is the bridge's marker for a call whose turn ended before the harness
               reported an outcome: it is finished work with nothing to show, so it takes neither the
               running ellipsis nor the failure mark. */}
-          <span className="uw-tool-icon">
-            {status === "completed" ? "✓" : status === "error" ? "!" : status === "incomplete" ? "–" : "⋯"}
-          </span>
+          <ToolStatusIcon status={status} />
           <span className="uw-tool-title">
-            <span className="bui-tool-kind" aria-hidden="true">{TOOL_KIND_GLYPH[kind]}</span>
+            <span className="bui-tool-kind" aria-hidden="true">{KindIcon({ size: 12 })}</span>
             {state?.title || part.tool || "Tool"}
           </span>
           {command ? <code>{command.length > 90 ? `${command.slice(0, 90)}…` : command}</code> : null}
@@ -312,7 +338,7 @@ function ActivityGroup({ group }: { group: ActivityGroupValue }) {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
-        <span className="uw-tool-icon">{group.status === "completed" ? "✓" : group.status === "error" ? "!" : "⋯"}</span>
+        <ToolStatusIcon status={group.status} />
         <span className="uw-tool-title">{activityLabel(group)}</span>
         <span className="bui-tool-meta">
           {elapsed ? <span className="bui-tool-duration">{elapsed}</span> : null}

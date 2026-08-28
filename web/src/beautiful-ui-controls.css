@@ -772,3 +772,211 @@
     transform: none;
   }
 }
+
+/* =============================================================================
+ * Fourth pass: the waiting states, and real icons.
+ *
+ * A still screenshot cannot show any of this, which is most of why the first
+ * three passes read as a font change. Everything below moves.
+ * ============================================================================= */
+
+/* ------------------------------------------------------------------ icons */
+
+/* The kind and status marks are SVG now rather than borrowed characters, so the
+   badge centres a box instead of a glyph sitting on a text baseline. */
+.bui-tool > summary .bui-tool-kind svg,
+.tdw-work-thread-conversation .uw-tool-icon svg {
+  display: block;
+}
+
+.bui-tool > summary .bui-tool-kind {
+  color: var(--td3-muted-2);
+}
+
+.bui-tool-edit > summary .bui-tool-kind,
+.bui-tool-run > summary .bui-tool-kind {
+  color: var(--td3-attention-text);
+}
+
+/* A rule, not a mark: `incomplete` is finished work that produced no result. */
+.bui-status-none {
+  width: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentcolor;
+}
+
+/* ---------------------------------------------------------------- spinner */
+
+/* One turning ring per running call. A conic gradient masked to a ring costs the
+   compositor a single rotation - no per-frame rasterising, which matters once six
+   of these are on screen on a phone. */
+.bui-spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.75px solid var(--td3-border-strong);
+  border-top-color: currentcolor;
+  animation: bui-spin .75s linear infinite;
+}
+
+@keyframes bui-spin {
+  to { transform: rotate(1turn); }
+}
+
+.tdw-work-thread-conversation .uw-tool-running > summary .uw-tool-icon {
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft);
+}
+
+/* ------------------------------------------------- running progress on a card */
+
+/* An indeterminate sweep along the bottom edge of a call that is still going. It
+   is the difference between "this row is working" and "this row is stuck", which
+   a static spinner in the corner does not settle. */
+.tdw-work-thread-conversation .uw-tool-running.bui-tool > summary {
+  position: relative;
+}
+
+.tdw-work-thread-conversation .uw-tool-running.bui-tool > summary::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--td3-blue) 45%,
+    var(--td3-blue) 55%,
+    transparent
+  );
+  background-size: 45% 100%;
+  background-repeat: no-repeat;
+  animation: bui-sweep 1.5s var(--bui-ease) infinite;
+}
+
+@keyframes bui-sweep {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
+/* ------------------------------------------------------------- typing dots */
+
+/* The pending row - the one thing on screen between sending a prompt and the
+   first token - was a sentence and nothing else. */
+.bui-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
+  vertical-align: baseline;
+}
+
+.bui-typing i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--td3-blue-text);
+  animation: bui-bounce 1.1s var(--bui-ease) infinite;
+}
+
+.bui-typing i:nth-child(2) { animation-delay: .15s; }
+.bui-typing i:nth-child(3) { animation-delay: .3s; }
+
+@keyframes bui-bounce {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* The label beside them breathes rather than sitting still. */
+.tdw-work-thread-conversation .uw-message-working {
+  animation: bui-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes bui-breathe {
+  0%, 100% { opacity: .72; }
+  50% { opacity: 1; }
+}
+
+/* ------------------------------------------------------- expand / collapse */
+
+/* A details element snaps open. Where the engine can animate its content box it
+   now grows into place instead; where it cannot, nothing changes and the panel
+   opens exactly as it did before. */
+@supports selector(::details-content) {
+  .tdw-work-thread-conversation .bui-tool,
+  .tdw-work-thread-conversation .bui-activity {
+    interpolate-size: allow-keywords;
+  }
+
+  .tdw-work-thread-conversation .bui-tool::details-content,
+  .tdw-work-thread-conversation .bui-activity::details-content {
+    height: 0;
+    overflow: clip;
+    opacity: 0;
+    transition: height .26s var(--bui-ease), opacity .2s var(--bui-ease),
+      content-visibility .26s allow-discrete;
+  }
+
+  .tdw-work-thread-conversation .bui-tool[open]::details-content,
+  .tdw-work-thread-conversation .bui-activity[open]::details-content {
+    height: auto;
+    opacity: 1;
+  }
+}
+
+/* --------------------------------------------------------------- skeletons */
+
+/* Loading older history was a bare button and a pause. A shimmering placeholder
+   is what tells the user the pause is a fetch and not a dead end. */
+.tdw-work-thread-conversation .uw-history-loader {
+  position: relative;
+}
+
+.tdw-work-thread-conversation .uw-history-loader::after {
+  content: "";
+  display: block;
+  height: 2px;
+  margin: 8px auto 0;
+  width: min(320px, 60%);
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--td3-raise-1),
+    var(--td3-raise-3) 50%,
+    var(--td3-raise-1)
+  );
+  background-size: 220% 100%;
+  animation: bui-shimmer 1.6s linear infinite;
+}
+
+@keyframes bui-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+
+/* ------------------------------------------ reduced motion, fourth pass */
+
+@media (prefers-reduced-motion: reduce) {
+  .bui-spinner,
+  .bui-typing i,
+  .tdw-work-thread-conversation .uw-message-working,
+  .tdw-work-thread-conversation .uw-tool-running.bui-tool > summary::after,
+  .tdw-work-thread-conversation .uw-history-loader::after {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  /* A ring with no rotation is a static ring, which still reads as "in progress". */
+  .bui-spinner {
+    border-top-color: currentcolor;
+  }
+
+  .tdw-work-thread-conversation .bui-tool::details-content,
+  .tdw-work-thread-conversation .bui-activity::details-content {
+    transition: none;
+  }
+}

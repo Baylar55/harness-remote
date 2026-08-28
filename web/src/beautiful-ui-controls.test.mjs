@@ -56,7 +56,11 @@ test("a tool call reports its kind, its cost and a readable outcome", () => {
   // ones the stylesheet accents - colour stays reserved for status.
   const kinds = [...renderer.matchAll(/^  (read|edit|run|search|web|task|tool):/gm)].map((m) => m[1])
   assert.ok(kinds.length >= 7, `only ${kinds.length} tool kinds are declared`)
-  for (const kind of kinds) assert.match(renderer, new RegExp(`\\b${kind}: "`), `${kind} has no glyph`)
+  // Real SVG components, not unicode characters: a borrowed glyph inherits text metrics and renders
+  // as a different shape per platform - on Android, as a box.
+  for (const kind of kinds) assert.match(renderer, new RegExp(`${kind}: [A-Z][A-Za-z]*Icon`), `${kind} has no icon`)
+  assert.match(renderer, /function ToolStatusIcon\(\{ status \}: \{ status: string \}\)/)
+  assert.doesNotMatch(renderer, /TOOL_KIND_GLYPH/)
   assert.match(cssRules, /\.bui-tool-edit > summary \.bui-tool-kind,\n\.bui-tool-run > summary \.bui-tool-kind/)
 })
 
