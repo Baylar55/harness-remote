@@ -124,6 +124,63 @@ test("replaying one accepted client request id dispatches one native prompt", as
   }
 }))
 
+test("native Session prompt validates and includes image attachments in the idempotent operation", async () => withLedger(async (operationLedger) => {
+  const calls = []
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async promptSession(agentID, sessionID, input) { calls.push([agentID, sessionID, input.attachments]) }
+  })
+  const port = await listen(server)
+  const attachment = { mime: "image/png", filename: "screen.png", url: "data:image/png;base64,aGVsbG8=" }
+  try {
+    const first = await postPrompt(port, promptBody({ attachments: [attachment] }))
+    assert.equal(first.status, 200)
+    assert.deepEqual(calls, [["codex", "native-123", [attachment]]])
+
+    const replay = await postPrompt(port, promptBody({ attachments: [attachment] }))
+    assert.equal(replay.status, 200)
+    assert.equal(calls.length, 1)
+
+    const conflict = await postPrompt(port, promptBody({
+      attachments: [{ ...attachment, url: "data:image/png;base64,d29ybGQ=" }]
+    }))
+    assert.equal(conflict.status, 409)
+    assert.match((await conflict.json()).error, /already used for a different native Session operation/)
+    assert.equal(calls.length, 1)
+  } finally {
+    await close(server)
+  }
+}))
+
+test("native Session prompt rejects unsupported or oversized attachment input before dispatch", async () => withLedger(async (operationLedger) => {
+  let dispatches = 0
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    async claimSession() {},
+    operationLedger,
+    async promptSession() { dispatches += 1 }
+  })
+  const port = await listen(server)
+  try {
+    const unsupported = await postPrompt(port, promptBody({
+      attachments: [{ mime: "text/plain", filename: "note.txt", url: "data:text/plain;base64,aGVsbG8=" }]
+    }))
+    assert.equal(unsupported.status, 400)
+
+    const malformed = await postPrompt(port, promptBody({
+      attachments: [{ mime: "image/png", filename: "screen.png", url: "https://example.invalid/image.png" }]
+    }))
+    assert.equal(malformed.status, 400)
+    assert.equal(dispatches, 0)
+  } finally {
+    await close(server)
+  }
+}))
+
 test("concurrent retries converge before a second native prompt can start", async () => withLedger(async (operationLedger) => {
   let dispatches = 0
   let releaseDispatch
