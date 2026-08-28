@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
 import type { AttachmentPart } from "../attachments"
 import { createCoalescedTailRefresh } from "../coalesced-tail-refresh"
+import { taskConversationController, type ConversationController } from "../conversation-controller"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "../message-pages"
 import type { SavedServerProfile } from "../serverProfiles"
 import {
@@ -86,6 +87,8 @@ type Props = {
    * as if it were the Session's persisted selection.
    */
   deferModelFallback?: boolean
+  /** Explicit I/O boundary. Native Sessions provide a Session-scoped controller. */
+  controller?: ConversationController
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
@@ -282,7 +285,8 @@ export function WorkThreadConversation({
   onAttentionChange,
   commands = [],
   modelScope,
-  deferModelFallback = false
+  deferModelFallback = false,
+  controller = taskConversationController
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${task.id}`
   const initialAgentID = agentForRun(task, task.run)
@@ -409,9 +413,9 @@ export function WorkThreadConversation({
   }, [currentAgentID, currentTaskModelKey])
 
   const loadInitialTarget = useCallback(async (target: SessionTarget): Promise<SessionFeed> => {
-    const page = await api.loadMessagePage(target.config, target.sessionID, target.directory, undefined, INITIAL_PAGE_SIZE, false)
+    const page = await controller.loadMessagePage(target.config, target.sessionID, target.directory, undefined, INITIAL_PAGE_SIZE, false)
     return { messages: page.messages, before: page.before, hasMore: page.hasMore }
-  }, [])
+  }, [controller])
 
   useEffect(() => {
     const generation = ++loadGeneration.current
@@ -511,7 +515,7 @@ export function WorkThreadConversation({
     }
     await tailRefreshRef.current(async () => {
       try {
-        const page = await api.loadMessagePage(target.config, session, target.directory, undefined, INITIAL_PAGE_SIZE, false)
+        const page = await controller.loadMessagePage(target.config, session, target.directory, undefined, INITIAL_PAGE_SIZE, false)
         setFeeds((current) => {
           const existing = current[session]
           if (!existing) return { ...current, [session]: { messages: page.messages, before: page.before, hasMore: page.hasMore } }
@@ -526,7 +530,7 @@ export function WorkThreadConversation({
         // reconciliation path will retry without clearing or replacing it.
       }
     })
-  }, [baseConfig])
+  }, [baseConfig, controller])
 
   const refreshAttention = useCallback(async (sourceTask?: MachineTask) => {
     if (attentionInFlightRef.current) return
@@ -562,7 +566,7 @@ export function WorkThreadConversation({
     reconcileInFlightRef.current = true
     try {
       const prior = taskRef.current
-      let next = await taskClient.getWorkThread(baseConfig, prior.id)
+      let next = await controller.getWorkThread(baseConfig, prior.id)
       if (taskConversationSignature(next) !== taskConversationSignature(prior)
         || next.title !== prior.title
         || next.checkpoints?.length !== prior.checkpoints?.length) {
@@ -579,7 +583,7 @@ export function WorkThreadConversation({
             runId: next.run.id
           })
           if (created) {
-            next = await taskClient.getWorkThread(baseConfig, next.id)
+            next = await controller.getWorkThread(baseConfig, next.id)
             onTaskUpdateRef.current(next)
             taskRef.current = next
             onWorkspaceRefreshRef.current?.()
@@ -593,7 +597,7 @@ export function WorkThreadConversation({
     } finally {
       reconcileInFlightRef.current = false
     }
-  }, [baseConfig, refreshCurrentTail, refreshAttention])
+  }, [baseConfig, controller, refreshCurrentTail, refreshAttention])
 
   useEffect(() => {
     void refreshAttention()
@@ -676,7 +680,7 @@ export function WorkThreadConversation({
       await Promise.all(olderTargets.map(async (target) => {
         const current = feedsRef.current[target.sessionID]
         if (!current?.before) return
-        const page = await api.loadMessagePage(target.config, target.sessionID, target.directory, current.before, OLDER_PAGE_SIZE, false)
+        const page = await controller.loadMessagePage(target.config, target.sessionID, target.directory, current.before, OLDER_PAGE_SIZE, false)
         setFeeds((feedsNow) => {
           const feed = feedsNow[target.sessionID] ?? current
           const messages = prependOlderMessagePage(feed.messages, page.messages)
@@ -711,12 +715,12 @@ export function WorkThreadConversation({
     setDraft("")
     setPendingPrompt({ text, priorRunID: taskRef.current.run?.id ?? null, attachments: promptAttachments })
     try {
-      const latest = await taskClient.getWorkThread(baseConfig, task.id)
+      const latest = await controller.getWorkThread(baseConfig, task.id)
       if (isActive(latest)) {
         onTaskUpdateRef.current(latest)
         throw new Error(`${agentLabel(agentsRef.current, agentForRun(latest, latest.run))} is still working. Stop it or wait for the reply before sending another message.`)
       }
-      const next = await taskClient.continueTask(baseConfig, task.id, {
+      const next = await controller.continueTask(baseConfig, task.id, {
         prompt: text,
         attachments: promptAttachments,
         command: slashCommand,
@@ -749,7 +753,7 @@ export function WorkThreadConversation({
     setStopping(true)
     setError(null)
     try {
-      const next = await taskClient.cancelWorkThread(baseConfig, task.id)
+      const next = await controller.cancelWorkThread(baseConfig, task.id)
       onTaskUpdateRef.current(next)
       taskRef.current = next
       await Promise.all([refreshCurrentTail(next), refreshAttention(next)])
