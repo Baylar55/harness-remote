@@ -349,6 +349,54 @@
   line-height: 1.48;
 }
 
+.tdw-work-thread-conversation .uw-composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px 0;
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment {
+  min-width: 0;
+  max-width: min(260px, 100%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid var(--td3-border);
+  border-radius: 999px;
+  background: var(--td3-raise-1);
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment button {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--td3-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.tdw-work-thread-conversation .uw-composer-attachment button:hover,
+.tdw-work-thread-conversation .uw-composer-attachment button:focus-visible {
+  color: var(--td3-text);
+  background: var(--td3-raise-2);
+}
+
 .tdw-work-thread-conversation .uw-composer-footer {
   min-height: 44px;
   padding: 5px 8px 8px 14px;
