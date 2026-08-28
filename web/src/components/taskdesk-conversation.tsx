@@ -1,6 +1,7 @@
 import { memo, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { ATTACHMENT_MAX_COUNT, fileToAttachment, type AttachmentPart } from "../attachments"
 import type { MessageEnvelope } from "../types"
-import { ChatIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, StopCircleIcon } from "../Icons"
+import { ChatIcon, CloseIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, PaperclipIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
 import "../taskdesk-history-loader.css"
@@ -37,6 +38,10 @@ type Props = {
   onLoadOlder?: () => Promise<void> | void
   draft: string
   onDraftChange: (value: string) => void
+  attachments?: AttachmentPart[]
+  attachmentsSupported?: boolean
+  onAttachmentsChange?: (attachments: AttachmentPart[]) => void
+  onAttachmentError?: (message: string) => void
   onSend: () => Promise<void> | void
   sending?: boolean
   sendDisabled?: boolean
@@ -345,6 +350,10 @@ export function TaskDeskConversation({
   onLoadOlder,
   draft,
   onDraftChange,
+  attachments = [],
+  attachmentsSupported = false,
+  onAttachmentsChange,
+  onAttachmentError,
   onSend,
   sending = false,
   sendDisabled = false,
@@ -359,9 +368,10 @@ export function TaskDeskConversation({
   renderMessage
 }: Props) {
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
   const composerFrameRef = useRef<number | undefined>(undefined)
   const touchFirst = hasTouchFirstPointer()
-  const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
+  const canSend = Boolean((draft.trim() || attachments.length) && !sending && !waiting && !sendDisabled && ready)
   // A phone has no Ctrl or Cmd key, so telling a touch user to press Ctrl/Cmd+Enter named the one
   // way to send that they do not have. Enter inserts a newline there; the Send button is the action.
   const hint = footerHint ?? (touchFirst ? "Enter adds a line. Tap Send to send." : "Enter to send · Shift+Enter for a newline")
@@ -414,6 +424,22 @@ export function TaskDeskConversation({
       />
 
       <div className="uw-composer-shell">
+        {attachments.length ? (
+          <div className="uw-composer-attachments" aria-label="Attached images">
+            {attachments.map((attachment, index) => (
+              <span className="uw-composer-attachment" key={`${attachment.filename}:${index}`}>
+                <strong>{attachment.filename}</strong>
+                <button
+                  type="button"
+                  onClick={() => onAttachmentsChange?.(attachments.filter((_, position) => position !== index))}
+                  aria-label={`Remove ${attachment.filename}`}
+                >
+                  <CloseIcon size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {/* A placeholder is not a label: it disappears as soon as the field has content, which left
             the product's primary input unnamed for a screen reader.
 
@@ -434,6 +460,39 @@ export function TaskDeskConversation({
         <div className="uw-composer-footer">
           <span className="uw-composer-directory">{directory || ""}</span>
           <div>
+            {attachmentsSupported ? (
+              <>
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={async (event) => {
+                    const room = Math.max(0, ATTACHMENT_MAX_COUNT - attachments.length)
+                    const chosen = Array.from(event.target.files ?? []).slice(0, room)
+                    event.target.value = ""
+                    if (!chosen.length) return
+                    try {
+                      const prepared = await Promise.all(chosen.map((file) => fileToAttachment(file)))
+                      onAttachmentsChange?.([...attachments, ...prepared])
+                    } catch (reason) {
+                      onAttachmentError?.(reason instanceof Error ? reason.message : String(reason))
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="uw-button"
+                  disabled={!ready || sending || waiting || attachments.length >= ATTACHMENT_MAX_COUNT}
+                  onClick={() => attachmentInputRef.current?.click()}
+                  aria-label="Attach image"
+                  title="Attach image"
+                >
+                  <PaperclipIcon size={15} />
+                </button>
+              </>
+            ) : null}
             <small id="uw-composer-hint">{hint}</small>
             {waiting && onStop ? (
               <button
