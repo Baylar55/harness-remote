@@ -277,8 +277,9 @@ export const api = {
     return request<FileEntry[]>(config, withDirectory(`/file?path=${encodeURIComponent(path)}`, directory))
   },
 
-  listCommands(config: ServerConfig) {
-    return request<CommandInfo[]>(config, "/command")
+  listCommands(config: ServerConfig, sessionID?: string) {
+    const path = sessionID ? `/command?sessionID=${encodeURIComponent(sessionID)}` : "/command"
+    return request<CommandInfo[]>(config, path)
   },
 
   async listAgents(config: ServerConfig, directory?: string) {
