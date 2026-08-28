@@ -3,6 +3,10 @@ import http from "node:http"
 import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
 
 const SESSION_OPERATION_ROUTE = /^\/v1\/agents\/([^/]+)\/session\/([^/]+)\/(claim|prompt|stop|handoff)$/
+const ATTACHMENT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
+const MAX_ATTACHMENTS = 8
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+const MAX_ATTACHMENT_TOTAL_BYTES = 15 * 1024 * 1024
 
 function requestError(message) {
   const error = new Error(message)
@@ -36,7 +40,7 @@ async function readJSONBody(request) {
   let body = ""
   for await (const chunk of request) {
     body += chunk
-    if (body.length > 2_000_000) throw requestError("Request body is too large")
+    if (body.length > 25_000_000) throw requestError("Request body is too large")
   }
   if (!body) return {}
   try {
@@ -63,13 +67,44 @@ function promptModelInput(body) {
   return { providerID, modelID }
 }
 
+function base64ByteLength(value) {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0
+  return Math.max(0, Math.floor(value.length * 3 / 4) - padding)
+}
+
+function promptAttachmentsInput(value) {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value)) throw requestError("Prompt attachments must be an array")
+  if (value.length > MAX_ATTACHMENTS) throw requestError(`At most ${MAX_ATTACHMENTS} attachments per prompt`)
+  let total = 0
+  return value.map((attachment) => {
+    if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+      throw requestError("Prompt attachment must be an object")
+    }
+    const mime = typeof attachment.mime === "string" ? attachment.mime.toLowerCase() : ""
+    if (!ATTACHMENT_MIME_TYPES.has(mime)) throw requestError(`Unsupported attachment type ${mime || "unknown"}`)
+    const filename = typeof attachment.filename === "string" && attachment.filename.trim()
+      ? attachment.filename.trim().slice(0, 255)
+      : "attachment"
+    const url = typeof attachment.url === "string" ? attachment.url : ""
+    const match = /^data:[^;,]+;base64,([A-Za-z0-9+/=]+)$/s.exec(url)
+    if (!match) throw requestError("An attachment must be a base64 data URL")
+    const bytes = base64ByteLength(match[1])
+    if (bytes > MAX_ATTACHMENT_BYTES) throw requestError("Each attachment must stay under 5MB")
+    total += bytes
+    if (total > MAX_ATTACHMENT_TOTAL_BYTES) throw requestError("Attachments must stay under 15MB in total")
+    return { mime, filename, url }
+  })
+}
+
 function promptInput(body) {
   const common = operationIdentityInput(body)
   const text = typeof body.text === "string" ? body.text.trim() : ""
   const model = promptModelInput(body)
   const variant = typeof body.variant === "string" && body.variant.trim() ? body.variant.trim() : undefined
+  const attachments = promptAttachmentsInput(body.attachments)
   if (!text) throw requestError("A text prompt is required")
-  return { ...common, text, model, variant }
+  return { ...common, text, model, variant, attachments }
 }
 
 function stopInput(body) {
@@ -176,7 +211,17 @@ export function createSessionClaimServer({
 
       const identity = { agentID, sessionID, clientRequestId: input.clientRequestId }
       const signaturePayload = operation === "prompt"
-        ? { text: input.text, directory: input.directory, model: input.model, variant: input.variant ?? null }
+        ? {
+            text: input.text,
+            directory: input.directory,
+            model: input.model,
+            variant: input.variant ?? null,
+            attachments: input.attachments.map((attachment) => ({
+              mime: attachment.mime,
+              filename: attachment.filename,
+              digest: createHash("sha256").update(attachment.url).digest("hex")
+            }))
+          }
         : operation === "stop"
           ? { directory: input.directory, operationToken: input.operationToken }
           : {
