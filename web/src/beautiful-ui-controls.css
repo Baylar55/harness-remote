@@ -280,6 +280,68 @@
   }
 }
 
+/* ---------------------------------------------------------------- mobile Session header */
+
+/* A Session title is an edit control in its own right. Keeping a long handoff label, its
+   experimental badge and the destructive/native actions beside that control made the available
+   title width collapse on a phone: the handoff crossed the title and the pencil appeared to float
+   over the name. On touch, make the hierarchy explicit instead of asking one flex row to solve an
+   impossible layout. The identity remains first; actions become their own compact row underneath. */
+@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
+  .hr-native-workspace-session-header {
+    min-height: 0;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .hr-native-session-heading {
+    min-width: 0;
+    flex: none;
+  }
+
+  .hr-native-session-title-button {
+    min-height: 44px;
+    width: 100%;
+    margin-inline-start: 0;
+    padding-inline: 8px;
+  }
+
+  .hr-native-workspace-session-actions {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .hr-native-workspace-session-actions > .hr-session-handoff {
+    order: -1;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .hr-session-handoff-trigger {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 10px;
+  }
+
+  .hr-session-handoff-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The badge is useful context in the handoff dialog. In the constrained action row it is
+     decorative repetition, and removing it preserves the action label and native controls. */
+  .hr-session-handoff-trigger > .hr-experimental-badge {
+    display: none;
+  }
+}
+
 /* =============================================================================
  * Second pass: the visible one.
  *

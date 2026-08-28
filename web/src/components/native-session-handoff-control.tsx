@@ -143,9 +143,11 @@ export function NativeSessionHandoffControl({ source, agents, onOpen }: Props) {
         onClick={() => { setError(null); setPending(false); setOpen(true) }}
         disabled={busy}
         aria-expanded={open}
+        aria-label={t("sf.continueWithAgent")}
+        title={t("sf.continueWithAgent")}
       >
-        <ChatIcon size={14} />
-        {t("sf.continueWithAgent")}
+        <ChatIcon size={14} aria-hidden="true" />
+        <span className="hr-session-handoff-label">{t("sf.continueWithAgent")}</span>
         <span className="hr-experimental-badge">Experimental</span>
       </button>
 
