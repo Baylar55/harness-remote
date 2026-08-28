@@ -11,6 +11,7 @@ export type NativeSessionRecord = {
   stopCapability?: string
   abortSupported: boolean
   modelsSupported: boolean
+  commandsSupported?: boolean
   renameSupported: boolean
   deleteSupported: boolean
   /** True only when this UI record comes from a mutation that just created/claimed the Session through
@@ -64,6 +65,7 @@ export type NativeSessionSurfaceTarget = {
   status?: SessionStatus
   external: boolean
   modelsSupported: boolean
+  commandsSupported?: boolean
   /** Native metadata mutations are exposed by the owning harness contract. The chat header shows
    * Rename/Delete only for a Session whose harness actually implements them. */
   renameSupported: boolean
@@ -165,6 +167,7 @@ export function nativeSessionSurfaceTarget(
     status: record.status,
     external,
     modelsSupported: record.modelsSupported,
+    commandsSupported: record.commandsSupported === true,
     renameSupported: record.renameSupported,
     deleteSupported: record.deleteSupported,
     model: sessionModel(record.session),
@@ -207,6 +210,7 @@ export async function discoverAgentNativeSessions(
     stopCapability: agent.contract?.sessions?.stop,
     abortSupported: agent.capabilities?.abort === true,
     modelsSupported: agent.capabilities?.models === true,
+    commandsSupported: agent.capabilities?.commands === true,
     renameSupported: agent.capabilities?.sessionRename === true,
     deleteSupported: agent.capabilities?.sessionDelete === true,
     session,
