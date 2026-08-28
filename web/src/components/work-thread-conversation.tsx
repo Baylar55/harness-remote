@@ -13,6 +13,7 @@ import {
 import { startTaskDeskSessionLiveRefresh } from "../taskdesk-session-live-refresh"
 import type {
   BackendKind,
+  CommandInfo,
   MachineAgentHost,
   MessageEnvelope,
   ModelOption,
@@ -71,6 +72,7 @@ type Props = {
   onTaskUpdate: (task: MachineTask) => void
   onWorkspaceRefresh?: () => void
   onAttentionChange?: (needsAttention: boolean) => void
+  commands?: CommandInfo[]
   /**
    * Which catalog identity this conversation's model picker should ask for. Defaults to the Work
    * Thread, which is what a Task-backed conversation means. A native-Session surface passes the
@@ -278,6 +280,7 @@ export function WorkThreadConversation({
   onTaskUpdate,
   onWorkspaceRefresh,
   onAttentionChange,
+  commands = [],
   modelScope,
   deferModelFallback = false
 }: Props) {
@@ -687,6 +690,10 @@ export function WorkThreadConversation({
   async function send() {
     const text = draft.trim()
     const promptAttachments = attachments
+    const slashMatch = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text)
+    const slashCommand = slashMatch && commands.some((command) => command.name === slashMatch[1])
+      ? { name: slashMatch[1], arguments: (slashMatch[2] || "").trim() }
+      : undefined
     if ((!text && !promptAttachments.length) || sending || working || sendInFlightRef.current) return
     sendInFlightRef.current = true
     setSending(true)
@@ -702,6 +709,7 @@ export function WorkThreadConversation({
       const next = await taskClient.continueTask(baseConfig, task.id, {
         prompt: text,
         attachments: promptAttachments,
+        command: slashCommand,
         agentId: targetAgentID,
         model: selectedModel ? { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant } : null
       })
@@ -828,6 +836,7 @@ export function WorkThreadConversation({
         onLoadOlder={loadOlder}
         draft={draft}
         onDraftChange={setDraft}
+        commands={commands}
         attachments={attachments}
         attachmentsSupported={attachmentsSupported}
         onAttachmentsChange={setAttachments}
