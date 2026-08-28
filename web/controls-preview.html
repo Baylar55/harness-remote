@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Harness Remote — ported controls</title>
+    <style>
+      body { margin: 0; background: var(--td3-bg); color: var(--td3-text); font-family: system-ui, -apple-system, sans-serif; }
+      .cp-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+        padding: 10px 16px; border-bottom: 1px solid var(--td3-border); background: var(--td3-chrome-strong);
+        backdrop-filter: blur(10px); }
+      .cp-bar strong { font-size: 12px; }
+      .cp-bar small { color: var(--td3-muted); font-size: 11px; }
+      .cp-bar .cp-spacer { flex: 1 1 auto; }
+      .cp-bar button { min-height: 30px; padding: 0 10px; border: 1px solid var(--td3-border);
+        border-radius: 8px; color: var(--td3-text-2); background: var(--td3-control); font-size: 11px; cursor: pointer; }
+      .cp-bar button[aria-pressed="true"] { border-color: var(--td3-blue-border); color: var(--td3-blue-text); background: var(--td3-blue-soft); }
+      .cp-page { max-width: 1040px; margin: 0 auto; padding: 20px 16px 60px; }
+      .cp-page .tdw-work-thread-conversation { display: grid; gap: 26px; }
+      /* The app's shell rules size and position themselves for a full-height product layout. This is a
+         page, so they are neutralised here - preview-only, and the only place !important appears. */
+      .cp-page .tdw-shell,
+      .cp-page .hr-native-session-observer {
+        display: block !important;
+        position: static !important;
+        width: auto !important;
+        height: auto !important;
+        max-height: none !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        background: none !important;
+        border: 0 !important;
+      }
+      /* .tdw-attention is capped at 42% of a pane that does not exist here. */
+      .cp-attn-host .tdw-attention { max-height: none !important; }
+      .cp-section > h2 { margin: 0 0 4px; font-size: 11px; font-weight: 800; letter-spacing: .09em;
+        text-transform: uppercase; color: var(--td3-muted); }
+      .cp-section > p { margin: 0 0 12px; max-width: 70ch; color: var(--td3-text-3); font-size: 12px; line-height: 1.5; }
+      .cp-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .cp-attn-host { display: block; }
+    </style>
+  </head>
+  <body>
+    <div class="cp-bar">
+      <strong>Ported controls</strong>
+      <small>dev preview — not part of the app bundle</small>
+      <span class="cp-spacer"></span>
+      <button type="button" data-theme-choice="dark">Dark</button>
+      <button type="button" data-theme-choice="light">Light</button>
+    </div>
+
+    <div class="cp-page">
+      <div class="tdw-shell hr-control-plane hr-native-workspace">
+      <div class="hr-native-session-observer writable">
+      <div class="tdw-work-thread-conversation">
+      <section class="cp-section">
+        <h2>Activity — live</h2>
+        <p>The thinking state. The clock comes from the harness's own part timestamps, and the title sweeps while the group is running. Both stop under <code>prefers-reduced-motion</code>.</p>
+        <details class="uw-tool-card uw-activity-group uw-tool-running bui-activity" open>
+          <summary>
+            <span class="uw-tool-icon">⋯</span>
+            <span class="uw-tool-title">Working on the session adapter</span>
+            <span class="bui-tool-meta"><span class="bui-tool-duration" data-live-clock>0s</span><span class="uw-tool-status">Working</span></span>
+          </summary>
+          <div class="uw-activity-parts">
+            <div class="uw-reasoning">
+              <strong>Reasoning</strong>
+              <div class="uw-markdown td3-markdown"><p>The adapter registers before model enrichment, so the transcript is usable before the catalog read returns.</p></div>
+            </div>
+            <div class="uw-tool-stack">
+              <details class="uw-tool-card uw-tool-completed bui-tool bui-tool-read">
+                <summary><span class="uw-tool-icon">✓</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">▤</span>Read</span><code>web/src/native-session-v3-adapter.ts</code><span class="bui-tool-meta"><span class="bui-tool-duration">1.2s</span><span class="uw-tool-status">Done</span></span></summary>
+              </details>
+              <details class="uw-tool-card uw-tool-completed bui-tool bui-tool-search">
+                <summary><span class="uw-tool-icon">✓</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">⌕</span>Grep</span><code>uw-activity-group</code><span class="bui-tool-meta"><span class="bui-tool-duration">3s</span><span class="uw-tool-status">Done</span></span></summary>
+              </details>
+              <details class="uw-tool-card uw-tool-completed bui-tool bui-tool-edit">
+                <summary><span class="uw-tool-icon">✓</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">✎</span>Write</span><code>web/src/beautiful-ui-controls.css</code><span class="bui-tool-meta"><span class="bui-tool-duration">45s</span><span class="uw-tool-status">Done</span></span></summary>
+              </details>
+              <details class="uw-tool-card uw-tool-completed bui-tool bui-tool-run">
+                <summary><span class="uw-tool-icon">✓</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">❯</span>Bash</span><code>npm run test:v3-product-ui</code><span class="bui-tool-meta"><span class="bui-tool-duration">2m 14s</span><span class="uw-tool-status">Done</span></span></summary>
+              </details>
+              <details class="uw-tool-card uw-tool-running bui-tool bui-tool-web">
+                <summary><span class="uw-tool-icon">⋯</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">◍</span>WebFetch</span><code>https://example.invalid/spec</code><span class="bui-tool-meta"><span class="uw-tool-status">Working</span></span></summary>
+              </details>
+              <details class="uw-tool-card uw-tool-error bui-tool bui-tool-run" open>
+                <summary><span class="uw-tool-icon">!</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">❯</span>Bash</span><code>rg --hidden-all uw-tool-status</code><span class="bui-tool-meta"><span class="bui-tool-duration">1.1s</span><span class="uw-tool-status">Failed</span></span></summary>
+                <div class="uw-code-block"><pre>error: unrecognized flag --hidden-all
+
+Usage: rg [OPTIONS] PATTERN [PATH ...]</pre></div>
+              </details>
+              <details class="uw-tool-card uw-tool-incomplete bui-tool bui-tool-task">
+                <summary><span class="uw-tool-icon">–</span><span class="uw-tool-title"><span class="bui-tool-kind" aria-hidden="true">◇</span>Task</span><span class="bui-tool-meta"><span class="uw-tool-status">No result</span></span></summary>
+              </details>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <section class="cp-section">
+        <h2>Activity — finished</h2>
+        <p>Collapsed by default once the turn ends, so reasoning stays available without competing with the reply.</p>
+        <details class="uw-tool-card uw-activity-group uw-tool-completed bui-activity">
+          <summary><span class="uw-tool-icon">✓</span><span class="uw-tool-title">Ran 6 tools</span><span class="bui-tool-meta"><span class="uw-tool-status">completed</span></span></summary>
+          <div class="uw-activity-parts"><div class="uw-reasoning"><strong>Reasoning</strong><div class="uw-markdown td3-markdown"><p>Nothing left to check.</p></div></div></div>
+        </details>
+      </section>
+
+      <section class="cp-section">
+        <h2>Status pill</h2>
+        <p>The dot pulses only while a turn is working.</p>
+        <div class="cp-row tdw-conversation-toolbar">
+          <span class="tdw-conversation-state working"><i aria-hidden="true"></i><span>Claude is working · <span data-live-clock>0s</span></span></span>
+          <span class="tdw-conversation-state attention"><i aria-hidden="true"></i><span>Needs attention</span></span>
+          <span class="tdw-conversation-state ready"><i aria-hidden="true"></i><span>Ready</span></span>
+          <span class="tdw-conversation-state stopped"><i aria-hidden="true"></i><span>Stopped</span></span>
+        </div>
+      </section>
+
+      <section class="cp-section">
+        <h2>Approval — permission</h2>
+        <p>Each requested scope is its own chip, and Deny reads as the destructive choice.</p>
+        <div class="cp-attn-host">
+          <section class="tdw-attention bui-approval" aria-label="Agent needs your input">
+            <div class="tdw-attention-heading"><span><i class="bui-approval-dot" aria-hidden="true"></i>Needs your input</span><strong>The coding agent is waiting for a decision.</strong></div>
+            <div class="tdw-attention-card">
+              <strong>Permission required</strong>
+              <p>Run a shell command that writes inside the project directory.</p>
+              <div class="bui-approval-scopes" aria-label="Requested scope"><code>web/src/**</code><code>bridge/src/**</code><code>docs/*.md</code><code>.github/workflows/*.yml</code></div>
+              <div class="tdw-attention-actions">
+                <button type="button" class="tdw-button secondary bui-approval-deny">Deny</button>
+                <button type="button" class="tdw-button secondary">Allow once</button>
+                <button type="button" class="tdw-button primary">Always allow</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="cp-section">
+        <h2>Approval — question</h2>
+        <p>Click an option: the mark is the feedback that used to be a background tint indistinguishable from hover.</p>
+        <div class="cp-attn-host">
+          <section class="tdw-attention bui-approval" aria-label="Agent needs your input">
+            <div class="tdw-attention-heading"><span><i class="bui-approval-dot" aria-hidden="true"></i>Needs your input</span><strong>The coding agent is waiting for a decision.</strong></div>
+            <div class="tdw-attention-card">
+              <fieldset>
+                <legend>Styling approach</legend>
+                <p>Which styling strategy should the port use for the v3 controls, given the 33 stylesheets already in the tree?</p>
+                <div class="tdw-attention-options">
+                  <button type="button" class="selected" aria-pressed="true"><strong><i class="bui-approval-check" aria-hidden="true">✓</i>Port onto the --td3 tokens</strong><span>No new dependencies, and the Light theme keeps working</span></button>
+                  <button type="button" aria-pressed="false"><strong><i class="bui-approval-check" aria-hidden="true"></i>Introduce Tailwind</strong><span>Faster copy-paste, two styling systems to maintain</span></button>
+                </div>
+                <input placeholder="Type another answer..." aria-label="Custom answer" />
+              </fieldset>
+              <div class="tdw-attention-actions"><button type="button" class="tdw-button primary">Send answer</button></div>
+            </div>
+          </section>
+        </div>
+      </section>
+      </div>
+      </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/controls-preview.ts"></script>
+  </body>
+</html>

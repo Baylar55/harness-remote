@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import test from "node:test"
@@ -113,4 +113,25 @@ test("aria semantics survive the restyle", () => {
   assert.match(attention, /aria-pressed=\{selected\.includes\(option\.label\)\}/)
   assert.match(attention, /<i className="bui-approval-dot" aria-hidden="true" \/>/)
   assert.match(renderer, /<span className="bui-tool-kind" aria-hidden="true">/)
+})
+
+test("the dev preview loads exactly the stylesheets the app loads", () => {
+  // The preview exists so these controls can be reviewed without waiting for a harness to emit a
+  // tool part or a permission request. That only works if it is styled by the same sheets: a rule
+  // the app has and the preview does not makes the preview a lie, and the reverse hides a bug.
+  const app = new Set()
+  for (const file of ["main.tsx", ...readdirSync(path.join(here, "components")).map((f) => `components/${f}`)]) {
+    if (!/\.tsx?$/.test(file)) continue
+    for (const match of read(file).matchAll(/import "\.[./]*([a-z0-9-]+\.css)"/g)) app.add(match[1])
+  }
+  const preview = new Set([...read("controls-preview.ts").matchAll(/import "\.\/([a-z0-9-]+\.css)"/g)].map((m) => m[1]))
+  assert.deepEqual([...app].filter((s) => !preview.has(s)), [], "the preview is missing a stylesheet the app loads")
+  assert.deepEqual([...preview].filter((s) => !app.has(s)), [], "the preview loads a stylesheet the app does not")
+})
+
+test("the preview never reaches a production bundle", () => {
+  // Vite's default build input is index.html alone, so a second root HTML is served in dev and left
+  // out of the bundle, the APK and the desktop app. An added `rollupOptions.input` would change that.
+  assert.doesNotMatch(read("../vite.config.ts"), /rollupOptions|input:/)
+  assert.match(read("../controls-preview.html"), /src="\/src\/controls-preview\.ts"/)
 })
