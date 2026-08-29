@@ -9,7 +9,6 @@ import {
 } from "./native-session-discovery"
 import { handoffNativeSession } from "./native-session-handoff"
 import {
-  loadPendingNativeSessionPrompt,
   nativeSessionTransferredContext,
   sendNativeSessionPrompt
 } from "./native-session-prompt"
@@ -195,7 +194,6 @@ export async function continueNativeSessionOnRoute({
   // Prompt idempotency belongs entirely to sendNativeSessionPrompt. Its own pending record decides
   // whether an ambiguous prompt must be retried exactly or whether its normal recovery horizon has
   // elapsed. This route record deliberately owns only the already-created target identity.
-  loadPendingNativeSessionPrompt(routedTarget)
 
   const transferredContext = nativeSessionTransferredContext(routedTarget)
   if (pending.link && transferredContext) {
