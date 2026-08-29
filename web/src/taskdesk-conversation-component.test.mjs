@@ -48,14 +48,14 @@ test("conversation mutations reconcile ambiguous outcomes instead of blindly res
 })
 
 
-test("an early assistant envelope owns the getting-started row instead of duplicating it", () => {
-  assert.match(controller, /currentTurnHasAssistantBubble/)
-  assert.match(controller, /liveTurnID = \(working \|\| replySettling\).*currentTurnHasAssistantBubble/)
-  assert.match(controller, /sending=\{preparingReply && !currentTurnHasAssistantBubble\}/)
-  assert.match(controller, /activityPending=\{Boolean\(activity && preparingReply\)\}/)
-  assert.match(controller, /bui-typing/)
-  assert.match(controller, /activityPending \? <span className="bui-typing"/)
-  assert.match(controller, /activityPending \? null : <time>/)
+test("an early empty assistant envelope stays behind the shared getting-started indicator", () => {
+  assert.match(controller, /assistantMessageHasSignal/)
+  assert.match(controller, /const presentedTimeline = useMemo/)
+  assert.match(controller, /message\.info\.role === "assistant"[\s\S]*!assistantMessageHasSignal\(message\)/)
+  assert.match(controller, /sending=\{preparingReply\}/)
+  assert.match(controller, /liveTurnID = \(working \|\| replySettling\)[\s\S]*currentTurnHasAssistantSignal/)
+  assert.match(component, /className="uw-message uw-message-agent uw-message-pending"/)
+  assert.match(component, /className="bui-typing"/)
 })
 
 
