@@ -78,6 +78,8 @@ let handoffTargetCounter = 0
 let lastHandoffTargetID = null
 let sseOpened = 0
 const sseResponses = new Set()
+let blockNextModelReadFor = null
+let releaseBlockedModelRead = null
 
 function corsHeaders() {
   return {
@@ -214,6 +216,11 @@ function startFakeDaemon() {
       }
       if (request.method === "GET" && rest === "models") {
         modelReads[agentID] += 1
+        if (blockNextModelReadFor === agentID) {
+          blockNextModelReadFor = null
+          await new Promise((resolve) => { releaseBlockedModelRead = resolve })
+          releaseBlockedModelRead = null
+        }
         json(response, 200, {
           models: agent.models,
           stale: false,
@@ -475,9 +482,18 @@ try {
   // A rolling-upgrade daemon may not know /v1/session-links yet and can answer 204. Opening a
   // completely normal Session must stay usable instead of storing undefined and crashing on .find().
   legacyNextLinkList = true
+  blockNextModelReadFor = "pi"
   await openSession(page, TITLE_A, markers.get(SESSION_A))
-  await page.getByRole("textbox", { name: "Message PI" }).waitFor({ state: "visible", timeout: 15_000 })
+  const blockedComposer = page.getByRole("textbox", { name: "Message PI" })
+  await blockedComposer.waitFor({ state: "visible", timeout: 15_000 })
+  await waitFor(() => typeof releaseBlockedModelRead === "function", "blocked PI model catalog request")
+  assert.equal(await blockedComposer.isDisabled(), true, "composer must stay disabled while native models are still loading")
+  assert.equal(await page.getByRole("button", { name: /^Send$/ }).isDisabled(), true, "Send must stay disabled while native models are still loading")
+  assert.equal(await page.locator(".tdw-agent-control select").first().isDisabled(), true, "harness selector must stay disabled while native models are still loading")
+  assert.match(await page.locator(".tdw-conversation-state").innerText(), /Loading models|Waiting for model catalog/, "Session must expose model bootstrap instead of Ready")
+  releaseBlockedModelRead?.()
   await assertCatalog(page, ["pi-coding", "pi-reasoning"], ["omp-fast", "omp-deep"], "A")
+  assert.equal(await blockedComposer.isDisabled(), false, "composer must enable automatically after the verified catalog arrives")
   await chooseModel(page, "pi-coding")
   await assertCatalog(page, ["pi-coding", "pi-reasoning"], ["omp-fast", "omp-deep"], "A after first change")
   await chooseModel(page, "pi-reasoning", "high")
