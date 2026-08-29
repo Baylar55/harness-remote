@@ -489,7 +489,7 @@ function NativeSessionsWorkspace({
   const routeMachines = useMemo<NativeSessionRouteMachine[]>(() => {
     const byMachineID = new Map<string, NativeSessionRouteMachine>()
     for (const runtime of runtimes) {
-      if (runtime.state !== "online" || !runtime.snapshot || runtime.error) continue
+      if (runtime.state !== "online" || !runtime.snapshot) continue
       const machineID = runtime.snapshot.machine.id
       if (byMachineID.has(machineID)) continue
       byMachineID.set(machineID, {
