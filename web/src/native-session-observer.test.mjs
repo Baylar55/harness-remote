@@ -62,4 +62,11 @@ assert.ok(workThread.includes('controller.loadMessagePage'), 'v3 transcript pagi
 assert.ok(workThread.includes('startTaskDeskSessionLiveRefresh'), 'v3 live routing must remain authoritative')
 assert.ok(workThread.includes('buildConversationTimeline'), 'v3 logical timeline must remain authoritative')
 
+assert.ok(workThread.includes('interactionEnabled'), 'native Session controls must have an explicit machine-connectivity gate')
+assert.ok(observer.includes('if (!interactionEnabled) return'), 'model/capability enrichment must pause while the machine reconnects')
+assert.ok(adapter.includes('reconcilePendingPromptFromTranscript'), 'a lost mobile POST response must be reconstructed from the authoritative native transcript')
+assert.ok(adapter.includes('loadPendingNativeSessionPrompt'), 'transcript reconciliation must be scoped to an actual durable ambiguous prompt')
+assert.ok(adapter.includes('markPendingNativeSessionPromptAccepted'), 'transcript-proven delivery must clear the durable request id without resending')
+assert.ok(adapter.includes('nativeMessageID'), 'a reconciled request and the native user envelope must retain one logical turn identity')
+
 console.log('native Session v3-controller tests passed')
