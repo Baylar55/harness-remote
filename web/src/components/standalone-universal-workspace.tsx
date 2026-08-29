@@ -23,7 +23,7 @@ import {
 import { migrateNativeSessionMachineStorage } from "../native-session-machine-id-migration"
 import { nativeSessionTransferredContext } from "../native-session-prompt"
 import type { NativeSessionRouteMachine } from "../native-session-routing"
-import type { MachineSnapshot, ServerConfig, Session } from "../types"
+import type { MachineSnapshot, Session } from "../types"
 import {
   createWorkspaceMachine,
   type WorkspaceMachine
