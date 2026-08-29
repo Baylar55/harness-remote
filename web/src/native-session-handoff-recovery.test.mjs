@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { handoffNativeSession } from "./native-session-handoff.ts"
+import { acknowledgeNativeSessionHandoff, handoffNativeSession } from "./native-session-handoff.ts"
 
 class MemoryStorage {
   constructor(entries = []) { this.map = new Map(entries) }
@@ -76,7 +76,13 @@ try {
   const accepted = await handoffNativeSession(source, "omp", "Source", model)
   assert.equal(accepted.status, "accepted")
   assert.equal(acceptedBody.clientRequestId, oldPending.clientRequestId, "resource creation must reuse its idempotency key even after 24 hours")
-  assert.equal(storage.getItem(storageKey), null, "accepted resource creation may clear the pending key")
+  assert.equal(
+    JSON.parse(storage.getItem(storageKey)).clientRequestId,
+    oldPending.clientRequestId,
+    "accepted creation must retain its key until the caller durably stores the returned target"
+  )
+  acknowledgeNativeSessionHandoff(source)
+  assert.equal(storage.getItem(storageKey), null, "caller acknowledgement may clear the creation key after target persistence")
 
   storage.setItem(storageKey, JSON.stringify(oldPending))
   globalThis.fetch = async () => { throw new Error("lost response") }
@@ -98,6 +104,26 @@ try {
   await assert.rejects(() => handoffNativeSession(source, "omp", "Source", model), /model rejected/)
   assert.equal(storage.getItem(storageKey), null, "a definite 4xx may release the resource-creation key")
 
+  let attemptedWithoutRecoveryStorage = false
+  globalThis.localStorage = {
+    get length() { return 0 },
+    key() { return null },
+    getItem() { return null },
+    setItem() { throw new Error("storage full") },
+    removeItem() {},
+    clear() {}
+  }
+  globalThis.fetch = async () => {
+    attemptedWithoutRecoveryStorage = true
+    throw new Error("network should not be reached")
+  }
+  await assert.rejects(
+    () => handoffNativeSession(source, "omp", "Source", model),
+    /Cannot persist Session handoff recovery state/
+  )
+  assert.equal(attemptedWithoutRecoveryStorage, false, "resource creation must not start without durable recovery state")
+
+  globalThis.localStorage = storage
   let retryBody
   globalThis.fetch = async (_url, options) => {
     retryBody = JSON.parse(options.body)
