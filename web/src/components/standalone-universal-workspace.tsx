@@ -270,9 +270,6 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
     </div>
   )
 }
-function machineConfig(config: ServerConfig): ServerConfig {
-  return { ...config, agentId: undefined }
-}
 
 function projectLabel(directory: string): string {
   const parts = directory.split(/[\\/]/).filter(Boolean)
