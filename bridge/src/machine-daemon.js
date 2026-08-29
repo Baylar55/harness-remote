@@ -545,7 +545,8 @@ export function createMachineDaemonServer({
     commandSession,
     stopSession,
     handoffSession,
-    operationLedger: operations
+    operationLedger: operations,
+    sessionLinkStore: links
   })
   const launchServer = createLaunchServer({ innerServer: claimServer, config, taskRunController: runs })
   const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks, projectCatalog: projects })
