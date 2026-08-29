@@ -552,28 +552,36 @@ export function WorkThreadConversation({
     if (settledPrompt) setPendingPrompt(null)
   }, [settledPrompt])
 
-  useEffect(() => {
-    if (!uncertainDelivery) return
-    const currentTurn = conversation.currentTurn
-    if (
-      !currentTurn?.id
-      || currentTurn.id === uncertainDelivery.priorTurnID
-      || currentTurn.prompt?.trim() !== uncertainDelivery.text
-    ) return
+  const uncertainDeliverySettled = Boolean(
+    uncertainDelivery
+    && conversation.currentTurn?.id
+    && conversation.currentTurn.id !== uncertainDelivery.priorTurnID
+    && conversation.currentTurn.prompt?.trim() === uncertainDelivery.text
+    && timeline.some((message) =>
+      message.info.role === "user"
+      && message.taskdesk?.runId === conversation.currentTurn?.id
+      && message.parts.some((part) => part.type === "text" && part.text?.trim() === uncertainDelivery.text)
+    )
+  )
+  const visibleDraft = uncertainDeliverySettled && draft.trim() === uncertainDelivery?.text ? "" : draft
 
-    // The same mounted Session has now reconstructed the ambiguous request from its native
-    // transcript (or an explicit same-id retry was accepted). Clear only the restored draft that
-    // still belongs to that request; anything the user typed meanwhile stays untouched.
+  useEffect(() => {
+    if (!uncertainDelivery || !uncertainDeliverySettled || !conversation.currentTurn?.id) return
+    const recovered = uncertainDelivery
+
+    // Transcript identity wins over the transport catch. On mobile the native tail may prove
+    // acceptance before fetch surfaces its connection-reset error; deriving visibleDraft above keeps
+    // that late catch from resurrecting an already-delivered prompt in the composer for one render.
     setUncertainDelivery(null)
-    setAwaitingReplyTurnID(currentTurn.id)
+    setAwaitingReplyTurnID(conversation.currentTurn.id)
     setError(null)
     setDraft((current) => {
-      if (current.trim() !== uncertainDelivery.text) return current
+      if (current.trim() !== recovered.text) return current
       persistDraft(draftStorageKey, "")
       return ""
     })
-    setAttachments((current) => current === uncertainDelivery.attachments ? [] : current)
-  }, [uncertainDelivery, conversation.currentTurn?.id, conversation.currentTurn?.prompt, draftStorageKey, persistDraft])
+    setAttachments((current) => current === recovered.attachments ? [] : current)
+  }, [uncertainDelivery, uncertainDeliverySettled, conversation.currentTurn?.id, draftStorageKey, persistDraft])
 
   const currentTurnHasAssistantSignal = useMemo(() => {
     const turnID = conversation.currentTurn?.id
@@ -1066,7 +1074,7 @@ export function WorkThreadConversation({
         hasMore={hasMore}
         loadingOlder={loadingOlder}
         onLoadOlder={loadOlder}
-        draft={draft}
+        draft={visibleDraft}
         onDraftChange={setDraft}
         commands={commands}
         attachments={attachments}
