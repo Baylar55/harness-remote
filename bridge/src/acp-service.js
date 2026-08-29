@@ -401,6 +401,32 @@ export class AcpService {
       ))
   }
 
+  /**
+   * Lightweight overlay for Sessions this bridge already created or claimed.
+   *
+   * The Session-first rail intentionally reads the harness's cheap native index instead of calling
+   * listSessions(), because restoring every historical snapshot just to draw the rail can retain
+   * gigabytes of transcript data. Some ACP adapters, notably PI, do not publish a brand-new Session
+   * in that native index until its first prompt materialises native history. Keep only the small
+   * in-memory metadata for Sessions whose writer this bridge already owns, plus an explicit local
+   * title override when the harness cannot persist that name itself.
+   */
+  ownedSessionIndex(directory) {
+    return [...this.#ownedSessions].flatMap((sessionID) => {
+      const session = this.#sessions.get(sessionID)
+      if (!session || (directory && !sameDirectory(session.cwd, directory))) return []
+      const titleOverride = this.#titles.get(sessionID)
+      return [{
+        session: sessionView(
+          session,
+          this.#isBusy(sessionID) ? "busy" : "idle",
+          titleOverride || session.title
+        ),
+        ...(titleOverride ? { titleOverride } : {})
+      }]
+    })
+  }
+
   async createSession({ directory, title, model }) {
     await this.#acp.start()
     const result = await this.#acp.request("session/new", { cwd: directory, mcpServers: [] })
