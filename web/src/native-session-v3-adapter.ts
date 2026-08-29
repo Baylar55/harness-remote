@@ -15,6 +15,7 @@ import type { MessageEnvelope, ModelSelection, ServerConfig } from "./types"
 
 // Keep the value stable so drafts/local UI identity survive the architecture migration.
 const NATIVE_CONVERSATION_ID_PREFIX = "native-session-v3:"
+const PENDING_TRANSCRIPT_CLOCK_SKEW_MS = 2 * 60 * 1000
 
 type NativeTurnRecord = {
   id: string
@@ -398,6 +399,11 @@ function reconcilePendingPromptFromTranscript(entry: NativeConversationEntry, pa
     if (visiblePrompt(message) !== prompt) continue
     const alreadyClaimed = [...entry.turns.values()].some((turn) => turn.nativeMessageID === message.info.id)
     if (alreadyClaimed) continue
+    // After a remount there are no remembered native ids yet, so an older identical user prompt
+    // must not be mistaken for this ambiguous delivery. Native and mobile clocks can differ a
+    // little; two minutes is deliberately generous without turning historical repeats into proof.
+    const nativeCreated = Number(message.info.time?.created) || 0
+    if (!entry.initialPageCaptured && (!nativeCreated || nativeCreated < pending.createdAt - PENDING_TRANSCRIPT_CLOCK_SKEW_MS)) continue
     userIndex = index
     break
   }
