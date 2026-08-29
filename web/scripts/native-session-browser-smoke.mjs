@@ -50,7 +50,6 @@ let modelCatalogReads
 let promptHttpBodies
 let nativePromptDispatches
 let uncertainDelivered
-let droppedResponseDelivered
 let ledger
 let clock
 let sseResponses
@@ -71,7 +70,6 @@ function resetFakeState() {
   promptHttpBodies = []
   nativePromptDispatches = 0
   uncertainDelivered = false
-  droppedResponseDelivered = false
   ledger = new Map()
   clock = 10_000
   sseResponses = new Set()
@@ -317,15 +315,6 @@ function startFakeDaemon() {
         return
       }
 
-      // Reproduce the mobile failure reported in manual testing: native work is already durable, but
-      // the HTTP socket dies before the client sees an acceptance response. The client must not
-      // dispatch the prompt again merely to make the mounted Session show the answer.
-      if (body.text === DROPPED_RESPONSE_PROMPT && !droppedResponseDelivered) {
-        droppedResponseDelivered = true
-        response.destroy()
-        return
-      }
-
       json(response, 200, { status: "accepted", clientRequestId: requestId })
       return
     }
@@ -536,6 +525,23 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   // without a second Send and without navigation away/back.
   const droppedHttpBefore = promptHttpBodies.length
   const droppedDispatchBefore = nativePromptDispatches
+  let droppedClientResponse = false
+  const droppedRoute = "**/v1/agents/pi/session/*/prompt"
+  await page.route(droppedRoute, async (route) => {
+    const request = route.request()
+    let body
+    try { body = request.postDataJSON() } catch {}
+    if (!droppedClientResponse && body?.text === DROPPED_RESPONSE_PROMPT) {
+      // Forward the POST all the way to the fake daemon so its ledger/transcript are durable, then
+      // discard only the response on the client side. This is deterministic unlike closing the
+      // server socket, which Chromium may transparently replay at the HTTP transport layer.
+      await route.fetch()
+      droppedClientResponse = true
+      await route.abort("connectionreset")
+      return
+    }
+    await route.continue()
+  })
   await sendPrompt(page, DROPPED_RESPONSE_PROMPT)
   await waitFor(() => promptHttpBodies.length >= droppedHttpBefore + 1, "PI dropped-response HTTP attempt")
   assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "lost HTTP response must start with exactly one prompt request")
@@ -549,6 +555,8 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(await page.getByText(DROPPED_RESPONSE_PROMPT, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response prompt")
   assert.equal(await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response reply")
   assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), "", "transcript-proven acceptance must clear the restored uncertain draft")
+  assert.equal(droppedClientResponse, true, "the regression fixture must actually discard the accepted HTTP response")
+  await page.unroute(droppedRoute)
 
   await waitForReady(page)
   const promptsBeforeReload = promptHttpBodies.length
