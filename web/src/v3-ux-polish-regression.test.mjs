@@ -76,7 +76,7 @@ assert.match(nativeObserverCss, /\.hr-control-plane \.hr-native-session-observer
 assert.match(nativeObserverCss, /\.tdw-connection-notice/)
 assert.match(standalone, /MACHINE_RECONNECT_POLL_MS = 1_500/)
 assert.match(standalone, /selectedInteractionEnabled/)
-assert.match(standalone, /runtime\.state !== "online" \|\| !runtime\.snapshot \|\| runtime\.error/)
+assert.match(standalone, /selectedInteractionEnabled[\s\S]*!selectedRuntime\.error/)
 assert.match(standalone, /startupPhase === "sessions"[\s\S]*sf\.loadingSessions/)
 
 // A single mobile timeout must not turn a machine that was already proven online into a false disconnect.
