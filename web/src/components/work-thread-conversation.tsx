@@ -647,7 +647,10 @@ export function WorkThreadConversation({
         ? lastModelForAgent(conversationRef.current, targetAgentID)
         : null
       const priorKey = modelKey(prior)
-      const mayUseCatalogDefault = !deferModelFallback || routeChanged || !conversationHasUserPrompt
+      const latestConversation = conversationRef.current
+      const latestHasUserPrompt = Boolean(latestConversation.initialPrompt?.trim())
+        || conversationTurns(latestConversation).some((turn) => Boolean(turn.prompt?.trim()))
+      const mayUseCatalogDefault = !deferModelFallback || routeChanged || !latestHasUserPrompt
       const fallback = mayUseCatalogDefault
         ? catalog.models.find((model) => model.isDefault) || catalog.models[0]
         : undefined
@@ -665,7 +668,16 @@ export function WorkThreadConversation({
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, targetMachineID, conversation.id, conversation.directory, destinationConfig, modelScopeKey, deferModelFallback, routingSignature, routeChanged, conversationHasUserPrompt])
+  }, [targetAgentID, targetMachineID, conversation.id, conversation.directory, destinationConfig, modelScopeKey, deferModelFallback, routingSignature])
+
+  // Transcript discovery can prove that a Session is not new after the catalog has already returned.
+  // Do not re-read the catalog just for that transition: drop only the untouched provisional default
+  // and leave explicit user choices and verified native model metadata alone.
+  useEffect(() => {
+    if (!deferModelFallback || routeChanged || !conversationHasUserPrompt || currentConversationModelKey) return
+    if (modelSelectionTouchedRef.current) return
+    setTargetModelKey("")
+  }, [deferModelFallback, routeChanged, conversationHasUserPrompt, currentConversationModelKey])
 
   // Only a model verified by the current live catalog is sent explicitly. A null selection is
   // intentional: the controller distinguishes it from an omitted field, which means reuse the
