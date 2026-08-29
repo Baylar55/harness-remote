@@ -133,6 +133,9 @@ assert.equal(last.body.variant, 'high', 'the variant travels beside the model, n
 
 // --- 6. Transcript-proven acceptance clears ambiguous delivery without resending handoff context --
 const handoffTarget = target({
+  key: 'machine:pi:handoff-target',
+  sessionID: 'handoff-target',
+  ref: { machineID: 'machine', agentID: 'pi', sessionID: 'handoff-target', directory: '/repo' },
   history: [{
     ref: { machineID: 'machine', agentID: 'omp', sessionID: 'source', directory: '/repo' },
     title: 'Source',
