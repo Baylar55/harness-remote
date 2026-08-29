@@ -447,7 +447,7 @@ function NativeSessionsWorkspace({
     if (!selected) return ""
     const inMemory = selected.history?.length ? nativeSessionTransferredContext(selected) : ""
     if (inMemory) return inMemory
-    return selectedLinks.find((link) =>
+    return (Array.isArray(selectedLinks) ? selectedLinks : []).find((link) =>
       link.target.machineID === selected.machineID
       && link.target.agentID === selected.agentID
       && link.target.sessionID === selected.sessionID
@@ -482,7 +482,7 @@ function NativeSessionsWorkspace({
     }
     void api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)
       .then(({ links }) => {
-        if (!cancelled) setSelectedLinks(links)
+        if (!cancelled) setSelectedLinks(Array.isArray(links) ? links : [])
       })
       .catch(() => {
         if (!cancelled) {
@@ -496,7 +496,7 @@ function NativeSessionsWorkspace({
   async function openLinkedSession(ref: NativeSessionRef) {
     setLineageError(null)
     const runtime = runtimes.find((candidate) => candidate.snapshot?.machine.id === ref.machineID)
-    const agent = runtime?.snapshot?.agents.find((candidate) => candidate.id === ref.agentID)
+    const agent = runtime?.snapshot?.agents?.find((candidate) => candidate.id === ref.agentID)
     if (!runtime || !agent) {
       setLineageError("The linked machine or harness is currently offline.")
       return
@@ -683,7 +683,7 @@ function NativeSessionsWorkspace({
                       {selectedLinks.map((link) => {
                         const destination = linkedDestination(link)
                         const machine = routeMachines.find((candidate) => candidate.machineID === destination.ref.machineID)
-                        const agent = machine?.agents.find((candidate) => candidate.id === destination.ref.agentID)
+                        const agent = machine?.agents?.find((candidate) => candidate.id === destination.ref.agentID)
                         return (
                           <button
                             type="button"
