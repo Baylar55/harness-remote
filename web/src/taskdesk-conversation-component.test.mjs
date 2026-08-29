@@ -19,7 +19,8 @@ test("shared conversation owns transcript ordering and the composer", () => {
 test("native Sessions consume the shared conversation through the mature controller", () => {
   assert.match(observer, /<WorkThreadConversation/)
   assert.match(controller, /<TaskDeskConversation/)
-  assert.match(controller, /messages=\{visibleTimeline\}/)
+  assert.match(controller, /const presentedTimeline = useMemo/)
+  assert.match(controller, /messages=\{presentedTimeline\}/)
   assert.match(controller, /onLoadOlder=\{loadOlder\}/)
   assert.match(controller, /draft=\{draft\}/)
   assert.match(controller, /onSend=\{send\}/)
