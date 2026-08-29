@@ -105,6 +105,31 @@ function appendTurn(sessionID, prompt, requestId) {
   if (entry) entry.time.updated = base + 1
 }
 
+function appendPendingTurn(sessionID, prompt, requestId) {
+  const base = clock
+  clock += 10
+  transcript(sessionID).push(
+    message(sessionID, `oc-user-${requestId}`, "user", prompt, base),
+    {
+      info: { id: `oc-assistant-${requestId}`, role: "assistant", sessionID, time: { created: base + 1 } },
+      parts: []
+    }
+  )
+  const entry = sessionCatalog.get(sessionID)
+  if (entry) entry.time.updated = base + 1
+}
+
+function finishPendingTurn(sessionID, prompt, requestId) {
+  const current = transcript(sessionID)
+  const assistant = current.find((item) => item.info.id === `oc-assistant-${requestId}`)
+  if (!assistant) return
+  const completed = clock++
+  assistant.info = { ...assistant.info, time: { ...assistant.info.time, completed }, finish: "stop" }
+  assistant.parts = [textPart(`oc-assistant-${requestId}-text`, replyFor(prompt))]
+  const entry = sessionCatalog.get(sessionID)
+  if (entry) entry.time.updated = completed
+}
+
 function emitLiveEvent(sessionID) {
   const frame = `data: ${JSON.stringify({ directory: DIRECTORY, payload: { type: "message.updated", properties: { info: { sessionID } } } })}\n\n`
   for (const response of [...sseResponses]) {
@@ -272,11 +297,20 @@ function startFakeDaemon() {
       if (!ledger.has(ledgerKey)) {
         nativePromptDispatches += 1
         ledger.set(ledgerKey, body)
-        appendTurn(sessionID, body.text, requestId)
+        if (body.text === SUCCESS_PROMPT) appendPendingTurn(sessionID, body.text, requestId)
+        else appendTurn(sessionID, body.text, requestId)
       }
       if (body.text === SUCCESS_PROMPT) {
+        // Accept while the native transcript contains the real assistant envelope but no content yet.
+        // This is the OpenCode transition that used to replace the animated pending row with a
+        // timestamp-only row and make preparation look finished.
+        json(response, 200, { status: "accepted", clientRequestId: requestId })
         emitLiveEvent(sessionID)
-        await new Promise((resolve) => setTimeout(resolve, 500))
+        setTimeout(() => {
+          finishPendingTurn(sessionID, body.text, requestId)
+          emitLiveEvent(sessionID)
+        }, 900)
+        return
       }
       json(response, 200, { status: "accepted", clientRequestId: requestId })
       return
@@ -418,6 +452,11 @@ async function assertExistingContract(browser, viewport, mobile) {
   await sendPrompt(page, SUCCESS_PROMPT)
   await page.evaluate(() => window.dispatchEvent(new Event("pageshow")))
   await waitFor(() => promptHttpBodies.length === httpBefore + 1, "OpenCode success HTTP attempt")
+  const preparing = page.getByRole("status", { name: /OpenCode is getting started/ })
+  await preparing.waitFor({ state: "visible", timeout: 10_000 })
+  assert.equal(await preparing.locator(".bui-typing").count(), 1, "OpenCode preparation must keep the same animated typing dots as the other harnesses")
+  assert.equal(await preparing.locator("time").count(), 0, "OpenCode preparation must not look like a completed timestamped response")
+  assert.equal(await page.getByRole("status", { name: /OpenCode is getting started/ }).count(), 1, "OpenCode must expose exactly one preparation identity row")
   assert.equal(nativePromptDispatches, dispatchBefore + 1, "one OpenCode Send must dispatch one native prompt")
   assert.equal(claimRequests, 0, "OpenCode Send must never cross the ACP claim endpoint")
   assert.equal(promptHttpBodies[httpBefore].sessionID, SESSION_ID, "OpenCode Send must target the existing native Session id")
