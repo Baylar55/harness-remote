@@ -56,6 +56,8 @@ let clock
 let sseResponses
 let liveEventTypes
 let createCount
+let blockNextSessionList
+let releaseBlockedSessionList
 
 function resetFakeState() {
   sessionCatalog = new Map([[SESSION_ID, {
@@ -77,6 +79,8 @@ function resetFakeState() {
   sseResponses = new Set()
   liveEventTypes = []
   createCount = 0
+  blockNextSessionList = false
+  releaseBlockedSessionList = null
 }
 
 function emitLiveEvent(type, sessionID = SESSION_ID) {
@@ -229,6 +233,11 @@ function startFakeDaemon() {
     }
 
     if (request.method === "GET" && url.pathname === "/v1/agents/pi/experimental/session") {
+      if (blockNextSessionList) {
+        blockNextSessionList = false
+        await new Promise((resolve) => { releaseBlockedSessionList = resolve })
+        releaseBlockedSessionList = null
+      }
       json(response, 200, [...sessionCatalog.values()])
       return
     }
@@ -463,6 +472,35 @@ async function sendPrompt(page, text) {
   throw new Error(`Timed out waiting for v3 Send after filling ${text}`)
 }
 
+async function assertStartupTransitionContract(browser, viewport, mobile) {
+  resetFakeState()
+  blockNextSessionList = true
+  const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  await seed(page)
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
+
+  const deadline = Date.now() + 12_000
+  while (typeof releaseBlockedSessionList !== "function" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.equal(typeof releaseBlockedSessionList, "function", "startup fixture never reached Session discovery")
+
+  const startup = page.locator(".hr-native-workspace-empty.hr-native-startup.connecting")
+  await startup.waitFor({ state: "visible", timeout: 12_000 })
+  assert.match(await startup.innerText(), /Loading.*Session/i, "machine-connected startup must remain in Loading Sessions")
+  assert.equal(await page.locator(".hr-native-workspace-empty.hr-native-startup.offline").count(), 0, "startup must not claim all machines are disconnected while Sessions are still loading")
+  assert.equal(await page.locator(".hr-native-machine-group.offline").count(), 0, "an already-connected machine must not render offline during Session discovery")
+  const newSession = page.getByRole("button", { name: "New Session" })
+  await newSession.waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await newSession.isDisabled(), true, "New Session must remain disabled until Session discovery settles")
+
+  releaseBlockedSessionList?.()
+  await page.getByRole("button", { name: /PI v3-first regression session/ }).waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await newSession.isDisabled(), false, "New Session must enable only after real Session discovery completes")
+  await context.close()
+}
+
 async function assertExistingSessionContract(browser, viewport, mobile) {
   resetFakeState()
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
@@ -674,6 +712,10 @@ try {
   await ready(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
 
+  console.log("native PI v3-first browser smoke: startup transition desktop")
+  await assertStartupTransitionContract(browser, { width: 1366, height: 768 }, false)
+  console.log("native PI v3-first browser smoke: startup transition mobile")
+  await assertStartupTransitionContract(browser, { width: 390, height: 844 }, true)
   console.log("native PI v3-first browser smoke: existing desktop")
   await assertExistingSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: existing mobile")
@@ -682,7 +724,7 @@ try {
   await assertCreateSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: create mobile")
   await assertCreateSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, delayed first-reply settlement, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: startup loading transition, open-without-unlock, lazy claim, delayed first-reply settlement, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
