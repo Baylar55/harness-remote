@@ -54,7 +54,8 @@ assert.ok(workThread.includes('modelSelectionTouchedRef'), 'late native enrichme
 assert.ok(workThread.includes('currentConversationModelKey === previous'), 'the late-model sync must be edge-triggered rather than resetting the picker on every render')
 assert.ok(observer.includes('deferModelFallback'), 'native Sessions must still defer catalog fallback when an existing Session may have native model authority')
 assert.ok(workThread.includes('conversationHasUserPrompt'), 'the shared controller must distinguish a truly empty Session from an existing conversation')
-assert.ok(workThread.includes('mayUseCatalogDefault = !deferModelFallback || routeChanged || !conversationHasUserPrompt'), 'only empty Sessions and fresh handoffs may use a verified catalog default before native model metadata exists')
+assert.ok(workThread.includes('mayUseCatalogDefault = !deferModelFallback || routeChanged || !latestHasUserPrompt'), 'only empty Sessions and fresh handoffs may use a verified catalog default before native model metadata exists')
+assert.equal(workThread.includes('routingSignature, routeChanged, conversationHasUserPrompt'), false, 'first-prompt discovery must not trigger a second catalog read')
 
 assert.ok(workThread.includes('const sendInFlightRef = useRef(false)'), 'v3 send in-flight guard must remain authoritative')
 assert.ok(workThread.includes('controller.loadMessagePage'), 'v3 transcript paging must remain authoritative')
