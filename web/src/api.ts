@@ -341,14 +341,20 @@ export const api = {
     return request<Session>(config, withDirectory("/session", directory), { method: "POST", body: { title, model: toCreateSessionModel(model) } })
   },
 
-  listNativeSessionLinks(config: ServerConfig, identity: NativeSessionIdentityPayload) {
+  async listNativeSessionLinks(config: ServerConfig, identity: NativeSessionIdentityPayload) {
     const params = new URLSearchParams({
       machineID: identity.machineID,
       agentID: identity.agentID,
       sessionID: identity.sessionID,
       directory: identity.directory
     })
-    return request<{ links: NativeSessionLinkRecord[] }>(config, `/v1/session-links?${params.toString()}`)
+    const response = await request<unknown>(config, `/v1/session-links?${params.toString()}`)
+    // Rolling upgrades must never make opening an otherwise valid native Session fatal. Older
+    // daemons may answer this unknown machine-level route with 204 (normalized to true on Android)
+    // or with another legacy payload. Treat "no verified links array" as "no lineage support yet".
+    if (!response || typeof response !== "object") return { links: [] as NativeSessionLinkRecord[] }
+    const links = (response as { links?: unknown }).links
+    return { links: Array.isArray(links) ? links as NativeSessionLinkRecord[] : [] }
   },
 
   registerNativeSessionLink(config: ServerConfig, link: NativeSessionLinkRecord) {
