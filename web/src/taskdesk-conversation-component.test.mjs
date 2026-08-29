@@ -62,3 +62,12 @@ test("machine reconnect pauses mutations and resumes reconciliation in place", (
   assert.match(controller, /if \(!wasEnabled && interactionEnabled\) \{[\s\S]*void reconcile\(\)/)
   assert.match(controller, /onConnectionIssueRef\.current\?\.\(\)/)
 })
+
+
+test("transcript-proven ambiguous delivery settles the restored draft without a duplicate Send", () => {
+  assert.match(controller, /uncertainDelivery/)
+  assert.match(controller, /currentTurn\.id === uncertainDelivery\.priorTurnID/)
+  assert.match(controller, /currentTurn\.prompt\?\.trim\(\) !== uncertainDelivery\.text/)
+  assert.match(controller, /current\.trim\(\) !== uncertainDelivery\.text/)
+  assert.match(controller, /setUncertainDelivery\(null\)/)
+})
