@@ -177,7 +177,6 @@ assert.ok(workThread.includes('modelGeneration.current += 1') && workThread.incl
 assert.equal(standalone.includes('<NativeSessionHandoffControl'), false, 'the separate Continue with another harness button must not remain in the Session header')
 assert.ok(standalone.includes('openLinkedSession') && standalone.includes('selectedTransferredContext'), 'source and target Sessions must expose navigable lineage and transferred context after reopen')
 assert.ok(standalone.includes('transferredContext || ""'), 'reopened target Sessions must recover transferred context from durable lineage metadata')
-assert.ok(standalone.includes('api.listNativeSessionLinks(machineConfig(selected.config), selected.ref)'), 'lineage reads must use the machine endpoint rather than an agent-scoped native Session config')
 assert.ok(standalone.includes('api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)'), 'lineage reads must use the machine endpoint rather than an agent-scoped Session config')
 assert.ok(home.includes('snapshot.machine.id'), 'native Session identity must use the daemon machine id rather than the local saved-profile id')
 assert.ok(standalone.includes('migrateNativeSessionMachineStorage(machine.id, snapshot.machine.id)'), 'canonical machine identity must migrate legacy native Session browser state before use')
