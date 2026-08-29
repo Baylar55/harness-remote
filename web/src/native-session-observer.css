@@ -29,7 +29,7 @@
 .hr-native-session-observer .tdw-agent-control.routed {
   width: min(760px, 100%);
   display: grid;
-  grid-template-columns: minmax(130px, .8fr) minmax(130px, .8fr) minmax(200px, 1.4fr);
+  grid-template-columns: minmax(150px, .8fr) minmax(220px, 1.4fr);
   gap: 8px;
 }
 
@@ -80,6 +80,7 @@
     display: flex !important;
     align-items: center !important;
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     gap: 8px !important;
   }
 
@@ -96,22 +97,16 @@
   }
 
   .hr-native-session-observer .tdw-agent-control.routed {
+    min-width: 0 !important;
     width: 100% !important;
+    flex: 1 1 100% !important;
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) !important;
     gap: 6px !important;
   }
 
   .hr-native-session-observer .tdw-agent-control.routed > label:first-child {
     display: flex !important;
-  }
-
-  .hr-native-session-observer .tdw-agent-control.routed .tdw-model-control {
-    grid-column: 1 / -1;
-  }
-
-  .hr-native-session-observer .tdw-agent-control.routed ~ .tdw-conversation-state {
-    display: none !important;
   }
 
   .hr-native-session-observer .tdw-model-control,
@@ -122,11 +117,11 @@
   }
 
   .hr-control-plane .hr-native-session-observer .tdw-conversation-state {
-    max-width: 46%;
+    max-width: 100%;
     min-height: 32px;
     display: inline-flex !important;
     overflow: hidden;
-    margin-left: 0;
+    margin-left: auto;
     white-space: nowrap;
   }
 
