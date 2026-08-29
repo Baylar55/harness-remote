@@ -108,6 +108,15 @@ function isTransportFailure(reason: unknown): boolean {
   return /cannot reach|timed out|network|connection|failed to fetch/i.test(message)
 }
 
+function assistantMessageHasSignal(message: WorkThreadMessage): boolean {
+  if (message.info.role !== "assistant") return false
+  return message.parts.some((part) => {
+    if (part.type === "tool") return true
+    if (part.type === "reasoning") return Boolean(part.text?.trim() || part.time?.start)
+    return part.type === "text" && Boolean(part.text?.trim())
+  })
+}
+
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
   return value === "opencode" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
     ? value
@@ -262,12 +271,10 @@ function ConversationStatePill({
 
 const WorkThreadBubble = memo(function WorkThreadBubble({
   message,
-  activity,
-  activityPending = false
+  activity
 }: {
   message: WorkThreadMessage
   activity?: string
-  activityPending?: boolean
 }) {
   const meta = message.taskdesk
   if (message.info.role === CONVERSATION_EVENT_ROLE) {
@@ -290,11 +297,8 @@ const WorkThreadBubble = memo(function WorkThreadBubble({
             line the reply will carry when it is finished, reading "<agent> is working" while it is
             not. A separate status row under this one would be a second name for the same turn. */}
         <header>
-          <strong className={activity ? "uw-message-working" : undefined} {...(activity ? { role: "status", "aria-live": "polite" as const } : {})}>
-            {activity || label}
-            {activityPending ? <span className="bui-typing" aria-hidden="true"><i /><i /><i /></span> : null}
-          </strong>
-          {activityPending ? null : <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>}
+          <strong className={activity ? "uw-message-working" : undefined} {...(activity ? { role: "status", "aria-live": "polite" as const } : {})}>{activity || label}</strong>
+          <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>
         </header>
         <TaskDeskMessageContent message={message} />
       </div>
@@ -570,22 +574,9 @@ export function WorkThreadConversation({
   const currentTurnHasAssistantSignal = useMemo(() => {
     const turnID = conversation.currentTurn?.id
     if (!turnID) return false
-    return timeline.some((message) => message.info.role === "assistant"
-      && message.taskdesk?.runId === turnID
-      && message.parts.some((part) => {
-        if (part.type === "tool") return true
-        if (part.type === "reasoning") return Boolean(part.text?.trim() || part.time?.start)
-        return part.type === "text" && Boolean(part.text?.trim())
-      }))
-  }, [timeline, conversation.currentTurn?.id])
-  // OpenCode can publish the real assistant envelope before that envelope has text/reasoning/tool
-  // content. Once that bubble exists it must own the "getting started" line itself; rendering the
-  // generic pending bubble as well produces two adjacent OpenCode identity rows for one reply.
-  const currentTurnHasAssistantBubble = useMemo(() => {
-    const turnID = conversation.currentTurn?.id
-    return Boolean(turnID && timeline.some((message) =>
-      message.info.role === "assistant" && message.taskdesk?.runId === turnID
-    ))
+    return timeline.some((message) =>
+      message.taskdesk?.runId === turnID && assistantMessageHasSignal(message)
+    )
   }, [timeline, conversation.currentTurn?.id])
 
   const replySettling = Boolean(
@@ -960,9 +951,21 @@ export function WorkThreadConversation({
   // The pending bubble is the reply that is coming, so it wears the identity of the agent that is
   // about to answer rather than the one that answered last.
   const pendingAgentBackend = (sending ? destinationAgents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
-  // Only the turn that is actually running carries the live status row, and only once its bubble is
-  // on screen - before that the pending bubble is showing the very same row.
-  const liveTurnID = (working || replySettling) && !hasAttention && currentTurnHasAssistantBubble ? conversation.currentTurn?.id : undefined
+  // Preparation is rendered by the exact same generic pending bubble for every harness. OpenCode can
+  // publish an empty assistant envelope early, but that transport detail must not replace the shared
+  // waiting UX. The real assistant bubble takes over only once it contains reasoning/text/tool activity.
+  const liveTurnID = (working || replySettling) && !hasAttention && currentTurnHasAssistantSignal
+    ? conversation.currentTurn?.id
+    : undefined
+  const presentedTimeline = useMemo(() => {
+    const turnID = conversation.currentTurn?.id
+    if (!preparingReply || !turnID) return visibleTimeline
+    return visibleTimeline.filter((message) =>
+      !(message.info.role === "assistant"
+        && message.taskdesk?.runId === turnID
+        && !assistantMessageHasSignal(message))
+    )
+  }, [visibleTimeline, preparingReply, conversation.currentTurn?.id])
 
   const waitingLabel = hasAttention
     ? "Waiting for your input"
@@ -1048,7 +1051,7 @@ export function WorkThreadConversation({
       {error ? <div className="tdw-chat-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError(null)}>×</button></div> : null}
 
       <TaskDeskConversation
-        messages={visibleTimeline}
+        messages={presentedTimeline}
         agentLabel={pendingAgentLabel}
         agentBackend={pendingAgentBackend}
         loading={loading}
@@ -1067,7 +1070,7 @@ export function WorkThreadConversation({
         onAttachmentsChange={setAttachments}
         onAttachmentError={setError}
         onSend={send}
-        sending={preparingReply && !currentTurnHasAssistantBubble}
+        sending={preparingReply}
         sendDisabled={!interactionEnabled || working || replySettling || hasAttention || routeBlockedByAttachments || modelBootstrapBlocked}
         composerDisabled={!interactionEnabled || modelBootstrapBlocked}
         onStop={working && interactionEnabled ? stop : undefined}
@@ -1090,7 +1093,6 @@ export function WorkThreadConversation({
               key={message.info.id}
               message={message as WorkThreadMessage}
               activity={activity}
-              activityPending={Boolean(activity && preparingReply)}
             />
           )
         }}
