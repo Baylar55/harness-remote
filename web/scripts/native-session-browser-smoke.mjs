@@ -15,6 +15,8 @@ const SUCCESS_REPLY = "PI-SINGLE-FINAL-REPLY"
 const ERROR_PROMPT = "PI-ERROR-PROMPT"
 const LOST_PROMPT = "PI-LOST-HTTP-PROMPT"
 const LOST_REPLY = "PI-LOST-HTTP-REPLY"
+const DROPPED_RESPONSE_PROMPT = "PI-DROPPED-HTTP-RESPONSE-PROMPT"
+const DROPPED_RESPONSE_REPLY = "PI-DROPPED-HTTP-RESPONSE-REPLY"
 const CREATE_TITLE = "PI created from Harness Remote"
 const CREATE_PROMPT = "PI-CREATED-FIRST-PROMPT"
 const CREATE_REPLY = "PI-CREATED-FIRST-REPLY"
@@ -48,6 +50,7 @@ let modelCatalogReads
 let promptHttpBodies
 let nativePromptDispatches
 let uncertainDelivered
+let droppedResponseDelivered
 let ledger
 let clock
 let sseResponses
@@ -68,6 +71,7 @@ function resetFakeState() {
   promptHttpBodies = []
   nativePromptDispatches = 0
   uncertainDelivered = false
+  droppedResponseDelivered = false
   ledger = new Map()
   clock = 10_000
   sseResponses = new Set()
@@ -295,6 +299,7 @@ function startFakeDaemon() {
         ledger.set(ledgerKey, body)
         if (body.text === ERROR_PROMPT) appendErrorTurn(sessionID, body.text, requestId)
         else if (body.text === LOST_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, LOST_REPLY)
+        else if (body.text === DROPPED_RESPONSE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, DROPPED_RESPONSE_REPLY)
         else if (body.text === CREATE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, CREATE_REPLY)
         else if (body.text === REOPEN_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, REOPEN_REPLY)
         else appendSuccessTurn(sessionID, body.text, requestId, SUCCESS_REPLY)
@@ -309,6 +314,15 @@ function startFakeDaemon() {
       if (body.text === LOST_PROMPT && !uncertainDelivered) {
         uncertainDelivered = true
         json(response, 202, { status: "uncertain", clientRequestId: requestId })
+        return
+      }
+
+      // Reproduce the mobile failure reported in manual testing: native work is already durable, but
+      // the HTTP socket dies before the client sees an acceptance response. The client must not
+      // dispatch the prompt again merely to make the mounted Session show the answer.
+      if (body.text === DROPPED_RESPONSE_PROMPT && !droppedResponseDelivered) {
+        droppedResponseDelivered = true
+        response.destroy()
         return
       }
 
@@ -515,6 +529,28 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(await page.getByText(LOST_REPLY, { exact: true }).count(), 1, "reconciliation duplicated the assistant reply")
 
   await waitForReady(page)
+
+  // A transport-level lost response is different from the explicit 202 uncertainty above. The
+  // daemon has already executed and persisted the turn, while the browser sees a network error.
+  // Reconnect must recover that exact turn from the native transcript in the same mounted Session,
+  // without a second Send and without navigation away/back.
+  const droppedHttpBefore = promptHttpBodies.length
+  const droppedDispatchBefore = nativePromptDispatches
+  await sendPrompt(page, DROPPED_RESPONSE_PROMPT)
+  await waitFor(() => promptHttpBodies.length >= droppedHttpBefore + 1, "PI dropped-response HTTP attempt")
+  assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "lost HTTP response must start with exactly one prompt request")
+  assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "lost HTTP response must still correspond to one native dispatch")
+  await page.getByText(/Cannot reach/).waitFor({ state: "visible", timeout: 10_000 })
+  await page.getByText(/Reconnecting to machine/).waitFor({ state: "visible", timeout: 10_000 })
+  await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  await waitForReady(page)
+  assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "automatic reconnect must never resend a prompt whose transcript proves delivery")
+  assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "automatic reconnect must not duplicate native work")
+  assert.equal(await page.getByText(DROPPED_RESPONSE_PROMPT, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response prompt")
+  assert.equal(await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response reply")
+  assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), "", "transcript-proven acceptance must clear the restored uncertain draft")
+
+  await waitForReady(page)
   const promptsBeforeReload = promptHttpBodies.length
   const dispatchesBeforeReload = nativePromptDispatches
   await page.reload({ waitUntil: "networkidle" })
@@ -523,7 +559,7 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "refresh must never emit a native PI prompt")
   assert.equal(nativePromptDispatches, dispatchesBeforeReload, "refresh must never dispatch native PI work")
   await page.getByText(LOST_REPLY, { exact: true }).waitFor({ state: "visible" })
-  for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, LOST_PROMPT, LOST_REPLY]) {
+  for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, LOST_PROMPT, LOST_REPLY, DROPPED_RESPONSE_PROMPT, DROPPED_RESPONSE_REPLY]) {
     assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `refresh duplicated transcript marker: ${marker}`)
   }
   assert.equal(await page.getByRole("button", { name: "Continue with another agent" }).count(), 0, "cross-agent handoff UI must stay disabled during single-Session parity work")
@@ -594,7 +630,7 @@ try {
   await assertCreateSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: create mobile")
   await assertCreateSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, create, ordered activity, error recovery, uncertain-delivery reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, create, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
