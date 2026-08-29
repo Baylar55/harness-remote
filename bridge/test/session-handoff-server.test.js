@@ -125,6 +125,103 @@ test("handoff semantic changes conflict under the same durable request id", asyn
   }
 }))
 
+test("target id checkpoint survives post-create enrichment failure and retry reuses that Session", async () => withLedger(async (operationLedger) => {
+  let creates = 0
+  const expected = {
+    target: {
+      machineID: "machine-1",
+      agentID: "pi",
+      sessionID: "pi-native-checkpointed",
+      directory: "/repo"
+    }
+  }
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    operationLedger,
+    async handoffSession(_sourceAgentID, _sourceSessionID, _input, { checkpoint }) {
+      creates += 1
+      // This is the critical daemon ordering: session/new already returned X, so X becomes durable
+      // before any model/title/link work that may still fail.
+      await checkpoint(expected)
+      throw new Error("post-create link enrichment failed")
+    }
+  })
+  const port = await listen(server)
+  try {
+    const first = await post(port)
+    const retry = await post(port)
+    assert.equal(first.status, 200)
+    assert.equal(retry.status, 200)
+    assert.deepEqual((await first.json()).result, expected)
+    assert.deepEqual((await retry.json()).result, expected)
+    assert.equal(creates, 1, "post-create failure must never create a second target Session")
+  } finally {
+    await close(server)
+  }
+}))
+
+test("uncertain session creation retry can reconcile one unique target without replaying create", async () => withLedger(async (operationLedger) => {
+  let creates = 0
+  let reconciles = 0
+  const recovery = {
+    kind: "native-session-handoff-create",
+    targetAgentID: "pi",
+    directory: "/repo",
+    beforeSessionIDs: ["pi-old-1"]
+  }
+  const expected = {
+    target: {
+      machineID: "machine-1",
+      agentID: "pi",
+      sessionID: "pi-native-recovered",
+      directory: "/repo"
+    }
+  }
+  const server = createSessionClaimServer({
+    innerServer: new EventEmitter(),
+    config: { username: "", password: "", corsOrigins: [] },
+    operationLedger,
+    async handoffSession() {
+      creates += 1
+      const error = new Error("session/new response was lost")
+      error.ambiguous = true
+      error.recovery = recovery
+      throw error
+    },
+    async reconcileHandoff(sourceAgentID, sourceSessionID, input, storedRecovery) {
+      reconciles += 1
+      assert.equal(sourceAgentID, "codex")
+      assert.equal(sourceSessionID, "source-native-1")
+      assert.equal(input.targetAgentID, "pi")
+      assert.deepEqual(storedRecovery, recovery)
+      return expected
+    }
+  })
+  const port = await listen(server)
+  try {
+    const first = await post(port)
+    assert.equal(first.status, 202)
+    assert.equal((await first.json()).status, "uncertain")
+
+    const retry = await post(port)
+    assert.equal(retry.status, 200)
+    const retryBody = await retry.json()
+    assert.equal(retryBody.status, "accepted")
+    assert.deepEqual(retryBody.result, expected)
+    assert.equal(creates, 1)
+    assert.equal(reconciles, 1)
+
+    const stableRetry = await post(port)
+    assert.equal(stableRetry.status, 200)
+    assert.deepEqual((await stableRetry.json()).result, expected)
+    assert.equal(creates, 1)
+    assert.equal(reconciles, 1, "accepted reconciliation must become the durable ledger answer")
+  } finally {
+    await close(server)
+  }
+}))
+
 test("ambiguous target creation is never automatically replayed", async () => withLedger(async (operationLedger) => {
   let creates = 0
   const server = createSessionClaimServer({
