@@ -25,6 +25,7 @@ type PendingNativeSessionHandoff = {
 }
 
 const STORAGE_PREFIX = "harness-remote.native-session-handoff.v1"
+const PENDING_HANDOFF_TTL_MS = 10 * 60 * 1000
 
 function storageKey(source: NativeSessionSurfaceTarget): string {
   return `${STORAGE_PREFIX}:${encodeURIComponent(source.machineID)}:${encodeURIComponent(source.agentID)}:${encodeURIComponent(source.sessionID)}`
@@ -120,7 +121,9 @@ export async function handoffNativeSession(
   const normalizedTitle = title?.trim() || undefined
   const normalizedModel = normalizeModel(model)
 
-  const existing = loadPending(source)
+  const stored = loadPending(source)
+  const existing = stored && Date.now() - stored.createdAt <= PENDING_HANDOFF_TTL_MS ? stored : null
+  if (stored && !existing) clearPending(source)
   if (existing && (
     existing.targetAgentID !== target
     || (existing.title || "") !== (normalizedTitle || "")
