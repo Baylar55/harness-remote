@@ -32,8 +32,6 @@ export type NativeSessionRouteContinueInput = {
 
 type PendingRouteContinue = {
   agentID: string
-  prompt: string
-  model: ModelSelection | null
   createdAt: number
   target: NativeSessionRef
   link?: NativeSessionLinkRecord
@@ -47,14 +45,6 @@ function transactionKey(source: NativeSessionSurfaceTarget): string {
 
 function machineConfig(config: ServerConfig): ServerConfig {
   return { ...config, agentId: undefined }
-}
-
-function sameModel(left?: ModelSelection | null, right?: ModelSelection | null): boolean {
-  if (!left && !right) return true
-  if (!left || !right) return false
-  return left.providerID === right.providerID
-    && left.modelID === right.modelID
-    && (left.variant || "") === (right.variant || "")
 }
 
 export function clearPendingNativeSessionRoute(source: NativeSessionSurfaceTarget) {
@@ -73,15 +63,12 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingRouteContinue |
       || !parsed.target.sessionID
       || !parsed.target.directory
       || typeof parsed.agentID !== "string"
-      || typeof parsed.prompt !== "string"
     ) {
       clearPendingNativeSessionRoute(source)
       return null
     }
     return {
       agentID: parsed.agentID,
-      prompt: parsed.prompt,
-      model: parsed.model && parsed.model.providerID && parsed.model.modelID ? parsed.model : null,
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now(),
       target: parsed.target,
       link: parsed.link
@@ -142,8 +129,8 @@ function targetRecord(source: NativeSessionSurfaceTarget, ref: NativeSessionRef,
  * - before the target Session is known, handoffNativeSession owns a durable idempotency key and
  *   never expires it client-side;
  * - after the target Session is known, this route record keeps that exact target until its first
- *   prompt is accepted. A definite prompt rejection may change prompt/model on retry, but it may not
- *   forget the target and create another native Session.
+ *   prompt is accepted. Prompt/model retry semantics remain exclusively in native-session-prompt;
+ *   this record never forgets the target and therefore cannot create another native Session.
  *
  * This means an ambiguous delivery can remain conservative, but it can never turn into duplicate
  * resource creation merely because time passed or a first prompt was refused.
@@ -185,8 +172,6 @@ export async function continueNativeSessionOnRoute({
     }
     pending = {
       agentID: targetAgent.id,
-      prompt: normalizedPrompt,
-      model,
       createdAt: Date.now(),
       target: result.result.target,
       link: result.result.link as NativeSessionLinkRecord | undefined
@@ -207,21 +192,10 @@ export async function continueNativeSessionOnRoute({
     requiresExplicitClaim: false
   }
 
-  const unresolvedPrompt = loadPendingNativeSessionPrompt(routedTarget)
-  if (unresolvedPrompt && (
-    unresolvedPrompt.text !== normalizedPrompt
-    || !sameModel(unresolvedPrompt.model, model)
-  )) {
-    throw new Error("The linked target Session has an unresolved first prompt. Retry that exact prompt and model before changing the request.")
-  }
-
-  if (!unresolvedPrompt && (
-    pending.prompt !== normalizedPrompt
-    || !sameModel(pending.model, model)
-  )) {
-    pending = { ...pending, prompt: normalizedPrompt, model }
-    persistPending(source, pending)
-  }
+  // Prompt idempotency belongs entirely to sendNativeSessionPrompt. Its own pending record decides
+  // whether an ambiguous prompt must be retried exactly or whether its normal recovery horizon has
+  // elapsed. This route record deliberately owns only the already-created target identity.
+  loadPendingNativeSessionPrompt(routedTarget)
 
   const transferredContext = nativeSessionTransferredContext(routedTarget)
   if (pending.link && transferredContext) {
