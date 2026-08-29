@@ -70,12 +70,21 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHa
   }
 }
 
-function persistPending(source: NativeSessionSurfaceTarget, pending: PendingNativeSessionHandoff) {
-  try { localStorage.setItem(storageKey(source), JSON.stringify(pending)) } catch {}
+function persistPending(source: NativeSessionSurfaceTarget, pending: PendingNativeSessionHandoff): boolean {
+  try {
+    localStorage.setItem(storageKey(source), JSON.stringify(pending))
+    return true
+  } catch {
+    return false
+  }
 }
 
 function clearPending(source: NativeSessionSurfaceTarget) {
   try { localStorage.removeItem(storageKey(source)) } catch {}
+}
+
+export function acknowledgeNativeSessionHandoff(source: NativeSessionSurfaceTarget) {
+  clearPending(source)
 }
 
 function errorDetail(body: unknown, status: number): string {
@@ -106,7 +115,8 @@ function responseData(value: unknown): { status: NativeSessionHandoffStatus; res
  * The client request id is persisted before network I/O. A lost response or WebView reload therefore
  * retries the same semantic handoff instead of creating another target Session. Unlike prompt
  * delivery, resource creation has no blind TTL: forgetting this id after an ambiguous response can
- * create a second real native Session. Only a definite 4xx refusal or an accepted result releases it.
+ * create a second real native Session. A definite 4xx refusal releases it immediately; an accepted
+ * result is acknowledged only by the caller after the returned target ref has itself been persisted.
  */
 export async function handoffNativeSession(
   source: NativeSessionSurfaceTarget,
@@ -135,7 +145,9 @@ export async function handoffNativeSession(
     model: normalizedModel,
     createdAt: Date.now()
   }
-  persistPending(source, pending)
+  if (!persistPending(source, pending)) {
+    throw new Error("Cannot persist Session handoff recovery state. No target Session was created.")
+  }
 
   const path = `/session/${encodeURIComponent(source.sessionID)}/handoff`
   const body = {
@@ -204,6 +216,5 @@ export async function handoffNativeSession(
     }
   }
 
-  if (parsed.status === "accepted" && parsed.result) clearPending(source)
   return { ...parsed, clientRequestId: pending.clientRequestId }
 }
