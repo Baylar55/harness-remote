@@ -70,4 +70,7 @@ assert.ok(adapter.includes('markPendingNativeSessionPromptAccepted'), 'transcrip
 assert.ok(adapter.includes('nativeMessageID'), 'a reconciled request and the native user envelope must retain one logical turn identity')
 assert.ok(adapter.includes('PENDING_TRANSCRIPT_CLOCK_SKEW_MS'), 'a remounted Session must not mistake an old repeated prompt for a newly ambiguous delivery')
 
+assert.ok(workThread.includes('REPLY_SETTLE_RECONCILE_MS'), 'an accepted native turn must stay on fast reconciliation until its assistant reply is visible')
+assert.ok(workThread.includes('modelBootstrapBlocked'), 'models-capable native Sessions must not become writable before catalog bootstrap settles')
+
 console.log('native Session v3-controller tests passed')
