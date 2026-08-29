@@ -47,7 +47,7 @@ export class SessionLinkStore {
       for (const link of parsed.links) {
         if (!link || typeof link !== "object" || link.type !== "handoff") continue
         if (!validIdentity(link.source) || !validIdentity(link.target)) continue
-        if (link.source.machineID !== this.#machineID || link.target.machineID !== this.#machineID) continue
+        if (link.source.machineID !== this.#machineID && link.target.machineID !== this.#machineID) continue
         this.#links.set(linkKey(link.source, link.target), link)
       }
     } catch (error) {
@@ -80,8 +80,8 @@ export class SessionLinkStore {
 
   async addHandoff({ source, target, createdAt = new Date().toISOString() }) {
     if (!validIdentity(source) || !validIdentity(target)) throw new Error("Native Session link requires complete source and target identities")
-    if (source.machineID !== this.#machineID || target.machineID !== this.#machineID) {
-      throw new Error("Native Session links must stay inside their machine scope")
+    if (source.machineID !== this.#machineID && target.machineID !== this.#machineID) {
+      throw new Error("Native Session links must include this machine")
     }
     return this.#serial(async () => {
       await this.#load()
@@ -102,6 +102,7 @@ export class SessionLinkStore {
 
   async listFor(identity) {
     if (!validIdentity(identity)) throw new Error("A complete native Session identity is required")
+    if (identity.machineID !== this.#machineID) throw new Error("Native Session link lookup must target this machine")
     await this.#load()
     const key = identityKey(identity)
     return [...this.#links.values()]

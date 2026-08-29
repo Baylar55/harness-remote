@@ -3,6 +3,8 @@ import http from "node:http"
 import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
 
 const SESSION_OPERATION_ROUTE = /^\/v1\/agents\/([^/]+)\/session\/([^/]+)\/(claim|prompt|command|stop|handoff)$/
+const REMOTE_HANDOFF_ROUTE = "/v1/session-handoffs"
+const SESSION_LINK_ROUTE = "/v1/session-links"
 const ATTACHMENT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
@@ -136,6 +138,40 @@ function handoffInput(body) {
   return { ...common, targetAgentID, model, variant, title }
 }
 
+function nativeSessionIdentityInput(value, label = "Native Session") {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw requestError(`${label} identity is required`)
+  const machineID = typeof value.machineID === "string" ? value.machineID.trim() : ""
+  const agentID = typeof value.agentID === "string" ? value.agentID.trim() : ""
+  const sessionID = typeof value.sessionID === "string" ? value.sessionID.trim() : ""
+  const directory = typeof value.directory === "string" ? value.directory : ""
+  if (![machineID, agentID, sessionID, directory].every(Boolean)) throw requestError(`${label} identity is incomplete`)
+  return { machineID, agentID, sessionID, directory }
+}
+
+function remoteHandoffInput(body) {
+  const common = operationIdentityInput(body)
+  const source = nativeSessionIdentityInput(body?.source, "Source Session")
+  const targetAgentID = typeof body.targetAgentID === "string" ? body.targetAgentID.trim() : ""
+  const model = promptModelInput(body)
+  const variant = typeof body.variant === "string" && body.variant.trim() ? body.variant.trim() : undefined
+  const title = typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : undefined
+  if (!common.directory) throw requestError("Remote Session handoff requires a target project directory")
+  if (!targetAgentID || targetAgentID.length > 200) throw requestError("Remote Session handoff requires a targetAgentID")
+  return { ...common, source, targetAgentID, model, variant, title }
+}
+
+function sessionLinkInput(body) {
+  const candidate = body?.link ?? body
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) || candidate.type !== "handoff") {
+    throw requestError("Only native Session handoff links are supported")
+  }
+  return {
+    source: nativeSessionIdentityInput(candidate.source, "Source Session"),
+    target: nativeSessionIdentityInput(candidate.target, "Target Session"),
+    createdAt: typeof candidate.createdAt === "string" && candidate.createdAt ? candidate.createdAt : new Date().toISOString()
+  }
+}
+
 function mutationSignature(operation, payload) {
   return createHash("sha256").update(JSON.stringify({ operation, ...payload })).digest("hex")
 }
@@ -178,18 +214,84 @@ export function createSessionClaimServer({
   commandSession,
   stopSession,
   handoffSession,
+  remoteHandoffSession,
   operationLedger,
+  sessionLinkStore,
   createServer = http.createServer
 }) {
   return createServer(async (request, response) => {
     const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     const match = SESSION_OPERATION_ROUTE.exec(requestURL.pathname)
-    if (!match) {
+    const remoteHandoffRoute = requestURL.pathname === REMOTE_HANDOFF_ROUTE
+    const sessionLinkRoute = requestURL.pathname === SESSION_LINK_ROUTE
+    if (!match && !remoteHandoffRoute && !sessionLinkRoute) {
       innerServer.emit("request", request, response)
       return
     }
 
     if (!authenticateDaemonRequest(request, response, config)) return
+
+    if (sessionLinkRoute) {
+      try {
+        if (!sessionLinkStore) throw new Error("Native Session link store is not configured")
+        if (request.method === "GET") {
+          const identity = nativeSessionIdentityInput({
+            machineID: requestURL.searchParams.get("machineID") || "",
+            agentID: requestURL.searchParams.get("agentID") || "",
+            sessionID: requestURL.searchParams.get("sessionID") || "",
+            directory: requestURL.searchParams.get("directory") || ""
+          })
+          writeJSON(response, 200, { links: await sessionLinkStore.listFor(identity) })
+          return
+        }
+        if (request.method === "POST") {
+          const input = sessionLinkInput(await readJSONBody(request))
+          writeJSON(response, 200, { link: await sessionLinkStore.addHandoff(input) })
+          return
+        }
+        response.writeHead(405, { Allow: "GET, POST, OPTIONS" })
+        response.end()
+      } catch (error) {
+        writeJSON(response, statusForSessionError(error), { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (remoteHandoffRoute) {
+      try {
+        if (request.method !== "POST") {
+          response.writeHead(405, { Allow: "POST, OPTIONS" })
+          response.end()
+          return
+        }
+        if (!operationLedger) throw new Error("Native Session operation ledger is not configured")
+        if (typeof remoteHandoffSession !== "function") throw new Error("Remote native Session handoff transport is not configured")
+        const input = remoteHandoffInput(await readJSONBody(request))
+        const identity = {
+          agentID: input.targetAgentID,
+          sessionID: `remote-handoff:${input.source.machineID}:${input.source.agentID}:${input.source.sessionID}`,
+          clientRequestId: input.clientRequestId
+        }
+        const signaturePayload = {
+          source: input.source,
+          directory: input.directory,
+          targetAgentID: input.targetAgentID,
+          model: input.model,
+          variant: input.variant ?? null,
+          title: input.title ?? null
+        }
+        const result = await runIdempotentMutation({
+          operationLedger,
+          identity,
+          signature: mutationSignature("remote-handoff", signaturePayload),
+          dispatch: () => remoteHandoffSession(input.source, input)
+        })
+        writeJSON(response, result.status === "accepted" ? 200 : 202, result)
+      } catch (error) {
+        writeJSON(response, statusForSessionError(error), { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
     if (request.method !== "POST") {
       response.writeHead(405, { Allow: "POST, OPTIONS" })
       response.end()
