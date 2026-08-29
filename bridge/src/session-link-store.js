@@ -18,11 +18,19 @@ function validIdentity(value) {
     && [value.machineID, value.agentID, value.sessionID, value.directory].every((entry) => typeof entry === "string" && entry)
 }
 
+function normalizedTransferredContext(value) {
+  if (value === undefined || value === null || value === "") return undefined
+  if (typeof value !== "string") throw new Error("Transferred Session context must be text")
+  if (value.length > 12_000) throw new Error("Transferred Session context is too large")
+  return value
+}
+
 /**
  * Small machine-scoped graph of explicit relationships between real harness-owned Sessions.
  *
- * A link does not own either Session, carry transcript data or create a second conversation identity.
- * It only records that Harness Remote deliberately handed work from one native Session to another.
+ * A link does not own either Session or create a second conversation identity. It records that
+ * Harness Remote deliberately handed work from one native Session to another and may retain the
+ * exact bounded context string used for that handoff so the UI can explain it after reopening.
  */
 export class SessionLinkStore {
   #machineID
@@ -47,7 +55,7 @@ export class SessionLinkStore {
       for (const link of parsed.links) {
         if (!link || typeof link !== "object" || link.type !== "handoff") continue
         if (!validIdentity(link.source) || !validIdentity(link.target)) continue
-        if (link.source.machineID !== this.#machineID && link.target.machineID !== this.#machineID) continue
+        if (link.source.machineID !== this.#machineID || link.target.machineID !== this.#machineID) continue
         this.#links.set(linkKey(link.source, link.target), link)
       }
     } catch (error) {
@@ -78,21 +86,29 @@ export class SessionLinkStore {
     return next
   }
 
-  async addHandoff({ source, target, createdAt = new Date().toISOString() }) {
+  async addHandoff({ source, target, createdAt = new Date().toISOString(), transferredContext }) {
     if (!validIdentity(source) || !validIdentity(target)) throw new Error("Native Session link requires complete source and target identities")
-    if (source.machineID !== this.#machineID && target.machineID !== this.#machineID) {
-      throw new Error("Native Session links must include this machine")
+    if (source.machineID !== this.#machineID || target.machineID !== this.#machineID) {
+      throw new Error("Native Session links must stay inside their machine scope")
     }
+    const context = normalizedTransferredContext(transferredContext)
     return this.#serial(async () => {
       await this.#load()
       const key = linkKey(source, target)
       const existing = this.#links.get(key)
-      if (existing) return structuredClone(existing)
+      if (existing) {
+        if (!context || existing.transferredContext === context) return structuredClone(existing)
+        const updated = { ...existing, transferredContext: context }
+        this.#links.set(key, updated)
+        await this.#persist()
+        return structuredClone(updated)
+      }
       const link = {
         type: "handoff",
         source: structuredClone(source),
         target: structuredClone(target),
-        createdAt
+        createdAt,
+        ...(context ? { transferredContext: context } : {})
       }
       this.#links.set(key, link)
       await this.#persist()
