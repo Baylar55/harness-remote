@@ -50,6 +50,7 @@ let modelCatalogReads
 let promptHttpBodies
 let nativePromptDispatches
 let uncertainDelivered
+let machineProbeFailuresRemaining
 let ledger
 let clock
 let sseResponses
@@ -70,6 +71,7 @@ function resetFakeState() {
   promptHttpBodies = []
   nativePromptDispatches = 0
   uncertainDelivered = false
+  machineProbeFailuresRemaining = 0
   ledger = new Map()
   clock = 10_000
   sseResponses = new Set()
@@ -198,6 +200,11 @@ function startFakeDaemon() {
     const url = new URL(request.url || "/", `http://127.0.0.1:${DAEMON_PORT}`)
 
     if (request.method === "GET" && url.pathname === "/v1/machine") {
+      if (machineProbeFailuresRemaining > 0) {
+        machineProbeFailuresRemaining -= 1
+        json(response, 500, { error: "synthetic mobile reconnect probe failure" })
+        return
+      }
       json(response, 200, {
         machine: { id: "machine-pi-v3-first", name: "PI v3-first Test", createdAt: new Date().toISOString() },
         agents: [{
@@ -526,6 +533,9 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   const droppedHttpBefore = promptHttpBodies.length
   const droppedDispatchBefore = nativePromptDispatches
   let droppedClientResponse = false
+  // discoverMachineWithRetry performs two fresh probes per refresh. Fail exactly that first cycle so
+  // the cached Session remains visible but non-writable long enough to assert the reconnect gate.
+  machineProbeFailuresRemaining = 2
   const droppedRoute = "**/v1/agents/pi/session/*/prompt"
   await page.route(droppedRoute, async (route) => {
     const request = route.request()
@@ -548,6 +558,8 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "lost HTTP response must still correspond to one native dispatch")
   await page.getByText(/Cannot reach/).waitFor({ state: "visible", timeout: 10_000 })
   await page.getByText(/Reconnecting to machine/).waitFor({ state: "visible", timeout: 10_000 })
+  assert.equal(await page.getByRole("button", { name: "Send" }).isDisabled(), true, "Send must stay disabled while the machine probe is failing")
+  assert.equal(await page.locator(".tdw-model-trigger").isDisabled(), true, "model selection must stay disabled while the machine reconnects")
   await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
   await waitForReady(page)
   assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "automatic reconnect must never resend a prompt whose transcript proves delivery")
