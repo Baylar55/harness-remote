@@ -31,7 +31,7 @@ test("machine Session-link endpoint mirrors and reads lineage", async () => {
   const link = {
     type: "handoff",
     source: { machineID: "machine-1", agentID: "codex", sessionID: "source-1", directory: "/repo" },
-    target: { machineID: "machine-2", agentID: "pi", sessionID: "target-2", directory: "/repo" },
+    target: { machineID: "machine-1", agentID: "pi", sessionID: "target-2", directory: "/repo" },
     createdAt: "2026-08-29T07:00:00.000Z"
   }
   try {
@@ -45,6 +45,16 @@ test("machine Session-link endpoint mirrors and reads lineage", async () => {
     const listed = await fetch(`http://127.0.0.1:${port}/v1/session-links?${params}`)
     assert.equal(listed.status, 200)
     assert.deepEqual((await listed.json()).links, [link])
+
+    const enriched = { ...link, transferredContext: "User: persisted transfer" }
+    const update = await fetch(`http://127.0.0.1:${port}/v1/session-links`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ link: enriched })
+    })
+    assert.equal(update.status, 200)
+    const listedAgain = await fetch(`http://127.0.0.1:${port}/v1/session-links?${params}`)
+    assert.deepEqual((await listedAgain.json()).links, [enriched])
   } finally {
     await new Promise((resolve) => server.close(resolve))
     await rm(stateDirectory, { recursive: true, force: true })
