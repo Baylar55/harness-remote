@@ -193,6 +193,9 @@ assert.equal(standalone.includes('<NativeSessionHandoffControl'), false, 'the se
 assert.ok(standalone.includes('openLinkedSession') && standalone.includes('selectedTransferredContext'), 'source and target Sessions must expose navigable lineage and transferred context after reopen')
 assert.ok(standalone.includes('transferredContext || ""'), 'reopened target Sessions must recover transferred context from durable lineage metadata')
 assert.ok(standalone.includes('api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)'), 'lineage reads must use the machine endpoint rather than an agent-scoped Session config')
+assert.ok(api.includes('const response = await request<unknown>(config, \`/v1/session-links?\${params.toString()}\`)'), 'lineage API must inspect runtime response shape instead of trusting TypeScript')
+assert.ok(api.includes('Array.isArray(links) ? links as NativeSessionLinkRecord[] : []'), 'legacy or malformed lineage responses must normalize to an empty link list')
+assert.ok(standalone.includes('setSelectedLinks(Array.isArray(links) ? links : [])'), 'workspace must never store an undefined lineage collection')
 assert.ok(home.includes('snapshot.machine.id'), 'native Session identity must use the daemon machine id rather than the local saved-profile id')
 assert.ok(standalone.includes('migrateNativeSessionMachineStorage(machine.id, snapshot.machine.id)'), 'canonical machine identity must migrate legacy native Session browser state before use')
 for (const prefix of ['native-session-prompt.v1', 'native-session-command.v1', 'native-session-handoff.v1', 'native-session-handoff-context.v1', 'taskdesk.draft.native-session-v3']) {
