@@ -42,14 +42,13 @@ test("handoff link survives restart and remains only metadata between real nativ
   }
 })
 
-test("Session links cannot cross the machine scope", async () => {
+test("Session links may cross machines when this machine is one endpoint", async () => {
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-session-links-scope-"))
   try {
     const store = new SessionLinkStore({ machineID: "machine-1", stateDirectory })
-    await assert.rejects(
-      () => store.addHandoff({ source, target: { ...target, machineID: "machine-2" } }),
-      /machine scope/
-    )
+    const link = await store.addHandoff({ source, target: { ...target, machineID: "machine-2" } })
+    assert.equal(link.target.machineID, "machine-2")
+    assert.deepEqual(await store.listFor(source), [link])
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }
