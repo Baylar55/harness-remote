@@ -92,8 +92,8 @@ type Props = {
   /** Explicit I/O boundary. Native Sessions provide a Session-scoped controller. */
   controller?: ConversationController
   /**
-   * Optional Session-first destination chooser. Changing these controls is intentionally inert:
-   * only Send invokes onContinue, which may create a linked native Session on another harness/machine.
+   * Optional Session-first destination chooser. Changing the harness is intentionally inert:
+   * only Send invokes onContinue, which may create a linked native Session on this same machine.
    */
   routing?: {
     currentMachineID: string
@@ -362,10 +362,7 @@ export function WorkThreadConversation({
   const selectedRouteMachine = routing?.machines.find((machine) => machine.machineID === targetMachineID)
   const destinationAgents = routing ? (selectedRouteMachine?.agents || []) : agents
   const destinationConfig = selectedRouteMachine?.config || baseConfig
-  const routeChanged = Boolean(routing && (
-    targetMachineID !== routing.currentMachineID || targetAgentID !== currentAgentID
-  ))
-  const routeMachineLabel = selectedRouteMachine?.label || targetMachineID
+  const routeChanged = Boolean(routing && targetAgentID !== currentAgentID)
   const routeAgentLabel = agentLabel(destinationAgents, targetAgentID)
   const routingSignature = routing
     ? routing.machines.map((machine) => `${machine.machineID}:${machine.agents.map((agent) => agent.id).join(",")}`).join("|")
@@ -750,7 +747,7 @@ export function WorkThreadConversation({
         ? { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant }
         : null
       if (routeChanged && routing) {
-        if (slashCommand) throw new Error("Slash commands stay scoped to the open Session. Send a normal prompt to continue on another harness or machine.")
+        if (slashCommand) throw new Error("Slash commands stay scoped to the open Session. Send a normal prompt to continue on another harness.")
         await routing.onContinue({
           machineID: targetMachineID,
           agentID: targetAgentID,
@@ -811,7 +808,8 @@ export function WorkThreadConversation({
 
   const currentLabel = agentLabel(agents, currentAgentID)
   const attachmentAgent = destinationAgents.find((agent) => agent.id === targetAgentID)
-  const attachmentsSupported = attachmentAgent?.capabilities?.attachments === true
+  const attachmentsSupported = !routeChanged && attachmentAgent?.capabilities?.attachments === true
+  const routeBlockedByAttachments = routeChanged && attachments.length > 0
   const hasAttention = questions.length > 0 || permissions.length > 0
   const preparingReply = sending || (working && !currentRunHasAssistantSignal)
   const pendingAgentLabel = sending ? agentLabel(destinationAgents, targetAgentID) : currentLabel
@@ -849,28 +847,14 @@ export function WorkThreadConversation({
     <div className="tdw-work-thread-conversation">
       <div className="tdw-conversation-toolbar">
         <div className={`tdw-agent-control${routing ? " routed" : ""}`}>
-          {routing ? (
-            <label className="tdw-route-machine-control">
-              <span>Machine</span>
-              <select value={targetMachineID} disabled={working || sending} onChange={(event) => {
-                const machineID = event.target.value
-                const machine = routing.machines.find((candidate) => candidate.machineID === machineID)
-                const preferred = machine?.agents.some((candidate) => candidate.id === currentAgentID)
-                  ? currentAgentID
-                  : machine?.agents[0]?.id || ""
-                modelSelectionTouchedRef.current = false
-                setTargetMachineID(machineID)
-                setTargetAgentID(preferred)
-                setTargetModelKey("")
-              }}>
-                {routing.machines.map((machine) => <option value={machine.machineID} key={machine.machineID}>{machine.label}</option>)}
-              </select>
-            </label>
-          ) : null}
           <label>
             <span>{routing ? "Harness" : "Continue with"}</span>
             <select value={targetAgentID} disabled={working || sending || destinationAgents.length === 0} onChange={(event) => {
+              modelGeneration.current += 1
               modelSelectionTouchedRef.current = false
+              setModels([])
+              setModelError(null)
+              setTargetModelKey("")
               setTargetAgentID(event.target.value)
             }}>
               {destinationAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label}</option>)}
@@ -891,10 +875,12 @@ export function WorkThreadConversation({
       {routeChanged ? (
         <div className={`tdw-route-preview${sending ? " active" : ""}`} role="status" aria-live="polite">
           <span>{sending ? "Creating linked Session…" : "Next message will continue in"}</span>
-          <strong>{routeMachineLabel} <i aria-hidden="true">/</i> {routeAgentLabel}</strong>
-          <small>{sending
-            ? "The new native Session is linked before this prompt is delivered."
-            : "The current Session stays here. Nothing changes until you send."}</small>
+          <strong>{routeAgentLabel}</strong>
+          <small>{routeBlockedByAttachments
+            ? "Remove the attached images before continuing on another harness."
+            : sending
+              ? "A new native Session on this machine is linked before this prompt is delivered."
+              : "The current Session stays here. Nothing changes until you send."}</small>
         </div>
       ) : null}
 
@@ -929,7 +915,7 @@ export function WorkThreadConversation({
         onAttachmentError={setError}
         onSend={send}
         sending={preparingReply}
-        sendDisabled={working || hasAttention}
+        sendDisabled={working || hasAttention || routeBlockedByAttachments}
         onStop={working ? stop : undefined}
         stopping={stopping}
         placeholder={`Message ${agentLabel(destinationAgents, targetAgentID)}…`}
