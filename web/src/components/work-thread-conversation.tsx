@@ -84,11 +84,20 @@ type Props = {
   deferModelFallback?: boolean
   /** Explicit I/O boundary. Native Sessions provide a Session-scoped controller. */
   controller: ConversationController
+  /** Backend mutations/catalog reads pause while the owning machine is reconnecting. */
+  interactionEnabled?: boolean
+  /** Surface a Session-scoped transport failure to the machine runtime immediately. */
+  onConnectionIssue?: () => void
   routing?: {
     currentMachineID: string
     machines: NativeSessionRouteMachine[]
     onContinue: (input: NativeSessionRouteContinueInput) => Promise<void>
   }
+}
+
+function isTransportFailure(reason: unknown): boolean {
+  const message = reason instanceof Error ? reason.message : String(reason)
+  return /cannot reach|timed out|network|connection|failed to fetch/i.test(message)
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
@@ -284,6 +293,8 @@ export function WorkThreadConversation({
   modelScope,
   deferModelFallback = false,
   controller,
+  interactionEnabled = true,
+  onConnectionIssue,
   routing
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${conversation.id}`
@@ -328,11 +339,14 @@ export function WorkThreadConversation({
   const agentsRef = useRef(agents)
   const onConversationUpdateRef = useRef(onConversationUpdate)
   const onAttentionChangeRef = useRef(onAttentionChange)
+  const onConnectionIssueRef = useRef(onConnectionIssue)
+  const priorInteractionEnabledRef = useRef(interactionEnabled)
 
   conversationRef.current = conversation
   agentsRef.current = agents
   onConversationUpdateRef.current = onConversationUpdate
   onAttentionChangeRef.current = onAttentionChange
+  onConnectionIssueRef.current = onConnectionIssue
 
   const targets = useMemo(() => sessionTargets(conversation, baseConfig, agents), [conversation.id, conversation.turns, conversation.currentTurn, conversation.directory, baseConfig, agents])
   const targetSignature = targets.map((target) => `${target.sessionID}:${target.agentID}:${target.directory}`).join("|")
@@ -436,13 +450,18 @@ export function WorkThreadConversation({
       setLoading(false)
       return
     }
+    if (!interactionEnabled) {
+      if (Object.keys(feedsRef.current).length === 0) setLoading(true)
+      return
+    }
     if (Object.keys(feedsRef.current).length === 0) setLoading(true)
     void Promise.all(missing.map(async (target) => {
       try {
         const feed = await loadInitialTarget(target)
         if (cancelled || loadGeneration.current !== generation) return
         setFeeds((current) => current[target.sessionID] ? current : { ...current, [target.sessionID]: feed })
-      } catch {
+      } catch (reason) {
+        if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
         // Durable Session history can outlive a live transport. Persisted turn outcome/error is the safe
         // fallback; do not invent a transcript association when the Session cannot be read.
       }
@@ -450,7 +469,7 @@ export function WorkThreadConversation({
       if (!cancelled && loadGeneration.current === generation) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [targetSignature, loadInitialTarget])
+  }, [targetSignature, loadInitialTarget, interactionEnabled])
 
   const messagesBySession = useMemo(
     () => Object.fromEntries(Object.entries(feeds).map(([session, feed]) => [session, feed.messages])),
@@ -545,7 +564,8 @@ export function WorkThreadConversation({
           if (messages === existing.messages && hasMore === existing.hasMore && before === existing.before) return current
           return { ...current, [session]: { ...existing, messages, hasMore, before } }
         })
-      } catch {
+      } catch (reason) {
+        if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
         // Live refresh is opportunistic. The existing transcript remains visible and the slow
         // reconciliation path will retry without clearing or replacing it.
       }
@@ -592,7 +612,8 @@ export function WorkThreadConversation({
         conversationRef.current = next
       }
       await Promise.all([refreshCurrentTail(next), refreshAttention(next)])
-    } catch {
+    } catch (reason) {
+      if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
       // A transient reconcile failure must never clear a valid conversation.
     } finally {
       reconcileInFlightRef.current = false
@@ -600,13 +621,23 @@ export function WorkThreadConversation({
   }, [baseConfig, controller, refreshCurrentTail, refreshAttention])
 
   useEffect(() => {
+    if (!interactionEnabled) return
     void refreshAttention()
     const delay = working ? ACTIVE_RECONCILE_MS : IDLE_RECONCILE_MS
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void reconcile()
     }, delay)
     return () => window.clearInterval(timer)
-  }, [working, reconcile, refreshAttention])
+  }, [working, reconcile, refreshAttention, interactionEnabled])
+
+  useEffect(() => {
+    const wasEnabled = priorInteractionEnabledRef.current
+    priorInteractionEnabledRef.current = interactionEnabled
+    if (!wasEnabled && interactionEnabled) {
+      setError(null)
+      void reconcile()
+    }
+  }, [interactionEnabled, reconcile])
 
   useEffect(() => {
     if (!currentTarget) return
@@ -630,6 +661,11 @@ export function WorkThreadConversation({
 
   useEffect(() => {
     const current = ++modelGeneration.current
+    if (!interactionEnabled) {
+      setModelsLoading(false)
+      setModelError(null)
+      return
+    }
     if (!targetAgentID || (routing && !selectedRouteMachine)) {
       setModels([])
       setTargetModelKey("")
@@ -664,11 +700,12 @@ export function WorkThreadConversation({
         setModels([])
         setTargetModelKey("")
         setModelError(reason instanceof Error ? reason.message : String(reason))
+        if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
       }
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, targetMachineID, conversation.id, conversation.directory, destinationConfig, modelScopeKey, deferModelFallback, routingSignature])
+  }, [targetAgentID, targetMachineID, conversation.id, conversation.directory, destinationConfig, modelScopeKey, deferModelFallback, routingSignature, interactionEnabled])
 
   // Transcript discovery can prove that a Session is not new after the catalog has already returned.
   // Do not re-read the catalog just for that transition: drop only the untouched provisional default
@@ -686,7 +723,7 @@ export function WorkThreadConversation({
   const selectedModel = models.find((model) => modelKey(model) === targetModelKey)
 
   async function loadOlder() {
-    if (loadingOlder) return
+    if (loadingOlder || !interactionEnabled) return
     const olderTargets = targets.filter((target) => feedsRef.current[target.sessionID]?.hasMore && feedsRef.current[target.sessionID]?.before)
     if (olderTargets.length === 0) return
     setLoadingOlder(true)
@@ -722,7 +759,7 @@ export function WorkThreadConversation({
     const slashCommand = slashMatch && matchedCommand
       ? { name: matchedCommand.name, arguments: (slashMatch[2] || "").trim() }
       : undefined
-    if ((!text && !promptAttachments.length) || sending || working || sendInFlightRef.current) return
+    if ((!text && !promptAttachments.length) || sending || working || sendInFlightRef.current || !interactionEnabled) return
     sendInFlightRef.current = true
     setSending(true)
     setError(null)
@@ -767,6 +804,7 @@ export function WorkThreadConversation({
         void refreshAttention(next)
       }
     } catch (reason) {
+      if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
       // The prompt goes back to the composer, so it must also stop standing in for a turn that was
       // never accepted.
       setPendingPrompt(null)
@@ -780,7 +818,7 @@ export function WorkThreadConversation({
   }
 
   async function stop() {
-    if (stopping || !working || stopInFlightRef.current) return
+    if (stopping || !working || stopInFlightRef.current || !interactionEnabled) return
     stopInFlightRef.current = true
     setStopping(true)
     setError(null)
@@ -790,6 +828,7 @@ export function WorkThreadConversation({
       conversationRef.current = next
       await Promise.all([refreshCurrentTail(next), refreshAttention(next)])
     } catch (reason) {
+      if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       stopInFlightRef.current = false
@@ -840,7 +879,7 @@ export function WorkThreadConversation({
         <div className={`tdw-agent-control${routing ? " routed" : ""}`}>
           <label>
             <span>{routing ? "Harness" : "Continue with"}</span>
-            <select value={targetAgentID} disabled={working || sending || destinationAgents.length === 0} onChange={(event) => {
+            <select value={targetAgentID} disabled={!interactionEnabled || working || sending || destinationAgents.length === 0} onChange={(event) => {
               modelGeneration.current += 1
               modelSelectionTouchedRef.current = false
               setModels([])
@@ -856,7 +895,7 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
               modelSelectionTouchedRef.current = true
               setTargetModelKey(value)
-            }} disabled={working || sending || !targetAgentID} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
+            }} disabled={!interactionEnabled || working || sending || !targetAgentID} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
           </label>
         </div>
@@ -872,6 +911,12 @@ export function WorkThreadConversation({
             : sending
               ? "A new native Session on this machine is linked before this prompt is delivered."
               : "The current Session stays here. Nothing changes until you send."}</small>
+        </div>
+      ) : null}
+
+      {!interactionEnabled ? (
+        <div className="tdw-connection-notice" role="status" aria-live="polite">
+          Reconnecting to machine… The Session stays open and controls resume automatically.
         </div>
       ) : null}
 
@@ -906,8 +951,8 @@ export function WorkThreadConversation({
         onAttachmentError={setError}
         onSend={send}
         sending={preparingReply && !currentTurnHasAssistantBubble}
-        sendDisabled={working || hasAttention || routeBlockedByAttachments}
-        onStop={working ? stop : undefined}
+        sendDisabled={!interactionEnabled || working || hasAttention || routeBlockedByAttachments}
+        onStop={working && interactionEnabled ? stop : undefined}
         stopping={stopping}
         placeholder={`Message ${agentLabel(destinationAgents, targetAgentID)}…`}
         emptyText="Start the conversation. You can continue with another coding agent at any time."
