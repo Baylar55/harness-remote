@@ -414,7 +414,9 @@ export function createMachineDaemonServer({
       throw daemonError("session_stop_rejected", message)
     }
   }
-  const createHandoffTarget = async (targetAgentID, { directory, model, variant, title, sourceAgentID }) => {
+  const handoffSession = async (sourceAgentID, sourceSessionID, { targetAgentID, directory, model, variant, title }) => {
+    const sourceEntry = daemon.hostEntry(sourceAgentID)
+    if (!sourceEntry) throw daemonError("unknown_agent", `Unknown source agent: ${sourceAgentID}`)
     const targetEntry = daemon.hostEntry(targetAgentID)
     if (!targetEntry) throw daemonError("unknown_agent", `Unknown target agent: ${targetAgentID}`)
     if (targetEntry.host?.capabilities?.sessions === false || daemon.registry.host(targetAgentID)?.capabilities?.sessions === false) {
@@ -425,7 +427,7 @@ export function createMachineDaemonServer({
     const resolvedModel = requestedModel
       ? await daemon.resolveModel(targetAgentID, requestedModel, { directory })
       : null
-    const targetTitle = title || `Handoff from ${sourceAgentID || "another Session"}`
+    const targetTitle = title || `Handoff from ${sourceAgentID}`
     let targetSession
     let nativeCreated = false
 
@@ -447,6 +449,8 @@ export function createMachineDaemonServer({
         }
         if (!targetSession?.id) throw daemonError("handoff_rejected", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
         nativeCreated = true
+        // createSession already applied the base model, so only the variant is left. Apply it through
+        // the service that owns this Session's configOptions rather than as a raw adapter request.
         const variantToApply = acpModelVariant(resolvedModel)
         if (variantToApply) await service.setModel(targetSession.id, modelWireName(resolvedModel), variantToApply)
       } else {
@@ -493,46 +497,15 @@ export function createMachineDaemonServer({
         if (!targetSession?.id) throw daemonError("handoff_uncertain", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
         nativeCreated = true
       }
-      return targetSession
+
+      const source = { machineID, agentID: sourceAgentID, sessionID: sourceSessionID, directory }
+      const target = { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory }
+      const link = await links.addHandoff({ source, target })
+      return { target, link }
     } catch (error) {
       if (nativeCreated && error && typeof error === "object") error.ambiguous = true
       throw error
     }
-  }
-
-  const persistHandoffLink = async (source, target) => {
-    try {
-      return await links.addHandoff({ source, target })
-    } catch (error) {
-      if (error && typeof error === "object") error.ambiguous = true
-      throw error
-    }
-  }
-
-  const handoffSession = async (sourceAgentID, sourceSessionID, { targetAgentID, directory, model, variant, title }) => {
-    const sourceEntry = daemon.hostEntry(sourceAgentID)
-    if (!sourceEntry) throw daemonError("unknown_agent", `Unknown source agent: ${sourceAgentID}`)
-    const targetSession = await createHandoffTarget(targetAgentID, { directory, model, variant, title, sourceAgentID })
-    const source = { machineID, agentID: sourceAgentID, sessionID: sourceSessionID, directory }
-    const target = { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory }
-    const link = await persistHandoffLink(source, target)
-    return { target, link }
-  }
-
-  const remoteHandoffSession = async (source, { targetAgentID, directory, model, variant, title }) => {
-    if (!source || typeof source !== "object" || !source.machineID || !source.agentID || !source.sessionID || !source.directory) {
-      throw daemonError("handoff_rejected", "Remote handoff requires a complete source native Session identity")
-    }
-    const targetSession = await createHandoffTarget(targetAgentID, {
-      directory,
-      model,
-      variant,
-      title,
-      sourceAgentID: source.agentID
-    })
-    const target = { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory }
-    const link = await persistHandoffLink(source, target)
-    return { target, link }
   }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
@@ -572,9 +545,7 @@ export function createMachineDaemonServer({
     commandSession,
     stopSession,
     handoffSession,
-    remoteHandoffSession,
-    operationLedger: operations,
-    sessionLinkStore: links
+    operationLedger: operations
   })
   const launchServer = createLaunchServer({ innerServer: claimServer, config, taskRunController: runs })
   const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks, projectCatalog: projects })
