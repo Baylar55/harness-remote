@@ -110,6 +110,10 @@ function isTransportFailure(reason: unknown): boolean {
 
 function assistantMessageHasSignal(message: WorkThreadMessage): boolean {
   if (message.info.role !== "assistant") return false
+  // An error-only assistant envelope has no text/reasoning/tool part, but it is still meaningful
+  // output and must remain visible. Only a truly empty neutral envelope is presentation noise while
+  // the shared getting-started indicator owns the wait.
+  if (message.info.error) return true
   return message.parts.some((part) => {
     if (part.type === "tool") return true
     if (part.type === "reasoning") return Boolean(part.text?.trim() || part.time?.start)
