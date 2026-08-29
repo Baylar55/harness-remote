@@ -27,6 +27,10 @@ type Props = {
   onOpenSession?: (target: NativeSessionSurfaceTarget) => void
   onSessionRefresh?: () => void
   onStateChange?: (state: NativeSessionVisualState) => void
+  /** False while the owning machine is still bootstrapping or is in reconnect grace. Reads remain visible. */
+  interactionEnabled?: boolean
+  /** A Session-scoped request discovered a transport outage before the machine poll did. */
+  onConnectionIssue?: () => void
 }
 export type NativeSessionVisualState = "working" | "attention" | "stopped" | "ready"
 
@@ -67,7 +71,15 @@ function targetForInitialRuntime(target: NativeSessionSurfaceTarget): NativeSess
  * Writer acquisition is deferred to the first mutation by native-session-v3-adapter, so the user
  * never has to unlock the transcript with an extra Continue step. Nothing is persisted as a Task or Run.
  */
-export function NativeSessionObserver({ target, routes = [], onOpenSession, onSessionRefresh, onStateChange }: Props) {
+export function NativeSessionObserver({
+  target,
+  routes = [],
+  onOpenSession,
+  onSessionRefresh,
+  onStateChange,
+  interactionEnabled = true,
+  onConnectionIssue
+}: Props) {
   const [conversation, setConversation] = useState<ConversationRuntime | null>(null)
   const [controller, setController] = useState<ConversationController | null>(null)
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
@@ -90,6 +102,7 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
   }, [])
 
   useEffect(() => {
+    if (!interactionEnabled) return
     let disposed = false
     setAttachmentsSupported(false)
     setCommands([])
@@ -113,7 +126,7 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
         }
       })
     return () => { disposed = true }
-  }, [target.key, target.config.host, target.config.port, target.config.agentId])
+  }, [target.key, target.config.host, target.config.port, target.config.agentId, interactionEnabled])
 
   const agent = useMemo<MachineAgentHost>(() => ({
     id: target.agentID,
@@ -142,6 +155,7 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
   }), [routes, target.machineID, target.agentID, agent])
 
   const handleRoutedContinue = useCallback(async (input: NativeSessionRouteContinueInput) => {
+    if (!interactionEnabled) throw new Error("The machine is reconnecting. Continue will be available when the connection is healthy again.")
     const machine = routableRoutes.find((candidate) => candidate.machineID === input.machineID)
     const targetAgent = machine?.agents.find((candidate) => candidate.id === input.agentID)
     if (!machine || !targetAgent) throw new Error("That harness is no longer available on this machine.")
@@ -155,7 +169,7 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
     })
     onSessionRefresh?.()
     onOpenSession?.(next)
-  }, [routableRoutes, target, onSessionRefresh, onOpenSession])
+  }, [routableRoutes, target, onSessionRefresh, onOpenSession, interactionEnabled])
 
   useEffect(() => {
     let disposed = false
@@ -174,19 +188,31 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
     setController(registration.controller)
     handleConversationUpdate(registration.conversation)
 
-    // Recovering the last requested native model is enrichment. It refines the already usable
-    // Session and must never be able to fail it. OpenCode/Codex deliberately started with no model
-    // above so a list-level default cannot block this authoritative per-turn result.
-    void resolveNativeSessionTargetModel(target).then((resolved) => {
-      if (disposed || resolved.model === initialTarget.model) return
-      applyDiscoveredNativeSessionModel(initialTarget, resolved.model)
-    })
-
     return () => {
       disposed = true
       registration?.dispose()
     }
   }, [target.key, handleConversationUpdate])
+
+  useEffect(() => {
+    if (!interactionEnabled) return
+    let disposed = false
+    const initialTarget = targetForInitialRuntime(target)
+    // Recovering the last requested native model is enrichment. It refines the already usable
+    // Session and must never be able to fail it. When a mobile machine is reconnecting this read is
+    // deliberately paused; toggling interactionEnabled back to true resumes it automatically.
+    void resolveNativeSessionTargetModel(target)
+      .then((resolved) => {
+        if (disposed || resolved.model === initialTarget.model) return
+        applyDiscoveredNativeSessionModel(initialTarget, resolved.model)
+      })
+      .catch((reason) => {
+        if (!disposed && /cannot reach|timed out|network|connection/i.test(reason instanceof Error ? reason.message : String(reason))) {
+          onConnectionIssue?.()
+        }
+      })
+    return () => { disposed = true }
+  }, [target.key, interactionEnabled, onConnectionIssue])
 
   if (!conversation || !controller) {
     return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session into the v3 controller...</div>
@@ -205,6 +231,8 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
         onConversationUpdate={handleConversationUpdate}
         onAttentionChange={handleAttentionChange}
         commands={commands}
+        interactionEnabled={interactionEnabled}
+        onConnectionIssue={onConnectionIssue}
         routing={onOpenSession && routableRoutes.length ? {
           currentMachineID: target.machineID,
           machines: routableRoutes,
