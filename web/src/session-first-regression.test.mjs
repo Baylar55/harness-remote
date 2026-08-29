@@ -23,6 +23,7 @@ const handoff = read('./native-session-handoff.ts')
 const routing = read('./native-session-routing.ts')
 const machineMigration = read('./native-session-machine-id-migration.ts')
 const standalone = read('./components/standalone-universal-workspace.tsx')
+const api = read('./api.ts')
 const daemon = read('../../bridge/src/machine-daemon.js')
 const daemonCli = read('../../bridge/src/daemon-cli.js')
 
