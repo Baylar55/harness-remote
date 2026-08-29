@@ -305,7 +305,13 @@ function startFakeDaemon() {
         if (body.text === ERROR_PROMPT) appendErrorTurn(sessionID, body.text, requestId)
         else if (body.text === LOST_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, LOST_REPLY)
         else if (body.text === DROPPED_RESPONSE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, DROPPED_RESPONSE_REPLY)
-        else if (body.text === CREATE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, CREATE_REPLY)
+        else if (body.text === CREATE_PROMPT) {
+          // Codex can report the turn idle before its rollout tail is readable. Reproduce that exact
+          // lifecycle on a freshly-created Session: accept immediately, emit no convenient SSE event,
+          // and make the authoritative transcript appear later. The mounted chat must settle it by
+          // itself instead of requiring navigation away and back.
+          setTimeout(() => appendSuccessTurn(sessionID, body.text, requestId, CREATE_REPLY), 1_800)
+        }
         else if (body.text === REOPEN_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, REOPEN_REPLY)
         else appendSuccessTurn(sessionID, body.text, requestId, SUCCESS_REPLY)
       }
@@ -610,8 +616,10 @@ async function assertCreateSessionContract(browser, viewport, mobile) {
   assert.equal(claimCount, 0, "a newly created PI Session is already owned and must not be claimed again")
 
   const dispatchBefore = nativePromptDispatches
+  const liveEventsBeforeFirstPrompt = liveEventTypes.length
   await sendPrompt(page, CREATE_PROMPT)
   await page.getByText(CREATE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(liveEventTypes.length, liveEventsBeforeFirstPrompt, "fresh Session reply settlement must not depend on receiving a final SSE event")
   assert.equal(claimCount, 0, "the first prompt of a freshly created PI Session must reuse creation ownership")
   assert.equal(nativePromptDispatches, dispatchBefore + 1, "created PI Session first prompt must dispatch exactly once")
   assert.equal(promptHttpBodies.filter((body) => body.sessionID === CREATED_SESSION_ID && body.text === CREATE_PROMPT).length, 1, "created PI Session prompt must target the returned native id exactly once")
@@ -650,7 +658,7 @@ try {
   await assertCreateSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: create mobile")
   await assertCreateSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, create, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, delayed first-reply settlement, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
