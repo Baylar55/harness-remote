@@ -68,7 +68,7 @@ jobs:
           npm run test:native-response
           node src/v3-mobile-regression-fixes.test.mjs
           node src/session-first-regression.test.mjs
-          node scripts/run-vite-test.mjs src/native-session-discovery.test.mjs src/native-session-continuation.test.mjs
+          node scripts/run-vite-test.mjs src/native-session-discovery.test.mjs src/native-session-continuation.test.mjs src/native-session-machine-id-migration.test.mjs
           node scripts/run-vite-test.mjs src/omp-session-multi-turn.test.mjs src/omp-session-model-projection.test.mjs
           node src/native-session-observer.test.mjs
           npm run test:native-session-model-lifecycle
