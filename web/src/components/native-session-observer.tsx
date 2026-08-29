@@ -132,8 +132,8 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
   }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported, commands.length])
 
   const routableRoutes = useMemo<NativeSessionRouteMachine[]>(() => routes.flatMap((machine) => {
+    if (machine.machineID !== target.machineID) return []
     const available = machine.agents.filter((candidate) => canCreateNativeSession(candidate))
-    if (machine.machineID !== target.machineID) return available.length ? [{ ...machine, agents: available }] : []
     const current = available.some((candidate) => candidate.id === target.agentID)
       ? available
       : [agent, ...available.filter((candidate) => candidate.id !== target.agentID)]
@@ -143,7 +143,7 @@ export function NativeSessionObserver({ target, routes = [], onOpenSession, onSe
   const handleRoutedContinue = useCallback(async (input: NativeSessionRouteContinueInput) => {
     const machine = routableRoutes.find((candidate) => candidate.machineID === input.machineID)
     const targetAgent = machine?.agents.find((candidate) => candidate.id === input.agentID)
-    if (!machine || !targetAgent) throw new Error("That machine or harness is no longer available.")
+    if (!machine || !targetAgent) throw new Error("That harness is no longer available on this machine.")
     const next = await continueNativeSessionOnRoute({
       source: target,
       targetMachine: machine,
