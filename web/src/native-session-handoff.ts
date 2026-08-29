@@ -25,7 +25,6 @@ type PendingNativeSessionHandoff = {
 }
 
 const STORAGE_PREFIX = "harness-remote.native-session-handoff.v1"
-const PENDING_HANDOFF_TTL_MS = 10 * 60 * 1000
 
 function storageKey(source: NativeSessionSurfaceTarget): string {
   return `${STORAGE_PREFIX}:${encodeURIComponent(source.machineID)}:${encodeURIComponent(source.agentID)}:${encodeURIComponent(source.sessionID)}`
@@ -105,9 +104,9 @@ function responseData(value: unknown): { status: NativeSessionHandoffStatus; res
  * Create exactly one real native Session on another harness and link it to the source Session.
  *
  * The client request id is persisted before network I/O. A lost response or WebView reload therefore
- * retries the same semantic handoff instead of creating another target Session. While delivery is
- * pending or uncertain, changing the target harness is blocked because doing so would reuse one
- * idempotency key for a different resource-creating mutation.
+ * retries the same semantic handoff instead of creating another target Session. Unlike prompt
+ * delivery, resource creation has no blind TTL: forgetting this id after an ambiguous response can
+ * create a second real native Session. Only a definite 4xx refusal or an accepted result releases it.
  */
 export async function handoffNativeSession(
   source: NativeSessionSurfaceTarget,
@@ -121,9 +120,7 @@ export async function handoffNativeSession(
   const normalizedTitle = title?.trim() || undefined
   const normalizedModel = normalizeModel(model)
 
-  const stored = loadPending(source)
-  const existing = stored && Date.now() - stored.createdAt <= PENDING_HANDOFF_TTL_MS ? stored : null
-  if (stored && !existing) clearPending(source)
+  const existing = loadPending(source)
   if (existing && (
     existing.targetAgentID !== target
     || (existing.title || "") !== (normalizedTitle || "")
