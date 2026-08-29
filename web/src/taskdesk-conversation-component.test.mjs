@@ -51,6 +51,7 @@ test("conversation mutations reconcile ambiguous outcomes instead of blindly res
 
 test("an early empty assistant envelope stays behind the shared getting-started indicator", () => {
   assert.match(controller, /assistantMessageHasSignal/)
+  assert.match(controller, /if \(message\.info\.error\) return true/)
   assert.match(controller, /const presentedTimeline = useMemo/)
   assert.match(controller, /message\.info\.role === "assistant"[\s\S]*!assistantMessageHasSignal\(message\)/)
   assert.match(controller, /sending=\{preparingReply\}/)
