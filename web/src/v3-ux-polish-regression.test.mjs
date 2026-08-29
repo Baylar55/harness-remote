@@ -69,7 +69,7 @@ assert.match(mobileParity, /@media \(pointer: coarse\) and \(max-width: 599px\) 
 assert.match(mobileParity, /@media \(pointer: coarse\) and \(min-width: 600px\) and \(max-height: 640px\)/)
 
 // Native Session chat keeps the mature shared renderer without resurrecting the removed product UI.
-assert.match(chat, /<span>Continue with<\/span>/)
+assert.match(chat, /routing \? "Harness" : "Continue with"/)
 assert.match(chat, /buildWorkThreadTimeline/)
 assert.match(overrides, /tdw-conversation-event::before/)
 assert.match(overrides, /uw-activity-group\.uw-tool-running/)
@@ -77,8 +77,9 @@ assert.match(read("components/taskdesk-message-content.tsx"), /status === "runni
 assert.match(overrides, /prefers-reduced-motion/)
 
 // Model discovery is machine-scoped for native Sessions and must not restart on object identity churn.
-assert.match(chat, /taskClient\.listAgentModels\(baseConfig, targetAgentID, modelScope \?\? \{ workThreadId: task\.id \}\)/)
-assert.match(chat, /\[targetAgentID, task\.id, task\.workspace\.path, baseConfig, modelScopeKey, deferModelFallback\]/)
+assert.match(chat, /const scope = routing \? NATIVE_ROUTE_MODEL_SCOPE/)
+assert.match(chat, /taskClient\.listAgentModels\(destinationConfig, targetAgentID, scope\)/)
+assert.match(chat, /routingSignature/)
 assert.match(chat, /const modelScopeKey = modelScope \?/)
 assert.match(observer, /const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = \{\}/)
 assert.match(observer, /deferModelFallback/)
