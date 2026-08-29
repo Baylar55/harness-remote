@@ -552,7 +552,7 @@ try {
   rejectNextHandoff = true
   await harnessSelect.selectOption("omp")
   assert.equal(await page.getByRole("button", { name: "Attach image" }).count(), 0, "target harness must not accept new attachments during handoff")
-  const blockedComposer = page.getByRole("textbox", { name: "Message OMP" })
+  const blockedComposer = page.getByRole("textbox", { name: "Message PI" })
   await blockedComposer.fill("BLOCKED-BY-ATTACHMENT")
   assert.equal(await page.getByRole("button", { name: /^Send$/ }).isDisabled(), true, "existing attachments must block routed Send")
   await page.getByText("Remove the attached images before continuing on another harness.", { exact: true }).waitFor({ state: "visible" })
@@ -564,7 +564,7 @@ try {
   await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "A routed to OMP")
   await chooseModel(page, "omp-deep")
 
-  const refusedComposer = page.getByRole("textbox", { name: "Message OMP" })
+  const refusedComposer = page.getByRole("textbox", { name: "Message PI" })
   await refusedComposer.fill("HANDOFF-REFUSED")
   const rejectedBefore = rejectedHandoffs.length
   await page.getByRole("button", { name: /^Send$/ }).click()
@@ -577,12 +577,13 @@ try {
   await chooseModel(page, "omp-fast")
   const routedPromptBefore = promptBodies.length
   const handoffCountBefore = handoffLinks.length
-  const routed = await send(page, "OMP", "HANDOFF-SUCCESS")
+  const routed = await send(page, "PI", "HANDOFF-SUCCESS")
   await waitFor(() => handoffLinks.length === handoffCountBefore + 1, "persisted same-machine handoff link")
   await waitFor(() => Boolean(handoffLinks.at(-1)?.transferredContext), "persisted transferred context")
   assert.ok(lastHandoffTargetID, "successful handoff did not create a target Session")
   assert.equal(routed.sessionID, lastHandoffTargetID, "first routed prompt must address the newly created target Session")
   assert.equal(routed.agentID, "omp")
+  await page.getByRole("textbox", { name: "Message OMP" }).waitFor({ state: "visible", timeout: 15_000 })
   assert.deepEqual(routed.model, { providerID: "omp", modelID: "omp-fast" })
   assert.equal(promptBodies.length, routedPromptBefore + 1, "one routed Send must dispatch exactly one target prompt")
   assert.match(routed.text, /TRANSFERRED TASK CONTEXT/)
