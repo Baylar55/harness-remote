@@ -999,7 +999,7 @@ export function WorkThreadConversation({
         <div className={`tdw-agent-control${routing ? " routed" : ""}`}>
           <label>
             <span>{routing ? "Harness" : "Continue with"}</span>
-            <select value={targetAgentID} disabled={!interactionEnabled || working || sending || destinationAgents.length === 0} onChange={(event) => {
+            <select value={targetAgentID} disabled={!interactionEnabled || working || sending || modelBootstrapBlocked || destinationAgents.length === 0} onChange={(event) => {
               modelGeneration.current += 1
               modelSelectionTouchedRef.current = false
               setModels([])
