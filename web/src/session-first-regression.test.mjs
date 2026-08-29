@@ -166,6 +166,8 @@ assert.equal(routing.includes('createRemoteSessionHandoff'), false, 'cross-machi
 assert.ok(routing.includes('targetMachine.machineID !== source.machineID'), 'routed continuation must enforce the same-machine boundary')
 assert.equal(routing.includes('PENDING_ROUTE_TTL_MS'), false, 'a created target Session must never be forgotten by a blind route TTL')
 assert.equal(handoff.includes('PENDING_HANDOFF_TTL_MS'), false, 'ambiguous resource creation must retain its original idempotency key until reconciled')
+assert.ok(handoff.includes('acknowledgeNativeSessionHandoff') && !handoff.includes('if (parsed.status === "accepted" && parsed.result) clearPending(source)'), 'accepted creation must remain recoverable until the caller persists its target')
+assert.ok(routing.includes('if (!persistPending(source, pending))') && routing.includes('acknowledgeNativeSessionHandoff(source)'), 'route target persistence must happen before creation-key acknowledgement')
 assert.equal(routing.includes('loadPendingNativeSessionPrompt'), false, 'route recovery must not shadow the normal prompt pending/TTL semantics')
 assert.ok(routing.includes('pending.agentID !== targetAgent.id'), 'a created target Session must keep routing bound to that exact target harness')
 const routePendingShape = routing.match(/type PendingRouteContinue = \{[\s\S]*?\n\}/)?.[0] || ''
