@@ -46,6 +46,7 @@ test("a model catalog failure keeps history readable but native mutations gated"
   assert.match(chat, /modelBootstrapBlocked/)
   assert.match(chat, /composerDisabled=\{!interactionEnabled \|\| modelBootstrapBlocked\}/)
   assert.match(chat, /unavailableHint=\{modelError \|\| undefined\}/)
-  assert.match(chat, /messages=\{visibleTimeline\}/)
+  assert.match(chat, /const presentedTimeline = useMemo/)
+  assert.match(chat, /messages=\{presentedTimeline\}/)
   assert.equal(existsSync(new URL("./components/conversation-workspace.tsx", import.meta.url)), false)
 })
