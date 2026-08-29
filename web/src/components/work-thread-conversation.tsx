@@ -4,6 +4,7 @@ import type { AttachmentPart } from "../attachments"
 import { createCoalescedTailRefresh } from "../coalesced-tail-refresh"
 import { taskConversationController, type ConversationController } from "../conversation-controller"
 import { mergeLatestMessagePage, prependOlderMessagePage } from "../message-pages"
+import type { NativeSessionRouteContinueInput, NativeSessionRouteMachine } from "../native-session-routing"
 import type { SavedServerProfile } from "../serverProfiles"
 import {
   taskClient,
@@ -44,6 +45,7 @@ const DRAFT_STORAGE_PREFIX = "harness-remote.taskdesk.draft."
 // A synchronous localStorage write per keystroke is a measurable input cost on Android WebView and
 // on long conversations. The draft is still flushed before the conversation is left.
 const DRAFT_PERSIST_DEBOUNCE_MS = 400
+const NATIVE_ROUTE_MODEL_SCOPE: AgentModelScope = {}
 
 const HARNESS_ICON_FILES: Record<string, string> = {
   codex: "codex.svg",
@@ -89,6 +91,15 @@ type Props = {
   deferModelFallback?: boolean
   /** Explicit I/O boundary. Native Sessions provide a Session-scoped controller. */
   controller?: ConversationController
+  /**
+   * Optional Session-first destination chooser. Changing these controls is intentionally inert:
+   * only Send invokes onContinue, which may create a linked native Session on another harness/machine.
+   */
+  routing?: {
+    currentMachineID: string
+    machines: NativeSessionRouteMachine[]
+    onContinue: (input: NativeSessionRouteContinueInput) => Promise<void>
+  }
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
@@ -286,7 +297,8 @@ export function WorkThreadConversation({
   commands = [],
   modelScope,
   deferModelFallback = false,
-  controller = taskConversationController
+  controller = taskConversationController,
+  routing
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${task.id}`
   const initialAgentID = agentForRun(task, task.run)
@@ -307,6 +319,7 @@ export function WorkThreadConversation({
   const [questions, setQuestions] = useState<QuestionRequest[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
   const [targetAgentID, setTargetAgentID] = useState(initialAgentID)
+  const [targetMachineID, setTargetMachineID] = useState(routing?.currentMachineID || "")
   const [models, setModels] = useState<ModelOption[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [targetModelKey, setTargetModelKey] = useState(initialModelKey)
@@ -346,6 +359,17 @@ export function WorkThreadConversation({
   const currentAgent = agents.find((agent) => agent.id === currentAgentID)
   const currentSessionID = runSessionID(task.run)
   const currentTarget = currentSessionID ? targets.find((target) => target.sessionID === currentSessionID) : undefined
+  const selectedRouteMachine = routing?.machines.find((machine) => machine.machineID === targetMachineID)
+  const destinationAgents = routing ? (selectedRouteMachine?.agents || []) : agents
+  const destinationConfig = selectedRouteMachine?.config || baseConfig
+  const routeChanged = Boolean(routing && (
+    targetMachineID !== routing.currentMachineID || targetAgentID !== currentAgentID
+  ))
+  const routeMachineLabel = selectedRouteMachine?.label || targetMachineID
+  const routeAgentLabel = agentLabel(destinationAgents, targetAgentID)
+  const routingSignature = routing
+    ? routing.machines.map((machine) => `${machine.machineID}:${machine.agents.map((agent) => agent.id).join(",")}`).join("|")
+    : ""
   const working = isActive(task)
   // JSON.stringify over every Run is far too expensive to repeat on each keystroke. The Task object
   // identity only changes when the workspace actually reloads or updates the conversation.
@@ -380,6 +404,7 @@ export function WorkThreadConversation({
     setPermissions([])
     setAttachments([])
     setPendingPrompt(null)
+    setTargetMachineID(routing?.currentMachineID || "")
     setTargetAgentID(currentAgentID)
     setTargetModelKey(currentTaskModelKey)
     observedTaskModelKeyRef.current = currentTaskModelKey
@@ -388,7 +413,7 @@ export function WorkThreadConversation({
     stopInFlightRef.current = false
     attentionInFlightRef.current = false
     reconcileInFlightRef.current = false
-  }, [task.id])
+  }, [task.id, routing?.currentMachineID])
 
   useEffect(() => {
     if (currentAgentID !== targetAgentIDRef.current && task.run?.id) {
@@ -630,21 +655,22 @@ export function WorkThreadConversation({
 
   useEffect(() => {
     const current = ++modelGeneration.current
-    if (!targetAgentID) {
+    if (!targetAgentID || (routing && !selectedRouteMachine)) {
       setModels([])
       setTargetModelKey("")
       setModelError(null)
       return
     }
-    // A model from the previously selected harness must never remain selectable while this catalog
-    // is warming. Conversation history stays usable independently of model discovery.
     setModels([])
     setModelsLoading(true)
     setModelError(null)
-    void taskClient.listAgentModels(baseConfig, targetAgentID, modelScope ?? { workThreadId: task.id }).then((catalog) => {
+    const scope = routing ? NATIVE_ROUTE_MODEL_SCOPE : (modelScope ?? { workThreadId: task.id })
+    void taskClient.listAgentModels(destinationConfig, targetAgentID, scope).then((catalog) => {
       if (modelGeneration.current !== current) return
       setModels(catalog.models)
-      const prior = lastModelForAgent(taskRef.current, targetAgentID)
+      const prior = !routing || targetMachineID === routing.currentMachineID
+        ? lastModelForAgent(taskRef.current, targetAgentID)
+        : null
       const priorKey = modelKey(prior)
       const fallback = deferModelFallback
         ? undefined
@@ -663,7 +689,7 @@ export function WorkThreadConversation({
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, task.id, task.workspace.path, baseConfig, modelScopeKey, deferModelFallback])
+  }, [targetAgentID, targetMachineID, task.id, task.workspace.path, destinationConfig, modelScopeKey, deferModelFallback, routingSignature])
 
   // Only a model verified by the current live catalog is sent explicitly. A null selection is
   // intentional: the controller distinguishes it from an omitted field, which means reuse the
@@ -720,20 +746,38 @@ export function WorkThreadConversation({
         onTaskUpdateRef.current(latest)
         throw new Error(`${agentLabel(agentsRef.current, agentForRun(latest, latest.run))} is still working. Stop it or wait for the reply before sending another message.`)
       }
-      const next = await controller.continueTask(baseConfig, task.id, {
-        prompt: text,
-        attachments: promptAttachments,
-        command: slashCommand,
-        agentId: targetAgentID,
-        model: selectedModel ? { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant } : null
-      })
-      localStorage.removeItem(draftStorageKey)
-      setAttachments([])
-      onTaskUpdateRef.current(next)
-      taskRef.current = next
-      modelSelectionTouchedRef.current = false
-      await refreshCurrentTail(next)
-      void refreshAttention(next)
+      const selectedModelValue = selectedModel
+        ? { providerID: selectedModel.providerID, modelID: selectedModel.modelID, variant: selectedModel.variant }
+        : null
+      if (routeChanged && routing) {
+        if (slashCommand) throw new Error("Slash commands stay scoped to the open Session. Send a normal prompt to continue on another harness or machine.")
+        await routing.onContinue({
+          machineID: targetMachineID,
+          agentID: targetAgentID,
+          prompt: text,
+          attachments: promptAttachments,
+          model: selectedModelValue
+        })
+        localStorage.removeItem(draftStorageKey)
+        setAttachments([])
+        setPendingPrompt(null)
+        modelSelectionTouchedRef.current = false
+      } else {
+        const next = await controller.continueTask(baseConfig, task.id, {
+          prompt: text,
+          attachments: promptAttachments,
+          command: slashCommand,
+          agentId: targetAgentID,
+          model: selectedModelValue
+        })
+        localStorage.removeItem(draftStorageKey)
+        setAttachments([])
+        onTaskUpdateRef.current(next)
+        taskRef.current = next
+        modelSelectionTouchedRef.current = false
+        await refreshCurrentTail(next)
+        void refreshAttention(next)
+      }
     } catch (reason) {
       // The prompt goes back to the composer, so it must also stop standing in for a turn that was
       // never accepted.
@@ -766,14 +810,14 @@ export function WorkThreadConversation({
   }
 
   const currentLabel = agentLabel(agents, currentAgentID)
-  const attachmentAgent = agents.find((agent) => agent.id === targetAgentID)
+  const attachmentAgent = destinationAgents.find((agent) => agent.id === targetAgentID)
   const attachmentsSupported = attachmentAgent?.capabilities?.attachments === true
   const hasAttention = questions.length > 0 || permissions.length > 0
   const preparingReply = sending || (working && !currentRunHasAssistantSignal)
-  const pendingAgentLabel = sending ? agentLabel(agents, targetAgentID) : currentLabel
+  const pendingAgentLabel = sending ? agentLabel(destinationAgents, targetAgentID) : currentLabel
   // The pending bubble is the reply that is coming, so it wears the identity of the agent that is
   // about to answer rather than the one that answered last.
-  const pendingAgentBackend = (sending ? agents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
+  const pendingAgentBackend = (sending ? destinationAgents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
   // Only the turn that is actually running carries the live status row, and only once its bubble is
   // on screen - before that the pending bubble is showing the very same row.
   const liveRunID = working && !hasAttention && currentRunHasAssistantSignal ? task.run?.id : undefined
@@ -804,14 +848,32 @@ export function WorkThreadConversation({
   return (
     <div className="tdw-work-thread-conversation">
       <div className="tdw-conversation-toolbar">
-        <div className="tdw-agent-control">
+        <div className={`tdw-agent-control${routing ? " routed" : ""}`}>
+          {routing ? (
+            <label className="tdw-route-machine-control">
+              <span>Machine</span>
+              <select value={targetMachineID} disabled={working || sending} onChange={(event) => {
+                const machineID = event.target.value
+                const machine = routing.machines.find((candidate) => candidate.machineID === machineID)
+                const preferred = machine?.agents.some((candidate) => candidate.id === currentAgentID)
+                  ? currentAgentID
+                  : machine?.agents[0]?.id || ""
+                modelSelectionTouchedRef.current = false
+                setTargetMachineID(machineID)
+                setTargetAgentID(preferred)
+                setTargetModelKey("")
+              }}>
+                {routing.machines.map((machine) => <option value={machine.machineID} key={machine.machineID}>{machine.label}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label>
-            <span>Continue with</span>
-            <select value={targetAgentID} disabled={working || sending} onChange={(event) => {
+            <span>{routing ? "Harness" : "Continue with"}</span>
+            <select value={targetAgentID} disabled={working || sending || destinationAgents.length === 0} onChange={(event) => {
               modelSelectionTouchedRef.current = false
               setTargetAgentID(event.target.value)
             }}>
-              {agents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label}</option>)}
+              {destinationAgents.map((agent) => <option value={agent.id} key={agent.id}>{agent.label}</option>)}
             </select>
           </label>
           <label className="tdw-model-control">
@@ -819,12 +881,22 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
               modelSelectionTouchedRef.current = true
               setTargetModelKey(value)
-            }} disabled={working || sending} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
+            }} disabled={working || sending || !targetAgentID} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
           </label>
         </div>
         <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : task.run?.startedAt} status={task.status} detail={task.error?.message || undefined} />
       </div>
+
+      {routeChanged ? (
+        <div className={`tdw-route-preview${sending ? " active" : ""}`} role="status" aria-live="polite">
+          <span>{sending ? "Creating linked Session…" : "Next message will continue in"}</span>
+          <strong>{routeMachineLabel} <i aria-hidden="true">/</i> {routeAgentLabel}</strong>
+          <small>{sending
+            ? "The new native Session is linked before this prompt is delivered."
+            : "The current Session stays here. Nothing changes until you send."}</small>
+        </div>
+      ) : null}
 
       <WorkThreadAttention
         config={currentTarget?.config || configForAgent(baseConfig, agents, currentAgentID)}
@@ -860,7 +932,7 @@ export function WorkThreadConversation({
         sendDisabled={working || hasAttention}
         onStop={working ? stop : undefined}
         stopping={stopping}
-        placeholder={`Message ${agentLabel(agents, targetAgentID)}…`}
+        placeholder={`Message ${agentLabel(destinationAgents, targetAgentID)}…`}
         emptyText="Start the conversation. You can continue with another coding agent at any time."
         footerHint={hasAttention ? "Your input is required before the agent can continue" : working ? "The agent is working on your last message" : undefined}
         renderMessage={(message) => (
