@@ -52,3 +52,13 @@ test("an early assistant envelope owns the getting-started row instead of duplic
   assert.match(controller, /liveTurnID = working && !hasAttention && currentTurnHasAssistantBubble/)
   assert.match(controller, /sending=\{preparingReply && !currentTurnHasAssistantBubble\}/)
 })
+
+
+test("machine reconnect pauses mutations and resumes reconciliation in place", () => {
+  assert.match(controller, /interactionEnabled = true/)
+  assert.match(controller, /if \(!interactionEnabled\) \{[\s\S]*setModelsLoading\(false\)/)
+  assert.match(controller, /sendInFlightRef\.current \|\| !interactionEnabled/)
+  assert.match(controller, /sendDisabled=\{!interactionEnabled \|\| working/)
+  assert.match(controller, /if \(!wasEnabled && interactionEnabled\) \{[\s\S]*void reconcile\(\)/)
+  assert.match(controller, /onConnectionIssueRef\.current\?\.\(\)/)
+})
