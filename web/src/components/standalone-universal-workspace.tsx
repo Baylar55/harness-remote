@@ -542,7 +542,7 @@ function NativeSessionsWorkspace({
   useEffect(() => {
     let cancelled = false
     setLineageError(null)
-    if (!selected || !selectedRuntime) {
+    if (!selected || !selectedRuntime || !selectedInteractionEnabled) {
       setSelectedLinks([])
       return () => { cancelled = true }
     }
@@ -552,12 +552,14 @@ function NativeSessionsWorkspace({
       })
       .catch(() => {
         if (!cancelled) {
+          // Lineage is optional enrichment. A transient/read-only failure must never make a brand-new
+          // Session look broken or contaminate its writable/model state. Explicit navigation to a
+          // known link still reports its own actionable error in openLinkedSession().
           setSelectedLinks([])
-          setLineageError("Linked Session history is temporarily unavailable.")
         }
       })
     return () => { cancelled = true }
-  }, [selected?.key, selectedRuntime?.machine.id, listRevision])
+  }, [selected?.key, selectedRuntime?.machine.id, selectedInteractionEnabled, listRevision])
 
   async function openLinkedSession(ref: NativeSessionRef) {
     setLineageError(null)
