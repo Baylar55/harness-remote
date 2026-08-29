@@ -55,6 +55,7 @@ test("an early assistant envelope owns the getting-started row instead of duplic
   assert.match(controller, /activityPending=\{Boolean\(activity && preparingReply\)\}/)
   assert.match(controller, /bui-typing/)
   assert.match(controller, /activityPending \? <span className="bui-typing"/)
+  assert.match(controller, /activityPending \? null : <time>/)
 })
 
 
