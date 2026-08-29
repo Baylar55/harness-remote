@@ -70,6 +70,7 @@ const handoffLinks = []
 const handoffLedger = new Map()
 const rejectedHandoffs = []
 let rejectNextHandoff = false
+let legacyNextLinkList = false
 let rejectNextLinkPersistence = false
 let linkPersistenceFailures = 0
 let refuseNextHandoffTargetPrompt = false
@@ -144,6 +145,12 @@ function startFakeDaemon() {
 
     if (url.pathname === "/v1/session-links") {
       if (request.method === "GET") {
+        if (legacyNextLinkList) {
+          legacyNextLinkList = false
+          response.writeHead(204, corsHeaders())
+          response.end()
+          return
+        }
         const identity = {
           machineID: url.searchParams.get("machineID"),
           agentID: url.searchParams.get("agentID"),
@@ -465,7 +472,11 @@ try {
   await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   // --- A: catalog, two model changes in a row, then send -----------------------------------------
+  // A rolling-upgrade daemon may not know /v1/session-links yet and can answer 204. Opening a
+  // completely normal Session must stay usable instead of storing undefined and crashing on .find().
+  legacyNextLinkList = true
   await openSession(page, TITLE_A, markers.get(SESSION_A))
+  await page.getByRole("textbox", { name: "Message PI" }).waitFor({ state: "visible", timeout: 15_000 })
   await assertCatalog(page, ["pi-coding", "pi-reasoning"], ["omp-fast", "omp-deep"], "A")
   await chooseModel(page, "pi-coding")
   await assertCatalog(page, ["pi-coding", "pi-reasoning"], ["omp-fast", "omp-deep"], "A after first change")
