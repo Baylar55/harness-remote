@@ -743,6 +743,10 @@ export function WorkThreadConversation({
   useEffect(() => {
     const current = ++modelGeneration.current
     if (!interactionEnabled) {
+      // Do not let a catalog from the last healthy connection make the first reconnect render look
+      // writable. Preserve the selected key as preference only; membership is re-verified before the
+      // composer is enabled again.
+      setModels([])
       setModelsLoading(false)
       setModelError(null)
       return
