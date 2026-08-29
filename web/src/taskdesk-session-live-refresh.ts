@@ -171,7 +171,15 @@ export function startTaskDeskSessionLiveRefresh({
 
       if (event.type === "session.updated") {
         throttle("index", 450, onIndex)
-        if (selectedEvent) throttle("detail", 450, onDetail)
+        if (selectedEvent) {
+          // ACP adapters use session.updated for both edges of a turn. The final edge can arrive
+          // after the last streamed chunk, or be the only event Android receives after a brief SSE
+          // gap. Re-read the selected transcript as well as its detail so a completed reply cannot
+          // remain invisible until the user navigates away and back.
+          throttle("message", 120, onMessage)
+          throttle("detail", 450, onDetail)
+          settleAfterLifecycle()
+        }
         return
       }
 
