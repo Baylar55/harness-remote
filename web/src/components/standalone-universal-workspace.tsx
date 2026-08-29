@@ -20,6 +20,7 @@ import {
   type NativeSessionRef,
   type NativeSessionSurfaceTarget
 } from "../native-session-discovery"
+import { migrateNativeSessionMachineStorage } from "../native-session-machine-id-migration"
 import { nativeSessionTransferredContext } from "../native-session-prompt"
 import type { NativeSessionRouteMachine } from "../native-session-routing"
 import type { MachineSnapshot, Session } from "../types"
@@ -372,6 +373,7 @@ function NativeSessionsWorkspace({
     void Promise.all(machines.map(async (machine): Promise<NativeMachineRuntime> => {
       try {
         const snapshot = await discoverMachine(machine.config)
+        if (snapshot) migrateNativeSessionMachineStorage(machine.id, snapshot.machine.id)
         return snapshot
           ? { machine, snapshot, state: "online" }
           : { machine, snapshot: null, state: "offline", error: "This endpoint is not a Harness machine daemon." }
@@ -418,15 +420,21 @@ function NativeSessionsWorkspace({
     ? runtimes.find((runtime) => runtime.snapshot?.machine.id === selected.machineID || runtime.machine.id === selected.machineID)
     : undefined
   const selectedMachine = selectedRuntime?.machine
-  const routeMachines = useMemo<NativeSessionRouteMachine[]>(() => runtimes.flatMap((runtime) => {
-    if (runtime.state !== "online" || !runtime.snapshot) return []
-    return [{
-      machineID: runtime.snapshot.machine.id,
-      label: runtime.machine.name || runtime.snapshot.machine.name || runtime.snapshot.machine.id,
-      config: runtime.machine.config,
-      agents: runtime.snapshot.agents
-    }]
-  }), [runtimes])
+  const routeMachines = useMemo<NativeSessionRouteMachine[]>(() => {
+    const byMachineID = new Map<string, NativeSessionRouteMachine>()
+    for (const runtime of runtimes) {
+      if (runtime.state !== "online" || !runtime.snapshot) continue
+      const machineID = runtime.snapshot.machine.id
+      if (byMachineID.has(machineID)) continue
+      byMachineID.set(machineID, {
+        machineID,
+        label: runtime.machine.name || runtime.snapshot.machine.name || machineID,
+        config: runtime.machine.config,
+        agents: runtime.snapshot.agents
+      })
+    }
+    return [...byMachineID.values()]
+  }, [runtimes])
   const selectedProject = selected ? projectLabel(selected.directory) : undefined
   const selectedTokenCount = selected?.tokens
     ? (selected.tokens.input || 0) + (selected.tokens.output || 0) + (selected.tokens.reasoning || 0)
@@ -434,6 +442,16 @@ function NativeSessionsWorkspace({
   const selectedHasChanges = Boolean(selected?.summary && (
     selected.summary.files || selected.summary.additions || selected.summary.deletions
   ))
+  const selectedTransferredContext = useMemo(() => {
+    if (!selected) return ""
+    const inMemory = selected.history?.length ? nativeSessionTransferredContext(selected) : ""
+    if (inMemory) return inMemory
+    return selectedLinks.find((link) =>
+      link.target.machineID === selected.machineID
+      && link.target.agentID === selected.agentID
+      && link.target.sessionID === selected.sessionID
+    )?.transferredContext || ""
+  }, [selected, selectedLinks])
   const selectedPermissionRules = selected?.permission || []
   const selectedRestrictionCount = selectedPermissionRules.filter((rule) => rule.action === "deny").length
   const selectedPolicyLabel = selectedPermissionRules.length
@@ -461,7 +479,7 @@ function NativeSessionsWorkspace({
       setSelectedLinks([])
       return () => { cancelled = true }
     }
-    void api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)
+    void api.listNativeSessionLinks(selected.config, selected.ref)
       .then(({ links }) => {
         if (!cancelled) setSelectedLinks(links)
       })
@@ -654,7 +672,7 @@ function NativeSessionsWorkspace({
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>
               </header>
-              {selectedLinks.length || selected.history?.length || lineageError ? (
+              {selectedLinks.length || selectedTransferredContext || lineageError ? (
                 <section className="hr-session-lineage" aria-label="Linked Session history">
                   {selectedLinks.length ? (
                     <div className="hr-session-lineage-links">
@@ -677,10 +695,10 @@ function NativeSessionsWorkspace({
                       })}
                     </div>
                   ) : null}
-                  {selected.history?.length ? (
+                  {selectedTransferredContext ? (
                     <details className="hr-session-transfer-context">
                       <summary>Transferred context <span>exactly what the new harness received</span></summary>
-                      <pre>{nativeSessionTransferredContext(selected)}</pre>
+                      <pre>{selectedTransferredContext}</pre>
                     </details>
                   ) : null}
                   {lineageError ? <div className="hr-session-lineage-error" role="alert">{lineageError}</div> : null}
