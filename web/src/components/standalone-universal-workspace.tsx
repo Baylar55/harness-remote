@@ -479,12 +479,15 @@ function NativeSessionsWorkspace({
       setSelectedLinks([])
       return () => { cancelled = true }
     }
-    void api.listNativeSessionLinks(selected.config, selected.ref)
+    void api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)
       .then(({ links }) => {
         if (!cancelled) setSelectedLinks(links)
       })
       .catch(() => {
-        if (!cancelled) setSelectedLinks([])
+        if (!cancelled) {
+          setSelectedLinks([])
+          setLineageError("Linked Session history is temporarily unavailable.")
+        }
       })
     return () => { cancelled = true }
   }, [selected?.key, selectedRuntime?.machine.id, listRevision])
