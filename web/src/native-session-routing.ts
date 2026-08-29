@@ -40,7 +40,6 @@ type PendingRouteContinue = {
 }
 
 const STORAGE_PREFIX = "harness-remote.native-session-route-continue.v1"
-const PENDING_ROUTE_TTL_MS = 10 * 60 * 1000
 
 function transactionKey(source: NativeSessionSurfaceTarget): string {
   return `${STORAGE_PREFIX}:${encodeURIComponent(source.machineID)}:${encodeURIComponent(source.agentID)}:${encodeURIComponent(source.sessionID)}`
@@ -79,7 +78,7 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingRouteContinue |
       clearPendingNativeSessionRoute(source)
       return null
     }
-    const pending: PendingRouteContinue = {
+    return {
       agentID: parsed.agentID,
       prompt: parsed.prompt,
       model: parsed.model && parsed.model.providerID && parsed.model.modelID ? parsed.model : null,
@@ -87,11 +86,6 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingRouteContinue |
       target: parsed.target,
       link: parsed.link
     }
-    if (Date.now() - pending.createdAt > PENDING_ROUTE_TTL_MS) {
-      clearPendingNativeSessionRoute(source)
-      return null
-    }
-    return pending
   } catch {
     clearPendingNativeSessionRoute(source)
     return null
@@ -144,10 +138,10 @@ function targetRecord(source: NativeSessionSurfaceTarget, ref: NativeSessionRef,
  * Continue one native Session on another harness of the same machine.
  *
  * Machine changes are deliberately outside this protocol for now. The harness handoff itself owns
- * resource-creation idempotency. Once a target Session is confirmed, this small transaction retains
- * only enough information to retry an uncertain first prompt against that exact target. It expires
- * on the same ten-minute horizon as normal native prompt recovery and is cleared on definite prompt
- * rejection, so one failed handoff cannot permanently brick future routing.
+ * resource-creation idempotency. Once a target Session is confirmed, that target identity is durable:
+ * this transaction is never expired blindly, because forgetting a created resource can make a later
+ * Send create a duplicate Session. A definite first-prompt refusal clears only the prompt mutation;
+ * the next attempt may change prompt/model but still addresses this exact target Session.
  */
 export async function continueNativeSessionOnRoute({
   source,
@@ -175,12 +169,8 @@ export async function continueNativeSessionOnRoute({
   if (!normalizedPrompt) throw new Error("A text prompt is required")
 
   let pending = loadPending(source)
-  if (pending && (
-    pending.agentID !== targetAgent.id
-    || pending.prompt !== normalizedPrompt
-    || !sameModel(pending.model, model)
-  )) {
-    throw new Error("A routed continuation is still unresolved. Retry the same harness, model and prompt, or try again after the recovery window expires.")
+  if (pending && pending.agentID !== targetAgent.id) {
+    throw new Error("A linked target Session already exists for this continuation. Finish or open that linked Session before choosing another harness.")
   }
 
   if (!pending) {
@@ -227,18 +217,22 @@ export async function continueNativeSessionOnRoute({
     }
   }
 
-  try {
-    const sent = await sendNativeSessionPrompt(routedTarget, normalizedPrompt, model, [])
-    if (sent.status !== "accepted") {
-      throw new Error("The linked Session exists, but delivery of its first prompt is not confirmed. Retry the same harness and prompt to reconcile it.")
-    }
-    clearPendingNativeSessionRoute(source)
-    return routedTarget
-  } catch (error) {
-    // A 4xx rejection clears the target Session prompt record. In that case there is nothing left to
-    // reconcile, so free the source routing transaction immediately. Network/5xx uncertainty keeps
-    // both records until retry or TTL expiry and therefore preserves the no-duplicate guarantee.
-    if (!loadPendingNativeSessionPrompt(routedTarget)) clearPendingNativeSessionRoute(source)
-    throw error
+  const unresolvedPrompt = loadPendingNativeSessionPrompt(routedTarget)
+  if (unresolvedPrompt && (
+    unresolvedPrompt.text !== normalizedPrompt
+    || !sameModel(unresolvedPrompt.model ?? null, model)
+  )) {
+    throw new Error("The first prompt to the linked Session still has an unresolved delivery status. Retry that exact prompt and model before changing it.")
   }
+  if (!unresolvedPrompt && (pending.prompt !== normalizedPrompt || !sameModel(pending.model, model))) {
+    pending = { ...pending, prompt: normalizedPrompt, model }
+    persistPending(source, pending)
+  }
+
+  const sent = await sendNativeSessionPrompt(routedTarget, normalizedPrompt, model, [])
+  if (sent.status !== "accepted") {
+    throw new Error("The linked Session exists, but delivery of its first prompt is not confirmed. Retry the same harness and prompt to reconcile it.")
+  }
+  clearPendingNativeSessionRoute(source)
+  return routedTarget
 }
