@@ -172,7 +172,6 @@ export function NativeSessionObserver({
   }, [routableRoutes, target, onSessionRefresh, onOpenSession, interactionEnabled])
 
   useEffect(() => {
-    let disposed = false
     let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
     const initialTarget = targetForInitialRuntime(target)
 
@@ -189,7 +188,6 @@ export function NativeSessionObserver({
     handleConversationUpdate(registration.conversation)
 
     return () => {
-      disposed = true
       registration?.dispose()
     }
   }, [target.key, handleConversationUpdate])
