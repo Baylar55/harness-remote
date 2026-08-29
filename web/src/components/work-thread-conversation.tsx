@@ -34,6 +34,8 @@ import { WorkThreadAttention } from "./work-thread-attention"
 const INITIAL_PAGE_SIZE = 200
 const OLDER_PAGE_SIZE = 500
 const ACTIVE_RECONCILE_MS = 5_000
+const REPLY_SETTLE_RECONCILE_MS = 1_500
+const REPLY_SETTLE_IDLE_GRACE_MS = 20_000
 const IDLE_RECONCILE_MS = 30_000
 const DRAFT_STORAGE_PREFIX = "harness-remote.taskdesk.draft."
 // A synchronous localStorage write per keystroke is a measurable input cost on Android WebView and
@@ -258,7 +260,15 @@ function ConversationStatePill({
   return <span className={`tdw-conversation-state ${state}`} title={outcome && detail ? detail : undefined}><i aria-hidden="true" /><span>{text}</span></span>
 }
 
-const WorkThreadBubble = memo(function WorkThreadBubble({ message, activity }: { message: WorkThreadMessage; activity?: string }) {
+const WorkThreadBubble = memo(function WorkThreadBubble({
+  message,
+  activity,
+  activityPending = false
+}: {
+  message: WorkThreadMessage
+  activity?: string
+  activityPending?: boolean
+}) {
   const meta = message.taskdesk
   if (message.info.role === CONVERSATION_EVENT_ROLE) {
     return (
@@ -280,7 +290,10 @@ const WorkThreadBubble = memo(function WorkThreadBubble({ message, activity }: {
             line the reply will carry when it is finished, reading "<agent> is working" while it is
             not. A separate status row under this one would be a second name for the same turn. */}
         <header>
-          <strong className={activity ? "uw-message-working" : undefined} {...(activity ? { role: "status", "aria-live": "polite" as const } : {})}>{activity || label}</strong>
+          <strong className={activity ? "uw-message-working" : undefined} {...(activity ? { role: "status", "aria-live": "polite" as const } : {})}>
+            {activity || label}
+            {activityPending ? <span className="bui-typing" aria-hidden="true"><i /><i /><i /></span> : null}
+          </strong>
           <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>
         </header>
         <TaskDeskMessageContent message={message} />
@@ -317,6 +330,10 @@ export function WorkThreadConversation({
   // when it was sent. See `visibleTimeline`.
   const [pendingPrompt, setPendingPrompt] = useState<OptimisticPrompt | null>(null)
   const [uncertainDelivery, setUncertainDelivery] = useState<OptimisticPrompt | null>(null)
+  // A prompt can be accepted before the final native assistant envelope is readable. Keep the exact
+  // accepted turn in a short settle state so an early idle edge or a missed mobile SSE event cannot
+  // make the mounted Session stop reconciling before its reply is actually visible.
+  const [awaitingReplyTurnID, setAwaitingReplyTurnID] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
@@ -413,6 +430,7 @@ export function WorkThreadConversation({
     setPermissions([])
     setAttachments([])
     setPendingPrompt(null)
+    setAwaitingReplyTurnID(null)
     setTargetMachineID(routing?.currentMachineID || "")
     setTargetAgentID(currentAgentID)
     setTargetModelKey(currentConversationModelKey)
@@ -539,6 +557,7 @@ export function WorkThreadConversation({
     // transcript (or an explicit same-id retry was accepted). Clear only the restored draft that
     // still belongs to that request; anything the user typed meanwhile stays untouched.
     setUncertainDelivery(null)
+    setAwaitingReplyTurnID(currentTurn.id)
     setError(null)
     setDraft((current) => {
       if (current.trim() !== uncertainDelivery.text) return current
@@ -564,10 +583,41 @@ export function WorkThreadConversation({
   // generic pending bubble as well produces two adjacent OpenCode identity rows for one reply.
   const currentTurnHasAssistantBubble = useMemo(() => {
     const turnID = conversation.currentTurn?.id
-    return Boolean(working && turnID && timeline.some((message) =>
+    return Boolean(turnID && timeline.some((message) =>
       message.info.role === "assistant" && message.taskdesk?.runId === turnID
     ))
-  }, [timeline, working, conversation.currentTurn?.id])
+  }, [timeline, conversation.currentTurn?.id])
+
+  const replySettling = Boolean(
+    awaitingReplyTurnID
+    && conversation.currentTurn?.id === awaitingReplyTurnID
+    && !currentTurnHasAssistantSignal
+    && conversation.status !== "failed"
+    && conversation.status !== "cancelled"
+  )
+
+  useEffect(() => {
+    if (!awaitingReplyTurnID) return
+    if (
+      conversation.currentTurn?.id !== awaitingReplyTurnID
+      || currentTurnHasAssistantSignal
+      || conversation.status === "failed"
+      || conversation.status === "cancelled"
+    ) {
+      setAwaitingReplyTurnID(null)
+      return
+    }
+    // A genuinely long-running turn keeps the normal active reconciliation indefinitely. The bounded
+    // grace starts only after the harness reports idle, covering the common Codex race where its
+    // rollout becomes readable just after the lifecycle edge.
+    if (working) return
+    const expected = awaitingReplyTurnID
+    const timer = window.setTimeout(() => {
+      setAwaitingReplyTurnID((current) => current === expected ? null : current)
+    }, REPLY_SETTLE_IDLE_GRACE_MS)
+    return () => window.clearTimeout(timer)
+  }, [awaitingReplyTurnID, conversation.currentTurn?.id, conversation.status, currentTurnHasAssistantSignal, working])
+
   const hasMore = Object.values(feeds).some((feed) => feed.hasMore && feed.before)
 
   const refreshCurrentTail = useCallback(async (sourceConversation?: ConversationRuntime) => {
@@ -654,12 +704,12 @@ export function WorkThreadConversation({
   useEffect(() => {
     if (!interactionEnabled) return
     void refreshAttention()
-    const delay = working ? ACTIVE_RECONCILE_MS : IDLE_RECONCILE_MS
+    const delay = replySettling ? REPLY_SETTLE_RECONCILE_MS : working ? ACTIVE_RECONCILE_MS : IDLE_RECONCILE_MS
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void reconcile()
     }, delay)
     return () => window.clearInterval(timer)
-  }, [working, reconcile, refreshAttention, interactionEnabled])
+  }, [working, replySettling, reconcile, refreshAttention, interactionEnabled])
 
   useEffect(() => {
     const wasEnabled = priorInteractionEnabledRef.current
@@ -752,6 +802,10 @@ export function WorkThreadConversation({
   // previous turn's model. Null therefore asks the harness for its current native default and cannot
   // resurrect a persisted provider model that has since been removed.
   const selectedModel = models.find((model) => modelKey(model) === targetModelKey)
+  const selectedModelAgent = destinationAgents.find((agent) => agent.id === targetAgentID)
+  const modelSelectionRequired = selectedModelAgent?.capabilities?.models === true
+  const modelReady = !modelSelectionRequired || Boolean(selectedModel)
+  const modelBootstrapBlocked = modelSelectionRequired && !modelReady
 
   async function loadOlder() {
     if (loadingOlder || !interactionEnabled) return
@@ -790,7 +844,15 @@ export function WorkThreadConversation({
     const slashCommand = slashMatch && matchedCommand
       ? { name: matchedCommand.name, arguments: (slashMatch[2] || "").trim() }
       : undefined
-    if ((!text && !promptAttachments.length) || sending || working || sendInFlightRef.current || !interactionEnabled) return
+    if (
+      (!text && !promptAttachments.length)
+      || sending
+      || working
+      || replySettling
+      || sendInFlightRef.current
+      || !interactionEnabled
+      || modelBootstrapBlocked
+    ) return
     sendInFlightRef.current = true
     setSending(true)
     setError(null)
@@ -836,6 +898,7 @@ export function WorkThreadConversation({
         setAttachments([])
         onConversationUpdateRef.current(next)
         conversationRef.current = next
+        setAwaitingReplyTurnID(next.currentTurn?.id ?? null)
         modelSelectionTouchedRef.current = false
         await refreshCurrentTail(next)
         void refreshAttention(next)
@@ -885,14 +948,14 @@ export function WorkThreadConversation({
   const attachmentsSupported = !routeChanged && attachmentAgent?.capabilities?.attachments === true
   const routeBlockedByAttachments = routeChanged && attachments.length > 0
   const hasAttention = questions.length > 0 || permissions.length > 0
-  const preparingReply = sending || (working && !currentTurnHasAssistantSignal)
+  const preparingReply = sending || ((working || replySettling) && !currentTurnHasAssistantSignal)
   const pendingAgentLabel = sending ? agentLabel(destinationAgents, targetAgentID) : currentLabel
   // The pending bubble is the reply that is coming, so it wears the identity of the agent that is
   // about to answer rather than the one that answered last.
   const pendingAgentBackend = (sending ? destinationAgents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
   // Only the turn that is actually running carries the live status row, and only once its bubble is
   // on screen - before that the pending bubble is showing the very same row.
-  const liveTurnID = working && !hasAttention && currentTurnHasAssistantBubble ? conversation.currentTurn?.id : undefined
+  const liveTurnID = (working || replySettling) && !hasAttention && currentTurnHasAssistantBubble ? conversation.currentTurn?.id : undefined
 
   const waitingLabel = hasAttention
     ? "Waiting for your input"
@@ -939,11 +1002,11 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
               modelSelectionTouchedRef.current = true
               setTargetModelKey(value)
-            }} disabled={!interactionEnabled || working || sending || !targetAgentID} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
-            {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Continue uses the harness default.</small> : null}
+            }} disabled={!interactionEnabled || working || sending || modelsLoading || !targetAgentID} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
+            {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Sending is paused until a model can be verified.</small> : null}
           </label>
         </div>
-        <ConversationStatePill working={working || sending} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
+        <ConversationStatePill working={working || sending || replySettling} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
       </div>
 
       {routeChanged ? (
@@ -980,7 +1043,7 @@ export function WorkThreadConversation({
         agentBackend={pendingAgentBackend}
         loading={loading}
         ready={!loading}
-        waiting={working}
+        waiting={working || replySettling}
         workingLabel={waitingLabel}
         showWaitingIndicator={false}
         hasMore={hasMore}
@@ -995,18 +1058,33 @@ export function WorkThreadConversation({
         onAttachmentError={setError}
         onSend={send}
         sending={preparingReply && !currentTurnHasAssistantBubble}
-        sendDisabled={!interactionEnabled || working || hasAttention || routeBlockedByAttachments}
+        sendDisabled={!interactionEnabled || working || replySettling || hasAttention || routeBlockedByAttachments || modelBootstrapBlocked}
+        composerDisabled={!interactionEnabled || modelBootstrapBlocked}
         onStop={working && interactionEnabled ? stop : undefined}
         stopping={stopping}
         placeholder={`Message ${agentLabel(destinationAgents, targetAgentID)}…`}
         emptyText="Start the conversation. You can continue with another coding agent at any time."
-        footerHint={hasAttention ? "Your input is required before the agent can continue" : working ? "The agent is working on your last message" : undefined}
+        footerHint={hasAttention
+          ? "Your input is required before the agent can continue"
+          : modelBootstrapBlocked
+            ? modelsLoading ? "Loading available models…" : "A verified model is required before sending"
+            : working
+              ? "The agent is working on your last message"
+              : replySettling
+                ? "Waiting for the completed reply to become available…"
+                : undefined}
         renderMessage={(message) => (
-          <WorkThreadBubble
-            key={message.info.id}
-            message={message as WorkThreadMessage}
-            activity={activityForMessage(message as WorkThreadMessage)}
-          />
+          (() => {
+            const activity = activityForMessage(message as WorkThreadMessage)
+            return (
+              <WorkThreadBubble
+                key={message.info.id}
+                message={message as WorkThreadMessage}
+                activity={activity}
+                activityPending={Boolean(activity && preparingReply)}
+              />
+            )
+          })()
         )}
       />
     </div>
