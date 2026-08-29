@@ -1789,7 +1789,31 @@
 
   .hr-native-workspace-session-header {
     min-height: 62px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 6px;
+    row-gap: 0;
     padding: max(7px, env(safe-area-inset-top)) 9px 7px 47px;
+  }
+
+  .hr-native-session-heading {
+    min-width: 0;
+  }
+
+  .hr-native-workspace-session-actions {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    justify-self: end;
+    gap: 4px;
+  }
+
+  /* The native Session id is useful on desktop, but on a phone it competes with the destructive
+     action for the only header row. The title already identifies the Session in this surface. */
+  .hr-native-workspace-session-actions > code {
+    display: none;
   }
 
   .hr-native-session-heading h1 {
