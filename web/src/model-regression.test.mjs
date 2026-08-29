@@ -20,6 +20,8 @@ assert.match(conversation, /modelSelectionTouchedRef/, 'background model recover
 assert.match(conversation, /conversationHasUserPrompt/, 'native model fallback must distinguish a truly empty Session from an existing conversation')
 assert.match(conversation, /mayUseCatalogDefault = !deferModelFallback \\|\\| routeChanged \\|\\| !latestHasUserPrompt/, 'empty Sessions and fresh handoffs must choose a real catalog default')
 assert.doesNotMatch(conversation, /routingSignature, routeChanged, conversationHasUserPrompt/, 'first-prompt discovery must not re-read the model catalog')
+assert.match(conversation, /modelCatalogReady = !modelSelectionRequired \|\| \(!modelsLoading && models\.length > 0\)/, 'models-capable Sessions must stay non-writable until the live catalog is actually loaded')
+assert.match(conversation, /modelBootstrapBlocked/, 'model bootstrap must gate the composer instead of falling through to a synthetic default')
 assert.match(conversation, /<ModelPicker/, 'the Session controller must render the shared model picker')
 assert.match(picker, /Search model, provider, variant/, 'model catalog must remain searchable')
 assert.match(picker, /Harness default/, 'an unavailable catalog must fall back honestly to the harness default')
