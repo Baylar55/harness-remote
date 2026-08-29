@@ -62,6 +62,12 @@ type SessionFeed = {
   hasMore: boolean
 }
 
+type OptimisticPrompt = {
+  text: string
+  priorTurnID: string | null
+  attachments: AttachmentPart[]
+}
+
 type Props = {
   conversation: ConversationRuntime
   baseConfig: ServerConfig
@@ -309,7 +315,8 @@ export function WorkThreadConversation({
   const [sending, setSending] = useState(false)
   // The prompt that has been sent but is not yet in the transcript, with the turn that was current
   // when it was sent. See `visibleTimeline`.
-  const [pendingPrompt, setPendingPrompt] = useState<{ text: string; priorTurnID: string | null; attachments: AttachmentPart[] } | null>(null)
+  const [pendingPrompt, setPendingPrompt] = useState<OptimisticPrompt | null>(null)
+  const [uncertainDelivery, setUncertainDelivery] = useState<OptimisticPrompt | null>(null)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
@@ -341,12 +348,14 @@ export function WorkThreadConversation({
   const onAttentionChangeRef = useRef(onAttentionChange)
   const onConnectionIssueRef = useRef(onConnectionIssue)
   const priorInteractionEnabledRef = useRef(interactionEnabled)
+  const uncertainDeliveryRef = useRef(uncertainDelivery)
 
   conversationRef.current = conversation
   agentsRef.current = agents
   onConversationUpdateRef.current = onConversationUpdate
   onAttentionChangeRef.current = onAttentionChange
   onConnectionIssueRef.current = onConnectionIssue
+  uncertainDeliveryRef.current = uncertainDelivery
 
   const targets = useMemo(() => sessionTargets(conversation, baseConfig, agents), [conversation.id, conversation.turns, conversation.currentTurn, conversation.directory, baseConfig, agents])
   const targetSignature = targets.map((target) => `${target.sessionID}:${target.agentID}:${target.directory}`).join("|")
@@ -517,6 +526,28 @@ export function WorkThreadConversation({
     if (settledPrompt) setPendingPrompt(null)
   }, [settledPrompt])
 
+  useEffect(() => {
+    if (!uncertainDelivery) return
+    const currentTurn = conversation.currentTurn
+    if (
+      !currentTurn?.id
+      || currentTurn.id === uncertainDelivery.priorTurnID
+      || currentTurn.prompt?.trim() !== uncertainDelivery.text
+    ) return
+
+    // The same mounted Session has now reconstructed the ambiguous request from its native
+    // transcript (or an explicit same-id retry was accepted). Clear only the restored draft that
+    // still belongs to that request; anything the user typed meanwhile stays untouched.
+    setUncertainDelivery(null)
+    setError(null)
+    setDraft((current) => {
+      if (current.trim() !== uncertainDelivery.text) return current
+      persistDraft(draftStorageKey, "")
+      return ""
+    })
+    setAttachments((current) => current === uncertainDelivery.attachments ? [] : current)
+  }, [uncertainDelivery, conversation.currentTurn?.id, conversation.currentTurn?.prompt, draftStorageKey, persistDraft])
+
   const currentTurnHasAssistantSignal = useMemo(() => {
     const turnID = conversation.currentTurn?.id
     if (!turnID) return false
@@ -634,7 +665,7 @@ export function WorkThreadConversation({
     const wasEnabled = priorInteractionEnabledRef.current
     priorInteractionEnabledRef.current = interactionEnabled
     if (!wasEnabled && interactionEnabled) {
-      setError(null)
+      if (!uncertainDeliveryRef.current) setError(null)
       void reconcile()
     }
   }, [interactionEnabled, reconcile])
@@ -764,7 +795,13 @@ export function WorkThreadConversation({
     setSending(true)
     setError(null)
     setDraft("")
-    setPendingPrompt({ text, priorTurnID: conversationRef.current.currentTurn?.id ?? null, attachments: promptAttachments })
+    const optimisticPrompt: OptimisticPrompt = {
+      text,
+      priorTurnID: conversationRef.current.currentTurn?.id ?? null,
+      attachments: promptAttachments
+    }
+    setPendingPrompt(optimisticPrompt)
+    setUncertainDelivery(null)
     try {
       const latest = await controller.refreshConversation(baseConfig, conversation.id)
       if (isActive(latest)) {
@@ -804,9 +841,16 @@ export function WorkThreadConversation({
         void refreshAttention(next)
       }
     } catch (reason) {
-      if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
+      const transportFailure = isTransportFailure(reason)
+      if (transportFailure) {
+        onConnectionIssueRef.current?.()
+        setUncertainDelivery(optimisticPrompt)
+      } else {
+        setUncertainDelivery(null)
+      }
       // The prompt goes back to the composer, so it must also stop standing in for a turn that was
-      // never accepted.
+      // never accepted. If transport made acceptance ambiguous, the transcript reconciliation above
+      // clears this restored draft only after the exact native turn becomes authoritative.
       setPendingPrompt(null)
       setDraft((current) => text ? (current ? `${text}\n${current}` : text) : current)
       setAttachments(promptAttachments)
