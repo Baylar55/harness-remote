@@ -100,6 +100,35 @@ test("same client request id cannot be reused for different prompt payload", asy
   }
 })
 
+test("uncertain operation recovery hint survives restart", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-session-recovery-hint-"))
+  try {
+    const first = new SessionOperationLedger({ machineID: "machine-1", stateDirectory })
+    await first.begin(input())
+    const recovery = {
+      kind: "native-session-handoff-create",
+      targetAgentID: "pi",
+      directory: "/repo",
+      beforeSessionIDs: ["pi-old-1"]
+    }
+    await first.fail({
+      agentID: "codex",
+      sessionID: "native-1",
+      clientRequestId: "request-1",
+      ambiguous: true,
+      result: recovery
+    })
+
+    const restarted = new SessionOperationLedger({ machineID: "machine-1", stateDirectory })
+    const replay = await restarted.begin(input())
+    assert.equal(replay.duplicate, true)
+    assert.equal(replay.state, "uncertain")
+    assert.deepEqual(replay.entry.result, recovery)
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
 test("safe pre-dispatch failure removes the pending record while ambiguous failure preserves it", async () => {
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-session-failure-"))
   try {
