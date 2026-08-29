@@ -122,6 +122,12 @@ assert.ok(daemon.includes('/prompt_async${query}'), 'managed OpenCode must keep 
 assert.ok(daemon.includes('/command${query}'), 'managed OpenCode slash commands must use its native command endpoint')
 assert.equal(daemon.includes('agent: agentID'), false, 'machine harness id must never be sent as an OpenCode internal agent id')
 assert.ok(daemon.includes('await claimSession(agentID, sessionID)'), 'ACP Stop must transparently recover writer ownership when needed')
+const handoffBlock = daemon.match(/const handoffSession = async[\s\S]*?const launcher =/)?.[0] || ''
+assert.ok(handoffBlock.includes('service.createSession({ directory })'), 'ACP handoff creation must obtain a bare Session id before title/model enrichment')
+assert.ok(handoffBlock.includes('await checkpoint(result)'), 'handoff target identity must be checkpointed as soon as session/new returns')
+assert.equal(handoffBlock.includes('service.setModel('), false, 'handoff creation must defer model/variant application to the first prompt')
+assert.ok(daemon.includes('const reconcileHandoff = async'), 'daemon must support read-only reconciliation for ambiguous Session creation')
+assert.ok(daemon.includes('beforeSessionIDs'), 'handoff reconciliation must compare against a pre-create Session baseline')
 assert.ok(daemonCli.includes('sessionRename: true') && daemonCli.includes('sessionDelete: true'), 'managed OpenCode must advertise its native rename/delete primitives')
 
 assert.ok(workThread.includes('controller.loadMessagePage'), 'v3 WorkThreadConversation must remain transcript paging authority through its explicit I/O boundary')
@@ -152,6 +158,7 @@ for (const retiredPath of [
   './conversation-turn-state.ts',
   './conversation-turn-state.test.mjs',
   './components/model-selection-control.tsx',
+  './components/native-session-handoff-control.tsx',
   './native-session-handoff.css'
 ]) {
   assert.equal(existsSync(new URL(retiredPath, import.meta.url)), false, `${retiredPath} must not return as a parallel Session-first chat path`)
@@ -173,6 +180,9 @@ assert.ok(routing.includes('pending.agentID !== targetAgent.id'), 'a created tar
 const routePendingShape = routing.match(/type PendingRouteContinue = \{[\s\S]*?\n\}/)?.[0] || ''
 assert.equal(routePendingShape.includes('prompt:'), false, 'route persistence must own target identity, not duplicate prompt text')
 assert.equal(routePendingShape.includes('model:'), false, 'route persistence must own target identity, not duplicate prompt model')
+assert.ok(routing.includes('const persistedLink = await api.registerNativeSessionLink'), 'lineage/context persistence must be awaited before first prompt delivery')
+assert.equal(routing.includes('Context persistence is enrichment'), false, 'transferred context must not regress to best-effort persistence')
+assert.ok(routing.indexOf('const persistedLink = await api.registerNativeSessionLink') < routing.indexOf('const sent = await sendNativeSessionPrompt'), 'first routed prompt must wait for durable lineage/context persistence')
 assert.ok(routing.includes('registerNativeSessionLink') && routing.includes('transferredContext'), 'same-machine lineage must durably retain the exact bounded transferred context')
 assert.ok(routing.includes('sendNativeSessionPrompt'), 'the destination change must become real only when the user prompt is sent')
 assert.ok(workThread.includes('routing.onContinue') && workThread.includes('routeChanged'), 'the mature v3 composer must own send-time harness switching')
