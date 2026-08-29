@@ -166,8 +166,11 @@ assert.equal(routing.includes('createRemoteSessionHandoff'), false, 'cross-machi
 assert.ok(routing.includes('targetMachine.machineID !== source.machineID'), 'routed continuation must enforce the same-machine boundary')
 assert.equal(routing.includes('PENDING_ROUTE_TTL_MS'), false, 'a created target Session must never be forgotten by a blind route TTL')
 assert.equal(handoff.includes('PENDING_HANDOFF_TTL_MS'), false, 'ambiguous resource creation must retain its original idempotency key until reconciled')
-assert.ok(routing.includes('const unresolvedPrompt = loadPendingNativeSessionPrompt(routedTarget)'), 'route recovery must inspect target prompt delivery before accepting a different retry')
-assert.equal(routing.includes('if (!loadPendingNativeSessionPrompt(routedTarget)) clearPendingNativeSessionRoute(source)'), false, 'a definite first-prompt 4xx must not forget an already-created target Session')
+assert.equal(routing.includes('loadPendingNativeSessionPrompt'), false, 'route recovery must not shadow the normal prompt pending/TTL semantics')
+assert.ok(routing.includes('pending.agentID !== targetAgent.id'), 'a created target Session must keep routing bound to that exact target harness')
+const routePendingShape = routing.match(/type PendingRouteContinue = \{[\s\S]*?\n\}/)?.[0] || ''
+assert.equal(routePendingShape.includes('prompt:'), false, 'route persistence must own target identity, not duplicate prompt text')
+assert.equal(routePendingShape.includes('model:'), false, 'route persistence must own target identity, not duplicate prompt model')
 assert.ok(routing.includes('registerNativeSessionLink') && routing.includes('transferredContext'), 'same-machine lineage must durably retain the exact bounded transferred context')
 assert.ok(routing.includes('sendNativeSessionPrompt'), 'the destination change must become real only when the user prompt is sent')
 assert.ok(workThread.includes('routing.onContinue') && workThread.includes('routeChanged'), 'the mature v3 composer must own send-time harness switching')
