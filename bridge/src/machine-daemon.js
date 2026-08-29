@@ -414,7 +414,100 @@ export function createMachineDaemonServer({
       throw daemonError("session_stop_rejected", message)
     }
   }
-  const handoffSession = async (sourceAgentID, sourceSessionID, { targetAgentID, directory, model, variant, title }) => {
+  const listHandoffSessions = async (targetAgentID, directory) => {
+    const targetEntry = daemon.hostEntry(targetAgentID)
+    if (!targetEntry) throw daemonError("unknown_agent", `Unknown target agent: ${targetAgentID}`)
+
+    if (targetEntry.kind === "acp") {
+      const service = acpService(targetAgentID)
+      if (!service || typeof service.listSessions !== "function") {
+        throw daemonError("agent_unavailable", `Agent ${targetAgentID} cannot list native Sessions for handoff recovery`)
+      }
+      const sessions = await service.listSessions(directory)
+      return sessions
+        .filter((session) => session?.id && (!directory || session.directory === directory))
+        .map((session) => ({ id: session.id, directory: session.directory || directory }))
+    }
+
+    const host = targetEntry.host
+    try {
+      await host.start?.()
+    } catch (error) {
+      throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${targetAgentID} is unavailable`)
+    }
+    const query = directory ? `?directory=${encodeURIComponent(directory)}` : ""
+    const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session${query}`
+    const headers = { Accept: "application/json" }
+    const authorization = internalAuthorization(host)
+    if (authorization) headers.Authorization = authorization
+    let response
+    try {
+      response = await fetch(url, { method: "GET", headers })
+    } catch {
+      throw daemonError("agent_unavailable", `Cannot list ${targetAgentID} Sessions for handoff recovery`)
+    }
+    if (!response.ok) {
+      let detail = ""
+      try { detail = await response.text() } catch {}
+      throw daemonError("agent_unavailable", detail || `Listing ${targetAgentID} Sessions returned HTTP ${response.status}`)
+    }
+    let payload
+    try {
+      payload = await response.json()
+    } catch {
+      throw daemonError("agent_unavailable", `Listing ${targetAgentID} Sessions returned an unreadable response`)
+    }
+    const sessions = Array.isArray(payload) ? payload : Array.isArray(payload?.sessions) ? payload.sessions : []
+    return sessions
+      .map((session) => ({
+        id: session?.id || session?.sessionId,
+        directory: session?.directory || session?.cwd || directory
+      }))
+      .filter((session) => session.id && (!directory || session.directory === directory))
+  }
+
+  const handoffRecoverySnapshot = async (targetAgentID, directory) => ({
+    kind: "native-session-handoff-create",
+    targetAgentID,
+    directory,
+    beforeSessionIDs: (await listHandoffSessions(targetAgentID, directory)).map((session) => session.id)
+  })
+
+  const handoffResultForTarget = async (sourceAgentID, sourceSessionID, targetAgentID, directory, targetSessionID) => {
+    const source = { machineID, agentID: sourceAgentID, sessionID: sourceSessionID, directory }
+    const target = { machineID, agentID: targetAgentID, sessionID: targetSessionID, directory }
+    let link
+    try {
+      link = await links.addHandoff({ source, target })
+    } catch {
+      // The target identity is the resource-creation result. Link persistence is retried by the
+      // client before first-prompt completion and must never make an existing target "unknown".
+    }
+    return { target, ...(link ? { link } : {}) }
+  }
+
+  const reconcileHandoff = async (sourceAgentID, sourceSessionID, input, recovery) => {
+    if (
+      !recovery
+      || recovery.kind !== "native-session-handoff-create"
+      || recovery.targetAgentID !== input.targetAgentID
+      || recovery.directory !== input.directory
+      || !Array.isArray(recovery.beforeSessionIDs)
+    ) return undefined
+
+    const before = new Set(recovery.beforeSessionIDs.filter((value) => typeof value === "string" && value))
+    const current = await listHandoffSessions(input.targetAgentID, input.directory)
+    const candidates = current.filter((session) => !before.has(session.id))
+    if (candidates.length !== 1) return undefined
+    return handoffResultForTarget(sourceAgentID, sourceSessionID, input.targetAgentID, input.directory, candidates[0].id)
+  }
+
+  const handoffSession = async (
+    sourceAgentID,
+    sourceSessionID,
+    { targetAgentID, directory, model, variant, title },
+    { checkpoint } = {}
+  ) => {
     const sourceEntry = daemon.hostEntry(sourceAgentID)
     if (!sourceEntry) throw daemonError("unknown_agent", `Unknown source agent: ${sourceAgentID}`)
     const targetEntry = daemon.hostEntry(targetAgentID)
@@ -423,89 +516,95 @@ export function createMachineDaemonServer({
       throw daemonError("unsupported_agent", `Agent ${targetAgentID} does not support native Sessions`)
     }
 
+    // Validate the explicit model before creating a resource, but do not apply it during Session
+    // creation. The first prompt already carries model + variant through the mature prompt path.
+    // Keeping post-create model changes out of this mutation removes a large ambiguous window.
     const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
-    const resolvedModel = requestedModel
-      ? await daemon.resolveModel(targetAgentID, requestedModel, { directory })
-      : null
-    const targetTitle = title || `Handoff from ${sourceAgentID}`
+    if (requestedModel) await daemon.resolveModel(targetAgentID, requestedModel, { directory })
+
+    // Recovery needs a durable "before" set. If the target cannot be listed, fail before session/new
+    // rather than create a resource we would have no safe way to identify after a lost response.
+    const recovery = await handoffRecoverySnapshot(targetAgentID, directory)
     let targetSession
-    let nativeCreated = false
 
-    try {
-      if (targetEntry.kind === "acp") {
-        const service = acpService(targetAgentID)
-        if (!service || typeof service.createSession !== "function") {
-          throw daemonError("unsupported_agent", `Agent ${targetAgentID} cannot create native Sessions`)
-        }
-        try {
-          targetSession = await service.createSession({
-            directory,
-            title: targetTitle,
-            model: modelWireName(resolvedModel)
-          })
-        } catch (error) {
-          if (error && typeof error === "object") error.ambiguous = true
-          throw error
-        }
-        if (!targetSession?.id) throw daemonError("handoff_rejected", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
-        nativeCreated = true
-        // createSession already applied the base model, so only the variant is left. Apply it through
-        // the service that owns this Session's configOptions rather than as a raw adapter request.
-        const variantToApply = acpModelVariant(resolvedModel)
-        if (variantToApply) await service.setModel(targetSession.id, modelWireName(resolvedModel), variantToApply)
-      } else {
-        const host = targetEntry.host
-        try {
-          await host.start?.()
-        } catch (error) {
-          throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${targetAgentID} is unavailable`)
-        }
-        const query = `?directory=${encodeURIComponent(directory)}`
-        const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session${query}`
-        const headers = { Accept: "application/json", "Content-Type": "application/json" }
-        const authorization = internalAuthorization(host)
-        if (authorization) headers.Authorization = authorization
-        let response
-        try {
-          response = await fetch(url, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              title: targetTitle,
-              model: resolvedModel ? {
-                providerID: resolvedModel.providerID,
-                id: resolvedModel.modelID,
-                variant: resolvedModel.variant || undefined
-              } : undefined
-            })
-          })
-        } catch {
-          throw daemonError("handoff_uncertain", `Creating ${targetAgentID} Session is uncertain`, { ambiguous: true })
-        }
-        if (!response.ok) {
-          let detail = ""
-          try { detail = await response.text() } catch {}
-          const message = detail || `Creating ${targetAgentID} Session returned HTTP ${response.status}`
-          if (response.status >= 500) throw daemonError("handoff_uncertain", message, { ambiguous: true })
-          throw daemonError("handoff_rejected", message)
-        }
-        try {
-          targetSession = await response.json()
-        } catch {
-          throw daemonError("handoff_uncertain", `Creating ${targetAgentID} Session returned an unreadable response`, { ambiguous: true })
-        }
-        if (!targetSession?.id) throw daemonError("handoff_uncertain", `Agent ${targetAgentID} did not return a native Session id`, { ambiguous: true })
-        nativeCreated = true
+    if (targetEntry.kind === "acp") {
+      const service = acpService(targetAgentID)
+      if (!service || typeof service.createSession !== "function") {
+        throw daemonError("unsupported_agent", `Agent ${targetAgentID} cannot create native Sessions`)
       }
-
-      const source = { machineID, agentID: sourceAgentID, sessionID: sourceSessionID, directory }
-      const target = { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory }
-      const link = await links.addHandoff({ source, target })
-      return { target, link }
-    } catch (error) {
-      if (nativeCreated && error && typeof error === "object") error.ambiguous = true
-      throw error
+      try {
+        // Deliberately bare: title/model enrichment must not sit between session/new and durable
+        // knowledge of the returned Session id.
+        targetSession = await service.createSession({ directory })
+      } catch (error) {
+        if (error && typeof error === "object") {
+          error.ambiguous = true
+          error.recovery = recovery
+        }
+        throw error
+      }
+    } else {
+      const host = targetEntry.host
+      try {
+        await host.start?.()
+      } catch (error) {
+        throw daemonError("agent_unavailable", error instanceof Error ? error.message : `Agent ${targetAgentID} is unavailable`)
+      }
+      const query = `?directory=${encodeURIComponent(directory)}`
+      const url = `http://${host.readinessHost ?? host.host ?? "127.0.0.1"}:${host.port}/session${query}`
+      const headers = { Accept: "application/json", "Content-Type": "application/json" }
+      const authorization = internalAuthorization(host)
+      if (authorization) headers.Authorization = authorization
+      let response
+      try {
+        response = await fetch(url, { method: "POST", headers, body: "{}" })
+      } catch {
+        throw daemonError("handoff_uncertain", `Creating ${targetAgentID} Session is uncertain`, {
+          ambiguous: true,
+          recovery
+        })
+      }
+      if (!response.ok) {
+        let detail = ""
+        try { detail = await response.text() } catch {}
+        const message = detail || `Creating ${targetAgentID} Session returned HTTP ${response.status}`
+        if (response.status >= 500) {
+          throw daemonError("handoff_uncertain", message, { ambiguous: true, recovery })
+        }
+        throw daemonError("handoff_rejected", message)
+      }
+      try {
+        targetSession = await response.json()
+      } catch {
+        throw daemonError("handoff_uncertain", `Creating ${targetAgentID} Session returned an unreadable response`, {
+          ambiguous: true,
+          recovery
+        })
+      }
     }
+
+    if (!targetSession?.id) {
+      throw daemonError("handoff_uncertain", `Agent ${targetAgentID} did not return a native Session id`, {
+        ambiguous: true,
+        recovery
+      })
+    }
+
+    // From this point on the target is durable knowledge. Persist it in the operation ledger before
+    // any optional title/link enrichment so a later failure or daemon crash can only return/reuse X.
+    let result = { target: { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory } }
+    if (typeof checkpoint === "function") await checkpoint(result)
+
+    // Naming is cosmetic and model/variant are intentionally deferred to the first prompt. A naming
+    // failure therefore cannot downgrade an already-known target into an uncertain creation.
+    if (title && targetEntry.kind === "acp") {
+      const service = acpService(targetAgentID)
+      try { await service?.renameSession?.(targetSession.id, title) } catch {}
+    }
+
+    result = await handoffResultForTarget(sourceAgentID, sourceSessionID, targetAgentID, directory, targetSession.id)
+    if (typeof checkpoint === "function") await checkpoint(result)
+    return result
   }
   const launcher = taskLauncher ?? new TaskLauncher({ daemon, acpService })
   const runs = taskRunController ?? new TaskRunController({ taskStore: tasks, taskLauncher: launcher, acpService })
@@ -545,6 +644,7 @@ export function createMachineDaemonServer({
     commandSession,
     stopSession,
     handoffSession,
+    reconcileHandoff,
     operationLedger: operations,
     sessionLinkStore: links
   })
