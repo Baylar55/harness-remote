@@ -352,6 +352,11 @@ export function WorkThreadConversation({
     ? routing.machines.map((machine) => `${machine.machineID}:${machine.agents.map((agent) => agent.id).join(",")}`).join("|")
     : ""
   const working = isActive(conversation)
+  // A truly empty native Session has no persisted model to protect yet. In that one state, and for
+  // a routed handoff that will create a fresh Session, a verified catalog default is safer than a
+  // synthetic "Harness default" choice that some adapters cannot actually execute.
+  const conversationHasUserPrompt = Boolean(conversation.initialPrompt?.trim())
+    || conversationTurns(conversation).some((turn) => Boolean(turn.prompt?.trim()))
   // JSON.stringify over every turn is far too expensive to repeat on each keystroke. The conversation object
   // identity only changes when the workspace actually reloads or updates the conversation.
   const conversationSignature = useMemo(() => runtimeSignature(conversation), [conversation])
@@ -504,6 +509,15 @@ export function WorkThreadConversation({
         return part.type === "text" && Boolean(part.text?.trim())
       }))
   }, [timeline, conversation.currentTurn?.id])
+  // OpenCode can publish the real assistant envelope before that envelope has text/reasoning/tool
+  // content. Once that bubble exists it must own the "getting started" line itself; rendering the
+  // generic pending bubble as well produces two adjacent OpenCode identity rows for one reply.
+  const currentTurnHasAssistantBubble = useMemo(() => {
+    const turnID = conversation.currentTurn?.id
+    return Boolean(working && turnID && timeline.some((message) =>
+      message.info.role === "assistant" && message.taskdesk?.runId === turnID
+    ))
+  }, [timeline, working, conversation.currentTurn?.id])
   const hasMore = Object.values(feeds).some((feed) => feed.hasMore && feed.before)
 
   const refreshCurrentTail = useCallback(async (sourceConversation?: ConversationRuntime) => {
@@ -633,9 +647,10 @@ export function WorkThreadConversation({
         ? lastModelForAgent(conversationRef.current, targetAgentID)
         : null
       const priorKey = modelKey(prior)
-      const fallback = deferModelFallback
-        ? undefined
-        : catalog.models.find((model) => model.isDefault) || catalog.models[0]
+      const mayUseCatalogDefault = !deferModelFallback || routeChanged || !conversationHasUserPrompt
+      const fallback = mayUseCatalogDefault
+        ? catalog.models.find((model) => model.isDefault) || catalog.models[0]
+        : undefined
       const chosen = catalog.models.find((model) => modelKey(model) === priorKey) || fallback
       setTargetModelKey((currentKey) => {
         if (modelSelectionTouchedRef.current && catalog.models.some((model) => modelKey(model) === currentKey)) return currentKey
@@ -650,7 +665,7 @@ export function WorkThreadConversation({
     }).finally(() => {
       if (modelGeneration.current === current) setModelsLoading(false)
     })
-  }, [targetAgentID, targetMachineID, conversation.id, conversation.directory, destinationConfig, modelScopeKey, deferModelFallback, routingSignature])
+  }, [targetAgentID, targetMachineID, conversation.id, conversation.directory, destinationConfig, modelScopeKey, deferModelFallback, routingSignature, routeChanged, conversationHasUserPrompt])
 
   // Only a model verified by the current live catalog is sent explicitly. A null selection is
   // intentional: the controller distinguishes it from an omitted field, which means reuse the
@@ -782,7 +797,7 @@ export function WorkThreadConversation({
   const pendingAgentBackend = (sending ? destinationAgents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
   // Only the turn that is actually running carries the live status row, and only once its bubble is
   // on screen - before that the pending bubble is showing the very same row.
-  const liveTurnID = working && !hasAttention && currentTurnHasAssistantSignal ? conversation.currentTurn?.id : undefined
+  const liveTurnID = working && !hasAttention && currentTurnHasAssistantBubble ? conversation.currentTurn?.id : undefined
 
   const waitingLabel = hasAttention
     ? "Waiting for your input"
@@ -878,7 +893,7 @@ export function WorkThreadConversation({
         onAttachmentsChange={setAttachments}
         onAttachmentError={setError}
         onSend={send}
-        sending={preparingReply}
+        sending={preparingReply && !currentTurnHasAssistantBubble}
         sendDisabled={working || hasAttention || routeBlockedByAttachments}
         onStop={working ? stop : undefined}
         stopping={stopping}
