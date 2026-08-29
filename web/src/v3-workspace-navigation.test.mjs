@@ -44,7 +44,8 @@ test("opening a native Session updates selection and mobile detail explicitly", 
   assert.match(workspace, /setSelected\(target\)/)
   assert.match(workspace, /setMobileDetailOpen\(true\)/)
   assert.match(workspace, /selectedKey=\{selected\?\.key\}/)
-  assert.match(workspace, /<NativeSessionObserver key=\{selected\.key\} target=\{selected\}/)
+  assert.match(workspace, /<NativeSessionObserver[\s\S]*?key=\{selected\.key\}[\s\S]*?target=\{selected\}/)
+  assert.match(workspace, /onOpenSession=\{openSession\}/)
 })
 
 test("Session list navigation groups real native Sessions by machine and Project", () => {
