@@ -53,6 +53,8 @@ const RAIL_WIDTH_STEP = 16
 // machine that was already confirmed online is demoted to offline.
 const MACHINE_DISCOVERY_RETRY_MS = 350
 const MACHINE_OFFLINE_FAILURE_THRESHOLD = 3
+const MACHINE_NORMAL_POLL_MS = 10_000
+const MACHINE_RECONNECT_POLL_MS = 1_500
 
 async function discoverMachineWithRetry(config: WorkspaceMachine["config"]): Promise<MachineSnapshot | null> {
   try {
@@ -432,11 +434,16 @@ function NativeSessionsWorkspace({
     return () => { cancelled = true }
   }, [machines, revision])
 
+  const reconnectingCount = runtimes.filter((runtime) =>
+    runtime.state === "online" && Boolean(runtime.snapshot) && Boolean(runtime.error)
+  ).length
+
   useEffect(() => {
     if (!loaded) return
+    const interval = reconnectingCount > 0 ? MACHINE_RECONNECT_POLL_MS : MACHINE_NORMAL_POLL_MS
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") setRevision((value) => value + 1)
-    }, 10_000)
+    }, interval)
     const onVisibility = () => {
       if (document.visibilityState === "visible") setRevision((value) => value + 1)
     }
@@ -445,7 +452,7 @@ function NativeSessionsWorkspace({
       window.clearInterval(timer)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [loaded])
+  }, [loaded, reconnectingCount])
 
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
   const loadingCount = runtimes.filter((runtime) => runtime.state === "loading").length
@@ -454,10 +461,35 @@ function NativeSessionsWorkspace({
     ? runtimes.find((runtime) => runtime.snapshot?.machine.id === selected.machineID || runtime.machine.id === selected.machineID)
     : undefined
   const selectedMachine = selectedRuntime?.machine
+  const selectedInteractionEnabled = Boolean(
+    selectedRuntime?.state === "online"
+    && selectedRuntime.snapshot
+    && !selectedRuntime.error
+    && sessionsDiscovered
+  )
+  const lastConnectionProbeRequest = useRef(0)
+  const markSelectedMachineConnectionIssue = useCallback(() => {
+    const machineID = selectedRuntime?.machine.id
+    if (!machineID) return
+    setRuntimes((current) => reuseList(current, current.map((runtime) => {
+      if (runtime.machine.id !== machineID || !runtime.snapshot) return runtime
+      return {
+        ...runtime,
+        state: "online",
+        error: runtime.error || "Reconnecting to machine…",
+        consecutiveFailures: Math.max(1, runtime.consecutiveFailures || 0)
+      }
+    })))
+    const now = Date.now()
+    if (now - lastConnectionProbeRequest.current >= MACHINE_RECONNECT_POLL_MS) {
+      lastConnectionProbeRequest.current = now
+      setRevision((value) => value + 1)
+    }
+  }, [selectedRuntime?.machine.id])
   const routeMachines = useMemo<NativeSessionRouteMachine[]>(() => {
     const byMachineID = new Map<string, NativeSessionRouteMachine>()
     for (const runtime of runtimes) {
-      if (runtime.state !== "online" || !runtime.snapshot) continue
+      if (runtime.state !== "online" || !runtime.snapshot || runtime.error) continue
       const machineID = runtime.snapshot.machine.id
       if (byMachineID.has(machineID)) continue
       byMachineID.set(machineID, {
@@ -620,8 +652,14 @@ function NativeSessionsWorkspace({
         </div>
         <div className="tdw-top-actions">
           <span className="tdw-machine-health">
-            <i className={onlineCount > 0 ? "online" : loadingCount > 0 ? "loading" : "offline"} />
-            {loadingCount && !loaded ? t("sf.connecting") : t("sf.machineCount", { online: onlineCount, total: machines.length })}
+            <i className={startupPhase !== "ready" || reconnectingCount > 0 ? "loading" : onlineCount > 0 ? "online" : "offline"} />
+            {startupPhase === "machines"
+              ? t("sf.connecting")
+              : startupPhase === "sessions"
+                ? t("sf.loadingSessions")
+                : reconnectingCount > 0
+                  ? t("sf.connecting")
+                  : t("sf.machineCount", { online: onlineCount, total: machines.length })}
           </span>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> {t("sf.machines")}</button>
           <button type="button" className="palette-hint" onClick={() => setPaletteOpen(true)} title="Command palette"><span>⌘K</span></button>
@@ -746,6 +784,8 @@ function NativeSessionsWorkspace({
                   key={selected.key}
                   target={selected}
                   routes={routeMachines}
+                  interactionEnabled={selectedInteractionEnabled}
+                  onConnectionIssue={markSelectedMachineConnectionIssue}
                   onOpenSession={openSession}
                   onSessionRefresh={() => setListRevision((value) => value + 1)}
                   onStateChange={setSelectedState}
