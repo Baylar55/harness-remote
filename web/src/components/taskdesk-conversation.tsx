@@ -200,12 +200,28 @@ const ConversationTranscript = memo(function ConversationTranscript({
     // changes such as Working -> Needs attention never move the transcript by themselves.
     if (startedSend) nearBottomRef.current = true
     if (!nearBottomRef.current || followFrameRef.current !== undefined) return
-    followFrameRef.current = window.requestAnimationFrame(() => {
-      followFrameRef.current = undefined
+
+    const followTail = () => {
       const current = transcriptRef.current
       if (!current || preservingOlderRef.current || !nearBottomRef.current) return
       current.scrollTop = current.scrollHeight
       refreshJumpAffordances(current)
+    }
+
+    followFrameRef.current = window.requestAnimationFrame(() => {
+      followTail()
+      // Sending changes both the transcript (optimistic user turn) and the composer geometry. A
+      // second frame is intentional only for that explicit Send: it waits for both layouts to settle
+      // before pinning the new user bubble above the composer. Streaming updates keep the normal
+      // single-frame follow behavior, and an upward user scroll still cancels follow via nearBottom.
+      if (startedSend && nearBottomRef.current && !preservingOlderRef.current) {
+        followFrameRef.current = window.requestAnimationFrame(() => {
+          followFrameRef.current = undefined
+          followTail()
+        })
+      } else {
+        followFrameRef.current = undefined
+      }
     })
   }, [messages, loading, ready, sending])
 
