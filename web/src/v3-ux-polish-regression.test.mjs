@@ -73,6 +73,11 @@ assert.match(sessionWorkbench, /\.hr-native-workspace-session-header[\s\S]*displ
 assert.match(sessionWorkbench, /\.hr-native-workspace-session-actions > code[\s\S]*display: none;/)
 assert.match(nativeObserverCss, /\.hr-native-session-observer \.tdw-conversation-toolbar[\s\S]*display: grid !important;[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto !important;/)
 assert.match(nativeObserverCss, /\.hr-control-plane \.hr-native-session-observer \.tdw-conversation-state[\s\S]*grid-column: 2 !important;/)
+assert.match(nativeObserverCss, /\.tdw-connection-notice/)
+assert.match(standalone, /MACHINE_RECONNECT_POLL_MS = 1_500/)
+assert.match(standalone, /selectedInteractionEnabled/)
+assert.match(standalone, /runtime\.state !== "online" \|\| !runtime\.snapshot \|\| runtime\.error/)
+assert.match(standalone, /startupPhase === "sessions"[\s\S]*sf\.loadingSessions/)
 
 // A single mobile timeout must not turn a machine that was already proven online into a false disconnect.
 assert.match(standalone, /MACHINE_OFFLINE_FAILURE_THRESHOLD = 3/)
