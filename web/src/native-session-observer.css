@@ -45,6 +45,18 @@
   width: min(360px, 100%);
 }
 
+.hr-native-session-observer .tdw-connection-notice {
+  flex: 0 0 auto;
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--td3-yellow-border, rgba(191, 135, 0, 0.34));
+  border-radius: 9px;
+  color: var(--tdw-muted, #9299a8);
+  background: var(--td3-yellow-soft, rgba(191, 135, 0, 0.08));
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
 
 
 .hr-native-session-continuation {
