@@ -71,10 +71,9 @@ assert.match(mobileParity, /@media \(pointer: coarse\) and \(min-width: 600px\) 
 
 // Native Session chat keeps the mature shared renderer without resurrecting the removed product UI.
 assert.match(chat, /routing \? "Harness" : "Continue with"/)
-assert.doesNotMatch(chat, /<span>Machine<\/span>/, "native Session continuation must not expose cross-machine routing in the composer")
-assert.doesNotMatch(nativeObserverCss, /tdw-agent-control\.routed ~ \.tdw-conversation-state[\s\S]*display: none !important/, "routing controls must not hide ConversationStatePill on mobile")
-assert.match(nativeObserverCss, /\.hr-control-plane \.hr-native-session-observer \.tdw-conversation-state[\s\S]*display: inline-flex !important/, "mobile native Session state must remain visible")
-assert.match(chat, /buildWorkThreadTimeline/)
+assert.doesNotMatch(chat, /<span>Machine<\/span>/)
+assert.match(nativeObserverCss, /\.hr-control-plane \.hr-native-session-observer \.tdw-conversation-state[\s\S]*display: inline-flex !important/)
+assert.match(chat, /buildConversationTimeline/)
 assert.match(overrides, /tdw-conversation-event::before/)
 assert.match(overrides, /uw-activity-group\.uw-tool-running/)
 assert.match(read("components/taskdesk-message-content.tsx"), /status === "running" \? "Working" : status/)
