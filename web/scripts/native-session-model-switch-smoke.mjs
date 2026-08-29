@@ -124,7 +124,7 @@ function startFakeDaemon() {
           transport: "acp",
           managed: true,
           state: "available",
-          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true, attachments: id === "pi" },
           contract: { sessions: { stop: "owned-session-native-cancel" } }
         }))
       })
@@ -190,6 +190,10 @@ function startFakeDaemon() {
       }
       if (request.method === "GET" && rest === "session/status") {
         json(response, 200, Object.fromEntries(agent.sessions.map((id) => [id, { type: "idle" }])))
+        return
+      }
+      if (request.method === "GET" && (rest === "v1/capabilities" || rest === "capabilities")) {
+        json(response, 200, { attachments: agentID === "pi", commands: false })
         return
       }
       if (request.method === "GET" && rest === "models") {
@@ -533,9 +537,27 @@ try {
   assert.equal(await routedControls.getByText("Model", { exact: true }).count(), 1, "Session handoff must keep model selection")
   assert.equal(await page.locator(".tdw-conversation-state").isVisible(), true, "routing controls must not hide the Session state")
 
+  // Attachments stay on their current Session. Switching harness must keep the attachment visible,
+  // hide the add-image action and block Send until the user explicitly removes it.
+  const attachmentInput = page.locator('.uw-composer-shell input[type="file"]')
+  await attachmentInput.waitFor({ state: "attached", timeout: 15_000 })
+  await attachmentInput.setInputFiles({
+    name: "handoff.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")
+  })
+  await page.getByRole("button", { name: "Remove handoff.png" }).waitFor({ state: "visible", timeout: 15_000 })
+
   const harnessSelect = routedControls.getByLabel("Harness")
   rejectNextHandoff = true
   await harnessSelect.selectOption("omp")
+  assert.equal(await page.getByRole("button", { name: "Attach image" }).count(), 0, "target harness must not accept new attachments during handoff")
+  const blockedComposer = page.getByRole("textbox", { name: "Message OMP" })
+  await blockedComposer.fill("BLOCKED-BY-ATTACHMENT")
+  assert.equal(await page.getByRole("button", { name: /^Send$/ }).isDisabled(), true, "existing attachments must block routed Send")
+  await page.getByText("Remove the attached images before continuing on another harness.", { exact: true }).waitFor({ state: "visible" })
+  assert.equal(handoffLinks.length, 0, "attachment-blocked route must not create a target Session")
+  await page.getByRole("button", { name: "Remove handoff.png" }).click()
   // Harness change synchronously invalidates the old PI model. Once the OMP catalog arrives it must
   // contain only OMP choices, never the stale PI selection that could previously race with Send.
   assert.ok(!(await page.locator(".tdw-model-trigger").innerText()).includes("pi-"), "old harness model remained visible after changing harness")
