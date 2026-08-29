@@ -2,7 +2,12 @@ import { api, type MessagePage } from "./api"
 import { probeNativeSessionContinuation } from "./native-session-continuation"
 import { lastNativeMessageModel } from "./native-session-model"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
-import { sendNativeSessionCommand, sendNativeSessionPrompt } from "./native-session-prompt"
+import {
+  loadPendingNativeSessionPrompt,
+  markPendingNativeSessionPromptAccepted,
+  sendNativeSessionCommand,
+  sendNativeSessionPrompt
+} from "./native-session-prompt"
 import { stopNativeSession } from "./native-session-stop"
 import type { ConversationContinueInput, ConversationController } from "./conversation-controller"
 import type { ConversationRuntime, ConversationTurn } from "./conversation-runtime"
@@ -16,6 +21,8 @@ type NativeTurnRecord = {
   prompt: string
   created: number
   model: ModelSelection | null
+  /** Exact native user-envelope identity when this logical turn was reconstructed from transcript. */
+  nativeMessageID?: string
 }
 
 type NativeConversationEntry = {
@@ -352,15 +359,90 @@ function captureUserTurns(entry: NativeConversationEntry, page: MessagePage, bef
     const prompt = visiblePrompt(message)
     if (!prompt) continue
     const id = `${conversationID(entry.target)}:native-user:${message.info.id}`
-    if (entry.turns.has(id)) continue
+    if (
+      entry.turns.has(id)
+      || [...entry.turns.values()].some((turn) => turn.nativeMessageID === message.info.id)
+    ) continue
     const created = Number(message.info.time?.created) || entry.createdAt
-    entry.turns.set(id, { id, prompt, created, model: entry.currentModel })
+    entry.turns.set(id, { id, prompt, created, model: entry.currentModel, nativeMessageID: message.info.id })
     entry.createdAt = Math.min(entry.createdAt, created)
     entry.updatedAt = Math.max(entry.updatedAt, created)
     changed = true
   }
   if (!entry.initialPageCaptured) entry.initialPageCaptured = true
   if (changed) notify(entry)
+}
+
+/**
+ * A mobile transport can lose the HTTP response after the daemon accepted a prompt. In that case
+ * the durable request id remains in localStorage, but the controller never got to append its logical
+ * turn. The next authoritative tail read must reconcile that exact pending prompt in-place instead
+ * of requiring navigation away and back just to reconstruct the native history.
+ *
+ * This only runs while a durable pending record exists, so an ordinary external harness turn is
+ * never claimed as an HR mutation. Matching the newest visible user envelope also handles handoff
+ * wire wrappers because visiblePrompt strips the transferred-context envelope back to what the user
+ * actually typed.
+ */
+function reconcilePendingPromptFromTranscript(entry: NativeConversationEntry, page: MessagePage, before?: string): void {
+  if (before) return
+  const pending = loadPendingNativeSessionPrompt(entry.target)
+  if (!pending) return
+  const prompt = canonicalText(pending.text)
+  if (!prompt) return
+
+  let userIndex = -1
+  for (let index = page.messages.length - 1; index >= 0; index -= 1) {
+    const message = page.messages[index]
+    if (message.info.role !== "user" || !message.info.id) continue
+    if (visiblePrompt(message) !== prompt) continue
+    const alreadyClaimed = [...entry.turns.values()].some((turn) => turn.nativeMessageID === message.info.id)
+    if (alreadyClaimed) continue
+    userIndex = index
+    break
+  }
+  if (userIndex < 0) return
+
+  const nativeUser = page.messages[userIndex]
+  const id = `${conversationID(entry.target)}:request:${pending.clientRequestId}`
+  if (!entry.turns.has(id)) {
+    const created = Number(nativeUser.info.time?.created) || pending.createdAt || Date.now()
+    const model = pending.model ?? entry.currentModel
+    entry.turns.set(id, {
+      id,
+      prompt,
+      created,
+      model,
+      nativeMessageID: nativeUser.info.id
+    })
+    if (model) entry.currentModel = model
+    entry.createdAt = Math.min(entry.createdAt, created)
+    entry.updatedAt = Math.max(entry.updatedAt, created)
+  }
+
+  let completed = false
+  let completedAt = 0
+  for (let index = userIndex + 1; index < page.messages.length; index += 1) {
+    const message = page.messages[index]
+    if (message.info.role === "user") break
+    if (!nativeAssistantCompleted(message)) continue
+    completed = true
+    completedAt = Math.max(
+      completedAt,
+      Number(message.info.time?.completed) || Number(message.info.time?.created) || 0
+    )
+  }
+  if (completed) {
+    entry.statusType = "idle"
+    entry.forcedStatus = null
+    if (completedAt) entry.updatedAt = Math.max(entry.updatedAt, completedAt)
+  } else {
+    entry.statusType = "running"
+    entry.forcedStatus = "running"
+  }
+
+  markPendingNativeSessionPromptAccepted(entry.target)
+  notify(entry)
 }
 
 function appendAcceptedTurn(entry: NativeConversationEntry, prompt: string, model: ModelSelection | null, clientRequestId: string): ConversationRuntime {
@@ -440,6 +522,7 @@ function nativeConversationController(entry: NativeConversationEntry): Conversat
       const activeEntry = entryForRead(config, sessionID, directory)
       if (activeEntry === entry) {
         page = stabilizePiTailPage(entry, page, before)
+        reconcilePendingPromptFromTranscript(entry, page, before)
         captureUserTurns(entry, page, before)
         reconcileOpenCodeTranscriptStatus(entry, page, before)
         reconcileNativeSessionModel(entry, page, before)
