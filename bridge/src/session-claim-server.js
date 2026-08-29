@@ -171,21 +171,51 @@ function mutationSignature(operation, payload) {
   return createHash("sha256").update(JSON.stringify({ operation, ...payload })).digest("hex")
 }
 
-async function runIdempotentMutation({ operationLedger, identity, signature, dispatch }) {
+async function runIdempotentMutation({ operationLedger, identity, signature, dispatch, reconcile }) {
   const started = await operationLedger.begin({ ...identity, signature })
   if (started.duplicate) {
+    if (started.state === "uncertain" && typeof reconcile === "function") {
+      try {
+        const recovered = await reconcile(started.entry.result)
+        if (recovered) {
+          await operationLedger.accept({ ...identity, result: recovered })
+          return { status: "accepted", duplicate: true, result: recovered }
+        }
+      } catch {
+        // Reconciliation is read-only. A temporary read failure must leave the original uncertain
+        // entry untouched rather than replaying a resource-creating mutation.
+      }
+    }
     return { status: started.state, duplicate: true, result: started.entry.result }
   }
 
   let dispatched = false
-  try {
-    const result = await dispatch()
-    dispatched = true
+  let checkpointedResult
+  const checkpoint = async (result) => {
     await operationLedger.accept({ ...identity, result })
-    return { status: "accepted", duplicate: false, result }
+    checkpointedResult = result
+  }
+
+  try {
+    const result = await dispatch({ checkpoint })
+    dispatched = true
+    const acceptedResult = result === undefined ? checkpointedResult : result
+    if (result !== undefined || checkpointedResult === undefined) {
+      await operationLedger.accept({ ...identity, result })
+    }
+    return { status: "accepted", duplicate: false, result: acceptedResult }
   } catch (error) {
+    if (checkpointedResult !== undefined) {
+      // Resource identity is already durable. Any later title/model/link enrichment failure cannot
+      // turn the creation back into "unknown"; retries must return this exact resource.
+      return { status: "accepted", duplicate: false, result: checkpointedResult }
+    }
     const ambiguous = dispatched || error?.ambiguous === true
-    await operationLedger.fail({ ...identity, ambiguous })
+    await operationLedger.fail({
+      ...identity,
+      ambiguous,
+      ...(error?.recovery !== undefined ? { result: error.recovery } : {})
+    })
     if (ambiguous) return { status: "uncertain", duplicate: false }
     throw error
   }
@@ -197,9 +227,10 @@ async function runIdempotentMutation({ operationLedger, identity, signature, dis
  * Prompt and Stop mutate one existing native Session. Handoff is the deliberate cross-agent
  * exception: it creates one new real native Session on the target harness and returns that native
  * identity. No operation here creates a Task, Conversation or Run. Mutation ids are persisted before
- * dispatch; accepted resource-creating operations also persist their result before HTTP success so a
- * lost response can return the exact same target Session. Pending/uncertain operations are never
- * replayed automatically after a crash or ambiguous local transport failure.
+ * dispatch; resource-creating handoffs checkpoint the target identity as soon as it is known, before
+ * any optional enrichment. A direct creation ambiguity is never replayed blindly: duplicate retries
+ * may perform read-only reconciliation and promote one uniquely identified target into an accepted
+ * ledger result.
  */
 export function createSessionClaimServer({
   innerServer,
@@ -209,6 +240,7 @@ export function createSessionClaimServer({
   commandSession,
   stopSession,
   handoffSession,
+  reconcileHandoff,
   operationLedger,
   sessionLinkStore,
   createServer = http.createServer
@@ -318,13 +350,16 @@ export function createSessionClaimServer({
         operationLedger,
         identity,
         signature: mutationSignature(operation, signaturePayload),
-        dispatch: () => operation === "prompt"
+        reconcile: operation === "handoff" && typeof reconcileHandoff === "function"
+          ? (recovery) => reconcileHandoff(agentID, sessionID, input, recovery)
+          : undefined,
+        dispatch: ({ checkpoint }) => operation === "prompt"
           ? promptSession(agentID, sessionID, input)
           : operation === "command"
             ? commandSession(agentID, sessionID, input)
             : operation === "stop"
               ? stopSession(agentID, sessionID, input)
-              : handoffSession(agentID, sessionID, input)
+              : handoffSession(agentID, sessionID, input, { checkpoint })
       })
       const status = result.status === "accepted" ? 200 : 202
       writeJSON(response, status, {
