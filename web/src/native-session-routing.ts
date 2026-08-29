@@ -7,7 +7,7 @@ import {
   type NativeSessionRef,
   type NativeSessionSurfaceTarget
 } from "./native-session-discovery"
-import { handoffNativeSession } from "./native-session-handoff"
+import { acknowledgeNativeSessionHandoff, handoffNativeSession } from "./native-session-handoff"
 import {
   nativeSessionTransferredContext,
   sendNativeSessionPrompt
@@ -78,8 +78,13 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingRouteContinue |
   }
 }
 
-function persistPending(source: NativeSessionSurfaceTarget, pending: PendingRouteContinue) {
-  try { localStorage.setItem(transactionKey(source), JSON.stringify(pending)) } catch {}
+function persistPending(source: NativeSessionSurfaceTarget, pending: PendingRouteContinue): boolean {
+  try {
+    localStorage.setItem(transactionKey(source), JSON.stringify(pending))
+    return true
+  } catch {
+    return false
+  }
 }
 
 function historyEntry(source: NativeSessionSurfaceTarget, messages: NativeSessionHistoryEntry["messages"]): NativeSessionHistoryEntry {
@@ -175,7 +180,14 @@ export async function continueNativeSessionOnRoute({
       target: result.result.target,
       link: result.result.link as NativeSessionLinkRecord | undefined
     }
-    persistPending(source, pending)
+    if (!persistPending(source, pending)) {
+      throw new Error("The linked Session was created, but its recovery state could not be persisted. Retry the same harness to recover that exact target.")
+    }
+    acknowledgeNativeSessionHandoff(source)
+  } else {
+    // A previous crash may have happened after the route target was persisted but before the
+    // creation key was acknowledged. The durable route target is now authoritative.
+    acknowledgeNativeSessionHandoff(source)
   }
 
   const page = await api.loadMessagePage(source.config, source.sessionID, source.directory, undefined, 100, false)
@@ -202,8 +214,8 @@ export async function continueNativeSessionOnRoute({
         ...pending.link,
         transferredContext
       })
-      pending = { ...pending, link: persisted.link }
-      persistPending(source, pending)
+      const enriched = { ...pending, link: persisted.link }
+      if (persistPending(source, enriched)) pending = enriched
     } catch {
       // The link was already durably created by the handoff. Context persistence is enrichment and
       // must not turn an otherwise valid local target into a second resource-creation attempt.
