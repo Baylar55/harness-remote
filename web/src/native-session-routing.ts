@@ -208,19 +208,22 @@ export async function continueNativeSessionOnRoute({
   // elapsed. This route record deliberately owns only the already-created target identity.
 
   const transferredContext = nativeSessionTransferredContext(routedTarget)
-  if (pending.link && transferredContext) {
-    try {
-      const persisted = await api.registerNativeSessionLink(machineConfig(source.config), {
-        ...pending.link,
-        transferredContext
-      })
-      const enriched = { ...pending, link: persisted.link }
-      if (persistPending(source, enriched)) pending = enriched
-    } catch {
-      // The link was already durably created by the handoff. Context persistence is enrichment and
-      // must not turn an otherwise valid local target into a second resource-creation attempt.
-    }
+  const linkCandidate: NativeSessionLinkRecord = pending.link ?? {
+    type: "handoff",
+    source: source.ref,
+    target: pending.target,
+    createdAt: new Date(pending.createdAt).toISOString()
   }
+  // Lineage + transferred context are part of the durable handoff contract, not fire-and-forget
+  // enrichment. If this write fails, keep the known target route and retry this exact persistence
+  // before sending the first prompt. That guarantees reload/reopen inspectability without ever
+  // creating a second native Session.
+  const persistedLink = await api.registerNativeSessionLink(machineConfig(source.config), {
+    ...linkCandidate,
+    ...(transferredContext ? { transferredContext } : {})
+  })
+  const enriched = { ...pending, link: persistedLink.link }
+  if (persistPending(source, enriched)) pending = enriched
 
   const sent = await sendNativeSessionPrompt(routedTarget, normalizedPrompt, model, [])
   if (sent.status !== "accepted") {
