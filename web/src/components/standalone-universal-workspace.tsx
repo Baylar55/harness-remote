@@ -48,6 +48,20 @@ const RAIL_WIDTH_MIN = 260
 const RAIL_WIDTH_MAX = 620
 /** One arrow press. Wide enough to be worth pressing, small enough to land on an exact width. */
 const RAIL_WIDTH_STEP = 16
+// Mobile WebViews and freshly-started harnesses can transiently miss one daemon probe while an
+// operation is starting. Retry once inside the same refresh, then require repeated misses before a
+// machine that was already confirmed online is demoted to offline.
+const MACHINE_DISCOVERY_RETRY_MS = 350
+const MACHINE_OFFLINE_FAILURE_THRESHOLD = 3
+
+async function discoverMachineWithRetry(config: WorkspaceMachine["config"]): Promise<MachineSnapshot | null> {
+  try {
+    return await discoverMachine(config)
+  } catch {
+    await new Promise<void>((resolve) => setTimeout(resolve, MACHINE_DISCOVERY_RETRY_MS))
+    return discoverMachine(config)
+  }
+}
 
 function clampRailWidth(value: number): number {
   return Math.min(RAIL_WIDTH_MAX, Math.max(RAIL_WIDTH_MIN, Math.round(value)))
@@ -73,6 +87,7 @@ type NativeMachineRuntime = {
   snapshot: MachineSnapshot | null
   state: "loading" | "online" | "offline"
   error?: string
+  consecutiveFailures?: number
 }
 
 
@@ -296,8 +311,10 @@ function NativeSessionsWorkspace({
 }) {
   const t = useTranslator()
   const [runtimes, setRuntimes] = useState<NativeMachineRuntime[]>(() =>
-    machines.map((machine) => ({ machine, snapshot: null, state: "loading" }))
+    machines.map((machine) => ({ machine, snapshot: null, state: "loading", consecutiveFailures: 0 }))
   )
+  const runtimesRef = useRef(runtimes)
+  runtimesRef.current = runtimes
   const [loaded, setLoaded] = useState(machines.length === 0)
   const [refreshing, setRefreshing] = useState(false)
   const [revision, setRevision] = useState(0)
@@ -373,17 +390,33 @@ function NativeSessionsWorkspace({
 
     void Promise.all(machines.map(async (machine): Promise<NativeMachineRuntime> => {
       try {
-        const snapshot = await discoverMachine(machine.config)
+        const snapshot = await discoverMachineWithRetry(machine.config)
         if (snapshot) migrateNativeSessionMachineStorage(machine.id, snapshot.machine.id)
         return snapshot
-          ? { machine, snapshot, state: "online" }
-          : { machine, snapshot: null, state: "offline", error: "This endpoint is not a Harness machine daemon." }
+          ? { machine, snapshot, state: "online", consecutiveFailures: 0 }
+          : { machine, snapshot: null, state: "offline", error: "This endpoint is not a Harness machine daemon.", consecutiveFailures: MACHINE_OFFLINE_FAILURE_THRESHOLD }
       } catch (reason) {
+        const error = reason instanceof Error ? reason.message : String(reason)
+        const previous = runtimesRef.current.find((runtime) => runtime.machine.id === machine.id)
+        const sameEndpoint = previous?.machine.config.host === machine.config.host
+          && previous?.machine.config.port === machine.config.port
+          && previous?.machine.config.username === machine.config.username
+        const consecutiveFailures = (previous?.consecutiveFailures || 0) + 1
+        if (sameEndpoint && previous?.snapshot && consecutiveFailures < MACHINE_OFFLINE_FAILURE_THRESHOLD) {
+          return {
+            ...previous,
+            machine,
+            state: "online",
+            error,
+            consecutiveFailures
+          }
+        }
         return {
           machine,
           snapshot: null,
           state: "offline",
-          error: reason instanceof Error ? reason.message : String(reason)
+          error,
+          consecutiveFailures
         }
       }
     })).then((next) => {
