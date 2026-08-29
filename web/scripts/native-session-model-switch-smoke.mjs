@@ -70,6 +70,8 @@ const handoffLinks = []
 const handoffLedger = new Map()
 const rejectedHandoffs = []
 let rejectNextHandoff = false
+let rejectNextLinkPersistence = false
+let linkPersistenceFailures = 0
 let refuseNextHandoffTargetPrompt = false
 let handoffTargetCounter = 0
 let lastHandoffTargetID = null
@@ -157,6 +159,12 @@ function startFakeDaemon() {
       if (request.method === "POST") {
         const body = await readBody(request)
         const candidate = body.link
+        if (rejectNextLinkPersistence) {
+          rejectNextLinkPersistence = false
+          linkPersistenceFailures += 1
+          json(response, 503, { error: "Temporary SessionLinkStore write failure" })
+          return
+        }
         const index = handoffLinks.findIndex((link) =>
           link.source.machineID === candidate?.source?.machineID
           && link.source.agentID === candidate?.source?.agentID
@@ -582,12 +590,24 @@ try {
   await chooseModel(page, "omp-fast")
   const routedPromptBefore = promptBodies.length
   const handoffCountBefore = handoffLinks.length
-  const routed = await send(page, "PI", "HANDOFF-SUCCESS")
-  await waitFor(() => handoffLinks.length === handoffCountBefore + 1, "persisted same-machine handoff link")
-  await waitFor(() => Boolean(handoffLinks.at(-1)?.transferredContext), "persisted transferred context")
-  assert.ok(lastHandoffTargetID, "successful handoff did not create a target Session")
+  const createsBeforeContextFailure = handoffTargetCounter
+  rejectNextLinkPersistence = true
+  const contextRetryComposer = page.getByRole("textbox", { name: "Message PI" })
+  await contextRetryComposer.fill("HANDOFF-SUCCESS")
+  await page.getByRole("button", { name: /^Send$/ }).click()
+  await waitFor(() => linkPersistenceFailures === 1, "transferred-context persistence refusal")
+  await waitFor(() => handoffLinks.length === handoffCountBefore + 1, "target/link creation before context persistence refusal")
+  assert.ok(lastHandoffTargetID, "handoff target was not created before context persistence failed")
   const firstHandoffTargetID = lastHandoffTargetID
-  assert.equal(routed.sessionID, firstHandoffTargetID, "first routed prompt must address the newly created target Session")
+  assert.equal(handoffTargetCounter, createsBeforeContextFailure + 1, "context persistence failure must happen after exactly one target create")
+  assert.equal(promptBodies.length, routedPromptBefore, "first prompt must wait until lineage/context persistence succeeds")
+  await page.getByRole("alert").waitFor({ state: "visible", timeout: 15_000 })
+
+  const createsBeforeContextRetry = handoffTargetCounter
+  const routed = await send(page, "PI", "HANDOFF-SUCCESS")
+  assert.equal(handoffTargetCounter, createsBeforeContextRetry, "context persistence retry must reuse the already-created target Session")
+  await waitFor(() => Boolean(handoffLinks.at(-1)?.transferredContext), "persisted transferred context")
+  assert.equal(routed.sessionID, firstHandoffTargetID, "first routed prompt must address the already-created target Session")
   assert.equal(routed.agentID, "omp")
   await page.getByRole("textbox", { name: "Message OMP" }).waitFor({ state: "visible", timeout: 15_000 })
   assert.deepEqual(routed.model, { providerID: "omp", modelID: "omp-fast" })
