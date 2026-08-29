@@ -232,20 +232,42 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
       acp.listSessions(),
       service.deletedSessionIDs()
     ])
-    return sessions
-      .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
-      .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
-      .filter((session) => !deletedSessionIDs.has(session.sessionId))
-      .map((session) => {
-        const liveUpdatedAt = liveSessionActivity.get(session.sessionId) ?? 0
-        const listedUpdated = Date.parse(session.updatedAt ?? "")
-        const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
-        return listedSessionView(
-          session,
-          publicSessionStatus(session.sessionId, Math.max(liveUpdatedAt, listedTimestamp)),
-          liveUpdatedAt
-        )
-      })
+    const visible = new Map(
+      sessions
+        .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
+        .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
+        .filter((session) => !deletedSessionIDs.has(session.sessionId))
+        .map((session) => {
+          const liveUpdatedAt = liveSessionActivity.get(session.sessionId) ?? 0
+          const listedUpdated = Date.parse(session.updatedAt ?? "")
+          const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
+          const view = listedSessionView(
+            session,
+            publicSessionStatus(session.sessionId, Math.max(liveUpdatedAt, listedTimestamp)),
+            liveUpdatedAt
+          )
+          return [view.id, view]
+        })
+    )
+
+    // PI can create a valid writer Session before its lightweight ACP listing exposes it. Codex and
+    // other ACP adapters may also lack a native rename primitive even though Harness Remote can keep
+    // an explicit user title for the owned Session. Overlay only those already-owned identities:
+    // native discovery remains authoritative for every other Session and no transcript snapshot is
+    // restored merely to draw the rail.
+    for (const { session, titleOverride } of service.ownedSessionIndex(directory)) {
+      if (hiddenSessionIDs?.has(session.id) || deletedSessionIDs.has(session.id)) continue
+      const listed = visible.get(session.id)
+      if (!listed) {
+        visible.set(session.id, {
+          ...session,
+          status: publicSessionStatus(session.id, session.time?.updated)
+        })
+      } else if (titleOverride) {
+        visible.set(session.id, { ...listed, title: titleOverride })
+      }
+    }
+    return [...visible.values()]
   }
 
   const server = http.createServer(async (request, response) => {
