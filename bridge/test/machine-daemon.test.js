@@ -182,6 +182,8 @@ test("machine server wires registry, routing, native Session operations, task li
   assert.equal(typeof claimOptions.promptSession, "function")
   assert.equal(typeof claimOptions.commandSession, "function")
   assert.equal(typeof claimOptions.stopSession, "function")
+  assert.equal(typeof claimOptions.handoffSession, "function")
+  assert.equal(typeof claimOptions.reconcileHandoff, "function")
   assert.equal(claimOptions.operationLedger, fakeLedger)
   assert.equal(launchOptions.innerServer, claimServer)
   assert.equal(typeof launchOptions.taskRunController.launch, "function")
@@ -195,6 +197,126 @@ test("machine server wires registry, routing, native Session operations, task li
   assert.equal(typeof workThreadOptions.controller.reconcile, "function")
   assert.equal(workThreadOptions.controller.taskStore, routerOptions.taskStore)
   assert.deepEqual(bridgeOptions.machineRegistry.snapshot().agents.map((host) => host.id), ["pi", "opencode"])
+})
+
+test("machine handoff checkpoints a created target before link enrichment can fail", async () => {
+  const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
+  const codex = new FakeAcp()
+  const pi = new FakeAcp()
+  daemon.registerAcpHost({ id: "codex", agent: codex })
+  daemon.registerAcpHost({ id: "pi", agent: pi, bridgeConfig: { backend: "pi" } })
+
+  const targetSessions = [{ id: "pi-old", directory: "/repo" }]
+  let creates = 0
+  let claimOptions
+  createMachineDaemonServer({
+    daemon,
+    config: { backend: "codex", port: 4097 },
+    primaryAcp: codex,
+    sessionOperationLedger: { marker: "ledger" },
+    sessionLinkStore: {
+      async addHandoff() { throw new Error("simulated SessionLinkStore failure") }
+    },
+    createServer: (options) => ({
+      acpService: options.config.backend === "pi"
+        ? {
+            async listSessions() { return targetSessions },
+            async createSession(input) {
+              creates += 1
+              assert.deepEqual(input, { directory: "/repo" }, "handoff creation must not apply title/model before target checkpoint")
+              const created = { id: "pi-new", directory: "/repo" }
+              targetSessions.push(created)
+              return created
+            },
+            async renameSession() { throw new Error("cosmetic rename failed") },
+            async claimSession() { return true },
+            async prompt() {},
+            async abort() {}
+          }
+        : { async claimSession() { return true }, async prompt() {}, async abort() {} },
+      emit() {}
+    }),
+    createRouter: () => ({ marker: "router" }),
+    createClaimServer: (options) => { claimOptions = options; return { marker: "claim" } },
+    createLaunchServer: ({ innerServer }) => innerServer,
+    createModelServer: ({ innerServer }) => innerServer,
+    createFinishServer: ({ innerServer }) => innerServer,
+    createWorkThreadServerFactory: ({ innerServer }) => innerServer
+  })
+
+  const checkpoints = []
+  const result = await claimOptions.handoffSession(
+    "codex",
+    "source-native-1",
+    { targetAgentID: "pi", directory: "/repo", title: "Continue source" },
+    { checkpoint: async (value) => checkpoints.push(structuredClone(value)) }
+  )
+
+  assert.equal(creates, 1)
+  assert.equal(result.target.sessionID, "pi-new")
+  assert.equal(result.link, undefined, "link failure must not erase a known target identity")
+  assert.equal(checkpoints[0].target.sessionID, "pi-new", "target id must be checkpointed before enrichment")
+})
+
+test("machine handoff reconciles one ACP Session created behind a lost session/new response", async () => {
+  const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
+  const codex = new FakeAcp()
+  const pi = new FakeAcp()
+  daemon.registerAcpHost({ id: "codex", agent: codex })
+  daemon.registerAcpHost({ id: "pi", agent: pi, bridgeConfig: { backend: "pi" } })
+
+  const targetSessions = [{ id: "pi-old", directory: "/repo" }]
+  let creates = 0
+  let claimOptions
+  createMachineDaemonServer({
+    daemon,
+    config: { backend: "codex", port: 4097 },
+    primaryAcp: codex,
+    sessionOperationLedger: { marker: "ledger" },
+    sessionLinkStore: { async addHandoff({ source, target }) { return { type: "handoff", source, target, createdAt: "2026-08-29T12:00:00.000Z" } } },
+    createServer: (options) => ({
+      acpService: options.config.backend === "pi"
+        ? {
+            async listSessions() { return targetSessions },
+            async createSession() {
+              creates += 1
+              targetSessions.push({ id: "pi-recovered", directory: "/repo" })
+              throw new Error("simulated lost session/new response")
+            },
+            async claimSession() { return true },
+            async prompt() {},
+            async abort() {}
+          }
+        : { async claimSession() { return true }, async prompt() {}, async abort() {} },
+      emit() {}
+    }),
+    createRouter: () => ({ marker: "router" }),
+    createClaimServer: (options) => { claimOptions = options; return { marker: "claim" } },
+    createLaunchServer: ({ innerServer }) => innerServer,
+    createModelServer: ({ innerServer }) => innerServer,
+    createFinishServer: ({ innerServer }) => innerServer,
+    createWorkThreadServerFactory: ({ innerServer }) => innerServer
+  })
+
+  let recovery
+  await assert.rejects(
+    () => claimOptions.handoffSession("codex", "source-native-1", { targetAgentID: "pi", directory: "/repo" }),
+    (error) => {
+      assert.equal(error.ambiguous, true)
+      recovery = error.recovery
+      return true
+    }
+  )
+  assert.equal(creates, 1)
+
+  const reconciled = await claimOptions.reconcileHandoff(
+    "codex",
+    "source-native-1",
+    { targetAgentID: "pi", directory: "/repo" },
+    recovery
+  )
+  assert.equal(reconciled.target.sessionID, "pi-recovered")
+  assert.equal(creates, 1, "read-only reconciliation must not replay session/new")
 })
 
 test("machine Session mutations acquire ACP ownership lazily and reuse it", async () => {
