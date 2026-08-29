@@ -70,6 +70,7 @@ const handoffLinks = []
 const handoffLedger = new Map()
 const rejectedHandoffs = []
 let rejectNextHandoff = false
+let refuseNextHandoffTargetPrompt = false
 let handoffTargetCounter = 0
 let lastHandoffTargetID = null
 let sseOpened = 0
@@ -255,6 +256,10 @@ function startFakeDaemon() {
         }
         const link = { type: "handoff", source, target, createdAt: new Date().toISOString() }
         handoffLinks.push(link)
+        if (refuseNextHandoffTargetPrompt) {
+          refuseNextHandoffTargetPrompt = false
+          refuseNextPromptFor = targetSessionID
+        }
         const result = { target, link }
         handoffLedger.set(ledgerKey, result)
         json(response, 200, { status: "accepted", clientRequestId: body.clientRequestId, result })
@@ -581,7 +586,8 @@ try {
   await waitFor(() => handoffLinks.length === handoffCountBefore + 1, "persisted same-machine handoff link")
   await waitFor(() => Boolean(handoffLinks.at(-1)?.transferredContext), "persisted transferred context")
   assert.ok(lastHandoffTargetID, "successful handoff did not create a target Session")
-  assert.equal(routed.sessionID, lastHandoffTargetID, "first routed prompt must address the newly created target Session")
+  const firstHandoffTargetID = lastHandoffTargetID
+  assert.equal(routed.sessionID, firstHandoffTargetID, "first routed prompt must address the newly created target Session")
   assert.equal(routed.agentID, "omp")
   await page.getByRole("textbox", { name: "Message OMP" }).waitFor({ state: "visible", timeout: 15_000 })
   assert.deepEqual(routed.model, { providerID: "omp", modelID: "omp-fast" })
@@ -590,7 +596,7 @@ try {
   assert.match(routed.text, /SWITCH-A-HISTORY/)
   assert.equal(handoffLinks.at(-1).source.machineID, handoffLinks.at(-1).target.machineID, "handoff link must stay on one machine")
 
-  await page.getByText("Transferred context", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  await page.locator(".hr-session-transfer-context > summary").waitFor({ state: "visible", timeout: 15_000 })
   assert.equal(await page.getByText("Continued from", { exact: true }).count(), 1, "target Session must identify its source")
 
   // Reopening after a full app reload must recover both lineage and the exact bounded transferred
@@ -605,22 +611,61 @@ try {
   await reopenedTarget.click()
   await page.getByRole("heading", { name: TITLE_A }).waitFor({ state: "visible", timeout: 15_000 })
   await page.getByText("Continued from", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
-  await page.getByText("Transferred context", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  await page.locator(".hr-session-transfer-context > summary").waitFor({ state: "visible", timeout: 15_000 })
   const transfer = page.locator(".hr-session-transfer-context")
   await transfer.locator("summary").click()
   assert.match(await transfer.locator("pre").innerText(), /SWITCH-A-HISTORY/, "reopened target lost its transferred context")
 
+  // --- target created, first target prompt refused: retry must reuse that exact target --------------
+  await backToSessions(page)
+  await openSession(page, TITLE_B, markers.get(SESSION_B))
+  const retryControls = page.locator(".tdw-agent-control.routed")
+  const retryHarness = retryControls.locator("label").filter({ hasText: /^Harness/ }).locator("select")
+  await retryHarness.selectOption("omp")
+  await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "B routed to OMP")
+  await chooseModel(page, "omp-deep")
+
+  const linksBeforeTargetPromptRefusal = handoffLinks.length
+  const createsBeforeTargetPromptRefusal = handoffTargetCounter
+  const refusedBeforeTargetPromptRefusal = refusedPrompts.length
+  refuseNextHandoffTargetPrompt = true
+  const sourceComposer = page.getByRole("textbox", { name: "Message PI" })
+  await sourceComposer.fill("TARGET-FIRST-PROMPT-REFUSED")
+  await page.getByRole("button", { name: /^Send$/ }).click()
+  await waitFor(() => refusedPrompts.length === refusedBeforeTargetPromptRefusal + 1, "first target prompt refusal")
+  await waitFor(() => handoffLinks.length === linksBeforeTargetPromptRefusal + 1, "target creation before refused first prompt")
+  const refusedTargetID = lastHandoffTargetID
+  assert.ok(refusedTargetID, "handoff target was not created before first-prompt refusal")
+  assert.equal(handoffTargetCounter, createsBeforeTargetPromptRefusal + 1, "first attempt must create exactly one target Session")
+  assert.equal(refusedPrompts.at(-1).sessionID, refusedTargetID, "the refusal must come from the created target Session")
+  await page.getByRole("alert").waitFor({ state: "visible", timeout: 15_000 })
+
+  // A definite prompt 4xx releases only prompt delivery state. The durable route still owns the
+  // created target, so changing prompt/model must retry that Session without another handoff create.
+  await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "B target retry after first prompt refusal")
+  await chooseModel(page, "omp-fast")
+  const linksBeforeTargetRetry = handoffLinks.length
+  const createsBeforeTargetRetry = handoffTargetCounter
+  const recovered = await send(page, "PI", "TARGET-FIRST-PROMPT-RECOVERED")
+  assert.equal(recovered.agentID, "omp")
+  assert.equal(recovered.sessionID, refusedTargetID, "retry after first-prompt 4xx must reuse the already-created target Session")
+  assert.deepEqual(recovered.model, { providerID: "omp", modelID: "omp-fast" })
+  assert.equal(handoffLinks.length, linksBeforeTargetRetry, "retry must not create a second lineage link")
+  assert.equal(handoffTargetCounter, createsBeforeTargetRetry, "retry must not create a second native target Session")
+  await page.getByRole("textbox", { name: "Message OMP" }).waitFor({ state: "visible", timeout: 15_000 })
+
   // --- delivery and subscription hygiene ----------------------------------------------------------
-  assert.equal(promptBodies.length, 7, `expected exactly seven accepted prompts including the routed handoff, got ${promptBodies.length}`)
+  assert.equal(promptBodies.length, 8, `expected exactly eight accepted prompts including two routed handoffs, got ${promptBodies.length}`)
   const requestIDs = promptBodies.map((body) => body.clientRequestId)
   assert.equal(new Set(requestIDs).size, requestIDs.length, "each Send must use its own durable client request id")
   assert.ok(requestIDs.every((value) => typeof value === "string" && value), "every prompt must carry a client request id")
   assert.equal(promptBodies.filter((body) => body.sessionID === SESSION_A).length, 2, "A received exactly its own two prompts")
   assert.equal(promptBodies.filter((body) => body.sessionID === SESSION_B).length, 3)
-  assert.equal(refusedPrompts.length, 1, "exactly one normal prompt delivery was refused on purpose")
+  assert.equal(refusedPrompts.length, 2, "one normal prompt and one created-target first prompt were refused on purpose")
   assert.equal(rejectedHandoffs.length, 1, "exactly one handoff creation was definitively refused")
   assert.equal(promptBodies.filter((body) => body.sessionID === SESSION_C).length, 1)
-  assert.equal(promptBodies.filter((body) => body.sessionID === lastHandoffTargetID).length, 1, "handoff target received exactly one first prompt")
+  assert.equal(promptBodies.filter((body) => body.sessionID === firstHandoffTargetID).length, 1, "first handoff target received exactly one prompt")
+  assert.equal(promptBodies.filter((body) => body.sessionID === lastHandoffTargetID).length, 1, "recovered handoff target received exactly one accepted prompt")
   for (const body of promptBodies) assert.equal(body.directory, DIRECTORY, "every prompt must carry the Project directory")
 
   // Repeated Session opens must not leave one live event stream behind each.
