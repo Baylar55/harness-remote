@@ -91,7 +91,7 @@ function markHandoffSent(target: NativeSessionSurfaceTarget) {
   try { localStorage.setItem(handoffSentKey(target), "1") } catch {}
 }
 
-function transferredContext(target: NativeSessionSurfaceTarget): string {
+export function nativeSessionTransferredContext(target: NativeSessionSurfaceTarget): string {
   const history = target.history || []
   if (!history.length) return ""
   const lines: string[] = []
@@ -109,7 +109,7 @@ function transferredContext(target: NativeSessionSurfaceTarget): string {
 
 function wirePrompt(target: NativeSessionSurfaceTarget, visibleText: string): string {
   if (!target.history?.length || handoffAlreadySent(target)) return visibleText
-  const context = transferredContext(target)
+  const context = nativeSessionTransferredContext(target)
   if (!context) return visibleText
   // Keep the mature v3 packet markers. native-session-turns strips this technical envelope back to
   // USER INSTRUCTION for display, so the harness gets context while the user sees only what they wrote.

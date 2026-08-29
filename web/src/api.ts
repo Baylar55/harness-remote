@@ -64,6 +64,29 @@ export type MessagePage = {
   model?: ModelSelection
 }
 
+export type NativeSessionIdentityPayload = {
+  machineID: string
+  agentID: string
+  sessionID: string
+  directory: string
+}
+
+export type NativeSessionLinkRecord = {
+  type: "handoff"
+  source: NativeSessionIdentityPayload
+  target: NativeSessionIdentityPayload
+  createdAt: string
+}
+
+export type NativeSessionHandoffMutationResponse = {
+  status: "accepted" | "pending" | "uncertain"
+  duplicate?: boolean
+  result?: {
+    target: NativeSessionIdentityPayload
+    link?: NativeSessionLinkRecord
+  }
+}
+
 function sessionModelHeader(value: string | undefined): ModelSelection | undefined {
   if (!value) return undefined
   try {
@@ -315,6 +338,42 @@ export const api = {
 
   createSession(config: ServerConfig, title?: string, model?: ModelSelection, directory?: string) {
     return request<Session>(config, withDirectory("/session", directory), { method: "POST", body: { title, model: toCreateSessionModel(model) } })
+  },
+
+  createRemoteSessionHandoff(config: ServerConfig, input: {
+    clientRequestId: string
+    source: NativeSessionIdentityPayload
+    directory: string
+    targetAgentID: string
+    title?: string
+    model?: ModelSelection | null
+  }) {
+    return request<NativeSessionHandoffMutationResponse>(config, "/v1/session-handoffs", {
+      method: "POST",
+      body: {
+        clientRequestId: input.clientRequestId,
+        source: input.source,
+        directory: input.directory,
+        targetAgentID: input.targetAgentID,
+        title: input.title,
+        model: input.model ? toModelBody(input.model) : undefined,
+        variant: input.model?.variant || undefined
+      }
+    })
+  },
+
+  listNativeSessionLinks(config: ServerConfig, identity: NativeSessionIdentityPayload) {
+    const params = new URLSearchParams({
+      machineID: identity.machineID,
+      agentID: identity.agentID,
+      sessionID: identity.sessionID,
+      directory: identity.directory
+    })
+    return request<{ links: NativeSessionLinkRecord[] }>(config, `/v1/session-links?${params.toString()}`)
+  },
+
+  registerNativeSessionLink(config: ServerConfig, link: NativeSessionLinkRecord) {
+    return request<{ link: NativeSessionLinkRecord }>(config, "/v1/session-links", { method: "POST", body: { link } })
   },
 
   renameSession(config: ServerConfig, id: string, title: string, directory?: string) {

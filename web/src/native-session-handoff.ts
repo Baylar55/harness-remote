@@ -2,6 +2,7 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
+import type { ModelSelection } from "./types"
 
 export type NativeSessionHandoffStatus = "accepted" | "pending" | "uncertain"
 
@@ -19,6 +20,7 @@ type PendingNativeSessionHandoff = {
   clientRequestId: string
   targetAgentID: string
   title?: string
+  model?: ModelSelection | null
   createdAt: number
 }
 
@@ -33,6 +35,22 @@ function requestID(): string {
   return `handoff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+function normalizeModel(value: unknown): ModelSelection | null {
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Partial<ModelSelection>
+  const providerID = typeof candidate.providerID === "string" ? candidate.providerID.trim() : ""
+  const modelID = typeof candidate.modelID === "string" ? candidate.modelID.trim() : ""
+  if (!providerID || !modelID) return null
+  const variant = typeof candidate.variant === "string" && candidate.variant.trim() ? candidate.variant.trim() : undefined
+  return { providerID, modelID, ...(variant ? { variant } : {}) }
+}
+
+function sameModel(left?: ModelSelection | null, right?: ModelSelection | null): boolean {
+  if (!left && !right) return true
+  if (!left || !right) return false
+  return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
+}
+
 function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHandoff | null {
   try {
     const raw = localStorage.getItem(storageKey(source))
@@ -44,6 +62,7 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHa
       clientRequestId: parsed.clientRequestId,
       targetAgentID: parsed.targetAgentID.trim(),
       title: typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim() : undefined,
+      model: normalizeModel(parsed.model),
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now()
     }
   } catch {
@@ -92,21 +111,28 @@ function responseData(value: unknown): { status: NativeSessionHandoffStatus; res
 export async function handoffNativeSession(
   source: NativeSessionSurfaceTarget,
   targetAgentID: string,
-  title?: string
+  title?: string,
+  model?: ModelSelection | null
 ): Promise<{ status: NativeSessionHandoffStatus; clientRequestId: string; result?: NativeSessionHandoffResult }> {
   const target = targetAgentID.trim()
   if (!target || target === source.agentID) throw new Error("Choose a different coding agent for this handoff.")
   if (!source.directory) throw new Error("This Session has no project directory, so it cannot be handed off safely.")
   const normalizedTitle = title?.trim() || undefined
+  const normalizedModel = normalizeModel(model)
 
   const existing = loadPending(source)
-  if (existing && (existing.targetAgentID !== target || (existing.title || "") !== (normalizedTitle || ""))) {
-    throw new Error("A previous handoff still has an unresolved delivery status. Retry that exact target before choosing another coding agent.")
+  if (existing && (
+    existing.targetAgentID !== target
+    || (existing.title || "") !== (normalizedTitle || "")
+    || !sameModel(existing.model, normalizedModel)
+  )) {
+    throw new Error("A previous handoff still has an unresolved delivery status. Retry that exact target and model before choosing another destination.")
   }
   const pending = existing ?? {
     clientRequestId: requestID(),
     targetAgentID: target,
     title: normalizedTitle,
+    model: normalizedModel,
     createdAt: Date.now()
   }
   persistPending(source, pending)
@@ -116,7 +142,9 @@ export async function handoffNativeSession(
     clientRequestId: pending.clientRequestId,
     directory: source.directory,
     targetAgentID: pending.targetAgentID,
-    title: pending.title
+    title: pending.title,
+    model: pending.model ? { providerID: pending.model.providerID, modelID: pending.model.modelID } : undefined,
+    variant: pending.model?.variant || undefined
   }
 
   let parsed: { status: NativeSessionHandoffStatus; result?: NativeSessionHandoffResult }
