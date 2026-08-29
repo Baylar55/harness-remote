@@ -804,8 +804,11 @@ export function WorkThreadConversation({
   const selectedModel = models.find((model) => modelKey(model) === targetModelKey)
   const selectedModelAgent = destinationAgents.find((agent) => agent.id === targetAgentID)
   const modelSelectionRequired = selectedModelAgent?.capabilities?.models === true
-  const modelReady = !modelSelectionRequired || Boolean(selectedModel)
-  const modelBootstrapBlocked = modelSelectionRequired && !modelReady
+  // Existing native Sessions are allowed to keep their harness-owned current model when that exact
+  // value cannot be reconstructed. What is not allowed is sending before the live catalog itself has
+  // finished loading: a brand-new Codex/PI Session has no safe implicit model at that point.
+  const modelCatalogReady = !modelSelectionRequired || (!modelsLoading && models.length > 0)
+  const modelBootstrapBlocked = modelSelectionRequired && !modelCatalogReady
 
   async function loadOlder() {
     if (loadingOlder || !interactionEnabled) return
@@ -1002,7 +1005,7 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
               modelSelectionTouchedRef.current = true
               setTargetModelKey(value)
-            }} disabled={!interactionEnabled || working || sending || modelsLoading || !targetAgentID} loading={modelsLoading} placeholder={deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
+            }} disabled={!interactionEnabled || working || sending || modelsLoading || !targetAgentID} loading={modelsLoading} placeholder={modelBootstrapBlocked ? (modelError ? "Model unavailable" : "Loading models…") : deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Sending is paused until a model can be verified.</small> : null}
           </label>
         </div>
