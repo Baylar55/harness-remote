@@ -117,7 +117,7 @@ test("Session chat keeps bounded paging live events attention Stop and startup f
   assert.match(chat, /preparingReply/)
   assert.match(chat, /api\.loadQuestions/)
   assert.match(chat, /api\.loadPermissions/)
-  assert.match(chat, /onStop=\{working \? stop : undefined\}/)
+  assert.match(chat, /onStop=\{working && interactionEnabled \? stop : undefined\}/)
   assert.match(shared, /ThinkingIndicator/)
   assert.match(shared, /sending \|\| \(waiting && showWaitingIndicator\)/)
   assert.match(parts, /if \(forceRunning\) return "running"/)
