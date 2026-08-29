@@ -22,7 +22,8 @@ test("native Sessions consume the shared conversation through the mature control
   assert.match(controller, /const presentedTimeline = useMemo/)
   assert.match(controller, /messages=\{presentedTimeline\}/)
   assert.match(controller, /onLoadOlder=\{loadOlder\}/)
-  assert.match(controller, /draft=\{draft\}/)
+  assert.match(controller, /const visibleDraft = uncertainDeliverySettled/)
+  assert.match(controller, /draft=\{visibleDraft\}/)
   assert.match(controller, /onSend=\{send\}/)
 })
 
