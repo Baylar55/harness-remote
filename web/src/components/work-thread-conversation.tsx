@@ -294,7 +294,7 @@ const WorkThreadBubble = memo(function WorkThreadBubble({
             {activity || label}
             {activityPending ? <span className="bui-typing" aria-hidden="true"><i /><i /><i /></span> : null}
           </strong>
-          <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>
+          {activityPending ? null : <time>{message.info.time.created ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(message.info.time.created) : ""}</time>}
         </header>
         <TaskDeskMessageContent message={message} />
       </div>
