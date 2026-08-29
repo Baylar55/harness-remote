@@ -52,8 +52,9 @@ assert.match(nativeModel, /if \(target\.backend !== "opencode"[\s\S]{0,200}?\) r
 assert.ok(workThread.includes('observedConversationModelKeyRef'), 'the v3 picker must observe a model that arrives after the controller mounted')
 assert.ok(workThread.includes('modelSelectionTouchedRef'), 'late native enrichment must not overwrite a model the user explicitly picked')
 assert.ok(workThread.includes('currentConversationModelKey === previous'), 'the late-model sync must be edge-triggered rather than resetting the picker on every render')
-assert.ok(observer.includes('deferModelFallback'), 'native Sessions must not display the catalog default before native model metadata resolves')
-assert.ok(workThread.includes('const fallback = deferModelFallback'), 'the shared controller must preserve ordinary Work Thread fallback behavior')
+assert.ok(observer.includes('deferModelFallback'), 'native Sessions must still defer catalog fallback when an existing Session may have native model authority')
+assert.ok(workThread.includes('conversationHasUserPrompt'), 'the shared controller must distinguish a truly empty Session from an existing conversation')
+assert.ok(workThread.includes('mayUseCatalogDefault = !deferModelFallback || routeChanged || !conversationHasUserPrompt'), 'only empty Sessions and fresh handoffs may use a verified catalog default before native model metadata exists')
 
 assert.ok(workThread.includes('const sendInFlightRef = useRef(false)'), 'v3 send in-flight guard must remain authoritative')
 assert.ok(workThread.includes('controller.loadMessagePage'), 'v3 transcript paging must remain authoritative')
