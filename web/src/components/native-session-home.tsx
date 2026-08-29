@@ -548,8 +548,8 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
     })
     .sort((left, right) => right.updatedAt - left.updatedAt || left.label.localeCompare(right.label)), [agentFilter, filter, filteredGroups, machineFilter, presentationForItem, query, sources])
 
-  const createMachines = useMemo<CreateMachine[]>(() => sources.flatMap(({ machine, snapshot, state }) =>
-    snapshot && state === "online"
+  const createMachines = useMemo<CreateMachine[]>(() => sources.flatMap(({ machine, snapshot, state, error }) =>
+    snapshot && state === "online" && !error
       ? [{ machine, snapshot, label: snapshot.machine.name || machine.name }]
       : []
   ), [sources])
@@ -617,6 +617,10 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
   }
 
   function openCreatePanel() {
+    // A machine snapshot arriving is not the end of startup. Project + Session discovery must settle
+    // first, otherwise New Session competes with those reads on the same mobile connection and can
+    // be fired while the saved machine is already in a reconnect grace state.
+    if (!loaded || createMachines.length === 0) return
     const selectedRecord = records.find((item) => recordKey(item) === selectedKey)
     const preferredMachineID = createMachines.some(({ machine }) => machine.id === machineFilter)
       ? machineFilter
@@ -672,8 +676,15 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
             the workspace top bar plus the automatic discovery cycle. The Session list keeps exactly
             one action: starting a new native Session. */}
         <div className="hr-native-home-actions">
-          <button type="button" className="tdw-button primary hr-native-new-session" onClick={openCreatePanel} aria-label={t("sf.newSession")}>
-            <PlusIcon size={15} /> <span>{t("sf.newSession")}</span>
+          <button
+            type="button"
+            className="tdw-button primary hr-native-new-session"
+            onClick={openCreatePanel}
+            aria-label={t("sf.newSession")}
+            disabled={!loaded || createMachines.length === 0}
+            aria-busy={!loaded}
+          >
+            {!loaded ? <LoadingIcon size={15} /> : <PlusIcon size={15} />} <span>{t("sf.newSession")}</span>
           </button>
         </div>
       </div>
@@ -787,6 +798,7 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
       <div className="hr-native-machine-list">
         {machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => {
           const machineCollapsed = collapsedMachines.has(machine.id)
+          const reconnecting = state === "online" && Boolean(error)
           return (
             <section className={`hr-native-machine-group ${state}${machineCollapsed ? " collapsed" : ""}`} key={machine.id} aria-label={t("sf.groupSessions", { name: label })}>
               <button
@@ -800,13 +812,13 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
                   <i data-state={state} aria-hidden="true" />
                   <span>
                     <strong>{label}</strong>
-                    <small title={error || machine.config.host}>{state === "loading" ? t("sf.machineConnecting") : state === "offline" ? error || t("sf.machineOffline") : machine.config.host}</small>
+                    <small title={error || machine.config.host}>{state === "loading" || reconnecting ? t("sf.machineConnecting") : state === "offline" ? error || t("sf.machineOffline") : machine.config.host}</small>
                   </span>
                 </span>
                 <span className="hr-native-machine-metrics">
                   {machineAttentionCount ? <b>{t("sf.attentionCount", { count: machineAttentionCount })}</b> : null}
                   {workingCount ? <em>{t("sf.liveCount", { count: workingCount })}</em> : null}
-                  <small>{state === "online" ? (loaded ? sessionCount : "…") : state === "loading" ? "…" : t("sf.offline")}</small>
+                  <small>{state === "online" ? (loaded && !reconnecting ? sessionCount : "…") : state === "loading" ? "…" : t("sf.offline")}</small>
                   <i className="hr-native-machine-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i>
                 </span>
               </button>
@@ -814,9 +826,9 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
                 <>
                   {projects.length === 0 ? (
                     <div className="hr-native-machine-empty">
-                      {state === "loading" || (state === "online" && !loaded) ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
-                      <span>{state === "loading" || (state === "online" && !loaded)
-                        ? t("sf.discoveringProjects")
+                      {state === "loading" || (state === "online" && (!loaded || reconnecting)) ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
+                      <span>{state === "loading" || (state === "online" && (!loaded || reconnecting))
+                        ? t("sf.loadingSessions")
                         : state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
                     </div>
                   ) : null}
