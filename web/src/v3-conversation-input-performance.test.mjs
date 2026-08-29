@@ -38,11 +38,14 @@ test("an empty model catalog is a resolved native Session state, not a dead disa
   assert.match(observer, /deferModelFallback/)
 })
 
-test("a model catalog failure never blocks the native Session transcript", () => {
+test("a model catalog failure keeps history readable but native mutations gated", () => {
   assert.match(chat, /const \[modelError, setModelError\] = useState<string \| null>\(null\)/)
   assert.match(chat, /setModelError\(reason instanceof Error \? reason\.message : String\(reason\)\)/)
   assert.match(chat, /tdw-field-note/)
-  assert.match(chat, /Model catalog unavailable\. Continue uses the harness default\./)
+  assert.match(chat, /Model catalog unavailable\. Sending is paused until a model can be verified\./)
+  assert.match(chat, /modelBootstrapBlocked/)
+  assert.match(chat, /composerDisabled=\{!interactionEnabled \|\| modelBootstrapBlocked\}/)
   assert.match(chat, /unavailableHint=\{modelError \|\| undefined\}/)
+  assert.match(chat, /messages=\{visibleTimeline\}/)
   assert.equal(existsSync(new URL("./components/conversation-workspace.tsx", import.meta.url)), false)
 })
