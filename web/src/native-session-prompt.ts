@@ -156,6 +156,18 @@ export function clearPendingNativeSessionPrompt(target: NativeSessionSurfaceTarg
   try { localStorage.removeItem(storageKey(target)) } catch {}
 }
 
+/**
+ * Resolve an ambiguous native prompt after the authoritative transcript proves that exact request
+ * reached the Session. This is the same acceptance cleanup as receiving the HTTP 200 directly:
+ * clear the durable request id and, for the first handoff prompt, remember that transferred context
+ * has already been delivered so a later ordinary prompt cannot send it a second time.
+ */
+export function markPendingNativeSessionPromptAccepted(target: NativeSessionSurfaceTarget) {
+  const pending = loadPendingNativeSessionPrompt(target)
+  if (pending?.wireText && pending.wireText !== pending.text) markHandoffSent(target)
+  clearPendingNativeSessionPrompt(target)
+}
+
 function parseStatus(data: unknown): NativeSessionPromptStatus {
   if (data && typeof data === "object") {
     const value = (data as { status?: unknown }).status
@@ -291,10 +303,7 @@ export async function sendNativeSessionPrompt(
     }
   }
 
-  if (status === "accepted") {
-    if (pending.wireText && pending.wireText !== pending.text) markHandoffSent(target)
-    clearPendingNativeSessionPrompt(target)
-  }
+  if (status === "accepted") markPendingNativeSessionPromptAccepted(target)
   return { status, clientRequestId: pending.clientRequestId }
 }
 
