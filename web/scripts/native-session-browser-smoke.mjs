@@ -409,10 +409,34 @@ async function waitFor(predicate, description, timeout = 12_000) {
 }
 
 async function waitForReady(page) {
-  await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 12_000 })
-  const composer = page.getByRole("textbox", { name: "Message PI" })
-  await composer.waitFor({ state: "visible", timeout: 12_000 })
-  assert.equal(await composer.isDisabled(), false, "v3 composer must be enabled when the Session is ready")
+  try {
+    await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 12_000 })
+    const composer = page.getByRole("textbox", { name: "Message PI" })
+    await composer.waitFor({ state: "visible", timeout: 12_000 })
+    assert.equal(await composer.isDisabled(), false, "v3 composer must be enabled when the Session is ready")
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({
+      state: [...document.querySelectorAll(".tdw-conversation-state")].map((node) => ({
+        className: node.className,
+        text: node.textContent
+      })),
+      model: [...document.querySelectorAll(".tdw-model-control")].map((node) => ({
+        text: node.textContent,
+        trigger: node.querySelector("button")?.textContent,
+        disabled: node.querySelector("button")?.hasAttribute("disabled")
+      })),
+      composer: [...document.querySelectorAll(".uw-composer-shell textarea")].map((node) => ({
+        disabled: node.hasAttribute("disabled"),
+        value: node.value
+      })),
+      assistantRows: [...document.querySelectorAll(".uw-message-agent")].slice(-4).map((node) => ({
+        text: node.textContent,
+        pending: node.classList.contains("uw-message-pending")
+      }))
+    }))
+    console.error("waitForReady diagnostic:", JSON.stringify(diagnostic))
+    throw error
+  }
 }
 
 async function openSession(page, title) {
