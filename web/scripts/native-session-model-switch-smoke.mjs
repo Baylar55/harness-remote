@@ -548,7 +548,7 @@ try {
   })
   await page.getByRole("button", { name: "Remove handoff.png" }).waitFor({ state: "visible", timeout: 15_000 })
 
-  const harnessSelect = routedControls.getByLabel("Harness")
+  const harnessSelect = routedControls.locator("label").filter({ hasText: /^Harness/ }).locator("select")
   rejectNextHandoff = true
   await harnessSelect.selectOption("omp")
   assert.equal(await page.getByRole("button", { name: "Attach image" }).count(), 0, "target harness must not accept new attachments during handoff")
