@@ -17,6 +17,8 @@ assert.match(adapter, /reconcileNativeSessionModel/, 'the native runtime must ab
 assert.match(adapter, /for \(const turn of entry\.turns\.values\(\)\)/, 'recovered models must fill turns that never recorded one')
 assert.match(conversation, /taskClient\.listAgentModels/, 'the active Session controller must use the daemon model catalog')
 assert.match(conversation, /modelSelectionTouchedRef/, 'background model recovery must not overwrite an explicit picker choice')
+assert.match(conversation, /conversationHasUserPrompt/, 'native model fallback must distinguish a truly empty Session from an existing conversation')
+assert.match(conversation, /mayUseCatalogDefault = !deferModelFallback \|\| routeChanged \|\| !conversationHasUserPrompt/, 'empty Sessions and fresh handoffs must choose a real catalog default')
 assert.match(conversation, /<ModelPicker/, 'the Session controller must render the shared model picker')
 assert.match(picker, /Search model, provider, variant/, 'model catalog must remain searchable')
 assert.match(picker, /Harness default/, 'an unavailable catalog must fall back honestly to the harness default')
