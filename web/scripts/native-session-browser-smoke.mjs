@@ -632,7 +632,11 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   await waitForReady(page)
   assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "automatic reconnect must never resend a prompt whose transcript proves delivery")
   assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "automatic reconnect must not duplicate native work")
-  assert.equal(await page.getByText(DROPPED_RESPONSE_PROMPT, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response prompt")
+  assert.equal(
+    await page.locator(".uw-message-user").getByText(DROPPED_RESPONSE_PROMPT, { exact: true }).count(),
+    1,
+    "transcript recovery duplicated the dropped-response prompt bubble"
+  )
   assert.equal(await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response reply")
   assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), "", "transcript-proven acceptance must clear the restored uncertain draft")
   assert.equal(droppedClientResponse, true, "the regression fixture must actually discard the accepted HTTP response")
