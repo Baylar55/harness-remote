@@ -68,5 +68,6 @@ assert.ok(adapter.includes('reconcilePendingPromptFromTranscript'), 'a lost mobi
 assert.ok(adapter.includes('loadPendingNativeSessionPrompt'), 'transcript reconciliation must be scoped to an actual durable ambiguous prompt')
 assert.ok(adapter.includes('markPendingNativeSessionPromptAccepted'), 'transcript-proven delivery must clear the durable request id without resending')
 assert.ok(adapter.includes('nativeMessageID'), 'a reconciled request and the native user envelope must retain one logical turn identity')
+assert.ok(adapter.includes('PENDING_TRANSCRIPT_CLOCK_SKEW_MS'), 'a remounted Session must not mistake an old repeated prompt for a newly ambiguous delivery')
 
 console.log('native Session v3-controller tests passed')
