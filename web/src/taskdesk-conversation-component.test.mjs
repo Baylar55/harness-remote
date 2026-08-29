@@ -45,3 +45,10 @@ test("conversation mutations reconcile ambiguous outcomes instead of blindly res
   assert.match(taskClient, /PENDING_CONTINUE_STORAGE_PREFIX/)
   assert.match(taskClient, /hasClientRequest\(latest, pending\.clientRequestId\)/)
 })
+
+
+test("an early assistant envelope owns the getting-started row instead of duplicating it", () => {
+  assert.match(controller, /currentTurnHasAssistantBubble/)
+  assert.match(controller, /liveTurnID = working && !hasAttention && currentTurnHasAssistantBubble/)
+  assert.match(controller, /sending=\{preparingReply && !currentTurnHasAssistantBubble\}/)
+})
