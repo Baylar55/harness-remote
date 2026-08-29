@@ -965,6 +965,9 @@ export function WorkThreadConversation({
     : preparingReply
       ? `${pendingAgentLabel} is getting started`
       : `${currentLabel} is working`
+  const conversationStateLabel = modelBootstrapBlocked
+    ? modelsLoading ? "Loading models" : "Waiting for model catalog"
+    : waitingLabel
 
   /**
    * Exactly one row, on exactly one bubble.
@@ -1009,7 +1012,7 @@ export function WorkThreadConversation({
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Sending is paused until a model can be verified.</small> : null}
           </label>
         </div>
-        <ConversationStatePill working={working || sending || replySettling} attention={hasAttention} workingLabel={waitingLabel} startedAt={sending ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
+        <ConversationStatePill working={working || sending || replySettling || modelBootstrapBlocked} attention={hasAttention} workingLabel={conversationStateLabel} startedAt={sending ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
       </div>
 
       {routeChanged ? (
@@ -1076,19 +1079,17 @@ export function WorkThreadConversation({
               : replySettling
                 ? "Waiting for the completed reply to become available…"
                 : undefined}
-        renderMessage={(message) => (
-          (() => {
-            const activity = activityForMessage(message as WorkThreadMessage)
-            return (
-              <WorkThreadBubble
-                key={message.info.id}
-                message={message as WorkThreadMessage}
-                activity={activity}
-                activityPending={Boolean(activity && preparingReply)}
-              />
-            )
-          })()
-        )}
+        renderMessage={(message) => {
+          const activity = activityForMessage(message as WorkThreadMessage)
+          return (
+            <WorkThreadBubble
+              key={message.info.id}
+              message={message as WorkThreadMessage}
+              activity={activity}
+              activityPending={Boolean(activity && preparingReply)}
+            />
+          )
+        }}
       />
     </div>
   )
