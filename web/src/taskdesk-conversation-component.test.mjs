@@ -6,6 +6,7 @@ const component = readFileSync(new URL("./components/taskdesk-conversation.tsx",
 const controller = readFileSync(new URL("./components/work-thread-conversation.tsx", import.meta.url), "utf8")
 const observer = readFileSync(new URL("./components/native-session-observer.tsx", import.meta.url), "utf8")
 const taskClient = readFileSync(new URL("./taskClient.ts", import.meta.url), "utf8")
+const liveRefresh = readFileSync(new URL("./taskdesk-session-live-refresh.ts", import.meta.url), "utf8")
 
 test("shared conversation owns transcript ordering and the composer", () => {
   assert.match(component, /messages\.map\(\(message\) =>/)
@@ -49,8 +50,11 @@ test("conversation mutations reconcile ambiguous outcomes instead of blindly res
 
 test("an early assistant envelope owns the getting-started row instead of duplicating it", () => {
   assert.match(controller, /currentTurnHasAssistantBubble/)
-  assert.match(controller, /liveTurnID = working && !hasAttention && currentTurnHasAssistantBubble/)
+  assert.match(controller, /liveTurnID = \(working \|\| replySettling\).*currentTurnHasAssistantBubble/)
   assert.match(controller, /sending=\{preparingReply && !currentTurnHasAssistantBubble\}/)
+  assert.match(controller, /activityPending=\{Boolean\(activity && preparingReply\)\}/)
+  assert.match(controller, /bui-typing/)
+  assert.match(controller, /activityPending \? <span className="bui-typing"/)
 })
 
 
@@ -70,4 +74,27 @@ test("transcript-proven ambiguous delivery settles the restored draft without a 
   assert.match(controller, /currentTurn\.prompt\?\.trim\(\) !== uncertainDelivery\.text/)
   assert.match(controller, /current\.trim\(\) !== uncertainDelivery\.text/)
   assert.match(controller, /setUncertainDelivery\(null\)/)
+})
+
+
+test("model bootstrap blocks editing and Send until a live catalog is ready", () => {
+  assert.match(controller, /modelCatalogReady = !modelSelectionRequired \|\| \(!modelsLoading && models\.length > 0\)/)
+  assert.match(controller, /modelBootstrapBlocked/)
+  assert.match(controller, /\|\| modelBootstrapBlocked[\s\S]*\) return/)
+  assert.match(controller, /composerDisabled=\{!interactionEnabled \|\| modelBootstrapBlocked\}/)
+  assert.match(controller, /sendDisabled=\{!interactionEnabled \|\| working \|\| replySettling[\s\S]*modelBootstrapBlocked\}/)
+  assert.match(component, /disabled=\{!ready \|\| composerDisabled\}/)
+})
+
+test("accepted native replies keep settling after an early idle edge", () => {
+  assert.match(controller, /REPLY_SETTLE_RECONCILE_MS = 1_500/)
+  assert.match(controller, /REPLY_SETTLE_IDLE_GRACE_MS = 20_000/)
+  assert.match(controller, /setAwaitingReplyTurnID\(next\.currentTurn\?\.id \?\? null\)/)
+  assert.match(controller, /const replySettling = Boolean/)
+  assert.match(controller, /replySettling \? REPLY_SETTLE_RECONCILE_MS/)
+  assert.match(controller, /waiting=\{working \|\| replySettling\}/)
+})
+
+test("selected ACP lifecycle edges always re-read the mounted transcript", () => {
+  assert.match(liveRefresh, /event\.type === "session\.updated"[\s\S]*selectedEvent[\s\S]*throttle\("message", 120, onMessage\)[\s\S]*settleAfterLifecycle\(\)/)
 })
