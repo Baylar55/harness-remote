@@ -46,6 +46,8 @@ type Props = {
   onSend: () => Promise<void> | void
   sending?: boolean
   sendDisabled?: boolean
+  /** Disable editing as well as Send while the owning Session is not safely writable yet. */
+  composerDisabled?: boolean
   onStop?: () => Promise<void> | void
   stopping?: boolean
   workingLabel?: string
@@ -378,6 +380,7 @@ export function TaskDeskConversation({
   onSend,
   sending = false,
   sendDisabled = false,
+  composerDisabled = false,
   onStop,
   stopping = false,
   workingLabel,
@@ -402,7 +405,7 @@ export function TaskDeskConversation({
       .filter((command) => command.name.toLowerCase().includes(query) || (command.description || "").toLowerCase().includes(query))
       .slice(0, 8)
   }, [commands, commandMenuOpen, commandToken])
-  const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && ready)
+  const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && !composerDisabled && ready)
   // A phone has no Ctrl or Cmd key, so telling a touch user to press Ctrl/Cmd+Enter named the one
   // way to send that they do not have. Enter inserts a newline there; the Send button is the action.
   const hint = footerHint ?? (touchFirst ? "Enter adds a line. Tap Send to send." : "Enter to send · Shift+Enter for a newline")
@@ -528,7 +531,7 @@ export function TaskDeskConversation({
           placeholder={waiting ? `${agentLabel} is working…` : placeholder || `Continue with ${agentLabel}…`}
           rows={3}
           enterKeyHint={touchFirst ? "enter" : "send"}
-          disabled={!ready}
+          disabled={!ready || composerDisabled}
           aria-label={`Message ${agentLabel}`}
           aria-describedby="uw-composer-hint"
         />
@@ -559,7 +562,7 @@ export function TaskDeskConversation({
                 <button
                   type="button"
                   className="uw-button"
-                  disabled={!ready || sending || waiting || attachments.length >= ATTACHMENT_MAX_COUNT}
+                  disabled={!ready || composerDisabled || sending || waiting || attachments.length >= ATTACHMENT_MAX_COUNT}
                   onClick={() => attachmentInputRef.current?.click()}
                   aria-label="Attach image"
                   title="Attach image"
