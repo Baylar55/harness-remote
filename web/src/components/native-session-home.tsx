@@ -296,8 +296,17 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
   // native discovery clears these bridge states and becomes authoritative again.
   const [presentationOverrides, setPresentationOverrides] = useState<Record<string, SessionPresentationState>>({})
 
-  const machineSignature = sources.map(({ machine }) => machine.id).join("|")
-  const loaded = loadedSignature === machineSignature
+  const discoveryReady = sources.every(({ state }) => state !== "loading")
+  const machineSignature = sources.map(({ machine, snapshot, state }) =>
+    [
+      machine.id,
+      machine.config.host,
+      machine.config.port,
+      machine.config.agentId || "",
+      snapshot?.machine.id || state
+    ].join(":")
+  ).join("|")
+  const loaded = discoveryReady && loadedSignature === machineSignature
 
   useEffect(() => {
     if (!selectedKey || !selectedState) return
@@ -352,6 +361,15 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
       setLoading(false)
       return
     }
+    // A configured connection is not yet a discoverable machine while its daemon probe is still in
+    // flight. Running Session discovery against snapshot=null used to "complete" startup with an
+    // empty list, then flip to the real Sessions a moment later. Hold this phase explicitly until
+    // every configured machine has either produced a snapshot or definitively settled offline.
+    if (!discoveryReady) {
+      setLoading(true)
+      setDiscoveryError(null)
+      return
+    }
     let cancelled = false
     setLoading(true)
     setDiscoveryError(null)
@@ -391,7 +409,7 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
       if (!cancelled) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [sources, revision, refreshToken])
+  }, [sources, revision, refreshToken, discoveryReady, machineSignature])
 
   useEffect(() => {
     if (!loaded || document.visibilityState !== "visible") return
