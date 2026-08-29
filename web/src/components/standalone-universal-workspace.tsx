@@ -57,11 +57,12 @@ const MACHINE_NORMAL_POLL_MS = 10_000
 const MACHINE_RECONNECT_POLL_MS = 1_500
 
 async function discoverMachineWithRetry(config: WorkspaceMachine["config"]): Promise<MachineSnapshot | null> {
+  const fresh = () => discoverMachine(config, { allowCachedOnTransportFailure: false })
   try {
-    return await discoverMachine(config)
+    return await fresh()
   } catch {
     await new Promise<void>((resolve) => setTimeout(resolve, MACHINE_DISCOVERY_RETRY_MS))
-    return discoverMachine(config)
+    return fresh()
   }
 }
 
