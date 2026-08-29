@@ -14,6 +14,7 @@ const standalone = read("components/standalone-universal-workspace.tsx")
 const home = read("components/native-session-home.tsx")
 const observer = read("components/native-session-observer.tsx")
 const chat = read("components/work-thread-conversation.tsx")
+const conversationSurface = read("components/taskdesk-conversation.tsx")
 const overrides = read("conversation-control-plane-overrides.css")
 const sessionWorkbench = read("session-first-workbench.css")
 const mobileParity = read("v3-mobile-product-parity.css")
@@ -65,9 +66,22 @@ assert.match(sessionWorkbench, /hr-native-workspace-detail/)
 assert.match(mobileParity, /:has\(\.tdw-main\.mobile-open\) \.hr-mobile-nav[\s\S]*display: grid !important/)
 assert.match(mobileParity, /\.hr-mobile-settings-group label:nth-of-type\(2\)[\s\S]*display: grid !important/)
 assert.match(mobileParity, /\.uw-machine-harness-list[\s\S]*display: flex !important/)
-assert.match(mobileParity, /\.uw-transcript-jumps/)
+assert.match(mobileParity, /\.uw-transcript-jumps[\s\S]*top: 50%[\s\S]*bottom: auto/)
 assert.match(mobileParity, /@media \(pointer: coarse\) and \(max-width: 599px\) and \(max-height: 640px\)/)
 assert.match(mobileParity, /@media \(pointer: coarse\) and \(min-width: 600px\) and \(max-height: 640px\)/)
+assert.match(sessionWorkbench, /\.hr-native-workspace-session-header[\s\S]*display: grid;[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto;/)
+assert.match(sessionWorkbench, /\.hr-native-workspace-session-actions > code[\s\S]*display: none;/)
+assert.match(nativeObserverCss, /\.hr-native-session-observer \.tdw-conversation-toolbar[\s\S]*display: grid !important;[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto !important;/)
+assert.match(nativeObserverCss, /\.hr-control-plane \.hr-native-session-observer \.tdw-conversation-state[\s\S]*grid-column: 2 !important;/)
+
+// A single mobile timeout must not turn a machine that was already proven online into a false disconnect.
+assert.match(standalone, /MACHINE_OFFLINE_FAILURE_THRESHOLD = 3/)
+assert.match(standalone, /discoverMachineWithRetry/)
+assert.match(standalone, /previous\?\.snapshot && consecutiveFailures < MACHINE_OFFLINE_FAILURE_THRESHOLD/)
+
+// An explicit Send gets one extra layout-settle frame so its optimistic user bubble cannot land below the composer.
+assert.match(conversationSurface, /if \(startedSend && nearBottomRef\.current && !preservingOlderRef\.current\)/)
+assert.match(conversationSurface, /followFrameRef\.current = window\.requestAnimationFrame\(\(\) => \{[\s\S]*followTail\(\)/)
 
 // Native Session chat keeps the mature shared renderer without resurrecting the removed product UI.
 assert.match(chat, /routing \? "Harness" : "Continue with"/)
