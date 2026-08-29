@@ -593,7 +593,20 @@ export function createMachineDaemonServer({
     // From this point on the target is durable knowledge. Persist it in the operation ledger before
     // any optional title/link enrichment so a later failure or daemon crash can only return/reuse X.
     let result = { target: { machineID, agentID: targetAgentID, sessionID: targetSession.id, directory } }
-    if (typeof checkpoint === "function") await checkpoint(result)
+    if (typeof checkpoint === "function") {
+      try {
+        await checkpoint(result)
+      } catch (error) {
+        // session/new already returned X. If the ledger write itself fails before X becomes durable,
+        // the only safe fallback is the same read-only reconciliation baseline used for a lost
+        // session/new response; never allow the client to generate a fresh creation id blindly.
+        if (error && typeof error === "object") {
+          error.ambiguous = true
+          error.recovery = recovery
+        }
+        throw error
+      }
+    }
 
     // Naming is cosmetic and model/variant are intentionally deferred to the first prompt. A naming
     // failure therefore cannot downgrade an already-known target into an uncertain creation.
