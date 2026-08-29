@@ -29,6 +29,7 @@ import "./v3-mobile-a11y-fix.css"
 import "./v3-mobile-product-parity.css"
 import "./session-first-navigation.css"
 import "./session-first-workbench.css"
+import "./session-handoff-routing.css"
 // Loaded last: the ported controls refine rules the sheets above already set, and settling those
 // ties by load order is what keeps the port free of `!important`.
 import "./beautiful-ui-controls.css"

@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
 import type { ConversationController } from "../conversation-controller"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
+import { canCreateNativeSession } from "../native-session-create"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
+import {
+  continueNativeSessionOnRoute,
+  type NativeSessionRouteContinueInput,
+  type NativeSessionRouteMachine
+} from "../native-session-routing"
 import {
   applyDiscoveredNativeSessionModel,
   nativeSessionIsWorking,
@@ -16,6 +22,8 @@ import "../native-session-observer.css"
 
 type Props = {
   target: NativeSessionSurfaceTarget
+  routes?: NativeSessionRouteMachine[]
+  onOpenSession?: (target: NativeSessionSurfaceTarget) => void
   onSessionRefresh?: () => void
   onStateChange?: (state: NativeSessionVisualState) => void
 }
@@ -58,7 +66,7 @@ function targetForInitialProjection(target: NativeSessionSurfaceTarget): NativeS
  * Writer acquisition is deferred to the first mutation by native-session-v3-adapter, so the user
  * never has to unlock the transcript with an extra Continue step. Nothing is persisted as a Task or Run.
  */
-export function NativeSessionObserver({ target, onSessionRefresh, onStateChange }: Props) {
+export function NativeSessionObserver({ target, routes = [], onOpenSession, onSessionRefresh, onStateChange }: Props) {
   const [task, setTask] = useState<MachineTask | null>(null)
   const [controller, setController] = useState<ConversationController | null>(null)
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
@@ -123,6 +131,31 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
     }
   }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported, commands.length])
 
+  const routableRoutes = useMemo<NativeSessionRouteMachine[]>(() => routes.flatMap((machine) => {
+    if (machine.machineID !== target.machineID) return []
+    const available = machine.agents.filter((candidate) => canCreateNativeSession(candidate))
+    const current = available.some((candidate) => candidate.id === target.agentID)
+      ? available
+      : [agent, ...available.filter((candidate) => candidate.id !== target.agentID)]
+    return [{ ...machine, agents: current }]
+  }), [routes, target.machineID, target.agentID, agent])
+
+  const handleRoutedContinue = useCallback(async (input: NativeSessionRouteContinueInput) => {
+    const machine = routableRoutes.find((candidate) => candidate.machineID === input.machineID)
+    const targetAgent = machine?.agents.find((candidate) => candidate.id === input.agentID)
+    if (!machine || !targetAgent) throw new Error("That harness is no longer available on this machine.")
+    const next = await continueNativeSessionOnRoute({
+      source: target,
+      targetMachine: machine,
+      targetAgent,
+      prompt: input.prompt,
+      attachments: input.attachments,
+      model: input.model
+    })
+    onSessionRefresh?.()
+    onOpenSession?.(next)
+  }, [routableRoutes, target, onSessionRefresh, onOpenSession])
+
   useEffect(() => {
     let disposed = false
     let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
@@ -172,6 +205,11 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
         onWorkspaceRefresh={onSessionRefresh}
         onAttentionChange={handleAttentionChange}
         commands={commands}
+        routing={onOpenSession && routableRoutes.length ? {
+          currentMachineID: target.machineID,
+          machines: routableRoutes,
+          onContinue: handleRoutedContinue
+        } : undefined}
       />
     </div>
   )

@@ -45,6 +45,7 @@ import "./v3-mobile-a11y-fix.css"
 import "./v3-mobile-product-parity.css"
 import "./session-first-navigation.css"
 import "./session-first-workbench.css"
+import "./session-handoff-routing.css"
 import "./beautiful-ui-controls.css"
 
 /** Same list, same order as `main.tsx` - `beautiful-ui-controls.test.mjs` asserts the two match, so

@@ -19,8 +19,11 @@ const liveRefresh = read('./taskdesk-session-live-refresh.ts')
 const timeline = read('./work-thread-timeline.ts')
 const conversation = read('./components/taskdesk-conversation.tsx')
 const messageContent = read('./components/taskdesk-message-content.tsx')
-const handoff = read('./components/native-session-handoff-control.tsx')
+const handoff = read('./native-session-handoff.ts')
+const routing = read('./native-session-routing.ts')
+const machineMigration = read('./native-session-machine-id-migration.ts')
 const standalone = read('./components/standalone-universal-workspace.tsx')
+const api = read('./api.ts')
 const daemon = read('../../bridge/src/machine-daemon.js')
 const daemonCli = read('../../bridge/src/daemon-cli.js')
 
@@ -120,6 +123,12 @@ assert.ok(daemon.includes('/prompt_async${query}'), 'managed OpenCode must keep 
 assert.ok(daemon.includes('/command${query}'), 'managed OpenCode slash commands must use its native command endpoint')
 assert.equal(daemon.includes('agent: agentID'), false, 'machine harness id must never be sent as an OpenCode internal agent id')
 assert.ok(daemon.includes('await claimSession(agentID, sessionID)'), 'ACP Stop must transparently recover writer ownership when needed')
+const handoffBlock = daemon.match(/const handoffSession = async[\s\S]*?const launcher =/)?.[0] || ''
+assert.ok(handoffBlock.includes('service.createSession({ directory })'), 'ACP handoff creation must obtain a bare Session id before title/model enrichment')
+assert.ok(handoffBlock.includes('await checkpoint(result)'), 'handoff target identity must be checkpointed as soon as session/new returns')
+assert.equal(handoffBlock.includes('service.setModel('), false, 'handoff creation must defer model/variant application to the first prompt')
+assert.ok(daemon.includes('const reconcileHandoff = async'), 'daemon must support read-only reconciliation for ambiguous Session creation')
+assert.ok(daemon.includes('beforeSessionIDs'), 'handoff reconciliation must compare against a pre-create Session baseline')
 assert.ok(daemonCli.includes('sessionRename: true') && daemonCli.includes('sessionDelete: true'), 'managed OpenCode must advertise its native rename/delete primitives')
 
 assert.ok(workThread.includes('controller.loadMessagePage'), 'v3 WorkThreadConversation must remain transcript paging authority through its explicit I/O boundary')
@@ -150,16 +159,49 @@ for (const retiredPath of [
   './conversation-turn-state.ts',
   './conversation-turn-state.test.mjs',
   './components/model-selection-control.tsx',
+  './components/native-session-handoff-control.tsx',
   './native-session-handoff.css'
 ]) {
   assert.equal(existsSync(new URL(retiredPath, import.meta.url)), false, `${retiredPath} must not return as a parallel Session-first chat path`)
 }
 
-assert.ok(handoff.includes('handoffNativeSession(source, agent.id, source.title)'), 'cross-agent continuation must use the idempotent native handoff primitive')
-assert.ok(handoff.includes('api.loadMessagePage(source.config, source.sessionID, source.directory, undefined, 100, false)'), 'handoff context reads must never force ACP history refresh or replay')
-assert.ok(handoff.includes('writerOwned: true') && handoff.includes('requiresExplicitClaim: false'), 'a handoff-created native Session must remain owned without a redundant ACP claim')
-assert.ok(handoff.includes('canCreateNativeSession(agent)'), 'handoff choices must follow the same validated native create capability gate')
-assert.equal(handoff.includes('createTask('), false, 'native handoff must not recreate the retired Task/Conversation path')
+assert.ok(routing.includes('handoffNativeSession(source, targetAgent.id, source.title, model)'), 'cross-agent continuation must use the idempotent native handoff primitive')
+assert.ok(routing.includes('api.loadMessagePage(source.config, source.sessionID, source.directory, undefined, 100, false)'), 'handoff context reads must never force ACP history refresh or replay')
+assert.ok(routing.includes('writerOwned: true') && routing.includes('requiresExplicitClaim: false'), 'a handoff-created native Session must remain owned without a redundant ACP claim')
+assert.ok(observer.includes('canCreateNativeSession(candidate)'), 'handoff choices must follow the same validated native create capability gate')
+assert.equal(routing.includes('createTask('), false, 'native handoff must not recreate the retired Task/Conversation path')
+assert.equal(routing.includes('createRemoteSessionHandoff'), false, 'cross-machine Session creation must remain deferred until project mapping and recovery are designed')
+assert.ok(routing.includes('targetMachine.machineID !== source.machineID'), 'routed continuation must enforce the same-machine boundary')
+assert.equal(routing.includes('PENDING_ROUTE_TTL_MS'), false, 'a created target Session must never be forgotten by a blind route TTL')
+assert.equal(handoff.includes('PENDING_HANDOFF_TTL_MS'), false, 'ambiguous resource creation must retain its original idempotency key until reconciled')
+assert.ok(handoff.includes('acknowledgeNativeSessionHandoff') && !handoff.includes('if (parsed.status === "accepted" && parsed.result) clearPending(source)'), 'accepted creation must remain recoverable until the caller persists its target')
+assert.ok(routing.includes('if (!persistPending(source, pending))') && routing.includes('acknowledgeNativeSessionHandoff(source)'), 'route target persistence must happen before creation-key acknowledgement')
+assert.equal(routing.includes('loadPendingNativeSessionPrompt'), false, 'route recovery must not shadow the normal prompt pending/TTL semantics')
+assert.ok(routing.includes('pending.agentID !== targetAgent.id'), 'a created target Session must keep routing bound to that exact target harness')
+const routePendingShape = routing.match(/type PendingRouteContinue = \{[\s\S]*?\n\}/)?.[0] || ''
+assert.equal(routePendingShape.includes('prompt:'), false, 'route persistence must own target identity, not duplicate prompt text')
+assert.equal(routePendingShape.includes('model:'), false, 'route persistence must own target identity, not duplicate prompt model')
+assert.ok(routing.includes('const persistedLink = await api.registerNativeSessionLink'), 'lineage/context persistence must be awaited before first prompt delivery')
+assert.equal(routing.includes('Context persistence is enrichment'), false, 'transferred context must not regress to best-effort persistence')
+assert.ok(routing.indexOf('const persistedLink = await api.registerNativeSessionLink') < routing.indexOf('const sent = await sendNativeSessionPrompt'), 'first routed prompt must wait for durable lineage/context persistence')
+assert.ok(routing.includes('registerNativeSessionLink') && routing.includes('transferredContext'), 'same-machine lineage must durably retain the exact bounded transferred context')
+assert.ok(routing.includes('sendNativeSessionPrompt'), 'the destination change must become real only when the user prompt is sent')
+assert.ok(workThread.includes('routing.onContinue') && workThread.includes('routeChanged'), 'the mature v3 composer must own send-time harness switching')
+assert.equal(workThread.includes('<span>Machine</span>'), false, 'the Session composer must not expose cross-machine handoff selection')
+assert.ok(workThread.includes('routeBlockedByAttachments') && workThread.includes('sendDisabled={working || hasAttention || routeBlockedByAttachments}'), 'attachments must visibly block a harness handoff instead of becoming an unrecoverable routed pending')
+assert.ok(workThread.includes('modelGeneration.current += 1') && workThread.includes('setTargetModelKey("")'), 'changing harness must synchronously invalidate the previous harness model')
+assert.equal(standalone.includes('<NativeSessionHandoffControl'), false, 'the separate Continue with another harness button must not remain in the Session header')
+assert.ok(standalone.includes('openLinkedSession') && standalone.includes('selectedTransferredContext'), 'source and target Sessions must expose navigable lineage and transferred context after reopen')
+assert.ok(standalone.includes('transferredContext || ""'), 'reopened target Sessions must recover transferred context from durable lineage metadata')
+assert.ok(standalone.includes('api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)'), 'lineage reads must use the machine endpoint rather than an agent-scoped Session config')
+assert.ok(api.includes('const response = await request<unknown>(config, \`/v1/session-links?\${params.toString()}\`)'), 'lineage API must inspect runtime response shape instead of trusting TypeScript')
+assert.ok(api.includes('Array.isArray(links) ? links as NativeSessionLinkRecord[] : []'), 'legacy or malformed lineage responses must normalize to an empty link list')
+assert.ok(standalone.includes('setSelectedLinks(Array.isArray(links) ? links : [])'), 'workspace must never store an undefined lineage collection')
+assert.ok(home.includes('snapshot.machine.id'), 'native Session identity must use the daemon machine id rather than the local saved-profile id')
+assert.ok(standalone.includes('migrateNativeSessionMachineStorage(machine.id, snapshot.machine.id)'), 'canonical machine identity must migrate legacy native Session browser state before use')
+for (const prefix of ['native-session-prompt.v1', 'native-session-command.v1', 'native-session-handoff.v1', 'native-session-handoff-context.v1', 'taskdesk.draft.native-session-v3']) {
+  assert.ok(machineMigration.includes(prefix), `canonical machine-id migration must preserve ${prefix} state`)
+}
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
 assert.ok(standalone.includes('<NativeSessionHome'), 'Session-first navigation must remain native discovery based')
 assert.ok(standalone.includes('<NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />'), 'open Session header must own the delete action')

@@ -179,7 +179,7 @@ test("OpenCode native Session prompt preserves parts, model and variant without 
   })
 })
 
-test("ACP cross-agent handoff creates one real target Session, applies effort, and stores only a native Session link", async () => {
+test("ACP cross-agent handoff checkpoints a bare target and defers model effort to the first prompt", async () => {
   const daemon = new MachineDaemon({ id: "machine-handoff-acp", name: "workstation" })
   const codex = new FakeAcp()
   const pi = new FakeAcp()
@@ -195,9 +195,10 @@ test("ACP cross-agent handoff creates one real target Session, applies effort, a
   const links = []
   const modelCalls = []
   const service = {
+    async listSessions() { return [] },
     async createSession(input) {
       created.push(input)
-      return { id: "pi-native-new" }
+      return { id: "pi-native-new", directory: "/repo" }
     },
     async setModel(sessionID, model, variant) { modelCalls.push([sessionID, model, variant]) },
     async claimSession() {},
@@ -211,19 +212,21 @@ test("ACP cross-agent handoff creates one real target Session, applies effort, a
     }
   })
 
+  const checkpoints = []
   const result = await claimOptions.handoffSession("codex", "codex-native-source", {
     targetAgentID: "pi",
     directory: "/repo",
     model: { providerID: "openai", modelID: "gpt-5.6" },
     variant: "high",
     title: "Continue in PI"
-  })
+  }, { checkpoint: async (value) => checkpoints.push(structuredClone(value)) })
 
-  assert.deepEqual(created, [{ directory: "/repo", title: "Continue in PI", model: "openai/gpt-5.6" }])
-  // The variant goes through the owning service, which applies it after the model, not as a raw
-  // adapter request that races the target Session's own configOptions load.
+  assert.deepEqual(created, [{ directory: "/repo" }])
+  assert.equal(checkpoints[0].target.sessionID, "pi-native-new")
+  // Model + effort are intentionally not applied during resource creation. The first prompt carries
+  // both through AcpService.prompt after the target identity is already durable.
   assert.deepEqual(pi.configCalls, [])
-  assert.deepEqual(modelCalls, [["pi-native-new", "openai/gpt-5.6", { configId: "effort", value: "high" }]])
+  assert.deepEqual(modelCalls, [])
   assert.deepEqual(links, [{
     source: { machineID: "machine-handoff-acp", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
     target: { machineID: "machine-handoff-acp", agentID: "pi", sessionID: "pi-native-new", directory: "/repo" }
@@ -231,7 +234,7 @@ test("ACP cross-agent handoff creates one real target Session, applies effort, a
   assert.equal(result.target.sessionID, "pi-native-new")
 })
 
-test("OpenCode cross-agent handoff uses native Session creation with model and variant and stores the link", async () => {
+test("OpenCode cross-agent handoff snapshots Sessions then creates a bare recoverable target", async () => {
   const daemon = new MachineDaemon({ id: "machine-handoff-http", name: "workstation" })
   const codex = new FakeAcp()
   const openCode = new FakeHttpHost()
@@ -256,11 +259,15 @@ test("OpenCode cross-agent handoff uses native Session creation with model and v
 
   const originalFetch = globalThis.fetch
   const calls = []
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url, options = {}) => {
     calls.push([String(url), options])
+    if ((options.method || "GET") === "GET") {
+      return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } })
+    }
     return new Response(JSON.stringify({ id: "opencode-native-new" }), { status: 200, headers: { "Content-Type": "application/json" } })
   }
   let result
+  const checkpoints = []
   try {
     result = await claimOptions.handoffSession("codex", "codex-native-source", {
       targetAgentID: "opencode",
@@ -268,17 +275,18 @@ test("OpenCode cross-agent handoff uses native Session creation with model and v
       model: { providerID: "openai", modelID: "gpt-5.6" },
       variant: "high",
       title: "Continue in OpenCode"
-    })
+    }, { checkpoint: async (value) => checkpoints.push(structuredClone(value)) })
   } finally {
     globalThis.fetch = originalFetch
   }
 
-  assert.equal(calls.length, 1)
+  assert.equal(calls.length, 2)
   assert.match(calls[0][0], /\/session\?directory=%2Frepo$/)
-  assert.deepEqual(JSON.parse(calls[0][1].body), {
-    title: "Continue in OpenCode",
-    model: { providerID: "openai", id: "gpt-5.6", variant: "high" }
-  })
+  assert.equal(calls[0][1].method, "GET")
+  assert.match(calls[1][0], /\/session\?directory=%2Frepo$/)
+  assert.equal(calls[1][1].method, "POST")
+  assert.deepEqual(JSON.parse(calls[1][1].body), {})
+  assert.equal(checkpoints[0].target.sessionID, "opencode-native-new")
   assert.deepEqual(links, [{
     source: { machineID: "machine-handoff-http", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
     target: { machineID: "machine-handoff-http", agentID: "opencode", sessionID: "opencode-native-new", directory: "/repo" }

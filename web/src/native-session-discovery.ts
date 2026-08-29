@@ -1,4 +1,4 @@
-import { api } from "./api"
+import { api, type NativeSessionLinkRecord } from "./api"
 import { nativeSessionDisplayTitle } from "./native-session-title"
 import type { BackendKind, MachineAgentHost, MessageEnvelope, ModelSelection, ServerConfig, Session, SessionStatus } from "./types"
 
@@ -28,6 +28,8 @@ export type NativeSessionRef = {
   sessionID: string
   directory: string
 }
+
+export type NativeSessionLink = NativeSessionLinkRecord
 
 /**
  * Visible history inherited from an earlier native Session in an explicit cross-agent handoff.

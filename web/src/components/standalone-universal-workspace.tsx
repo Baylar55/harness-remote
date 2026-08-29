@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
+import { api } from "../api"
 import { Capacitor } from "@capacitor/core"
 import {
   isThemePreference,
@@ -12,7 +13,16 @@ import {
 import { ChatIcon, LoadingIcon, RefreshIcon, ServerIcon, SettingsIcon } from "../Icons"
 import { createTranslator, languageOptions, type LanguageCode } from "../i18n"
 import { discoverMachine, machineAgentStateLabel } from "../machineClient"
-import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
+import {
+  discoverAgentNativeSessions,
+  nativeSessionSurfaceTarget,
+  type NativeSessionLink,
+  type NativeSessionRef,
+  type NativeSessionSurfaceTarget
+} from "../native-session-discovery"
+import { migrateNativeSessionMachineStorage } from "../native-session-machine-id-migration"
+import { nativeSessionTransferredContext } from "../native-session-prompt"
+import type { NativeSessionRouteMachine } from "../native-session-routing"
 import type { MachineSnapshot, Session } from "../types"
 import {
   createWorkspaceMachine,
@@ -23,7 +33,6 @@ import { useDialogDismiss } from "../useDialogDismiss"
 import { useTranslator } from "../useTranslator"
 import { CommandPalette, type PaletteCommand } from "./shell"
 import { NativeSessionActions } from "./native-session-actions"
-import { NativeSessionHandoffControl } from "./native-session-handoff-control"
 import { NativeSessionHome } from "./native-session-home"
 import { NativeSessionTitle } from "./native-session-rename"
 import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
@@ -261,6 +270,7 @@ function MobileSettingsPage({ onClose }: { onClose: () => void }) {
     </div>
   )
 }
+
 function projectLabel(directory: string): string {
   const parts = directory.split(/[\\/]/).filter(Boolean)
   return parts[parts.length - 1] || directory || "Unknown Project"
@@ -293,6 +303,8 @@ function NativeSessionsWorkspace({
   const [revision, setRevision] = useState(0)
   const [selected, setSelected] = useState<NativeSessionSurfaceTarget | null>(null)
   const [selectedState, setSelectedState] = useState<NativeSessionVisualState | undefined>(undefined)
+  const [selectedLinks, setSelectedLinks] = useState<NativeSessionLink[]>([])
+  const [lineageError, setLineageError] = useState<string | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
   // A native metadata mutation happens outside the discovery cycle. Machine polling can legitimately
   // return an identical snapshot, so the Session list needs an explicit signal to re-read its
@@ -362,6 +374,7 @@ function NativeSessionsWorkspace({
     void Promise.all(machines.map(async (machine): Promise<NativeMachineRuntime> => {
       try {
         const snapshot = await discoverMachine(machine.config)
+        if (snapshot) migrateNativeSessionMachineStorage(machine.id, snapshot.machine.id)
         return snapshot
           ? { machine, snapshot, state: "online" }
           : { machine, snapshot: null, state: "offline", error: "This endpoint is not a Harness machine daemon." }
@@ -404,8 +417,25 @@ function NativeSessionsWorkspace({
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
   const loadingCount = runtimes.filter((runtime) => runtime.state === "loading").length
   const offlineCount = runtimes.filter((runtime) => runtime.state === "offline").length
-  const selectedRuntime = selected ? runtimes.find((runtime) => runtime.machine.id === selected.machineID) : undefined
+  const selectedRuntime = selected
+    ? runtimes.find((runtime) => runtime.snapshot?.machine.id === selected.machineID || runtime.machine.id === selected.machineID)
+    : undefined
   const selectedMachine = selectedRuntime?.machine
+  const routeMachines = useMemo<NativeSessionRouteMachine[]>(() => {
+    const byMachineID = new Map<string, NativeSessionRouteMachine>()
+    for (const runtime of runtimes) {
+      if (runtime.state !== "online" || !runtime.snapshot) continue
+      const machineID = runtime.snapshot.machine.id
+      if (byMachineID.has(machineID)) continue
+      byMachineID.set(machineID, {
+        machineID,
+        label: runtime.machine.name || runtime.snapshot.machine.name || machineID,
+        config: runtime.machine.config,
+        agents: runtime.snapshot.agents
+      })
+    }
+    return [...byMachineID.values()]
+  }, [runtimes])
   const selectedProject = selected ? projectLabel(selected.directory) : undefined
   const selectedTokenCount = selected?.tokens
     ? (selected.tokens.input || 0) + (selected.tokens.output || 0) + (selected.tokens.reasoning || 0)
@@ -413,6 +443,16 @@ function NativeSessionsWorkspace({
   const selectedHasChanges = Boolean(selected?.summary && (
     selected.summary.files || selected.summary.additions || selected.summary.deletions
   ))
+  const selectedTransferredContext = useMemo(() => {
+    if (!selected) return ""
+    const inMemory = selected.history?.length ? nativeSessionTransferredContext(selected) : ""
+    if (inMemory) return inMemory
+    return (Array.isArray(selectedLinks) ? selectedLinks : []).find((link) =>
+      link.target.machineID === selected.machineID
+      && link.target.agentID === selected.agentID
+      && link.target.sessionID === selected.sessionID
+    )?.transferredContext || ""
+  }, [selected, selectedLinks])
   const selectedPermissionRules = selected?.permission || []
   const selectedRestrictionCount = selectedPermissionRules.filter((rule) => rule.action === "deny").length
   const selectedPolicyLabel = selectedPermissionRules.length
@@ -433,6 +473,54 @@ function NativeSessionsWorkspace({
    * `loaded` and `sessionsDiscovered` true, so a background cycle never throws the user back to a
    * waiting screen.
    */
+  useEffect(() => {
+    let cancelled = false
+    setLineageError(null)
+    if (!selected || !selectedRuntime) {
+      setSelectedLinks([])
+      return () => { cancelled = true }
+    }
+    void api.listNativeSessionLinks(selectedRuntime.machine.config, selected.ref)
+      .then(({ links }) => {
+        if (!cancelled) setSelectedLinks(Array.isArray(links) ? links : [])
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedLinks([])
+          setLineageError("Linked Session history is temporarily unavailable.")
+        }
+      })
+    return () => { cancelled = true }
+  }, [selected?.key, selectedRuntime?.machine.id, listRevision])
+
+  async function openLinkedSession(ref: NativeSessionRef) {
+    setLineageError(null)
+    const runtime = runtimes.find((candidate) => candidate.snapshot?.machine.id === ref.machineID)
+    const agent = runtime?.snapshot?.agents?.find((candidate) => candidate.id === ref.agentID)
+    if (!runtime || !agent) {
+      setLineageError("The linked machine or harness is currently offline.")
+      return
+    }
+    try {
+      const records = await discoverAgentNativeSessions(runtime.machine.config, agent)
+      const record = records.find((candidate) => candidate.session.id === ref.sessionID)
+      if (!record) throw new Error("The linked native Session is no longer available.")
+      openSession(nativeSessionSurfaceTarget(ref.machineID, runtime.machine.config, record))
+    } catch (reason) {
+      setLineageError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  function linkedDestination(link: NativeSessionLink): { relation: string; ref: NativeSessionRef } {
+    const currentIsTarget =
+      link.target.machineID === selected?.machineID
+      && link.target.agentID === selected?.agentID
+      && link.target.sessionID === selected?.sessionID
+    return currentIsTarget
+      ? { relation: "Continued from", ref: link.source }
+      : { relation: "Continues in", ref: link.target }
+  }
+
   const startupPhase: "machines" | "sessions" | "ready" =
     !loaded || loadingCount > 0 ? "machines" : !sessionsDiscovered ? "sessions" : "ready"
 
@@ -585,12 +673,50 @@ function NativeSessionsWorkspace({
                     </div>
                   ) : null}
                   <NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />
-                  <NativeSessionHandoffControl source={selected} agents={selectedRuntime?.snapshot?.agents || []} onOpen={openSession} />
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>
               </header>
+              {selectedLinks.length || selectedTransferredContext || lineageError ? (
+                <section className="hr-session-lineage" aria-label="Linked Session history">
+                  {selectedLinks.length ? (
+                    <div className="hr-session-lineage-links">
+                      {selectedLinks.map((link) => {
+                        const destination = linkedDestination(link)
+                        const machine = routeMachines.find((candidate) => candidate.machineID === destination.ref.machineID)
+                        const agent = machine?.agents?.find((candidate) => candidate.id === destination.ref.agentID)
+                        return (
+                          <button
+                            type="button"
+                            className="hr-session-lineage-link"
+                            key={`${link.source.machineID}:${link.source.agentID}:${link.source.sessionID}->${link.target.machineID}:${link.target.agentID}:${link.target.sessionID}`}
+                            onClick={() => void openLinkedSession(destination.ref)}
+                          >
+                            <span>{destination.relation}</span>
+                            <strong>{machine?.label || destination.ref.machineID} <i aria-hidden="true">/</i> {agent?.label || destination.ref.agentID}</strong>
+                            <small>{destination.relation === "Continued from" ? "Open previous Session" : "Open next Session"} →</small>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                  {selectedTransferredContext ? (
+                    <details className="hr-session-transfer-context">
+                      <summary>Transferred context <span>exactly what the new harness received</span></summary>
+                      <pre>{selectedTransferredContext}</pre>
+                    </details>
+                  ) : null}
+                  {lineageError ? <div className="hr-session-lineage-error" role="alert">{lineageError}</div> : null}
+                </section>
+              ) : null}
               <div className="hr-native-workspace-chat">
-                <NativeSessionObserver key={selected.key} target={selected} onStateChange={setSelectedState} />
+                <NativeSessionObserver
+                  key={selected.key}
+                  target={selected}
+                  routes={routeMachines}
+                  onOpenSession={openSession}
+                  onSessionRefresh={() => setListRevision((value) => value + 1)}
+                  onStateChange={setSelectedState}
+                />
               </div>
             </>
           ) : machines.length === 0 ? (

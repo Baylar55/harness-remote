@@ -25,6 +25,8 @@ type Source = {
 
 type RecordWithMachine = {
   machine: WorkspaceMachine
+  /** Canonical daemon identity. WorkspaceMachine.id only identifies the saved connection locally. */
+  machineID: string
   record: NativeSessionRecord
   project?: MachineProject
 }
@@ -122,7 +124,7 @@ function harnessIconUrl(backend: string): string | undefined {
 }
 
 function recordKey(item: RecordWithMachine): string {
-  return `${item.machine.id}:${item.record.key}`
+  return `${item.machineID}:${item.record.key}`
 }
 
 function activityTimestamp(item: RecordWithMachine, anchor?: ActivityAnchor | null): number {
@@ -364,8 +366,9 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
         projects,
         records: sessions.map((record) => ({
           machine,
+          machineID: snapshot.machine.id,
           record,
-          project: catalogProject(record, projects, machine.id)
+          project: catalogProject(record, projects, snapshot.machine.id)
         }))
       }
     })).then((results) => {
@@ -583,7 +586,7 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
   }, [createAgentID, createOpen, selectedCreateMachine])
 
   function open(item: RecordWithMachine) {
-    onOpen(nativeSessionSurfaceTarget(item.machine.id, item.machine.config, item.record))
+    onOpen(nativeSessionSurfaceTarget(item.machineID, item.machine.config, item.record))
   }
 
   function toggleProject(groupKey: string) {
@@ -633,14 +636,14 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
     setCreateError(null)
     try {
       const { target, record } = await createNativeSessionTarget({
-        machineID: selectedCreateMachine.machine.id,
+        machineID: selectedCreateMachine.snapshot.machine.id,
         baseConfig: selectedCreateMachine.machine.config,
         agent: selectedCreateAgent,
         directory: selectedCreateProject.project.path,
         title: createTitle
       })
       setRecords((current) => [
-        { machine: selectedCreateMachine.machine, record, project: selectedCreateProject.project },
+        { machine: selectedCreateMachine.machine, machineID: selectedCreateMachine.snapshot.machine.id, record, project: selectedCreateProject.project },
         ...current.filter((item) => !(item.machine.id === selectedCreateMachine.machine.id && item.record.key === record.key))
       ].sort(sessionActivityCompare))
       setCreateTitle("")
