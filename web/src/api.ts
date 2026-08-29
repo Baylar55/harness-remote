@@ -76,6 +76,7 @@ export type NativeSessionLinkRecord = {
   source: NativeSessionIdentityPayload
   target: NativeSessionIdentityPayload
   createdAt: string
+  transferredContext?: string
 }
 
 export type NativeSessionHandoffMutationResponse = {
@@ -338,28 +339,6 @@ export const api = {
 
   createSession(config: ServerConfig, title?: string, model?: ModelSelection, directory?: string) {
     return request<Session>(config, withDirectory("/session", directory), { method: "POST", body: { title, model: toCreateSessionModel(model) } })
-  },
-
-  createRemoteSessionHandoff(config: ServerConfig, input: {
-    clientRequestId: string
-    source: NativeSessionIdentityPayload
-    directory: string
-    targetAgentID: string
-    title?: string
-    model?: ModelSelection | null
-  }) {
-    return request<NativeSessionHandoffMutationResponse>(config, "/v1/session-handoffs", {
-      method: "POST",
-      body: {
-        clientRequestId: input.clientRequestId,
-        source: input.source,
-        directory: input.directory,
-        targetAgentID: input.targetAgentID,
-        title: input.title,
-        model: input.model ? toModelBody(input.model) : undefined,
-        variant: input.model?.variant || undefined
-      }
-    })
   },
 
   listNativeSessionLinks(config: ServerConfig, identity: NativeSessionIdentityPayload) {
