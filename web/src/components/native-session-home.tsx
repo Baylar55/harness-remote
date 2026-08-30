@@ -72,6 +72,10 @@ type Props = {
   selectedState?: SessionPresentationState
   /** Fires when native Session discovery has settled at least once for the current machines. */
   onDiscoveredChange?: (discovered: boolean) => void
+  /** Session keys already deleted server-side but still present in the last discovered rail snapshot. */
+  deletingKeys?: ReadonlySet<string>
+  /** Called once a fresh discovery proves a deleting Session has disappeared from the native index. */
+  onDeletionSettled?: (key: string) => void
 }
 
 const SESSION_HOME_REFRESH_MS = 30_000
@@ -256,7 +260,17 @@ function nativeCreateAgents(snapshot: MachineSnapshot): MachineAgentHost[] {
   return snapshot.agents.filter(canCreateNativeSession)
 }
 
-export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttentionCountChange, onDiscoveredChange, selectedKey, selectedState }: Props) {
+export function NativeSessionHome({
+  sources,
+  onOpen,
+  refreshToken = 0,
+  onAttentionCountChange,
+  onDiscoveredChange,
+  selectedKey,
+  selectedState,
+  deletingKeys,
+  onDeletionSettled
+}: Props) {
   const t = useTranslator()
   const [records, setRecords] = useState<RecordWithMachine[]>([])
   const [projectsByMachine, setProjectsByMachine] = useState<Record<string, MachineProject[]>>({})
@@ -307,6 +321,14 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
     ].join(":")
   ).join("|")
   const loaded = discoveryReady && loadedSignature === machineSignature
+
+  useEffect(() => {
+    if (!loaded || loading || !deletingKeys?.size || !onDeletionSettled) return
+    const visibleKeys = new Set(records.map(recordKey))
+    for (const key of deletingKeys) {
+      if (!visibleKeys.has(key)) onDeletionSettled(key)
+    }
+  }, [loaded, loading, records, deletingKeys, onDeletionSettled])
 
   useEffect(() => {
     if (!selectedKey || !selectedState) return
@@ -893,19 +915,22 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
                                 const targetKey = recordKey(item)
                                 const selected = targetKey === selectedKey
                                 const recentlyCompleted = targetKey === recentlyCompletedKey
+                                const deleting = Boolean(deletingKeys?.has(targetKey))
                                 return (
                                   <button
                                     type="button"
                                     ref={selected ? selectedRowRef : undefined}
-                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${depth ? " child" : ""}`}
+                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
                                     data-depth={Math.min(depth, 3)}
                                     key={targetKey}
-                                    onClick={() => open(item)}
+                                    onClick={() => { if (!deleting) open(item) }}
+                                    disabled={deleting}
+                                    aria-busy={deleting || undefined}
                                     aria-current={selected ? "page" : undefined}
                                     aria-label={t("sf.openSessionAria", {
                                       title: accessibleTitle,
                                       agent: `${item.record.agentLabel}${nativeAgent ? ` · ${nativeAgent}` : ""}${restrictionCount ? ` · ${t("sf.restrictionsLabel", { count: restrictionCount })}` : ""}${depth ? ` · ${t("sf.childSession")}` : ""}`,
-                                      status: status.label,
+                                      status: deleting ? t("sf.deleting") : status.label,
                                       project: group.name,
                                       machine: group.machine.name
                                     })}
@@ -931,12 +956,14 @@ export function NativeSessionHome({ sources, onOpen, refreshToken = 0, onAttenti
                                       </small>
                                     </span>
                                     <span className="hr-native-session-meta">
-                                      <span className="hr-native-session-status" data-state={status.state} aria-live={selected ? "polite" : undefined}>
-                                        {recentlyCompleted ? "✓ " : ""}{status.label}
+                                      <span className="hr-native-session-status" data-state={deleting ? "deleting" : status.state} aria-live={selected || deleting ? "polite" : undefined}>
+                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted ? "✓ " : ""}{status.label}</>}
                                       </span>
-                                      <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? new Date(timestamp).toLocaleString() : undefined}>
-                                        {relativeTime(timestamp)}
-                                      </time>
+                                      {deleting ? null : (
+                                        <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? new Date(timestamp).toLocaleString() : undefined}>
+                                          {relativeTime(timestamp)}
+                                        </time>
+                                      )}
                                     </span>
                                   </button>
                                 )
