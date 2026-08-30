@@ -557,11 +557,6 @@ export function WorkThreadConversation({
     && conversation.currentTurn?.id
     && conversation.currentTurn.id !== uncertainDelivery.priorTurnID
     && conversation.currentTurn.prompt?.trim() === uncertainDelivery.text
-    && timeline.some((message) =>
-      message.info.role === "user"
-      && message.taskdesk?.runId === conversation.currentTurn?.id
-      && message.parts.some((part) => part.type === "text" && part.text?.trim() === uncertainDelivery.text)
-    )
   )
   const visibleDraft = uncertainDeliverySettled && draft.trim() === uncertainDelivery?.text ? "" : draft
 
