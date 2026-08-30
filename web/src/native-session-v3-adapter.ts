@@ -71,55 +71,81 @@ function messageText(message: MessageEnvelope): string {
 }
 
 /**
- * PI exposes two legitimate identities for one completed assistant reply: while the turn is live the
- * ACP stream has one message id, then the authoritative JSONL journal can expose the same reply with
- * its persisted record id. The mature v3 tail merge intentionally retains unseen ids, so letting that
- * transport identity swap through would display the same answer twice after Stop/reopen or any other
- * live-to-journal transition.
+ * PI can expose one logical turn under two transport identities: the live ACP cache first, then the
+ * authoritative JSONL journal. The mature v3 tail merge deliberately retains unseen ids so older
+ * pages never disappear; therefore PI must keep a browser identity stable when that live record is
+ * replaced by its persisted equivalent.
  *
- * Preserve the prior browser identity only for one unambiguous assistant final-text match. Reasoning
- * may accompany the final text because PI journals thinking and the answer in the same assistant
- * record. Repeated identical answers stay distinct because neither side may contain more than one
- * candidate. Errors and tool-bearing messages keep their native identities unchanged.
+ * This applies to the user prompt and terminal provider error as well as successful assistant text.
+ * A failed turn is especially important: PI can journal a different error sentence and different ids
+ * after ACP already emitted the failure. Without stabilising the prompt first and then keying the
+ * error to that prompt, the mounted chat keeps both copies until it is unmounted and reopened.
+ *
+ * Every match is deliberately one-to-one. Repeated identical prompts/replies remain distinct rather
+ * than risking a false merge; in that ambiguous case native ids are left untouched.
  */
+function piStableUserKey(message: MessageEnvelope): string | null {
+  if (message.info.role !== "user" || message.info.error || !message.parts.length) return null
+  const text = canonicalText(messageText(message))
+  if (text) return `text:${text}`
+  const semanticParts = message.parts.map((part) => Object.fromEntries(
+    Object.entries(part).filter(([key]) => key !== "id" && key !== "messageID")
+  ))
+  return semanticParts.length ? `parts:${JSON.stringify(semanticParts)}` : null
+}
+
 function piStableAssistantKey(message: MessageEnvelope): string | null {
   if (message.info.role !== "assistant" || message.info.error || !message.parts.length) return null
   if (message.parts.some((part) => part.type !== "text" && part.type !== "reasoning")) return null
   const textParts = message.parts.filter((part) => part.type === "text" && typeof part.text === "string")
   if (!textParts.length) return null
   const text = canonicalText(textParts.map((part) => part.text || "").join("\n"))
-  return text ? text : null
+  return text ? `text:${text}` : null
 }
 
-export function stabilizePiTailMessageIDs(
-  previous: MessageEnvelope[],
-  next: MessageEnvelope[]
-): MessageEnvelope[] {
-  if (!previous.length || !next.length) return next
+function piStableErrorTurnKey(
+  message: MessageEnvelope,
+  index: number,
+  messages: MessageEnvelope[]
+): string | null {
+  if (message.info.role !== "assistant" || !message.info.error) return null
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = messages[cursor]
+    if (candidate.info.role === "user") return candidate.info.id ? `user:${candidate.info.id}` : null
+  }
+  return null
+}
 
+function stabilizePiMessagesByKey(
+  previous: MessageEnvelope[],
+  next: MessageEnvelope[],
+  keyFor: (message: MessageEnvelope, index: number, messages: MessageEnvelope[]) => string | null
+): MessageEnvelope[] {
   const previousIDs = new Set(previous.map((message) => message.info.id))
   const nextIDs = new Set(next.map((message) => message.info.id))
   const previousByKey = new Map<string, MessageEnvelope[]>()
   const nextKeyCounts = new Map<string, number>()
 
-  for (const message of previous) {
+  for (let index = 0; index < previous.length; index += 1) {
+    const message = previous[index]
     if (nextIDs.has(message.info.id)) continue
-    const key = piStableAssistantKey(message)
+    const key = keyFor(message, index, previous)
     if (!key) continue
     const candidates = previousByKey.get(key) ?? []
     candidates.push(message)
     previousByKey.set(key, candidates)
   }
-  for (const message of next) {
+  for (let index = 0; index < next.length; index += 1) {
+    const message = next[index]
     if (previousIDs.has(message.info.id)) continue
-    const key = piStableAssistantKey(message)
+    const key = keyFor(message, index, next)
     if (key) nextKeyCounts.set(key, (nextKeyCounts.get(key) ?? 0) + 1)
   }
 
   let changed = false
-  const stabilized = next.map((message) => {
+  const stabilized = next.map((message, index) => {
     if (previousIDs.has(message.info.id)) return message
-    const key = piStableAssistantKey(message)
+    const key = keyFor(message, index, next)
     if (!key || nextKeyCounts.get(key) !== 1) return message
     const candidates = previousByKey.get(key)
     if (candidates?.length !== 1) return message
@@ -132,6 +158,19 @@ export function stabilizePiTailMessageIDs(
     }
   })
   return changed ? stabilized : next
+}
+
+export function stabilizePiTailMessageIDs(
+  previous: MessageEnvelope[],
+  next: MessageEnvelope[]
+): MessageEnvelope[] {
+  if (!previous.length || !next.length) return next
+  // Stabilise the prompt first. Terminal errors can then be matched to that stable prompt identity
+  // even when PI changes both the assistant id and the provider-specific error sentence on flush.
+  let stabilized = stabilizePiMessagesByKey(previous, next, piStableUserKey)
+  stabilized = stabilizePiMessagesByKey(previous, stabilized, piStableAssistantKey)
+  stabilized = stabilizePiMessagesByKey(previous, stabilized, piStableErrorTurnKey)
+  return stabilized
 }
 
 function stabilizePiTailPage(entry: NativeConversationEntry, page: MessagePage, before?: string): MessagePage {

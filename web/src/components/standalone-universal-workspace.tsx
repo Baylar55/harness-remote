@@ -601,22 +601,16 @@ function NativeSessionsWorkspace({
     setMobileDetailOpen(true)
   }
 
-  function handleSessionDeleted(key: string) {
+  const markSessionDeleting = useCallback((key: string) => {
     setDeletingSessionKeys((current) => {
       if (current.has(key)) return current
       const next = new Set(current)
       next.add(key)
       return next
     })
-    setListRevision((value) => value + 1)
-    if (selected?.key !== key) return
-    setSelected(null)
-    setSelectedState(undefined)
-    setMobileDetailOpen(false)
-    setRevision((value) => value + 1)
-  }
+  }, [])
 
-  const handleSessionDeletionSettled = useCallback((key: string) => {
+  const clearSessionDeleting = useCallback((key: string) => {
     setDeletingSessionKeys((current) => {
       if (!current.has(key)) return current
       const next = new Set(current)
@@ -624,6 +618,33 @@ function NativeSessionsWorkspace({
       return next
     })
   }, [])
+
+  function handleSessionDeleteStarted(key: string) {
+    markSessionDeleting(key)
+    // On phones return to the rail immediately, while the real DELETE is still in flight. The row
+    // remains present, disabled and visibly deleting; desktop keeps the same selected Session behind
+    // the modal. No machine refresh is involved in this transition.
+    if (selected?.key === key) setMobileDetailOpen(false)
+  }
+
+  function handleSessionDeleteFailed(key: string) {
+    clearSessionDeleting(key)
+    // Restore the detail so the action panel can show the server error instead of leaving mobile on
+    // the Session list with a deletion that never happened.
+    if (selected?.key === key) setMobileDetailOpen(true)
+  }
+
+  function handleSessionDeleted(key: string) {
+    // Session discovery is the only data that changed. Refreshing the whole machine here used to
+    // light the global top-right spinner and could leave it spinning behind a perfectly valid DELETE.
+    setListRevision((value) => value + 1)
+    if (selected?.key !== key) return
+    setSelected(null)
+    setSelectedState(undefined)
+    setMobileDetailOpen(false)
+  }
+
+  const handleSessionDeletionSettled = clearSessionDeleting
 
   function handleSessionRenamed(session: Session, title: string) {
     const nextTitle = session.title?.trim() || title
@@ -766,7 +787,12 @@ function NativeSessionsWorkspace({
                       {Number(selected.cost) > 0 ? <span title={t("sf.reportedCost")}>${Number(selected.cost).toFixed(2)}</span> : null}
                     </div>
                   ) : null}
-                  <NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />
+                  <NativeSessionActions
+                    target={selected}
+                    onDeleteStarted={handleSessionDeleteStarted}
+                    onDeleteFailed={handleSessionDeleteFailed}
+                    onDeleted={handleSessionDeleted}
+                  />
                   <code title={selected.sessionID}>{selected.sessionID}</code>
                 </div>
               </header>

@@ -13,6 +13,8 @@ const DIRECTORY = "/work/native-pi-v3-first"
 const SUCCESS_PROMPT = "PI-SUCCESS-PROMPT"
 const SUCCESS_REPLY = "PI-SINGLE-FINAL-REPLY"
 const ERROR_PROMPT = "PI-ERROR-PROMPT"
+const RECOVERY_PROMPT = "PI-RECOVERY-PROMPT"
+const RECOVERY_REPLY = "PI-RECOVERY-REPLY"
 const LOST_PROMPT = "PI-LOST-HTTP-PROMPT"
 const LOST_REPLY = "PI-LOST-HTTP-REPLY"
 const DROPPED_RESPONSE_PROMPT = "PI-DROPPED-HTTP-RESPONSE-PROMPT"
@@ -58,6 +60,8 @@ let liveEventTypes
 let createCount
 let blockNextSessionList
 let releaseBlockedSessionList
+let blockNextSessionDelete
+let releaseBlockedSessionDelete
 
 function resetFakeState() {
   sessionCatalog = new Map([[SESSION_ID, {
@@ -81,6 +85,8 @@ function resetFakeState() {
   createCount = 0
   blockNextSessionList = false
   releaseBlockedSessionList = null
+  blockNextSessionDelete = false
+  releaseBlockedSessionDelete = null
 }
 
 function emitLiveEvent(type, sessionID = SESSION_ID) {
@@ -130,16 +136,36 @@ function appendSuccessTurn(sessionID, prompt, requestId, reply) {
 function appendErrorTurn(sessionID, prompt, requestId) {
   const base = clock
   clock += 20
-  transcript(sessionID).push(
-    message(sessionID, `pi-error-user-${requestId}`, "user", [textPart(`pi-error-user-text-${requestId}`, prompt)], base),
-    message(sessionID, `pi-error-assistant-${requestId}`, "assistant", [], base + 1, {
+  const liveUserID = `pi-live-error-user-${requestId}`
+  const liveAssistantID = `pi-live-error-assistant-${requestId}`
+  const messages = transcript(sessionID)
+  messages.push(
+    message(sessionID, liveUserID, "user", [textPart(`${liveUserID}-text`, prompt)], base),
+    message(sessionID, liveAssistantID, "assistant", [], base + 1, {
       name: "PIError",
-      message: "PI synthetic failure",
-      data: { message: "PI synthetic failure" }
+      message: "PI live synthetic failure",
+      data: { message: "PI live synthetic failure" }
     })
   )
   const entry = sessionCatalog.get(sessionID)
   if (entry) entry.time.updated = base + 1
+
+  // PI's ACP failure can be visible before JSONL flushes. Replace both transport ids and even the
+  // provider sentence later, exactly like the real live->journal transition that used to require
+  // navigating away and back before the mounted chat became correct.
+  setTimeout(() => {
+    const current = transcript(sessionID)
+    const index = current.findIndex((item) => item.info.id === liveUserID)
+    if (index < 0) return
+    current.splice(index, 2,
+      message(sessionID, `pi-error-user-${requestId}`, "user", [textPart(`pi-error-user-text-${requestId}`, prompt)], base),
+      message(sessionID, `pi-error-assistant-${requestId}`, "assistant", [], base + 1, {
+        name: "PIError",
+        message: "PI synthetic failure",
+        data: { message: "PI synthetic failure" }
+      })
+    )
+  }, 900)
 }
 
 const MODEL_CATALOG = {
@@ -176,7 +202,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": APP_ORIGIN,
     "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Harness-Backend",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Max-Age": "600"
   }
 }
@@ -292,6 +318,11 @@ function startFakeDaemon() {
     const deleteMatch = /^\/v1\/agents\/pi\/session\/([^/]+)$/.exec(url.pathname)
     if (request.method === "DELETE" && deleteMatch) {
       const sessionID = decodeURIComponent(deleteMatch[1])
+      if (blockNextSessionDelete) {
+        blockNextSessionDelete = false
+        await new Promise((resolve) => { releaseBlockedSessionDelete = resolve })
+        releaseBlockedSessionDelete = null
+      }
       sessionCatalog.delete(sessionID)
       transcripts.delete(sessionID)
       json(response, 200, true)
@@ -321,6 +352,7 @@ function startFakeDaemon() {
         nativePromptDispatches += 1
         ledger.set(ledgerKey, body)
         if (body.text === ERROR_PROMPT) appendErrorTurn(sessionID, body.text, requestId)
+        else if (body.text === RECOVERY_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, RECOVERY_REPLY)
         else if (body.text === LOST_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, LOST_REPLY)
         else if (body.text === DROPPED_RESPONSE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, DROPPED_RESPONSE_REPLY)
         else if (body.text === CREATE_PROMPT) {
@@ -579,8 +611,20 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(claimCount, 1, "writer ownership must be reused while the Session stays open")
   assert.equal(nativePromptDispatches, dispatchBefore + 2, "PI error Send dispatched more than once")
   await page.getByText("PI synthetic failure", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
-  assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI error prompt duplicated")
+  await page.getByText("PI live synthetic failure", { exact: true }).waitFor({ state: "detached", timeout: 15_000 })
+  assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI error prompt duplicated across live/journal identity replacement")
   assert.equal(await page.getByText("PI synthetic failure", { exact: true }).count(), 1, "PI provider error duplicated")
+  assert.equal(await page.getByText("PI live synthetic failure", { exact: true }).count(), 0, "PI live failure survived after the journal became authoritative")
+
+  // Reproduce the user's second interaction in the same mounted PI Session. A successful model/turn
+  // after the failed one must produce exactly one reply without first navigating away and back.
+  await waitForReady(page)
+  await sendPrompt(page, RECOVERY_PROMPT)
+  await page.getByText(RECOVERY_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(await page.getByText(RECOVERY_PROMPT, { exact: true }).count(), 1, "PI recovery prompt duplicated after failed model turn")
+  assert.equal(await page.getByText(RECOVERY_REPLY, { exact: true }).count(), 1, "PI second interaction produced duplicate replies")
+  assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI failed turn duplicated after recovery")
+  assert.equal(await page.getByText("PI synthetic failure", { exact: true }).count(), 1, "PI persisted failure duplicated after recovery")
 
   await waitForReady(page)
   const lostHttpBefore = promptHttpBodies.length
@@ -655,7 +699,7 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "refresh must never emit a native PI prompt")
   assert.equal(nativePromptDispatches, dispatchesBeforeReload, "refresh must never dispatch native PI work")
   await page.getByText(LOST_REPLY, { exact: true }).waitFor({ state: "visible" })
-  for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, LOST_PROMPT, LOST_REPLY, DROPPED_RESPONSE_PROMPT, DROPPED_RESPONSE_REPLY]) {
+  for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, RECOVERY_PROMPT, RECOVERY_REPLY, LOST_PROMPT, LOST_REPLY, DROPPED_RESPONSE_PROMPT, DROPPED_RESPONSE_REPLY]) {
     assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `refresh duplicated transcript marker: ${marker}`)
   }
   assert.equal(await page.getByRole("button", { name: "Continue with another agent" }).count(), 0, "cross-agent handoff UI must stay disabled during single-Session parity work")
@@ -680,25 +724,38 @@ async function assertMobileDeleteTransitionContract(browser) {
   const dialog = page.getByRole("dialog", { name: "Delete Session" })
   await dialog.waitFor({ state: "visible", timeout: 10_000 })
 
-  // Hold the first post-delete discovery so the stale rail snapshot remains on screen long enough
-  // to prove it is a disabled transition row rather than a briefly clickable ghost Session.
-  blockNextSessionList = true
+  // Hold the DELETE itself first. The phone must already be back on the rail with a disabled spinner
+  // row while the server operation is still in flight — not only after DELETE has completed.
+  blockNextSessionDelete = true
   await dialog.getByRole("button", { name: "Delete Session", exact: true }).click()
 
-  const deadline = Date.now() + 10_000
+  let deadline = Date.now() + 10_000
+  while (typeof releaseBlockedSessionDelete !== "function" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(typeof releaseBlockedSessionDelete, "function", "delete fixture never reached the server DELETE")
+
+  const deletingRow = page.locator(".hr-native-session-row.deleting")
+  await deletingRow.waitFor({ state: "visible", timeout: 10_000 })
+  assert.equal(await deletingRow.count(), 1, "exactly one Session row must own the deletion transition")
+  assert.equal(await deletingRow.isDisabled(), true, "a deleting Session must not remain clickable")
+  const deletingText = await deletingRow.innerText()
+  assert.match(deletingText, /PI v3-first regression session/, "deletion transition must stay attached to the Session being deleted")
+  assert.match(deletingText, /Deleting|Eliminazione/i, "deleting Session must explain its transition")
+  assert.equal(await deletingRow.locator("svg").count() > 0, true, "deleting Session row must expose a loading indicator")
+  assert.notEqual(await page.locator(".hr-refresh-button").getAttribute("aria-busy"), "true", "Session DELETE must not start the global machine refresh spinner")
+
+  // Now let DELETE succeed but hold only the Session-list refresh. The same tombstone bridges that
+  // short stale-index window, then disappears as soon as discovery proves the Session is gone.
+  blockNextSessionList = true
+  releaseBlockedSessionDelete?.()
+  deadline = Date.now() + 10_000
   while (typeof releaseBlockedSessionList !== "function" && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 25))
   }
   assert.equal(typeof releaseBlockedSessionList, "function", "delete fixture never reached the post-delete Session refresh")
-
-  const deletingRow = page.locator(".hr-native-session-row.deleting")
   await deletingRow.waitFor({ state: "visible", timeout: 10_000 })
-  assert.equal(await deletingRow.count(), 1, "exactly one stale Session row must own the deletion transition")
-  assert.equal(await deletingRow.isDisabled(), true, "a server-deleted Session must not remain clickable while the rail is stale")
-  const deletingText = await deletingRow.innerText()
-  assert.match(deletingText, /PI v3-first regression session/, "deletion transition must stay attached to the Session that was deleted")
-  assert.match(deletingText, /Deleting|Eliminazione/i, "stale deleted Session must explain its transition")
-  assert.equal(await deletingRow.locator("svg").count() > 0, true, "deleting Session row must expose a loading indicator")
+  assert.notEqual(await page.locator(".hr-refresh-button").getAttribute("aria-busy"), "true", "post-delete Session refresh must stay local to the rail")
 
   releaseBlockedSessionList?.()
   await deletingRow.waitFor({ state: "detached", timeout: 10_000 })

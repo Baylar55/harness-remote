@@ -18,10 +18,12 @@ import { useTranslator } from "../useTranslator"
  */
 type Props = {
   target: NativeSessionSurfaceTarget
+  onDeleteStarted?: (key: string) => void
+  onDeleteFailed?: (key: string) => void
   onDeleted: (key: string) => void
 }
 
-export function NativeSessionActions({ target, onDeleted }: Props) {
+export function NativeSessionActions({ target, onDeleteStarted, onDeleteFailed, onDeleted }: Props) {
   const t = useTranslator()
   const [mode, setMode] = useState<"delete" | null>(null)
   const [busy, setBusy] = useState(false)
@@ -56,11 +58,13 @@ export function NativeSessionActions({ target, onDeleted }: Props) {
     if (busy) return
     setBusy(true)
     setError(null)
+    onDeleteStarted?.(target.key)
     try {
       await api.deleteSession(target.config, target.sessionID, target.directory)
       setMode(null)
       onDeleted(target.key)
     } catch (reason) {
+      onDeleteFailed?.(target.key)
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
       setBusy(false)
