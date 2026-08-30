@@ -119,6 +119,57 @@ function semanticHistorySignature(messages) {
   return JSON.stringify(messages.map(semanticMessageIdentity))
 }
 
+/**
+ * A PI provider failure is first known by the live ACP request and can reach the journal a little
+ * later. Match the bridge's temporary failure to the persisted turn by its preceding user prompt,
+ * not by message id: PI's ACP stream and JSONL journal legitimately use different identities.
+ */
+function persistedFailureForTransientTurn(persisted, cached, failureID) {
+  const failureIndex = cached.findIndex((message) => message?.info?.id === failureID)
+  if (failureIndex < 0) return true
+
+  let userIndex = failureIndex - 1
+  while (userIndex >= 0 && cached[userIndex]?.info?.role !== "user") userIndex -= 1
+  if (userIndex < 0) return false
+
+  const userSignature = semanticMessageSignature(cached[userIndex])
+  const userCreated = Number(cached[userIndex]?.info?.time?.created) || 0
+  let persistedUserIndex = -1
+  let closestDistance = Number.POSITIVE_INFINITY
+  for (let index = 0; index < persisted.length; index += 1) {
+    const candidate = persisted[index]
+    if (candidate?.info?.role !== "user" || semanticMessageSignature(candidate) !== userSignature) continue
+    const candidateCreated = Number(candidate?.info?.time?.created) || 0
+    const distance = userCreated && candidateCreated ? Math.abs(candidateCreated - userCreated) : 0
+    if (distance <= closestDistance) {
+      closestDistance = distance
+      persistedUserIndex = index
+    }
+  }
+  if (persistedUserIndex < 0) return false
+
+  for (let index = persistedUserIndex + 1; index < persisted.length; index += 1) {
+    const candidate = persisted[index]
+    if (candidate?.info?.role === "user") break
+    if (candidate?.info?.role === "assistant" && candidate.info?.error?.message) return true
+  }
+  return false
+}
+
+/** Keep exactly the temporary failed turn visible while PI's authoritative journal catches up. */
+function transientFailureTurnMessages(cached, failureIDs) {
+  if (!failureIDs?.size) return []
+  const indexes = new Set()
+  for (let failureIndex = 0; failureIndex < cached.length; failureIndex += 1) {
+    if (!failureIDs.has(cached[failureIndex]?.info?.id)) continue
+    let start = failureIndex
+    while (start > 0 && cached[start - 1]?.info?.role !== "user") start -= 1
+    if (start > 0 && cached[start - 1]?.info?.role === "user") start -= 1
+    for (let index = start; index <= failureIndex; index += 1) indexes.add(index)
+  }
+  return cached.filter((_message, index) => indexes.has(index))
+}
+
 /** Exported for testing only. */
 export function mergeReplay(previous, replayed) {
   if (previous.length === 0) return replayed
@@ -314,6 +365,9 @@ export class AcpService {
   #cancelledSessions = new Set()
   #promptedSessions = new Set()
   #chunkMessageIDs = new Map()
+  // PI's journal is authoritative, but a provider rejection can be emitted by ACP before the journal
+  // has flushed its terminal assistant error. These ids keep only that short-lived bridge copy alive.
+  #transientFailureMessageIDs = new Map()
   #snapshotDirectory
   #restoredSnapshots = new Set()
   #dirtySnapshots = new Set()
@@ -658,6 +712,7 @@ export class AcpService {
     this.#ownedSessions.delete(sessionID)
     this.#adoptedSessions.delete(sessionID)
     this.#promptAcknowledgements.delete(sessionID)
+    this.#transientFailureMessageIDs.delete(sessionID)
     this.#chunkMessageIDs.delete(`${sessionID}:user`)
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
     this.#emit("session.deleted", sessionID)
@@ -670,10 +725,37 @@ export class AcpService {
     if (this.#historyLoader?.authoritativeHistory) {
       try {
         const persistedMessages = mergeFragmentedPiSnapshot(await this.#historyLoader(sessionID))
-        const cachedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
+        let cachedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
+        const transientFailures = this.#transientFailureMessageIDs.get(sessionID)
+
+        // Once PI has journalled the failed turn, its record replaces the bridge's temporary error
+        // even when the wording/id differs. Leaving both in the live cache is what made the next
+        // successful turn appear to produce an extra assistant response.
+        if (transientFailures?.size) {
+          const superseded = new Set()
+          for (const failureID of transientFailures) {
+            if (persistedFailureForTransientTurn(persistedMessages, cachedMessages, failureID)) {
+              superseded.add(failureID)
+            }
+          }
+          if (superseded.size) {
+            cachedMessages = cachedMessages.filter((message) => !superseded.has(message?.info?.id))
+            for (const failureID of superseded) transientFailures.delete(failureID)
+            if (!transientFailures.size) this.#transientFailureMessageIDs.delete(sessionID)
+          }
+        }
+
+        const pendingFailureTurn = transientFailureTurnMessages(
+          cachedMessages,
+          this.#transientFailureMessageIDs.get(sessionID)
+        )
         const messages = this.#isBusy(sessionID)
           ? mergeFragmentedPiSnapshot(mergeExternalHistory(persistedMessages, cachedMessages))
-          : persistedMessages
+          // Idle normally means "journal only". The one exception is a live provider failure the
+          // journal has not flushed yet; keep that exact failed turn until the persisted copy exists.
+          : pendingFailureTurn.length
+            ? mergeFragmentedPiSnapshot(mergeExternalHistory(persistedMessages, pendingFailureTurn))
+            : persistedMessages
         if (semanticHistorySignature(messages) !== semanticHistorySignature(cachedMessages)) {
           this.#resetActionsForSessionChange(sessionID)
         }
@@ -1102,6 +1184,11 @@ export class AcpService {
       messages.push(target)
     }
     target.info.error = { name: "HarnessTurnError", message: message.trim() }
+    if (this.#historyLoader?.authoritativeHistory) {
+      const failures = this.#transientFailureMessageIDs.get(sessionID) ?? new Set()
+      failures.add(target.info.id)
+      this.#transientFailureMessageIDs.set(sessionID, failures)
+    }
     this.#emit("message.updated", sessionID)
     this.#persistSnapshot(sessionID)
   }
@@ -1117,7 +1204,14 @@ export class AcpService {
       try {
         await this.setModel(sessionID, next.model, next.variant)
       } catch (error) {
+        // The queued user prompt was already recorded when it was enqueued. A model switch refusal
+        // terminates that turn; never run it on the previous model after telling the client it failed.
+        this.#recordTurnFailure(sessionID, error.message)
         this.#emit("session.error", sessionID, { message: error.message })
+        this.#emit("session.updated", sessionID)
+        this.#persistSnapshot(sessionID)
+        void this.#runNextQueued(sessionID)
+        return
       }
     }
     this.#startTurn(sessionID, next.text, true, next.attachments ?? [])
