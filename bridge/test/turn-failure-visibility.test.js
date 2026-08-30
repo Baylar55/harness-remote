@@ -86,6 +86,7 @@ test("a live ACP turn failure is recorded on the transcript, not only announced 
 test("a live PI provider failure remains visible until the authoritative journal catches up, then deduplicates", async () => {
   let persisted = []
   const historyLoader = async () => persisted
+  historyLoader.page = async () => ({ messages: persisted, before: null, hasMore: false })
   historyLoader.authoritativeHistory = true
   historyLoader.claimOnLoad = true
 
@@ -93,7 +94,7 @@ test("a live PI provider failure remains visible until the authoritative journal
   await service.prompt(SESSION, "bad model turn")
   await new Promise((resolve) => setTimeout(resolve, 20))
 
-  const live = await service.messages(SESSION)
+  const live = (await service.messagePage(SESSION, { limit: 100 })).messages
   assert.equal(live.filter((message) => message.info.role === "user").length, 1)
   assert.equal(live.filter((message) => message.info.error?.message).length, 1)
   assert.match(live.find((message) => message.info.error)?.info.error.message, /provider rejected/)
@@ -117,7 +118,7 @@ test("a live PI provider failure remains visible until the authoritative journal
     }
   ]
 
-  const durable = await service.messages(SESSION)
+  const durable = (await service.messagePage(SESSION, { limit: 100 })).messages
   assert.equal(durable.filter((message) => message.info.role === "user").length, 1)
   assert.equal(durable.filter((message) => message.info.error?.message).length, 1)
   assert.equal(durable.find((message) => message.info.error)?.info.error.message, "Model is no longer available")
