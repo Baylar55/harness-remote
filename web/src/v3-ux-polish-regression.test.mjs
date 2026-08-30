@@ -19,6 +19,7 @@ const overrides = read("conversation-control-plane-overrides.css")
 const sessionWorkbench = read("session-first-workbench.css")
 const mobileParity = read("v3-mobile-product-parity.css")
 const nativeObserverCss = read("native-session-observer.css")
+const nativeHomeUxCss = read("native-session-home-ux.css")
 const machineClient = read("machineClient.ts")
 
 assert.match(backendSetup, /return 4097/)
@@ -81,6 +82,17 @@ assert.match(standalone, /allowCachedOnTransportFailure: false/)
 assert.match(standalone, /selectedInteractionEnabled/)
 assert.match(standalone, /selectedInteractionEnabled[\s\S]*!selectedRuntime\.error/)
 assert.match(standalone, /startupPhase === "sessions"[\s\S]*sf\.loadingSessions/)
+
+// A successful mobile delete remains visibly transitional until the native Session index confirms it.
+assert.match(standalone, /deletingSessionKeys/)
+assert.match(standalone, /setDeletingSessionKeys/)
+assert.match(standalone, /deletingKeys=\{deletingSessionKeys\}/)
+assert.match(home, /deletingKeys\?\.has\(targetKey\)/)
+assert.match(home, /disabled=\{deleting\}/)
+assert.match(home, /sf\.deleting/)
+assert.match(home, /onDeletionSettled/)
+assert.match(nativeHomeUxCss, /\.hr-native-session-row\.deleting/)
+assert.match(nativeHomeUxCss, /cursor: progress/)
 
 // A single mobile timeout must not turn a machine that was already proven online into a false disconnect.
 assert.match(standalone, /MACHINE_OFFLINE_FAILURE_THRESHOLD = 3/)
