@@ -53,7 +53,8 @@ test("Session list navigation groups real native Sessions by machine and Project
   assert.match(home, /collapsedMachines/)
   assert.match(home, /collapsedProjects/)
   assert.match(home, /sessionTreeRows\(group\.sessions\)/)
-  assert.match(home, /onClick=\{\(\) => open\(item\)\}/)
+  assert.match(home, /onClick=\{\(\) => \{ if \(!deleting\) open\(item\) \}\}/)
+  assert.match(home, /disabled=\{deleting\}/)
 })
 
 test("new Session is created through the native Session path rather than a Conversation task", () => {
