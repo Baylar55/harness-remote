@@ -592,8 +592,8 @@ try {
   rejectNextHandoff = true
   await harnessSelect.selectOption("omp")
   assert.equal(await page.getByRole("button", { name: "Attach image" }).count(), 0, "target harness must not accept new attachments during handoff")
-  const blockedComposer = page.getByRole("textbox", { name: "Message PI" })
-  await blockedComposer.fill("BLOCKED-BY-ATTACHMENT")
+  const attachmentBlockedComposer = page.getByRole("textbox", { name: "Message PI" })
+  await attachmentBlockedComposer.fill("BLOCKED-BY-ATTACHMENT")
   assert.equal(await page.getByRole("button", { name: /^Send$/ }).isDisabled(), true, "existing attachments must block routed Send")
   await page.getByText("Remove the attached images before continuing on another harness.", { exact: true }).waitFor({ state: "visible" })
   assert.equal(handoffLinks.length, 0, "attachment-blocked route must not create a target Session")
