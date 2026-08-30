@@ -79,6 +79,14 @@ function validPath(path: unknown): path is string {
     && !/[\\\u0000-\u001f\u007f]/.test(path)
 }
 
+function isExplicitMachineScopedRequest(path: string): boolean {
+  try {
+    return MACHINE_SCOPED_PATH.test(new URL(path, "http://desktop.invalid").pathname)
+  } catch {
+    return false
+  }
+}
+
 function routedProfile(profile: DesktopProfile, route: DesktopRequestRoute | undefined): DesktopProfile | null {
   if (!route) return profile
   if (!ROUTE_BACKENDS.has(route.backend)) return null
@@ -153,7 +161,14 @@ export async function executeDesktopRequest(profile: DesktopProfile, request: De
     controller.abort()
     void activeReader?.cancel().catch(() => undefined)
   }, timeout)
-  const headers: Record<string, string> = { Accept: "application/json", ...routingHeaders(targetProfile, { preflight: false }) }
+  // Machine-control and explicit /v1/agents/<id> routes already carry their destination in the
+  // path. Sending X-Harness-Backend on them is not redundant: the daemon treats that header as a
+  // routing override, so /v1/machine + "opencode" can be diverted into the OpenCode child server.
+  // Browser/Android machine clients never send this hint on machine routes; desktop must match them.
+  const routeHeaders = isExplicitMachineScopedRequest(request.path)
+    ? {}
+    : routingHeaders(targetProfile, { preflight: false })
+  const headers: Record<string, string> = { Accept: "application/json", ...routeHeaders }
   if (profile.username && profile.password) {
     headers.Authorization = `Basic ${Buffer.from(`${profile.username}:${profile.password}`, "utf8").toString("base64")}`
   }
