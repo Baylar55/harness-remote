@@ -2,6 +2,7 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
+import type { ModelSelection } from "./types"
 
 export type NativeSessionHandoffStatus = "accepted" | "pending" | "uncertain"
 
@@ -19,6 +20,7 @@ type PendingNativeSessionHandoff = {
   clientRequestId: string
   targetAgentID: string
   title?: string
+  model?: ModelSelection | null
   createdAt: number
 }
 
@@ -33,6 +35,22 @@ function requestID(): string {
   return `handoff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
 
+function normalizeModel(value: unknown): ModelSelection | null {
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Partial<ModelSelection>
+  const providerID = typeof candidate.providerID === "string" ? candidate.providerID.trim() : ""
+  const modelID = typeof candidate.modelID === "string" ? candidate.modelID.trim() : ""
+  if (!providerID || !modelID) return null
+  const variant = typeof candidate.variant === "string" && candidate.variant.trim() ? candidate.variant.trim() : undefined
+  return { providerID, modelID, ...(variant ? { variant } : {}) }
+}
+
+function sameModel(left?: ModelSelection | null, right?: ModelSelection | null): boolean {
+  if (!left && !right) return true
+  if (!left || !right) return false
+  return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
+}
+
 function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHandoff | null {
   try {
     const raw = localStorage.getItem(storageKey(source))
@@ -44,6 +62,7 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHa
       clientRequestId: parsed.clientRequestId,
       targetAgentID: parsed.targetAgentID.trim(),
       title: typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim() : undefined,
+      model: normalizeModel(parsed.model),
       createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : Date.now()
     }
   } catch {
@@ -51,12 +70,21 @@ function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHa
   }
 }
 
-function persistPending(source: NativeSessionSurfaceTarget, pending: PendingNativeSessionHandoff) {
-  try { localStorage.setItem(storageKey(source), JSON.stringify(pending)) } catch {}
+function persistPending(source: NativeSessionSurfaceTarget, pending: PendingNativeSessionHandoff): boolean {
+  try {
+    localStorage.setItem(storageKey(source), JSON.stringify(pending))
+    return true
+  } catch {
+    return false
+  }
 }
 
 function clearPending(source: NativeSessionSurfaceTarget) {
   try { localStorage.removeItem(storageKey(source)) } catch {}
+}
+
+export function acknowledgeNativeSessionHandoff(source: NativeSessionSurfaceTarget) {
+  clearPending(source)
 }
 
 function errorDetail(body: unknown, status: number): string {
@@ -85,38 +113,50 @@ function responseData(value: unknown): { status: NativeSessionHandoffStatus; res
  * Create exactly one real native Session on another harness and link it to the source Session.
  *
  * The client request id is persisted before network I/O. A lost response or WebView reload therefore
- * retries the same semantic handoff instead of creating another target Session. While delivery is
- * pending or uncertain, changing the target harness is blocked because doing so would reuse one
- * idempotency key for a different resource-creating mutation.
+ * retries the same semantic handoff instead of creating another target Session. Unlike prompt
+ * delivery, resource creation has no blind TTL: forgetting this id after an ambiguous response can
+ * create a second real native Session. A definite 4xx refusal releases it immediately; an accepted
+ * result is acknowledged only by the caller after the returned target ref has itself been persisted.
  */
 export async function handoffNativeSession(
   source: NativeSessionSurfaceTarget,
   targetAgentID: string,
-  title?: string
+  title?: string,
+  model?: ModelSelection | null
 ): Promise<{ status: NativeSessionHandoffStatus; clientRequestId: string; result?: NativeSessionHandoffResult }> {
   const target = targetAgentID.trim()
   if (!target || target === source.agentID) throw new Error("Choose a different coding agent for this handoff.")
   if (!source.directory) throw new Error("This Session has no project directory, so it cannot be handed off safely.")
   const normalizedTitle = title?.trim() || undefined
+  const normalizedModel = normalizeModel(model)
 
   const existing = loadPending(source)
-  if (existing && (existing.targetAgentID !== target || (existing.title || "") !== (normalizedTitle || ""))) {
-    throw new Error("A previous handoff still has an unresolved delivery status. Retry that exact target before choosing another coding agent.")
+  if (existing && (
+    existing.targetAgentID !== target
+    || (existing.title || "") !== (normalizedTitle || "")
+    || !sameModel(existing.model, normalizedModel)
+  )) {
+    throw new Error("A previous handoff still has an unresolved delivery status. Retry that exact target and model before choosing another destination.")
   }
   const pending = existing ?? {
     clientRequestId: requestID(),
     targetAgentID: target,
     title: normalizedTitle,
+    model: normalizedModel,
     createdAt: Date.now()
   }
-  persistPending(source, pending)
+  if (!persistPending(source, pending)) {
+    throw new Error("Cannot persist Session handoff recovery state. No target Session was created.")
+  }
 
   const path = `/session/${encodeURIComponent(source.sessionID)}/handoff`
   const body = {
     clientRequestId: pending.clientRequestId,
     directory: source.directory,
     targetAgentID: pending.targetAgentID,
-    title: pending.title
+    title: pending.title,
+    model: pending.model ? { providerID: pending.model.providerID, modelID: pending.model.modelID } : undefined,
+    variant: pending.model?.variant || undefined
   }
 
   let parsed: { status: NativeSessionHandoffStatus; result?: NativeSessionHandoffResult }
@@ -176,6 +216,5 @@ export async function handoffNativeSession(
     }
   }
 
-  if (parsed.status === "accepted" && parsed.result) clearPending(source)
   return { ...parsed, clientRequestId: pending.clientRequestId }
 }

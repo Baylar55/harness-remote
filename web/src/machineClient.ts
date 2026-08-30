@@ -94,12 +94,16 @@ export function noMachineStatus(status: number | undefined): boolean {
  * state. A short in-memory grace period keeps the already-rendered workspace stable during that
  * transient transport failure instead of making the whole app look unconfigured for one poll.
  */
-export async function discoverMachine(config: ServerConfig): Promise<MachineSnapshot | null> {
+export async function discoverMachine(
+  config: ServerConfig,
+  options: { allowCachedOnTransportFailure?: boolean } = {}
+): Promise<MachineSnapshot | null> {
+  const allowCachedOnTransportFailure = options.allowCachedOnTransportFailure !== false
   if (isDesktopPlatform()) {
     const result = await desktopRequestResult(config, { path: "/v1/machine" })
     if (!result.ok) {
       if (result.error.code === "http" && noMachineStatus(result.error.status)) return null
-      if (result.error.code !== "http") {
+      if (result.error.code !== "http" && allowCachedOnTransportFailure) {
         const cached = recentCachedSnapshot(config)
         if (cached) return cached
       }
@@ -114,8 +118,10 @@ export async function discoverMachine(config: ServerConfig): Promise<MachineSnap
     try {
       response = await CapacitorHttp.get({ url: target, headers: headers(config), connectTimeout: 12_000, readTimeout: 12_000 })
     } catch {
-      const cached = recentCachedSnapshot(config)
-      if (cached) return cached
+      if (allowCachedOnTransportFailure) {
+        const cached = recentCachedSnapshot(config)
+        if (cached) return cached
+      }
       throw new Error(`Cannot reach ${config.host}:${config.port}.`)
     }
     if (noMachineStatus(response.status)) return null
@@ -129,8 +135,10 @@ export async function discoverMachine(config: ServerConfig): Promise<MachineSnap
   try {
     response = await fetch(target, { headers: headers(config), signal: controller.signal })
   } catch (error) {
-    const cached = recentCachedSnapshot(config)
-    if (cached) return cached
+    if (allowCachedOnTransportFailure) {
+      const cached = recentCachedSnapshot(config)
+      if (cached) return cached
+    }
     if (controller.signal.aborted) {
       throw new Error(`Machine discovery at ${config.host}:${config.port} timed out after ${BROWSER_DISCOVERY_TIMEOUT_MS / 1000}s.`)
     }

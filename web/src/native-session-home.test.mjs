@@ -86,5 +86,11 @@ assert.match(source, /activityTimestamp\(item, anchor\)/, "Project and Machine o
 assert.match(source, /setExpandedProjects/, "a selected Session below the compact preview must be made visible")
 assert.match(source, /scrollIntoView\(\{ block: "nearest"/, "the selected Session must be kept in the visible list viewport")
 assert.match(source, /recentlyCompletedKey/, "Working to Ready must leave a brief completion affordance")
+assert.match(source, /snapshot && state === "online" && !error/, "a reconnect-grace machine must not remain writable just because its last snapshot is cached")
+assert.match(source, /disabled=\{!loaded \|\| createMachines\.length === 0\}/, "New Session must stay disabled until Session and Project bootstrap has settled")
+assert.match(source, /if \(!loaded \|\| createMachines\.length === 0\) return/, "the create handler must enforce the same bootstrap gate as the button")
+assert.match(source, /t\("sf\.loadingSessions"\)/, "the empty rail must say Sessions are loading instead of implying the machine is disconnected")
+assert.match(source, /const discoveryReady = sources\.every\(\(\{ state \}\) => state !== "loading"\)/, "Session discovery must not settle while machine probes are still in flight")
+assert.match(source, /if \(!discoveryReady\) \{[\s\S]*setLoading\(true\)[\s\S]*return/, "the rail must remain explicitly loading until machine discovery can produce real Session results")
 
 console.log("native Session Home tree, create parity and stable-selection UX tests passed")

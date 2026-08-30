@@ -66,8 +66,20 @@ const promptBodies = []
 let refuseNextPromptFor = null
 const refusedPrompts = []
 const claimCounts = { pi: 0, omp: 0 }
+const handoffLinks = []
+const handoffLedger = new Map()
+const rejectedHandoffs = []
+let rejectNextHandoff = false
+let legacyNextLinkList = false
+let rejectNextLinkPersistence = false
+let linkPersistenceFailures = 0
+let refuseNextHandoffTargetPrompt = false
+let handoffTargetCounter = 0
+let lastHandoffTargetID = null
 let sseOpened = 0
 const sseResponses = new Set()
+let blockNextModelReadFor = null
+let releaseBlockedModelRead = null
 
 function corsHeaders() {
   return {
@@ -118,7 +130,7 @@ function startFakeDaemon() {
           transport: "acp",
           managed: true,
           state: "available",
-          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true, attachments: id === "pi" },
           contract: { sessions: { stop: "owned-session-native-cancel" } }
         }))
       })
@@ -130,6 +142,54 @@ function startFakeDaemon() {
         projects: [{ id: "project-model-switch", machineId: "machine-model-switch", name: "model-switch", path: DIRECTORY, kind: "git", configured: true }]
       })
       return
+    }
+
+
+    if (url.pathname === "/v1/session-links") {
+      if (request.method === "GET") {
+        if (legacyNextLinkList) {
+          legacyNextLinkList = false
+          response.writeHead(204, corsHeaders())
+          response.end()
+          return
+        }
+        const identity = {
+          machineID: url.searchParams.get("machineID"),
+          agentID: url.searchParams.get("agentID"),
+          sessionID: url.searchParams.get("sessionID")
+        }
+        const links = handoffLinks.filter((link) =>
+          (link.source.machineID === identity.machineID && link.source.agentID === identity.agentID && link.source.sessionID === identity.sessionID)
+          || (link.target.machineID === identity.machineID && link.target.agentID === identity.agentID && link.target.sessionID === identity.sessionID)
+        )
+        json(response, 200, { links })
+        return
+      }
+      if (request.method === "POST") {
+        const body = await readBody(request)
+        const candidate = body.link
+        if (rejectNextLinkPersistence) {
+          rejectNextLinkPersistence = false
+          linkPersistenceFailures += 1
+          json(response, 503, { error: "Temporary SessionLinkStore write failure" })
+          return
+        }
+        const index = handoffLinks.findIndex((link) =>
+          link.source.machineID === candidate?.source?.machineID
+          && link.source.agentID === candidate?.source?.agentID
+          && link.source.sessionID === candidate?.source?.sessionID
+          && link.target.machineID === candidate?.target?.machineID
+          && link.target.agentID === candidate?.target?.agentID
+          && link.target.sessionID === candidate?.target?.sessionID
+        )
+        if (index < 0) {
+          json(response, 404, { error: "Unknown Session link" })
+          return
+        }
+        handoffLinks[index] = { ...handoffLinks[index], ...candidate, createdAt: handoffLinks[index].createdAt }
+        json(response, 200, { link: handoffLinks[index] })
+        return
+      }
     }
 
     const agentMatch = /^\/v1\/agents\/([^/]+)\/(.*)$/.exec(url.pathname)
@@ -150,8 +210,17 @@ function startFakeDaemon() {
         json(response, 200, Object.fromEntries(agent.sessions.map((id) => [id, { type: "idle" }])))
         return
       }
+      if (request.method === "GET" && (rest === "v1/capabilities" || rest === "capabilities")) {
+        json(response, 200, { attachments: agentID === "pi", commands: false })
+        return
+      }
       if (request.method === "GET" && rest === "models") {
         modelReads[agentID] += 1
+        if (blockNextModelReadFor === agentID) {
+          blockNextModelReadFor = null
+          await new Promise((resolve) => { releaseBlockedModelRead = resolve })
+          releaseBlockedModelRead = null
+        }
         json(response, 200, {
           models: agent.models,
           stale: false,
@@ -164,6 +233,58 @@ function startFakeDaemon() {
       if (request.method === "POST" && claim) {
         claimCounts[agentID] += 1
         json(response, 200, { claimed: true, sessionID: decodeURIComponent(claim[1]) })
+        return
+      }
+      const handoff = /^session\/([^/]+)\/handoff$/.exec(rest)
+      if (request.method === "POST" && handoff) {
+        const sourceSessionID = decodeURIComponent(handoff[1])
+        const body = await readBody(request)
+        if (rejectNextHandoff) {
+          rejectNextHandoff = false
+          rejectedHandoffs.push({ sourceAgentID: agentID, sourceSessionID, ...body })
+          json(response, 409, { error: "Target model is unavailable", code: "model_unavailable" })
+          return
+        }
+
+        const ledgerKey = `${agentID}:${sourceSessionID}:${body.clientRequestId}`
+        const duplicate = handoffLedger.get(ledgerKey)
+        if (duplicate) {
+          json(response, 200, { status: "accepted", duplicate: true, result: duplicate })
+          return
+        }
+
+        const targetAgentID = body.targetAgentID
+        const targetAgent = AGENTS[targetAgentID]
+        if (!targetAgent) {
+          json(response, 404, { error: `Unknown target agent ${targetAgentID}` })
+          return
+        }
+        const targetSessionID = `native-handoff-${targetAgentID}-${++handoffTargetCounter}`
+        lastHandoffTargetID = targetSessionID
+        targetAgent.sessions.push(targetSessionID)
+        titles.set(targetSessionID, body.title || `Handoff from ${agentID}`)
+        transcripts.set(targetSessionID, [])
+        const source = {
+          machineID: "machine-model-switch",
+          agentID,
+          sessionID: sourceSessionID,
+          directory: body.directory
+        }
+        const target = {
+          machineID: "machine-model-switch",
+          agentID: targetAgentID,
+          sessionID: targetSessionID,
+          directory: body.directory
+        }
+        const link = { type: "handoff", source, target, createdAt: new Date().toISOString() }
+        handoffLinks.push(link)
+        if (refuseNextHandoffTargetPrompt) {
+          refuseNextHandoffTargetPrompt = false
+          refuseNextPromptFor = targetSessionID
+        }
+        const result = { target, link }
+        handoffLedger.set(ledgerKey, result)
+        json(response, 200, { status: "accepted", clientRequestId: body.clientRequestId, result })
         return
       }
       const prompt = /^session\/([^/]+)\/prompt$/.exec(rest)
@@ -358,8 +479,21 @@ try {
   await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   // --- A: catalog, two model changes in a row, then send -----------------------------------------
+  // A rolling-upgrade daemon may not know /v1/session-links yet and can answer 204. Opening a
+  // completely normal Session must stay usable instead of storing undefined and crashing on .find().
+  legacyNextLinkList = true
+  blockNextModelReadFor = "pi"
   await openSession(page, TITLE_A, markers.get(SESSION_A))
+  const blockedComposer = page.getByRole("textbox", { name: "Message PI" })
+  await blockedComposer.waitFor({ state: "visible", timeout: 15_000 })
+  await waitFor(() => typeof releaseBlockedModelRead === "function", "blocked PI model catalog request")
+  assert.equal(await blockedComposer.isDisabled(), true, "composer must stay disabled while native models are still loading")
+  assert.equal(await page.getByRole("button", { name: /^Send$/ }).isDisabled(), true, "Send must stay disabled while native models are still loading")
+  assert.equal(await page.locator(".tdw-agent-control select").first().isDisabled(), true, "harness selector must stay disabled while native models are still loading")
+  assert.match(await page.locator(".tdw-conversation-state").innerText(), /Loading models|Waiting for model catalog/, "Session must expose model bootstrap instead of Ready")
+  releaseBlockedModelRead?.()
   await assertCatalog(page, ["pi-coding", "pi-reasoning"], ["omp-fast", "omp-deep"], "A")
+  assert.equal(await blockedComposer.isDisabled(), false, "composer must enable automatically after the verified catalog arrives")
   await chooseModel(page, "pi-coding")
   await assertCatalog(page, ["pi-coding", "pi-reasoning"], ["omp-fast", "omp-deep"], "A after first change")
   await chooseModel(page, "pi-reasoning", "high")
@@ -432,15 +566,153 @@ try {
     assert.equal(await page.locator(".tdw-model-trigger").isDisabled(), false, `${title} model picker became unusable`)
   }
 
+  // --- explicit same-machine handoff: failure recovery, model isolation and persistent lineage ----
+  await backToSessions(page)
+  await openSession(page, TITLE_A, markers.get(SESSION_A))
+
+  const routedControls = page.locator(".tdw-agent-control.routed")
+  await routedControls.waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(await routedControls.getByText("Machine", { exact: true }).count(), 0, "Session handoff must not expose a machine selector")
+  assert.equal(await routedControls.getByText("Harness", { exact: true }).count(), 1, "Session handoff must expose one harness selector")
+  assert.equal(await routedControls.getByText("Model", { exact: true }).count(), 1, "Session handoff must keep model selection")
+  assert.equal(await page.locator(".tdw-conversation-state").isVisible(), true, "routing controls must not hide the Session state")
+
+  // Attachments stay on their current Session. Switching harness must keep the attachment visible,
+  // hide the add-image action and block Send until the user explicitly removes it.
+  const attachmentInput = page.locator('.uw-composer-shell input[type="file"]')
+  await attachmentInput.waitFor({ state: "attached", timeout: 15_000 })
+  await attachmentInput.setInputFiles({
+    name: "handoff.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")
+  })
+  await page.getByRole("button", { name: "Remove handoff.png" }).waitFor({ state: "visible", timeout: 15_000 })
+
+  const harnessSelect = routedControls.locator("label").filter({ hasText: /^Harness/ }).locator("select")
+  rejectNextHandoff = true
+  await harnessSelect.selectOption("omp")
+  assert.equal(await page.getByRole("button", { name: "Attach image" }).count(), 0, "target harness must not accept new attachments during handoff")
+  const attachmentBlockedComposer = page.getByRole("textbox", { name: "Message PI" })
+  await attachmentBlockedComposer.fill("BLOCKED-BY-ATTACHMENT")
+  assert.equal(await page.getByRole("button", { name: /^Send$/ }).isDisabled(), true, "existing attachments must block routed Send")
+  await page.getByText("Remove the attached images before continuing on another harness.", { exact: true }).waitFor({ state: "visible" })
+  assert.equal(handoffLinks.length, 0, "attachment-blocked route must not create a target Session")
+  await page.getByRole("button", { name: "Remove handoff.png" }).click()
+  // Harness change synchronously invalidates the old PI model. Once the OMP catalog arrives it must
+  // contain only OMP choices, never the stale PI selection that could previously race with Send.
+  assert.ok(!(await page.locator(".tdw-model-trigger").innerText()).includes("pi-"), "old harness model remained visible after changing harness")
+  await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "A routed to OMP")
+  await chooseModel(page, "omp-deep")
+
+  const refusedComposer = page.getByRole("textbox", { name: "Message PI" })
+  await refusedComposer.fill("HANDOFF-REFUSED")
+  const rejectedBefore = rejectedHandoffs.length
+  await page.getByRole("button", { name: /^Send$/ }).click()
+  await waitFor(() => rejectedHandoffs.length === rejectedBefore + 1, "definite handoff refusal")
+  await page.getByRole("alert").waitFor({ state: "visible", timeout: 15_000 })
+
+  // A definite 409 must not leave an immortal route transaction. Change both model and prompt and
+  // prove the next handoff creates a new native target instead of being blocked client-side.
+  await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "A after handoff refusal")
+  await chooseModel(page, "omp-fast")
+  const routedPromptBefore = promptBodies.length
+  const handoffCountBefore = handoffLinks.length
+  const createsBeforeContextFailure = handoffTargetCounter
+  rejectNextLinkPersistence = true
+  const contextRetryComposer = page.getByRole("textbox", { name: "Message PI" })
+  await contextRetryComposer.fill("HANDOFF-SUCCESS")
+  await page.getByRole("button", { name: /^Send$/ }).click()
+  await waitFor(() => linkPersistenceFailures === 1, "transferred-context persistence refusal")
+  await waitFor(() => handoffLinks.length === handoffCountBefore + 1, "target/link creation before context persistence refusal")
+  assert.ok(lastHandoffTargetID, "handoff target was not created before context persistence failed")
+  const firstHandoffTargetID = lastHandoffTargetID
+  assert.equal(handoffTargetCounter, createsBeforeContextFailure + 1, "context persistence failure must happen after exactly one target create")
+  assert.equal(promptBodies.length, routedPromptBefore, "first prompt must wait until lineage/context persistence succeeds")
+  await page.getByRole("alert").waitFor({ state: "visible", timeout: 15_000 })
+
+  const createsBeforeContextRetry = handoffTargetCounter
+  const routed = await send(page, "PI", "HANDOFF-SUCCESS")
+  assert.equal(handoffTargetCounter, createsBeforeContextRetry, "context persistence retry must reuse the already-created target Session")
+  await waitFor(() => Boolean(handoffLinks.at(-1)?.transferredContext), "persisted transferred context")
+  assert.equal(routed.sessionID, firstHandoffTargetID, "first routed prompt must address the already-created target Session")
+  assert.equal(routed.agentID, "omp")
+  await page.getByRole("textbox", { name: "Message OMP" }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.deepEqual(routed.model, { providerID: "omp", modelID: "omp-fast" })
+  assert.equal(promptBodies.length, routedPromptBefore + 1, "one routed Send must dispatch exactly one target prompt")
+  assert.match(routed.text, /TRANSFERRED TASK CONTEXT/)
+  assert.match(routed.text, /SWITCH-A-HISTORY/)
+  assert.equal(handoffLinks.at(-1).source.machineID, handoffLinks.at(-1).target.machineID, "handoff link must stay on one machine")
+
+  await page.locator(".hr-session-transfer-context > summary").waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(await page.getByText("Continued from", { exact: true }).count(), 1, "target Session must identify its source")
+
+  // Reopening after a full app reload must recover both lineage and the exact bounded transferred
+  // context from daemon metadata, not from the in-memory target returned by the handoff call.
+  await page.reload({ waitUntil: "domcontentloaded" })
+  await page.locator('.hr-native-workspace[aria-label="Sessions"]').waitFor({ state: "visible", timeout: 15_000 })
+  const reopenedTarget = page.locator(".hr-native-session-row")
+    .filter({ hasText: TITLE_A })
+    .filter({ hasText: "OMP" })
+    .first()
+  await reopenedTarget.waitFor({ state: "visible", timeout: 15_000 })
+  await reopenedTarget.click()
+  await page.getByRole("heading", { name: TITLE_A }).waitFor({ state: "visible", timeout: 15_000 })
+  await page.getByText("Continued from", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  await page.locator(".hr-session-transfer-context > summary").waitFor({ state: "visible", timeout: 15_000 })
+  const transfer = page.locator(".hr-session-transfer-context")
+  await transfer.locator("summary").click()
+  assert.match(await transfer.locator("pre").innerText(), /SWITCH-A-HISTORY/, "reopened target lost its transferred context")
+
+  // --- target created, first target prompt refused: retry must reuse that exact target --------------
+  await backToSessions(page)
+  await openSession(page, TITLE_B, markers.get(SESSION_B))
+  const retryControls = page.locator(".tdw-agent-control.routed")
+  const retryHarness = retryControls.locator("label").filter({ hasText: /^Harness/ }).locator("select")
+  await retryHarness.selectOption("omp")
+  await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "B routed to OMP")
+  await chooseModel(page, "omp-deep")
+
+  const linksBeforeTargetPromptRefusal = handoffLinks.length
+  const createsBeforeTargetPromptRefusal = handoffTargetCounter
+  const refusedBeforeTargetPromptRefusal = refusedPrompts.length
+  refuseNextHandoffTargetPrompt = true
+  const sourceComposer = page.getByRole("textbox", { name: "Message PI" })
+  await sourceComposer.fill("TARGET-FIRST-PROMPT-REFUSED")
+  await page.getByRole("button", { name: /^Send$/ }).click()
+  await waitFor(() => refusedPrompts.length === refusedBeforeTargetPromptRefusal + 1, "first target prompt refusal")
+  await waitFor(() => handoffLinks.length === linksBeforeTargetPromptRefusal + 1, "target creation before refused first prompt")
+  const refusedTargetID = lastHandoffTargetID
+  assert.ok(refusedTargetID, "handoff target was not created before first-prompt refusal")
+  assert.equal(handoffTargetCounter, createsBeforeTargetPromptRefusal + 1, "first attempt must create exactly one target Session")
+  assert.equal(refusedPrompts.at(-1).sessionID, refusedTargetID, "the refusal must come from the created target Session")
+  await page.getByRole("alert").waitFor({ state: "visible", timeout: 15_000 })
+
+  // A definite prompt 4xx releases only prompt delivery state. The durable route still owns the
+  // created target, so changing prompt/model must retry that Session without another handoff create.
+  await assertCatalog(page, ["omp-fast", "omp-deep"], ["pi-coding", "pi-reasoning"], "B target retry after first prompt refusal")
+  await chooseModel(page, "omp-fast")
+  const linksBeforeTargetRetry = handoffLinks.length
+  const createsBeforeTargetRetry = handoffTargetCounter
+  const recovered = await send(page, "PI", "TARGET-FIRST-PROMPT-RECOVERED")
+  assert.equal(recovered.agentID, "omp")
+  assert.equal(recovered.sessionID, refusedTargetID, "retry after first-prompt 4xx must reuse the already-created target Session")
+  assert.deepEqual(recovered.model, { providerID: "omp", modelID: "omp-fast" })
+  assert.equal(handoffLinks.length, linksBeforeTargetRetry, "retry must not create a second lineage link")
+  assert.equal(handoffTargetCounter, createsBeforeTargetRetry, "retry must not create a second native target Session")
+  await page.getByRole("textbox", { name: "Message OMP" }).waitFor({ state: "visible", timeout: 15_000 })
+
   // --- delivery and subscription hygiene ----------------------------------------------------------
-  assert.equal(promptBodies.length, 6, `expected exactly six accepted prompts, got ${promptBodies.length}`)
+  assert.equal(promptBodies.length, 8, `expected exactly eight accepted prompts including two routed handoffs, got ${promptBodies.length}`)
   const requestIDs = promptBodies.map((body) => body.clientRequestId)
   assert.equal(new Set(requestIDs).size, requestIDs.length, "each Send must use its own durable client request id")
   assert.ok(requestIDs.every((value) => typeof value === "string" && value), "every prompt must carry a client request id")
   assert.equal(promptBodies.filter((body) => body.sessionID === SESSION_A).length, 2, "A received exactly its own two prompts")
   assert.equal(promptBodies.filter((body) => body.sessionID === SESSION_B).length, 3)
-  assert.equal(refusedPrompts.length, 1, "exactly one delivery was refused on purpose")
+  assert.equal(refusedPrompts.length, 2, "one normal prompt and one created-target first prompt were refused on purpose")
+  assert.equal(rejectedHandoffs.length, 1, "exactly one handoff creation was definitively refused")
   assert.equal(promptBodies.filter((body) => body.sessionID === SESSION_C).length, 1)
+  assert.equal(promptBodies.filter((body) => body.sessionID === firstHandoffTargetID).length, 1, "first handoff target received exactly one prompt")
+  assert.equal(promptBodies.filter((body) => body.sessionID === lastHandoffTargetID).length, 1, "recovered handoff target received exactly one accepted prompt")
   for (const body of promptBodies) assert.equal(body.directory, DIRECTORY, "every prompt must carry the Project directory")
 
   // Repeated Session opens must not leave one live event stream behind each.
@@ -449,7 +721,7 @@ try {
   assert.ok(modelReads.pi <= 16, `PI catalog was re-read too often: ${modelReads.pi}`)
   assert.ok(modelReads.omp <= 8, `OMP catalog was re-read too often: ${modelReads.omp}`)
 
-  console.log(`native Session model-switch smoke passed: ${promptBodies.length} prompts, catalog reads pi=${modelReads.pi} omp=${modelReads.omp}, sse open=${sseResponses.size}/${sseOpened}`)
+  console.log(`native Session model-switch + handoff smoke passed: ${promptBodies.length} prompts, links=${handoffLinks.length}, catalog reads pi=${modelReads.pi} omp=${modelReads.omp}, sse open=${sseResponses.size}/${sseOpened}`)
 } finally {
   if (browser) await browser.close().catch(() => undefined)
   stopPreview(preview)

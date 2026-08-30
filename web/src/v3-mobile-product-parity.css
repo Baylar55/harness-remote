@@ -23,8 +23,10 @@
 .uw-transcript-jumps {
   position: absolute;
   z-index: 12;
+  top: 50%;
   right: 12px;
-  bottom: 14px;
+  bottom: auto;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -235,8 +237,10 @@
   }
 
   .uw-transcript-jumps {
+    top: 46%;
     right: 8px;
-    bottom: 9px;
+    bottom: auto;
+    transform: translateY(-50%);
     gap: 6px;
   }
 

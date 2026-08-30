@@ -81,3 +81,110 @@ test("a live ACP turn failure is recorded on the transcript, not only announced 
   assert.deepEqual(messages.map((message) => message.info.role), ["user", "assistant"])
   assert.equal(messages[1].info.error?.message, "Internal error: provider rejected the request")
 })
+
+
+test("a live PI provider failure remains visible until the authoritative journal catches up, then deduplicates", async () => {
+  let persisted = []
+  const historyLoader = async () => persisted
+  historyLoader.page = async () => ({ messages: persisted, before: null, hasMore: false })
+  historyLoader.authoritativeHistory = true
+  historyLoader.claimOnLoad = true
+
+  const service = new AcpService(new FailingAcp(), { historyLoader })
+  await service.prompt(SESSION, "bad model turn")
+  await new Promise((resolve) => setTimeout(resolve, 20))
+
+  const live = (await service.messagePage(SESSION, { limit: 100 })).messages
+  assert.equal(live.filter((message) => message.info.role === "user").length, 1)
+  assert.equal(live.filter((message) => message.info.error?.message).length, 1)
+  assert.match(live.find((message) => message.info.error)?.info.error.message, /provider rejected/)
+
+  // PI can write a provider-specific sentence and a different message id into JSONL after ACP has
+  // already rejected the request. That persisted turn must replace, not sit beside, the bridge copy.
+  persisted = [
+    {
+      info: { id: "pi-journal-user", role: "user", sessionID: SESSION, time: { created: Date.now() - 5 } },
+      parts: [{ id: "pi-journal-user-text", messageID: "pi-journal-user", type: "text", text: "bad model turn" }]
+    },
+    {
+      info: {
+        id: "pi-journal-error",
+        role: "assistant",
+        sessionID: SESSION,
+        time: { created: Date.now() },
+        error: { name: "HarnessTurnError", message: "Model is no longer available" }
+      },
+      parts: []
+    }
+  ]
+
+  const durable = (await service.messagePage(SESSION, { limit: 100 })).messages
+  assert.equal(durable.filter((message) => message.info.role === "user").length, 1)
+  assert.equal(durable.filter((message) => message.info.error?.message).length, 1)
+  assert.equal(durable.find((message) => message.info.error)?.info.error.message, "Model is no longer available")
+})
+
+class QueuedModelFailureAcp extends EventEmitter {
+  promptCalls = 0
+  #releaseFirst
+
+  async listSessions() {
+    return [{ sessionId: SESSION, cwd: process.cwd(), title: "Queued model failure", updatedAt: new Date().toISOString() }]
+  }
+
+  async request(method, params) {
+    if (method === "session/load") {
+      return {
+        configOptions: [{
+          id: "model",
+          currentValue: "provider/good",
+          options: [
+            { value: "provider/good", name: "Good" },
+            { value: "provider/bad", name: "Bad" }
+          ]
+        }]
+      }
+    }
+    if (method === "session/prompt") {
+      this.promptCalls += 1
+      if (this.promptCalls === 1) return new Promise((resolve) => { this.#releaseFirst = resolve })
+      throw new Error("a queued prompt must not reach session/prompt after model setup failed")
+    }
+    if (method === "session/set_config_option") {
+      if (params?.value === "provider/bad") throw new Error("Harness model is no longer usable")
+      return { configOptions: [] }
+    }
+    throw new Error(`Unexpected request: ${method}`)
+  }
+
+  releaseFirst() {
+    this.#releaseFirst?.({})
+  }
+
+  notify() {}
+}
+
+test("a queued prompt whose model switch fails is terminated instead of running on the previous model", async () => {
+  const acp = new QueuedModelFailureAcp()
+  const service = new AcpService(acp)
+  const errors = []
+  service.subscribe((event) => {
+    if (event.type === "session.error") errors.push(event.message)
+  })
+
+  await service.prompt(SESSION, "first turn")
+  await service.prompt(SESSION, "queued bad-model turn", "provider/bad")
+  assert.equal(acp.promptCalls, 1, "queued turn must wait for the active prompt")
+
+  acp.releaseFirst()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+
+  assert.equal(acp.promptCalls, 1, "failed queued model setup must not dispatch on the previous model")
+  assert.deepEqual(errors, ["Harness model is no longer usable"])
+  const messages = await service.messages(SESSION)
+  const queuedPromptIndex = messages.findIndex((message) =>
+    message.info.role === "user" && message.parts?.some((part) => part.text === "queued bad-model turn")
+  )
+  assert.ok(queuedPromptIndex >= 0)
+  assert.equal(messages.slice(queuedPromptIndex + 1).filter((message) => message.info.error?.message === "Harness model is no longer usable").length, 1)
+})

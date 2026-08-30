@@ -2024,3 +2024,68 @@ test("advertises attachment support from the agent's own prompt capabilities", a
     await Promise.all([capable.close(), incapable.close()])
   }
 })
+
+
+test("lightweight Session index keeps a bridge-created Session visible and preserves its user title", async () => {
+  class LazyNativeIndexAcp extends EventEmitter {
+    created = null
+    exposeNative = false
+
+    async start() {}
+
+    async listSessions() {
+      if (!this.exposeNative || !this.created) return []
+      return [{
+        ...this.created,
+        title: "Harness generated title"
+      }]
+    }
+
+    async request(method, params) {
+      if (method === "session/new") {
+        this.created = {
+          sessionId: "lazy-session",
+          cwd: params.cwd,
+          updatedAt: "2026-08-29T12:00:00.000Z"
+        }
+        return { sessionId: this.created.sessionId, configOptions: [] }
+      }
+      return {}
+    }
+
+    notify() {}
+  }
+
+  const acp = new LazyNativeIndexAcp()
+  const bridge = await startServer({ acp, backend: "codex" })
+  const directory = encodeURIComponent(process.cwd())
+  try {
+    const created = await fetch(`${bridge.baseURL}/session?directory=${directory}`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Chosen before first prompt" })
+    })
+    assert.equal(created.status, 200)
+
+    let index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
+    assert.equal(index.length, 1, "a native Session owned by the bridge must not disappear while the adapter listing catches up")
+    assert.equal(index[0].id, "lazy-session")
+    assert.equal(index[0].title, "Chosen before first prompt")
+
+    acp.exposeNative = true
+    index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
+    assert.equal(index.length, 1, "the native and owned views must converge on one Session identity")
+    assert.equal(index[0].title, "Chosen before first prompt", "a generated native title must not overwrite an explicit user title")
+
+    const renamed = await fetch(`${bridge.baseURL}/session/lazy-session?directory=${directory}`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Renamed from Harness Remote" })
+    })
+    assert.equal(renamed.status, 200)
+    index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
+    assert.equal(index[0].title, "Renamed from Harness Remote", "a bridge-local Codex rename must survive a Session-list refresh")
+  } finally {
+    await bridge.close()
+  }
+})

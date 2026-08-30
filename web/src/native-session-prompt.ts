@@ -91,7 +91,7 @@ function markHandoffSent(target: NativeSessionSurfaceTarget) {
   try { localStorage.setItem(handoffSentKey(target), "1") } catch {}
 }
 
-function transferredContext(target: NativeSessionSurfaceTarget): string {
+export function nativeSessionTransferredContext(target: NativeSessionSurfaceTarget): string {
   const history = target.history || []
   if (!history.length) return ""
   const lines: string[] = []
@@ -109,7 +109,7 @@ function transferredContext(target: NativeSessionSurfaceTarget): string {
 
 function wirePrompt(target: NativeSessionSurfaceTarget, visibleText: string): string {
   if (!target.history?.length || handoffAlreadySent(target)) return visibleText
-  const context = transferredContext(target)
+  const context = nativeSessionTransferredContext(target)
   if (!context) return visibleText
   // Keep the mature v3 packet markers. native-session-turns strips this technical envelope back to
   // USER INSTRUCTION for display, so the harness gets context while the user sees only what they wrote.
@@ -154,6 +154,18 @@ function persistPending(target: NativeSessionSurfaceTarget, pending: PendingNati
 
 export function clearPendingNativeSessionPrompt(target: NativeSessionSurfaceTarget) {
   try { localStorage.removeItem(storageKey(target)) } catch {}
+}
+
+/**
+ * Resolve an ambiguous native prompt after the authoritative transcript proves that exact request
+ * reached the Session. This is the same acceptance cleanup as receiving the HTTP 200 directly:
+ * clear the durable request id and, for the first handoff prompt, remember that transferred context
+ * has already been delivered so a later ordinary prompt cannot send it a second time.
+ */
+export function markPendingNativeSessionPromptAccepted(target: NativeSessionSurfaceTarget) {
+  const pending = loadPendingNativeSessionPrompt(target)
+  if (pending?.wireText && pending.wireText !== pending.text) markHandoffSent(target)
+  clearPendingNativeSessionPrompt(target)
 }
 
 function parseStatus(data: unknown): NativeSessionPromptStatus {
@@ -291,10 +303,7 @@ export async function sendNativeSessionPrompt(
     }
   }
 
-  if (status === "accepted") {
-    if (pending.wireText && pending.wireText !== pending.text) markHandoffSent(target)
-    clearPendingNativeSessionPrompt(target)
-  }
+  if (status === "accepted") markPendingNativeSessionPromptAccepted(target)
   return { status, clientRequestId: pending.clientRequestId }
 }
 

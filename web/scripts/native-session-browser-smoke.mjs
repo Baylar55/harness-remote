@@ -13,8 +13,12 @@ const DIRECTORY = "/work/native-pi-v3-first"
 const SUCCESS_PROMPT = "PI-SUCCESS-PROMPT"
 const SUCCESS_REPLY = "PI-SINGLE-FINAL-REPLY"
 const ERROR_PROMPT = "PI-ERROR-PROMPT"
+const RECOVERY_PROMPT = "PI-RECOVERY-PROMPT"
+const RECOVERY_REPLY = "PI-RECOVERY-REPLY"
 const LOST_PROMPT = "PI-LOST-HTTP-PROMPT"
 const LOST_REPLY = "PI-LOST-HTTP-REPLY"
+const DROPPED_RESPONSE_PROMPT = "PI-DROPPED-HTTP-RESPONSE-PROMPT"
+const DROPPED_RESPONSE_REPLY = "PI-DROPPED-HTTP-RESPONSE-REPLY"
 const CREATE_TITLE = "PI created from Harness Remote"
 const CREATE_PROMPT = "PI-CREATED-FIRST-PROMPT"
 const CREATE_REPLY = "PI-CREATED-FIRST-REPLY"
@@ -48,11 +52,16 @@ let modelCatalogReads
 let promptHttpBodies
 let nativePromptDispatches
 let uncertainDelivered
+let machineProbeFailuresRemaining
 let ledger
 let clock
 let sseResponses
 let liveEventTypes
 let createCount
+let blockNextSessionList
+let releaseBlockedSessionList
+let blockNextSessionDelete
+let releaseBlockedSessionDelete
 
 function resetFakeState() {
   sessionCatalog = new Map([[SESSION_ID, {
@@ -68,11 +77,16 @@ function resetFakeState() {
   promptHttpBodies = []
   nativePromptDispatches = 0
   uncertainDelivered = false
+  machineProbeFailuresRemaining = 0
   ledger = new Map()
   clock = 10_000
   sseResponses = new Set()
   liveEventTypes = []
   createCount = 0
+  blockNextSessionList = false
+  releaseBlockedSessionList = null
+  blockNextSessionDelete = false
+  releaseBlockedSessionDelete = null
 }
 
 function emitLiveEvent(type, sessionID = SESSION_ID) {
@@ -122,16 +136,36 @@ function appendSuccessTurn(sessionID, prompt, requestId, reply) {
 function appendErrorTurn(sessionID, prompt, requestId) {
   const base = clock
   clock += 20
-  transcript(sessionID).push(
-    message(sessionID, `pi-error-user-${requestId}`, "user", [textPart(`pi-error-user-text-${requestId}`, prompt)], base),
-    message(sessionID, `pi-error-assistant-${requestId}`, "assistant", [], base + 1, {
+  const liveUserID = `pi-live-error-user-${requestId}`
+  const liveAssistantID = `pi-live-error-assistant-${requestId}`
+  const messages = transcript(sessionID)
+  messages.push(
+    message(sessionID, liveUserID, "user", [textPart(`${liveUserID}-text`, prompt)], base),
+    message(sessionID, liveAssistantID, "assistant", [], base + 1, {
       name: "PIError",
-      message: "PI synthetic failure",
-      data: { message: "PI synthetic failure" }
+      message: "PI live synthetic failure",
+      data: { message: "PI live synthetic failure" }
     })
   )
   const entry = sessionCatalog.get(sessionID)
   if (entry) entry.time.updated = base + 1
+
+  // PI's ACP failure can be visible before JSONL flushes. Replace both transport ids and even the
+  // provider sentence later, exactly like the real live->journal transition that used to require
+  // navigating away and back before the mounted chat became correct.
+  setTimeout(() => {
+    const current = transcript(sessionID)
+    const index = current.findIndex((item) => item.info.id === liveUserID)
+    if (index < 0) return
+    current.splice(index, 2,
+      message(sessionID, `pi-error-user-${requestId}`, "user", [textPart(`pi-error-user-text-${requestId}`, prompt)], base),
+      message(sessionID, `pi-error-assistant-${requestId}`, "assistant", [], base + 1, {
+        name: "PIError",
+        message: "PI synthetic failure",
+        data: { message: "PI synthetic failure" }
+      })
+    )
+  }, 900)
 }
 
 const MODEL_CATALOG = {
@@ -168,7 +202,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": APP_ORIGIN,
     "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Harness-Backend",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Max-Age": "600"
   }
 }
@@ -196,6 +230,11 @@ function startFakeDaemon() {
     const url = new URL(request.url || "/", `http://127.0.0.1:${DAEMON_PORT}`)
 
     if (request.method === "GET" && url.pathname === "/v1/machine") {
+      if (machineProbeFailuresRemaining > 0) {
+        machineProbeFailuresRemaining -= 1
+        json(response, 500, { error: "synthetic mobile reconnect probe failure" })
+        return
+      }
       json(response, 200, {
         machine: { id: "machine-pi-v3-first", name: "PI v3-first Test", createdAt: new Date().toISOString() },
         agents: [{
@@ -205,7 +244,7 @@ function startFakeDaemon() {
           transport: "acp",
           managed: true,
           state: "available",
-          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true, sessionDelete: true },
           contract: { sessions: { stop: "owned-session-native-cancel" } }
         }]
       })
@@ -220,6 +259,11 @@ function startFakeDaemon() {
     }
 
     if (request.method === "GET" && url.pathname === "/v1/agents/pi/experimental/session") {
+      if (blockNextSessionList) {
+        blockNextSessionList = false
+        await new Promise((resolve) => { releaseBlockedSessionList = resolve })
+        releaseBlockedSessionList = null
+      }
       json(response, 200, [...sessionCatalog.values()])
       return
     }
@@ -271,6 +315,20 @@ function startFakeDaemon() {
       return
     }
 
+    const deleteMatch = /^\/v1\/agents\/pi\/session\/([^/]+)$/.exec(url.pathname)
+    if (request.method === "DELETE" && deleteMatch) {
+      const sessionID = decodeURIComponent(deleteMatch[1])
+      if (blockNextSessionDelete) {
+        blockNextSessionDelete = false
+        await new Promise((resolve) => { releaseBlockedSessionDelete = resolve })
+        releaseBlockedSessionDelete = null
+      }
+      sessionCatalog.delete(sessionID)
+      transcripts.delete(sessionID)
+      json(response, 200, true)
+      return
+    }
+
     const claimMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/claim$/.exec(url.pathname)
     if (request.method === "POST" && claimMatch) {
       claimCount += 1
@@ -294,8 +352,16 @@ function startFakeDaemon() {
         nativePromptDispatches += 1
         ledger.set(ledgerKey, body)
         if (body.text === ERROR_PROMPT) appendErrorTurn(sessionID, body.text, requestId)
+        else if (body.text === RECOVERY_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, RECOVERY_REPLY)
         else if (body.text === LOST_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, LOST_REPLY)
-        else if (body.text === CREATE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, CREATE_REPLY)
+        else if (body.text === DROPPED_RESPONSE_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, DROPPED_RESPONSE_REPLY)
+        else if (body.text === CREATE_PROMPT) {
+          // Codex can report the turn idle before its rollout tail is readable. Reproduce that exact
+          // lifecycle on a freshly-created Session: accept immediately, emit no convenient SSE event,
+          // and make the authoritative transcript appear later. The mounted chat must settle it by
+          // itself instead of requiring navigation away and back.
+          setTimeout(() => appendSuccessTurn(sessionID, body.text, requestId, CREATE_REPLY), 1_800)
+        }
         else if (body.text === REOPEN_PROMPT) appendSuccessTurn(sessionID, body.text, requestId, REOPEN_REPLY)
         else appendSuccessTurn(sessionID, body.text, requestId, SUCCESS_REPLY)
       }
@@ -393,10 +459,34 @@ async function waitFor(predicate, description, timeout = 12_000) {
 }
 
 async function waitForReady(page) {
-  await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 12_000 })
-  const composer = page.getByRole("textbox", { name: "Message PI" })
-  await composer.waitFor({ state: "visible", timeout: 12_000 })
-  assert.equal(await composer.isDisabled(), false, "v3 composer must be enabled when the Session is ready")
+  try {
+    await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 12_000 })
+    const composer = page.getByRole("textbox", { name: "Message PI" })
+    await composer.waitFor({ state: "visible", timeout: 12_000 })
+    assert.equal(await composer.isDisabled(), false, "v3 composer must be enabled when the Session is ready")
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => ({
+      state: [...document.querySelectorAll(".tdw-conversation-state")].map((node) => ({
+        className: node.className,
+        text: node.textContent
+      })),
+      model: [...document.querySelectorAll(".tdw-model-control")].map((node) => ({
+        text: node.textContent,
+        trigger: node.querySelector("button")?.textContent,
+        disabled: node.querySelector("button")?.hasAttribute("disabled")
+      })),
+      composer: [...document.querySelectorAll(".uw-composer-shell textarea")].map((node) => ({
+        disabled: node.hasAttribute("disabled"),
+        value: node.value
+      })),
+      assistantRows: [...document.querySelectorAll(".uw-message-agent")].slice(-4).map((node) => ({
+        text: node.textContent,
+        pending: node.classList.contains("uw-message-pending")
+      }))
+    }))
+    console.error("waitForReady diagnostic:", JSON.stringify(diagnostic))
+    throw error
+  }
 }
 
 async function openSession(page, title) {
@@ -421,6 +511,35 @@ async function sendPrompt(page, text) {
     await new Promise((resolve) => setTimeout(resolve, 50))
   }
   throw new Error(`Timed out waiting for v3 Send after filling ${text}`)
+}
+
+async function assertStartupTransitionContract(browser, viewport, mobile) {
+  resetFakeState()
+  blockNextSessionList = true
+  const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  await seed(page)
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
+
+  const deadline = Date.now() + 12_000
+  while (typeof releaseBlockedSessionList !== "function" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  assert.equal(typeof releaseBlockedSessionList, "function", "startup fixture never reached Session discovery")
+
+  const startup = page.locator(".hr-native-workspace-empty.hr-native-startup.connecting")
+  await startup.waitFor({ state: "visible", timeout: 12_000 })
+  assert.match(await startup.innerText(), /Loading.*Session/i, "machine-connected startup must remain in Loading Sessions")
+  assert.equal(await page.locator(".hr-native-workspace-empty.hr-native-startup.offline").count(), 0, "startup must not claim all machines are disconnected while Sessions are still loading")
+  assert.equal(await page.locator(".hr-native-machine-group.offline").count(), 0, "an already-connected machine must not render offline during Session discovery")
+  const newSession = page.getByRole("button", { name: "New Session" })
+  await newSession.waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await newSession.isDisabled(), true, "New Session must remain disabled until Session discovery settles")
+
+  releaseBlockedSessionList?.()
+  await page.getByRole("button", { name: /PI v3-first regression session/ }).waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await newSession.isDisabled(), false, "New Session must enable only after real Session discovery completes")
+  await context.close()
 }
 
 async function assertExistingSessionContract(browser, viewport, mobile) {
@@ -492,8 +611,20 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(claimCount, 1, "writer ownership must be reused while the Session stays open")
   assert.equal(nativePromptDispatches, dispatchBefore + 2, "PI error Send dispatched more than once")
   await page.getByText("PI synthetic failure", { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
-  assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI error prompt duplicated")
+  await page.getByText("PI live synthetic failure", { exact: true }).waitFor({ state: "detached", timeout: 15_000 })
+  assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI error prompt duplicated across live/journal identity replacement")
   assert.equal(await page.getByText("PI synthetic failure", { exact: true }).count(), 1, "PI provider error duplicated")
+  assert.equal(await page.getByText("PI live synthetic failure", { exact: true }).count(), 0, "PI live failure survived after the journal became authoritative")
+
+  // Reproduce the user's second interaction in the same mounted PI Session. A successful model/turn
+  // after the failed one must produce exactly one reply without first navigating away and back.
+  await waitForReady(page)
+  await sendPrompt(page, RECOVERY_PROMPT)
+  await page.getByText(RECOVERY_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(await page.getByText(RECOVERY_PROMPT, { exact: true }).count(), 1, "PI recovery prompt duplicated after failed model turn")
+  assert.equal(await page.getByText(RECOVERY_REPLY, { exact: true }).count(), 1, "PI second interaction produced duplicate replies")
+  assert.equal(await page.getByText(ERROR_PROMPT, { exact: true }).count(), 1, "PI failed turn duplicated after recovery")
+  assert.equal(await page.getByText("PI synthetic failure", { exact: true }).count(), 1, "PI persisted failure duplicated after recovery")
 
   await waitForReady(page)
   const lostHttpBefore = promptHttpBodies.length
@@ -515,6 +646,51 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(await page.getByText(LOST_REPLY, { exact: true }).count(), 1, "reconciliation duplicated the assistant reply")
 
   await waitForReady(page)
+
+  // A transport-level lost response is different from the explicit 202 uncertainty above. The
+  // daemon has already executed and persisted the turn while the browser loses only the HTTP reply.
+  // The native controller must reconcile that exact durable request against the transcript before
+  // surfacing an error, so the UI never invents a machine disconnect for an already-accepted prompt.
+  const droppedHttpBefore = promptHttpBodies.length
+  const droppedDispatchBefore = nativePromptDispatches
+  let droppedClientResponse = false
+  const droppedRoute = "**/v1/agents/pi/session/*/prompt"
+  await page.route(droppedRoute, async (route) => {
+    const request = route.request()
+    let body
+    try { body = request.postDataJSON() } catch {}
+    if (!droppedClientResponse && body?.text === DROPPED_RESPONSE_PROMPT) {
+      // Forward the POST all the way to the fake daemon so its ledger/transcript are durable, then
+      // discard only the response on the client side. This is deterministic unlike closing the
+      // server socket, which Chromium may transparently replay at the HTTP transport layer.
+      await route.fetch()
+      droppedClientResponse = true
+      await route.abort("connectionreset")
+      return
+    }
+    await route.continue()
+  })
+  await sendPrompt(page, DROPPED_RESPONSE_PROMPT)
+  await waitFor(() => promptHttpBodies.length >= droppedHttpBefore + 1, "PI dropped-response HTTP attempt")
+  assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "lost HTTP response must start with exactly one prompt request")
+  assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "lost HTTP response must still correspond to one native dispatch")
+  await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  await waitForReady(page)
+  assert.equal(await page.getByText(/Cannot reach/).count(), 0, "transcript-proven delivery must not surface a false transport error")
+  assert.equal(await page.getByText(/Reconnecting to machine/).count(), 0, "transcript-proven delivery must not force a false machine reconnect")
+  assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "transcript reconciliation must never resend a prompt whose delivery is already proven")
+  assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "transcript reconciliation must not duplicate native work")
+  assert.equal(
+    await page.locator(".uw-message-user").getByText(DROPPED_RESPONSE_PROMPT, { exact: true }).count(),
+    1,
+    "transcript recovery duplicated the dropped-response prompt bubble"
+  )
+  assert.equal(await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response reply")
+  assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), "", "transcript-proven acceptance must leave the composer empty")
+  assert.equal(droppedClientResponse, true, "the regression fixture must actually discard the accepted HTTP response")
+  await page.unroute(droppedRoute)
+
+  await waitForReady(page)
   const promptsBeforeReload = promptHttpBodies.length
   const dispatchesBeforeReload = nativePromptDispatches
   await page.reload({ waitUntil: "networkidle" })
@@ -523,7 +699,7 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "refresh must never emit a native PI prompt")
   assert.equal(nativePromptDispatches, dispatchesBeforeReload, "refresh must never dispatch native PI work")
   await page.getByText(LOST_REPLY, { exact: true }).waitFor({ state: "visible" })
-  for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, LOST_PROMPT, LOST_REPLY]) {
+  for (const marker of [SUCCESS_PROMPT, SUCCESS_REPLY, ERROR_PROMPT, RECOVERY_PROMPT, RECOVERY_REPLY, LOST_PROMPT, LOST_REPLY, DROPPED_RESPONSE_PROMPT, DROPPED_RESPONSE_REPLY]) {
     assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `refresh duplicated transcript marker: ${marker}`)
   }
   assert.equal(await page.getByRole("button", { name: "Continue with another agent" }).count(), 0, "cross-agent handoff UI must stay disabled during single-Session parity work")
@@ -533,6 +709,56 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   assert.ok(composer && size, "v3 composer geometry unavailable")
   assert.ok(composer.y >= -1 && composer.y + composer.height <= size.height + 1, `v3 composer escaped viewport: ${JSON.stringify({ composer, size })}`)
 
+  await context.close()
+}
+
+async function assertMobileDeleteTransitionContract(browser) {
+  resetFakeState()
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  await seed(page)
+  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+
+  await openSession(page, "PI v3-first regression session")
+  await page.getByRole("button", { name: "Delete Session" }).click()
+  const dialog = page.getByRole("dialog", { name: "Delete Session" })
+  await dialog.waitFor({ state: "visible", timeout: 10_000 })
+
+  // Hold the DELETE itself first. The phone must already be back on the rail with a disabled spinner
+  // row while the server operation is still in flight — not only after DELETE has completed.
+  blockNextSessionDelete = true
+  await dialog.getByRole("button", { name: "Delete Session", exact: true }).click()
+
+  let deadline = Date.now() + 10_000
+  while (typeof releaseBlockedSessionDelete !== "function" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(typeof releaseBlockedSessionDelete, "function", "delete fixture never reached the server DELETE")
+
+  const deletingRow = page.locator(".hr-native-session-row.deleting")
+  await deletingRow.waitFor({ state: "visible", timeout: 10_000 })
+  assert.equal(await deletingRow.count(), 1, "exactly one Session row must own the deletion transition")
+  assert.equal(await deletingRow.isDisabled(), true, "a deleting Session must not remain clickable")
+  const deletingText = await deletingRow.innerText()
+  assert.match(deletingText, /PI v3-first regression session/, "deletion transition must stay attached to the Session being deleted")
+  assert.match(deletingText, /Deleting|Eliminazione/i, "deleting Session must explain its transition")
+  assert.equal(await deletingRow.locator("svg").count() > 0, true, "deleting Session row must expose a loading indicator")
+  assert.notEqual(await page.locator(".hr-refresh-button").getAttribute("aria-busy"), "true", "Session DELETE must not start the global machine refresh spinner")
+
+  // Now let DELETE succeed but hold only the Session-list refresh. The same tombstone bridges that
+  // short stale-index window, then disappears as soon as discovery proves the Session is gone.
+  blockNextSessionList = true
+  releaseBlockedSessionDelete?.()
+  deadline = Date.now() + 10_000
+  while (typeof releaseBlockedSessionList !== "function" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(typeof releaseBlockedSessionList, "function", "delete fixture never reached the post-delete Session refresh")
+  await deletingRow.waitFor({ state: "visible", timeout: 10_000 })
+  assert.notEqual(await page.locator(".hr-refresh-button").getAttribute("aria-busy"), "true", "post-delete Session refresh must stay local to the rail")
+
+  releaseBlockedSessionList?.()
+  await deletingRow.waitFor({ state: "detached", timeout: 10_000 })
   await context.close()
 }
 
@@ -554,8 +780,10 @@ async function assertCreateSessionContract(browser, viewport, mobile) {
   assert.equal(claimCount, 0, "a newly created PI Session is already owned and must not be claimed again")
 
   const dispatchBefore = nativePromptDispatches
+  const liveEventsBeforeFirstPrompt = liveEventTypes.length
   await sendPrompt(page, CREATE_PROMPT)
   await page.getByText(CREATE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
+  assert.equal(liveEventTypes.length, liveEventsBeforeFirstPrompt, "fresh Session reply settlement must not depend on receiving a final SSE event")
   assert.equal(claimCount, 0, "the first prompt of a freshly created PI Session must reuse creation ownership")
   assert.equal(nativePromptDispatches, dispatchBefore + 1, "created PI Session first prompt must dispatch exactly once")
   assert.equal(promptHttpBodies.filter((body) => body.sessionID === CREATED_SESSION_ID && body.text === CREATE_PROMPT).length, 1, "created PI Session prompt must target the returned native id exactly once")
@@ -586,15 +814,21 @@ try {
   await ready(APP_ORIGIN)
   browser = await chromium.launch({ headless: true })
 
+  console.log("native PI v3-first browser smoke: startup transition desktop")
+  await assertStartupTransitionContract(browser, { width: 1366, height: 768 }, false)
+  console.log("native PI v3-first browser smoke: startup transition mobile")
+  await assertStartupTransitionContract(browser, { width: 390, height: 844 }, true)
   console.log("native PI v3-first browser smoke: existing desktop")
   await assertExistingSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: existing mobile")
   await assertExistingSessionContract(browser, { width: 390, height: 844 }, true)
+  console.log("native PI v3-first browser smoke: mobile delete transition")
+  await assertMobileDeleteTransitionContract(browser)
   console.log("native PI v3-first browser smoke: create desktop")
   await assertCreateSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: create mobile")
   await assertCreateSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: open-without-unlock, lazy claim, create, ordered activity, error recovery, uncertain-delivery reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: startup loading transition, mobile delete tombstone, open-without-unlock, lazy claim, delayed first-reply settlement, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {

@@ -1,4 +1,27 @@
 /* Session-first UX refinements layered on the existing native Session browser. */
+.hr-native-session-row.deleting {
+  cursor: progress;
+  opacity: 0.68;
+  border-color: color-mix(in srgb, var(--tdw-border, rgba(127, 127, 127, 0.22)) 72%, transparent);
+  background: color-mix(in srgb, var(--tdw-card, rgba(255, 255, 255, 0.035)) 72%, transparent);
+}
+
+.hr-native-session-row.deleting:hover,
+.hr-native-session-row.deleting:focus-visible {
+  border-color: color-mix(in srgb, var(--tdw-border, rgba(127, 127, 127, 0.22)) 72%, transparent);
+  background: color-mix(in srgb, var(--tdw-card, rgba(255, 255, 255, 0.035)) 72%, transparent);
+}
+
+.hr-native-session-row.deleting .hr-native-session-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hr-native-session-row.deleting .hr-native-session-status svg {
+  flex: none;
+}
+
 .hr-native-create-machine {
   grid-column: 1 / -1;
 }

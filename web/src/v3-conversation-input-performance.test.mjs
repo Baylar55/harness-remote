@@ -7,8 +7,8 @@ const picker = readFileSync(new URL("./components/model-picker.tsx", import.meta
 const observer = readFileSync(new URL("./components/native-session-observer.tsx", import.meta.url), "utf8")
 
 test("the shared Session chat signature is not recomputed on every keystroke", () => {
-  assert.match(chat, /const conversationSignature = useMemo\(\(\) => taskConversationSignature\(task\), \[task\]\)/)
-  assert.doesNotMatch(chat, /^\s*const conversationSignature = taskConversationSignature\(task\)\s*$/m)
+  assert.match(chat, /const conversationSignature = useMemo\(\(\) => runtimeSignature\(conversation\), \[conversation\]\)/)
+  assert.doesNotMatch(chat, /^\s*const conversationSignature = runtimeSignature\(conversation\)\s*$/m)
 })
 
 test("the Session composer draft is persisted on a debounce, not on every keystroke", () => {
@@ -38,11 +38,15 @@ test("an empty model catalog is a resolved native Session state, not a dead disa
   assert.match(observer, /deferModelFallback/)
 })
 
-test("a model catalog failure never blocks the native Session transcript", () => {
+test("a model catalog failure keeps history readable but native mutations gated", () => {
   assert.match(chat, /const \[modelError, setModelError\] = useState<string \| null>\(null\)/)
   assert.match(chat, /setModelError\(reason instanceof Error \? reason\.message : String\(reason\)\)/)
   assert.match(chat, /tdw-field-note/)
-  assert.match(chat, /Model catalog unavailable\. Continue uses the harness default\./)
+  assert.match(chat, /Model catalog unavailable\. Sending is paused until a model can be verified\./)
+  assert.match(chat, /modelBootstrapBlocked/)
+  assert.match(chat, /composerDisabled=\{!interactionEnabled \|\| modelBootstrapBlocked\}/)
   assert.match(chat, /unavailableHint=\{modelError \|\| undefined\}/)
+  assert.match(chat, /const presentedTimeline = useMemo/)
+  assert.match(chat, /messages=\{presentedTimeline\}/)
   assert.equal(existsSync(new URL("./components/conversation-workspace.tsx", import.meta.url)), false)
 })

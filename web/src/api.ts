@@ -64,6 +64,30 @@ export type MessagePage = {
   model?: ModelSelection
 }
 
+export type NativeSessionIdentityPayload = {
+  machineID: string
+  agentID: string
+  sessionID: string
+  directory: string
+}
+
+export type NativeSessionLinkRecord = {
+  type: "handoff"
+  source: NativeSessionIdentityPayload
+  target: NativeSessionIdentityPayload
+  createdAt: string
+  transferredContext?: string
+}
+
+export type NativeSessionHandoffMutationResponse = {
+  status: "accepted" | "pending" | "uncertain"
+  duplicate?: boolean
+  result?: {
+    target: NativeSessionIdentityPayload
+    link?: NativeSessionLinkRecord
+  }
+}
+
 function sessionModelHeader(value: string | undefined): ModelSelection | undefined {
   if (!value) return undefined
   try {
@@ -315,6 +339,26 @@ export const api = {
 
   createSession(config: ServerConfig, title?: string, model?: ModelSelection, directory?: string) {
     return request<Session>(config, withDirectory("/session", directory), { method: "POST", body: { title, model: toCreateSessionModel(model) } })
+  },
+
+  async listNativeSessionLinks(config: ServerConfig, identity: NativeSessionIdentityPayload) {
+    const params = new URLSearchParams({
+      machineID: identity.machineID,
+      agentID: identity.agentID,
+      sessionID: identity.sessionID,
+      directory: identity.directory
+    })
+    const response = await request<unknown>(config, `/v1/session-links?${params.toString()}`)
+    // Rolling upgrades must never make opening an otherwise valid native Session fatal. Older
+    // daemons may answer this unknown machine-level route with 204 (normalized to true on Android)
+    // or with another legacy payload. Treat "no verified links array" as "no lineage support yet".
+    if (!response || typeof response !== "object") return { links: [] as NativeSessionLinkRecord[] }
+    const links = (response as { links?: unknown }).links
+    return { links: Array.isArray(links) ? links as NativeSessionLinkRecord[] : [] }
+  },
+
+  registerNativeSessionLink(config: ServerConfig, link: NativeSessionLinkRecord) {
+    return request<{ link: NativeSessionLinkRecord }>(config, "/v1/session-links", { method: "POST", body: { link } })
   },
 
   renameSession(config: ServerConfig, id: string, title: string, directory?: string) {

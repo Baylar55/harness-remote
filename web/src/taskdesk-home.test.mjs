@@ -49,7 +49,7 @@ test("primary product surface is Machine -> Project -> native Session", () => {
   assert.match(home, /hr-native-session-row/)
   assert.match(home, /sessionTreeRows/)
   assert.match(observer, /<WorkThreadConversation/)
-  assert.match(sharedChat, /buildWorkThreadTimeline/)
+  assert.match(sharedChat, /buildConversationTimeline/)
   assert.match(sharedChat, /<TaskDeskConversation/)
 })
 
@@ -78,7 +78,9 @@ test("native Session metadata actions belong to the open Session, not the naviga
   const actions = read("./components/native-session-actions.tsx")
   const rename = read("./components/native-session-rename.tsx")
 
-  assert.match(standalone, /<NativeSessionActions target=\{selected\}/)
+  assert.match(standalone, /<NativeSessionActions\s+target=\{selected\}/)
+  assert.match(standalone, /onDeleteStarted=\{handleSessionDeleteStarted\}/)
+  assert.match(standalone, /onDeleteFailed=\{handleSessionDeleteFailed\}/)
   assert.match(actions, /api\.deleteSession/)
   assert.match(actions, /target\.deleteSupported/)
   // Rename edits the heading the header already shows, so it lives on that heading rather than in a
@@ -113,11 +115,11 @@ test("Session chat keeps bounded paging live events attention Stop and startup f
   assert.match(chat, /OLDER_PAGE_SIZE = 500/)
   assert.match(chat, /ACTIVE_RECONCILE_MS = 5_000/)
   assert.match(chat, /startTaskDeskSessionLiveRefresh/)
-  assert.match(chat, /currentRunHasAssistantSignal/)
+  assert.match(chat, /currentTurnHasAssistantSignal/)
   assert.match(chat, /preparingReply/)
   assert.match(chat, /api\.loadQuestions/)
   assert.match(chat, /api\.loadPermissions/)
-  assert.match(chat, /onStop=\{working \? stop : undefined\}/)
+  assert.match(chat, /onStop=\{working && interactionEnabled \? stop : undefined\}/)
   assert.match(shared, /ThinkingIndicator/)
   assert.match(shared, /sending \|\| \(waiting && showWaitingIndicator\)/)
   assert.match(parts, /if \(forceRunning\) return "running"/)

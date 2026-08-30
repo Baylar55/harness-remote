@@ -27,7 +27,8 @@ globalThis.window ??= globalThis
 const {
   sendNativeSessionPrompt,
   loadPendingNativeSessionPrompt,
-  clearPendingNativeSessionPrompt
+  clearPendingNativeSessionPrompt,
+  markPendingNativeSessionPromptAccepted
 } = await import('./native-session-prompt.ts')
 const { lastNativeMessageModel } = await import('./native-session-model.ts')
 
@@ -130,7 +131,36 @@ const last = sent[sent.length - 1]
 assert.deepEqual(last.body.model, { providerID: 'anthropic', modelID: 'claude-opus-4-8' })
 assert.equal(last.body.variant, 'high', 'the variant travels beside the model, not inside it')
 
-// --- 6. OpenCode current model is recovered from the newest native envelope ----------------------
+// --- 6. Transcript-proven acceptance clears ambiguous delivery without resending handoff context --
+const handoffTarget = target({
+  key: 'machine:pi:handoff-target',
+  sessionID: 'handoff-target',
+  ref: { machineID: 'machine', agentID: 'pi', sessionID: 'handoff-target', directory: '/repo' },
+  history: [{
+    ref: { machineID: 'machine', agentID: 'omp', sessionID: 'source', directory: '/repo' },
+    title: 'Source',
+    agentID: 'omp',
+    agentLabel: 'OMP',
+    backend: 'omp',
+    messages: [{
+      info: { id: 'source-user', role: 'user', time: { created: 1 } },
+      parts: [{ id: 'source-user:text', type: 'text', text: 'previous context' }]
+    }]
+  }]
+})
+responder = () => { throw new TypeError('network down') }
+await assert.rejects(sendNativeSessionPrompt(handoffTarget, 'take over', MODEL_X), /unknown/)
+const handoffPending = loadPendingNativeSessionPrompt(handoffTarget)
+assert.ok(handoffPending?.wireText?.includes('TRANSFERRED TASK CONTEXT'), 'the ambiguous first handoff carries its bounded transfer envelope')
+markPendingNativeSessionPromptAccepted(handoffTarget)
+assert.equal(loadPendingNativeSessionPrompt(handoffTarget), null, 'authoritative transcript proof must retire the ambiguous request id')
+
+responder = () => new Response(JSON.stringify({ status: 'accepted' }), { status: 200 })
+await sendNativeSessionPrompt(handoffTarget, 'next ordinary turn', MODEL_X)
+const nextWire = sent[sent.length - 1].body.text
+assert.equal(nextWire, 'next ordinary turn', 'transcript-proven handoff acceptance must prevent transferred context from being sent twice')
+
+// --- 7. OpenCode current model is recovered from the newest native envelope ----------------------
 const openCodeModel = lastNativeMessageModel([
   {
     info: {
@@ -157,7 +187,7 @@ assert.deepEqual(
   'a stale old user-model envelope must never beat the newer OpenCode assistant model'
 )
 
-// --- 7. OpenCode assistant envelopes may omit the variant ----------------------------------------
+// --- 8. OpenCode assistant envelopes may omit the variant ----------------------------------------
 const flatAssistantModel = lastNativeMessageModel([
   {
     info: {

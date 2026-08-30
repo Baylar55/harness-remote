@@ -44,7 +44,8 @@ test("opening a native Session updates selection and mobile detail explicitly", 
   assert.match(workspace, /setSelected\(target\)/)
   assert.match(workspace, /setMobileDetailOpen\(true\)/)
   assert.match(workspace, /selectedKey=\{selected\?\.key\}/)
-  assert.match(workspace, /<NativeSessionObserver key=\{selected\.key\} target=\{selected\}/)
+  assert.match(workspace, /<NativeSessionObserver[\s\S]*?key=\{selected\.key\}[\s\S]*?target=\{selected\}/)
+  assert.match(workspace, /onOpenSession=\{openSession\}/)
 })
 
 test("Session list navigation groups real native Sessions by machine and Project", () => {
@@ -52,7 +53,8 @@ test("Session list navigation groups real native Sessions by machine and Project
   assert.match(home, /collapsedMachines/)
   assert.match(home, /collapsedProjects/)
   assert.match(home, /sessionTreeRows\(group\.sessions\)/)
-  assert.match(home, /onClick=\{\(\) => open\(item\)\}/)
+  assert.match(home, /onClick=\{\(\) => \{ if \(!deleting\) open\(item\) \}\}/)
+  assert.match(home, /disabled=\{deleting\}/)
 })
 
 test("new Session is created through the native Session path rather than a Conversation task", () => {

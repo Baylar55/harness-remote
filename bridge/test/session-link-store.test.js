@@ -42,14 +42,35 @@ test("handoff link survives restart and remains only metadata between real nativ
   }
 })
 
-test("Session links cannot cross the machine scope", async () => {
+test("Session links stay machine-local", async () => {
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-session-links-scope-"))
   try {
     const store = new SessionLinkStore({ machineID: "machine-1", stateDirectory })
     await assert.rejects(
       () => store.addHandoff({ source, target: { ...target, machineID: "machine-2" } }),
-      /machine scope/
+      /stay inside their machine scope/
     )
+  } finally {
+    await rm(stateDirectory, { recursive: true, force: true })
+  }
+})
+
+test("handoff link can durably add the exact bounded transferred context", async () => {
+  const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-session-links-context-"))
+  try {
+    const first = new SessionLinkStore({ machineID: "machine-1", stateDirectory })
+    const initial = await first.addHandoff({ source, target, createdAt: "2026-08-24T14:00:00.000Z" })
+    const enriched = await first.addHandoff({
+      source,
+      target,
+      createdAt: "later",
+      transferredContext: "User: continue this work\n\nPI: prior answer"
+    })
+    assert.equal(enriched.createdAt, initial.createdAt)
+    assert.equal(enriched.transferredContext, "User: continue this work\n\nPI: prior answer")
+
+    const restarted = new SessionLinkStore({ machineID: "machine-1", stateDirectory })
+    assert.deepEqual(await restarted.listFor(target), [enriched])
   } finally {
     await rm(stateDirectory, { recursive: true, force: true })
   }

@@ -161,7 +161,7 @@ export class SessionOperationLedger {
     })
   }
 
-  async fail({ agentID, sessionID, clientRequestId, ambiguous = false }) {
+  async fail({ agentID, sessionID, clientRequestId, ambiguous = false, result }) {
     return this.#serial(async () => {
       await this.#load()
       const key = operationKey(agentID, sessionID, clientRequestId)
@@ -169,6 +169,7 @@ export class SessionOperationLedger {
       if (!entry) return
       if (ambiguous) {
         entry.state = "uncertain"
+        if (result !== undefined) entry.result = structuredClone(result)
         entry.updatedAt = new Date().toISOString()
       } else {
         this.#operations.delete(key)

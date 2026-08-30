@@ -2,13 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
 import type { ConversationController } from "../conversation-controller"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
+import { canCreateNativeSession } from "../native-session-create"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
+import {
+  continueNativeSessionOnRoute,
+  type NativeSessionRouteContinueInput,
+  type NativeSessionRouteMachine
+} from "../native-session-routing"
 import {
   applyDiscoveredNativeSessionModel,
   nativeSessionIsWorking,
   registerNativeSessionV3Adapter
 } from "../native-session-v3-adapter"
-import type { AgentModelScope, MachineTask } from "../taskClient"
+import type { ConversationRuntime } from "../conversation-runtime"
+import type { AgentModelScope } from "../taskClient"
 import type { CommandInfo, MachineAgentHost } from "../types"
 import { LoadingIcon } from "../Icons"
 import { WorkThreadConversation } from "./work-thread-conversation"
@@ -16,15 +23,21 @@ import "../native-session-observer.css"
 
 type Props = {
   target: NativeSessionSurfaceTarget
+  routes?: NativeSessionRouteMachine[]
+  onOpenSession?: (target: NativeSessionSurfaceTarget) => void
   onSessionRefresh?: () => void
   onStateChange?: (state: NativeSessionVisualState) => void
+  /** False while the owning machine is still bootstrapping or is in reconnect grace. Reads remain visible. */
+  interactionEnabled?: boolean
+  /** A Session-scoped request discovered a transport outage before the machine poll did. */
+  onConnectionIssue?: () => void
 }
 export type NativeSessionVisualState = "working" | "attention" | "stopped" | "ready"
 
-function visualState(task: MachineTask, attention = false): NativeSessionVisualState {
-  if (attention || task.status === "failed") return "attention"
-  if (task.status === "cancelled") return "stopped"
-  if (nativeSessionIsWorking(task.status)) return "working"
+function visualState(conversation: ConversationRuntime, attention = false): NativeSessionVisualState {
+  if (attention || conversation.status === "failed") return "attention"
+  if (conversation.status === "cancelled") return "stopped"
+  if (nativeSessionIsWorking(conversation.status)) return "working"
   return "ready"
 }
 
@@ -39,7 +52,7 @@ export { nativeSessionIsWorking }
  */
 const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
 
-function targetForInitialProjection(target: NativeSessionSurfaceTarget): NativeSessionSurfaceTarget {
+function targetForInitialRuntime(target: NativeSessionSurfaceTarget): NativeSessionSurfaceTarget {
   // OpenCode's Session list model is provider/default metadata rather than reliable per-turn truth,
   // and Codex's list can likewise expose the adapter default while the rollout carries the model
   // actually used by the latest turn. Treat those list values as provisional: mount immediately
@@ -58,29 +71,38 @@ function targetForInitialProjection(target: NativeSessionSurfaceTarget): NativeS
  * Writer acquisition is deferred to the first mutation by native-session-v3-adapter, so the user
  * never has to unlock the transcript with an extra Continue step. Nothing is persisted as a Task or Run.
  */
-export function NativeSessionObserver({ target, onSessionRefresh, onStateChange }: Props) {
-  const [task, setTask] = useState<MachineTask | null>(null)
+export function NativeSessionObserver({
+  target,
+  routes = [],
+  onOpenSession,
+  onSessionRefresh,
+  onStateChange,
+  interactionEnabled = true,
+  onConnectionIssue
+}: Props) {
+  const [conversation, setConversation] = useState<ConversationRuntime | null>(null)
   const [controller, setController] = useState<ConversationController | null>(null)
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
   const [commands, setCommands] = useState<CommandInfo[]>([])
-  const taskRef = useRef<MachineTask | null>(null)
+  const conversationRef = useRef<ConversationRuntime | null>(null)
   const attentionRef = useRef(false)
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
 
-  const handleTaskUpdate = useCallback((next: MachineTask) => {
-    taskRef.current = next
-    setTask(next)
+  const handleConversationUpdate = useCallback((next: ConversationRuntime) => {
+    conversationRef.current = next
+    setConversation(next)
     onStateChangeRef.current?.(visualState(next, attentionRef.current))
   }, [])
 
   const handleAttentionChange = useCallback((attention: boolean) => {
     attentionRef.current = attention
-    const current = taskRef.current
+    const current = conversationRef.current
     if (current) onStateChangeRef.current?.(visualState(current, attention))
   }, [])
 
   useEffect(() => {
+    if (!interactionEnabled) return
     let disposed = false
     setAttachmentsSupported(false)
     setCommands([])
@@ -104,7 +126,7 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
         }
       })
     return () => { disposed = true }
-  }, [target.key, target.config.host, target.config.port, target.config.agentId])
+  }, [target.key, target.config.host, target.config.port, target.config.agentId, interactionEnabled])
 
   const agent = useMemo<MachineAgentHost>(() => ({
     id: target.agentID,
@@ -123,38 +145,74 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
     }
   }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported, commands.length])
 
-  useEffect(() => {
-    let disposed = false
-    let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
-    const initialTarget = targetForInitialProjection(target)
+  const routableRoutes = useMemo<NativeSessionRouteMachine[]>(() => routes.flatMap((machine) => {
+    if (machine.machineID !== target.machineID) return []
+    const available = machine.agents.filter((candidate) => canCreateNativeSession(candidate))
+    const current = available.some((candidate) => candidate.id === target.agentID)
+      ? available
+      : [agent, ...available.filter((candidate) => candidate.id !== target.agentID)]
+    return [{ ...machine, agents: current }]
+  }), [routes, target.machineID, target.agentID, agent])
 
-    setTask(null)
+  const handleRoutedContinue = useCallback(async (input: NativeSessionRouteContinueInput) => {
+    if (!interactionEnabled) throw new Error("The machine is reconnecting. Continue will be available when the connection is healthy again.")
+    const machine = routableRoutes.find((candidate) => candidate.machineID === input.machineID)
+    const targetAgent = machine?.agents.find((candidate) => candidate.id === input.agentID)
+    if (!machine || !targetAgent) throw new Error("That harness is no longer available on this machine.")
+    const next = await continueNativeSessionOnRoute({
+      source: target,
+      targetMachine: machine,
+      targetAgent,
+      prompt: input.prompt,
+      attachments: input.attachments,
+      model: input.model
+    })
+    onSessionRefresh?.()
+    onOpenSession?.(next)
+  }, [routableRoutes, target, onSessionRefresh, onOpenSession, interactionEnabled])
+
+  useEffect(() => {
+    let registration: ReturnType<typeof registerNativeSessionV3Adapter> | undefined
+    const initialTarget = targetForInitialRuntime(target)
+
+    setConversation(null)
     setController(null)
-    taskRef.current = null
+    conversationRef.current = null
     attentionRef.current = false
 
     // Mount the mature controller on the Session itself, before any model enrichment. Gating the
     // whole transcript on a network read left this surface stuck on "Loading Session into the v3
     // controller..." whenever that read was slow, which is exactly what a busy daemon produces.
-    registration = registerNativeSessionV3Adapter(initialTarget, handleTaskUpdate)
+    registration = registerNativeSessionV3Adapter(initialTarget, handleConversationUpdate)
     setController(registration.controller)
-    handleTaskUpdate(registration.task)
-
-    // Recovering the last requested native model is enrichment. It refines the already usable
-    // Session and must never be able to fail it. OpenCode/Codex deliberately started with no model
-    // above so a list-level default cannot block this authoritative per-turn result.
-    void resolveNativeSessionTargetModel(target).then((resolved) => {
-      if (disposed || resolved.model === initialTarget.model) return
-      applyDiscoveredNativeSessionModel(initialTarget, resolved.model)
-    })
+    handleConversationUpdate(registration.conversation)
 
     return () => {
-      disposed = true
       registration?.dispose()
     }
-  }, [target.key, handleTaskUpdate])
+  }, [target.key, handleConversationUpdate])
 
-  if (!task || !controller) {
+  useEffect(() => {
+    if (!interactionEnabled) return
+    let disposed = false
+    const initialTarget = targetForInitialRuntime(target)
+    // Recovering the last requested native model is enrichment. It refines the already usable
+    // Session and must never be able to fail it. When a mobile machine is reconnecting this read is
+    // deliberately paused; toggling interactionEnabled back to true resumes it automatically.
+    void resolveNativeSessionTargetModel(target)
+      .then((resolved) => {
+        if (disposed || resolved.model === initialTarget.model) return
+        applyDiscoveredNativeSessionModel(initialTarget, resolved.model)
+      })
+      .catch((reason) => {
+        if (!disposed && /cannot reach|timed out|network|connection/i.test(reason instanceof Error ? reason.message : String(reason))) {
+          onConnectionIssue?.()
+        }
+      })
+    return () => { disposed = true }
+  }, [target.key, interactionEnabled, onConnectionIssue])
+
+  if (!conversation || !controller) {
     return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session into the v3 controller...</div>
   }
 
@@ -162,16 +220,22 @@ export function NativeSessionObserver({ target, onSessionRefresh, onStateChange 
     <div className="hr-native-session-observer writable">
       <WorkThreadConversation
         key={target.key}
-        task={task}
+        conversation={conversation}
         baseConfig={target.config}
         agents={[agent]}
         modelScope={NATIVE_SESSION_MODEL_SCOPE}
         deferModelFallback
         controller={controller}
-        onTaskUpdate={handleTaskUpdate}
-        onWorkspaceRefresh={onSessionRefresh}
+        onConversationUpdate={handleConversationUpdate}
         onAttentionChange={handleAttentionChange}
         commands={commands}
+        interactionEnabled={interactionEnabled}
+        onConnectionIssue={onConnectionIssue}
+        routing={onOpenSession && routableRoutes.length ? {
+          currentMachineID: target.machineID,
+          machines: routableRoutes,
+          onContinue: handleRoutedContinue
+        } : undefined}
       />
     </div>
   )

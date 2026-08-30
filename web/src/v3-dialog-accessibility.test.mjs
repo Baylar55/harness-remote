@@ -7,7 +7,6 @@ const read = (name) => readFileSync(new URL(name, import.meta.url), "utf8")
 const hook = read("./useDialogDismiss.ts")
 const standalone = read("./components/standalone-universal-workspace.tsx")
 const actions = read("./components/native-session-actions.tsx")
-const handoff = read("./components/native-session-handoff-control.tsx")
 const rename = read("./components/native-session-rename.tsx")
 
 test("every Session-first dialog closes on Escape, traps Tab and restores focus", () => {
@@ -32,7 +31,7 @@ test("the active Session-first shell dialogs use the shared dismissal behaviour"
   assert.match(standalone, /useDialogDismiss\(dialogRef, onClose\)/)
   assert.match(standalone, /useDialogDismiss\(pageRef, onClose, \{ autoFocus: false \}\)/)
   assert.match(actions, /useDialogDismiss\(deleteRef, close/)
-  assert.match(handoff, /return null/)
+  assert.equal(existsSync(new URL("./components/native-session-handoff-control.tsx", import.meta.url)), false)
 })
 
 test("no blocking native dialog is used for destructive Session-first actions", () => {
