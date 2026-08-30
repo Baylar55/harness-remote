@@ -218,7 +218,7 @@ function startFakeDaemon() {
           transport: "acp",
           managed: true,
           state: "available",
-          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true, sessionDelete: true },
           contract: { sessions: { stop: "owned-session-native-cancel" } }
         }]
       })
