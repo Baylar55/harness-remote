@@ -776,7 +776,12 @@ export class AcpService {
 
   async messagePage(sessionID, { limit = 100, before, refresh = false } = {}) {
     const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
-    if (this.#journalPageAvailable(sessionID) && !refresh && !this.#isBusy(sessionID)) {
+    if (
+      this.#journalPageAvailable(sessionID)
+      && !refresh
+      && !this.#isBusy(sessionID)
+      && !this.#transientFailureMessageIDs.get(sessionID)?.size
+    ) {
       try {
         let pageOptions = { limit: boundedLimit, before }
         if (this.#historyLoader.pageRequiresActiveLeaf) {
