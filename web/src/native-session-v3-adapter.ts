@@ -451,6 +451,35 @@ function reconcilePendingPromptFromTranscript(entry: NativeConversationEntry, pa
   notify(entry)
 }
 
+async function reconcilePromptAfterTransportFailure(entry: NativeConversationEntry): Promise<ConversationRuntime | null> {
+  const pending = loadPendingNativeSessionPrompt(entry.target)
+  if (!pending) return null
+  const expectedTurnID = `${conversationID(entry.target)}:request:${pending.clientRequestId}`
+
+  try {
+    let page = await api.loadMessagePage(
+      entry.target.config,
+      entry.target.sessionID,
+      entry.target.directory,
+      undefined,
+      200,
+      true
+    )
+    page = stabilizePiTailPage(entry, page)
+    reconcilePendingPromptFromTranscript(entry, page)
+    captureUserTurns(entry, page)
+    reconcileOpenCodeTranscriptStatus(entry, page)
+    reconcileNativeSessionModel(entry, page)
+  } catch {
+    return null
+  }
+
+  // Only the exact durable request id proves that the ambiguous POST reached this Session. If the
+  // transcript does not establish that identity, preserve the transport error and let the caller
+  // restore the draft for an explicit same-id retry.
+  return entry.turns.has(expectedTurnID) ? conversationSnapshot(entry) : null
+}
+
 function appendAcceptedTurn(entry: NativeConversationEntry, prompt: string, model: ModelSelection | null, clientRequestId: string): ConversationRuntime {
   const id = `${conversationID(entry.target)}:request:${clientRequestId}`
   if (!entry.turns.has(id)) {
@@ -552,9 +581,18 @@ function nativeConversationController(entry: NativeConversationEntry): Conversat
       }
       await ensureWriter(entry)
       const model = body.model ?? entry.currentModel
-      const result = body.command
-        ? await sendNativeSessionCommand(entry.target, body.command.name, body.command.arguments, model)
-        : await sendNativeSessionPrompt(entry.target, prompt, model, body.attachments ?? [])
+      let result
+      try {
+        result = body.command
+          ? await sendNativeSessionCommand(entry.target, body.command.name, body.command.arguments, model)
+          : await sendNativeSessionPrompt(entry.target, prompt, model, body.attachments ?? [])
+      } catch (reason) {
+        if (!body.command) {
+          const recovered = await reconcilePromptAfterTransportFailure(entry)
+          if (recovered) return recovered
+        }
+        throw reason
+      }
       if (result.status !== "accepted") {
         throw new Error(`${body.command ? "Command" : "Prompt"} delivery is ${result.status}. Retry the same request to reconcile the existing request id.`)
       }
