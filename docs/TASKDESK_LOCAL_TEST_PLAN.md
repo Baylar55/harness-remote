@@ -1,8 +1,14 @@
 # TaskDesk local test plan
 
-> Target branch: `v3/taskdesk`
+> **Historical test plan — not the current Harness Remote 3 development workflow.**
 >
-> Purpose: validate TaskDesk/Harness 3 locally against real harness CLIs before Android/network variables are introduced.
+> This document is preserved for reproducing the old TaskDesk integration surface and regressions.
+> Harness Remote 3.0.0 is Session-first and ships from `main`; new development and validation
+> should use current `main` plus the active v3 regression/browser/real-harness test suites.
+>
+> Historical target branch: `v3/taskdesk`
+>
+> Original purpose: validate TaskDesk/Harness 3 locally against real harness CLIs before Android/network variables were introduced.
 
 ## Important: New Task is still hidden in the normal app
 
