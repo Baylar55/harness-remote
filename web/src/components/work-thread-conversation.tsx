@@ -334,6 +334,11 @@ export function WorkThreadConversation({
   const [draft, setDraft] = useState(() => localStorage.getItem(draftStorageKey) || "")
   const [attachments, setAttachments] = useState<AttachmentPart[]>([])
   const [sending, setSending] = useState(false)
+  // Explicit presentation phase for the reply that has been requested but has not produced any
+  // meaningful assistant activity yet. Do not derive this only from transport/runtime state:
+  // OpenCode can acknowledge quickly and publish an empty assistant envelope before React commits
+  // the transient `sending` frame. The user must still see the same pending row as every harness.
+  const [replyPending, setReplyPending] = useState(false)
   // The prompt that has been sent but is not yet in the transcript, with the turn that was current
   // when it was sent. See `visibleTimeline`.
   const [pendingPrompt, setPendingPrompt] = useState<OptimisticPrompt | null>(null)
@@ -439,6 +444,7 @@ export function WorkThreadConversation({
     setAttachments([])
     setPendingPrompt(null)
     setAwaitingReplyTurnID(null)
+    setReplyPending(false)
     setTargetMachineID(routing?.currentMachineID || "")
     setTargetAgentID(currentAgentID)
     setTargetModelKey(currentConversationModelKey)
@@ -598,6 +604,17 @@ export function WorkThreadConversation({
   )
 
   useEffect(() => {
+    if (!replyPending) return
+    if (
+      (awaitingReplyTurnID && currentTurnHasAssistantSignal)
+      || conversation.status === "failed"
+      || conversation.status === "cancelled"
+    ) {
+      setReplyPending(false)
+    }
+  }, [replyPending, awaitingReplyTurnID, currentTurnHasAssistantSignal, conversation.status])
+
+  useEffect(() => {
     if (!awaitingReplyTurnID) return
     if (
       currentTurnHasAssistantSignal
@@ -615,6 +632,7 @@ export function WorkThreadConversation({
     const expected = awaitingReplyTurnID
     const timer = window.setTimeout(() => {
       setAwaitingReplyTurnID((current) => current === expected ? null : current)
+      setReplyPending(false)
     }, REPLY_SETTLE_IDLE_GRACE_MS)
     return () => window.clearTimeout(timer)
   }, [awaitingReplyTurnID, conversation.status, currentTurnHasAssistantSignal, working])
@@ -863,6 +881,7 @@ export function WorkThreadConversation({
     ) return
     sendInFlightRef.current = true
     setSending(true)
+    setReplyPending(true)
     setError(null)
     setDraft("")
     const optimisticPrompt: OptimisticPrompt = {
@@ -893,6 +912,7 @@ export function WorkThreadConversation({
         localStorage.removeItem(draftStorageKey)
         setAttachments([])
         setPendingPrompt(null)
+        setReplyPending(false)
         modelSelectionTouchedRef.current = false
       } else {
         const next = await controller.continueConversation(baseConfig, conversation.id, {
@@ -923,6 +943,7 @@ export function WorkThreadConversation({
       // never accepted. If transport made acceptance ambiguous, the transcript reconciliation above
       // clears this restored draft only after the exact native turn becomes authoritative.
       setPendingPrompt(null)
+      setReplyPending(false)
       setDraft((current) => text ? (current ? `${text}\n${current}` : text) : current)
       setAttachments(promptAttachments)
       setError(reason instanceof Error ? reason.message : String(reason))
@@ -936,6 +957,7 @@ export function WorkThreadConversation({
     if (stopping || !working || stopInFlightRef.current || !interactionEnabled) return
     stopInFlightRef.current = true
     setStopping(true)
+    setReplyPending(false)
     setError(null)
     try {
       const next = await controller.stopConversation(baseConfig, conversation.id)
@@ -956,11 +978,11 @@ export function WorkThreadConversation({
   const attachmentsSupported = !routeChanged && attachmentAgent?.capabilities?.attachments === true
   const routeBlockedByAttachments = routeChanged && attachments.length > 0
   const hasAttention = questions.length > 0 || permissions.length > 0
-  const preparingReply = sending || ((working || replySettling) && !currentTurnHasAssistantSignal)
-  const pendingAgentLabel = sending ? agentLabel(destinationAgents, targetAgentID) : currentLabel
+  const preparingReply = replyPending || sending || ((working || replySettling) && !currentTurnHasAssistantSignal)
+  const pendingAgentLabel = (replyPending || sending) ? agentLabel(destinationAgents, targetAgentID) : currentLabel
   // The pending bubble is the reply that is coming, so it wears the identity of the agent that is
   // about to answer rather than the one that answered last.
-  const pendingAgentBackend = (sending ? destinationAgents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
+  const pendingAgentBackend = ((replyPending || sending) ? destinationAgents.find((agent) => agent.id === targetAgentID) : currentAgent)?.backend
   // Preparation is rendered by the exact same generic pending bubble for every harness. OpenCode can
   // publish an empty assistant envelope early, but that transport detail must not replace the shared
   // waiting UX. The real assistant bubble takes over only once it contains reasoning/text/tool activity.
@@ -1009,7 +1031,7 @@ export function WorkThreadConversation({
         <div className={`tdw-agent-control${routing ? " routed" : ""}`}>
           <label>
             <span>{routing ? "Harness" : "Continue with"}</span>
-            <select value={targetAgentID} disabled={!interactionEnabled || working || sending || modelBootstrapBlocked || destinationAgents.length === 0} onChange={(event) => {
+            <select value={targetAgentID} disabled={!interactionEnabled || working || replyPending || sending || modelBootstrapBlocked || destinationAgents.length === 0} onChange={(event) => {
               modelGeneration.current += 1
               modelSelectionTouchedRef.current = false
               setModels([])
@@ -1025,11 +1047,11 @@ export function WorkThreadConversation({
             <ModelPicker compact models={models} value={targetModelKey} onChange={(value) => {
               modelSelectionTouchedRef.current = true
               setTargetModelKey(value)
-            }} disabled={!interactionEnabled || working || sending || modelsLoading || !targetAgentID} loading={modelsLoading} placeholder={modelBootstrapBlocked ? (modelError ? "Model unavailable" : "Loading models…") : deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
+            }} disabled={!interactionEnabled || working || replyPending || sending || modelsLoading || !targetAgentID} loading={modelsLoading} placeholder={modelBootstrapBlocked ? (modelError ? "Model unavailable" : "Loading models…") : deferModelFallback ? "Harness default" : undefined} unavailableHint={modelError || undefined} />
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Sending is paused until a model can be verified.</small> : null}
           </label>
         </div>
-        <ConversationStatePill working={working || sending || replySettling || modelBootstrapBlocked} attention={hasAttention} workingLabel={conversationStateLabel} startedAt={sending ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
+        <ConversationStatePill working={working || replyPending || sending || replySettling || modelBootstrapBlocked} attention={hasAttention} workingLabel={conversationStateLabel} startedAt={sending ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
       </div>
 
       {routeChanged ? (
