@@ -595,15 +595,12 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   await waitForReady(page)
 
   // A transport-level lost response is different from the explicit 202 uncertainty above. The
-  // daemon has already executed and persisted the turn, while the browser sees a network error.
-  // Reconnect must recover that exact turn from the native transcript in the same mounted Session,
-  // without a second Send and without navigation away/back.
+  // daemon has already executed and persisted the turn while the browser loses only the HTTP reply.
+  // The native controller must reconcile that exact durable request against the transcript before
+  // surfacing an error, so the UI never invents a machine disconnect for an already-accepted prompt.
   const droppedHttpBefore = promptHttpBodies.length
   const droppedDispatchBefore = nativePromptDispatches
   let droppedClientResponse = false
-  // discoverMachineWithRetry performs two fresh probes per refresh. Fail exactly that first cycle so
-  // the cached Session remains visible but non-writable long enough to assert the reconnect gate.
-  machineProbeFailuresRemaining = 2
   const droppedRoute = "**/v1/agents/pi/session/*/prompt"
   await page.route(droppedRoute, async (route) => {
     const request = route.request()
@@ -624,21 +621,19 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   await waitFor(() => promptHttpBodies.length >= droppedHttpBefore + 1, "PI dropped-response HTTP attempt")
   assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "lost HTTP response must start with exactly one prompt request")
   assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "lost HTTP response must still correspond to one native dispatch")
-  await page.getByText(/Cannot reach/).waitFor({ state: "visible", timeout: 10_000 })
-  await page.getByText(/Reconnecting to machine/).waitFor({ state: "visible", timeout: 10_000 })
-  assert.equal(await page.getByRole("button", { name: "Send" }).isDisabled(), true, "Send must stay disabled while the machine probe is failing")
-  assert.equal(await page.locator(".tdw-model-trigger").isDisabled(), true, "model selection must stay disabled while the machine reconnects")
   await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 15_000 })
   await waitForReady(page)
-  assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "automatic reconnect must never resend a prompt whose transcript proves delivery")
-  assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "automatic reconnect must not duplicate native work")
+  assert.equal(await page.getByText(/Cannot reach/).count(), 0, "transcript-proven delivery must not surface a false transport error")
+  assert.equal(await page.getByText(/Reconnecting to machine/).count(), 0, "transcript-proven delivery must not force a false machine reconnect")
+  assert.equal(promptHttpBodies.length, droppedHttpBefore + 1, "transcript reconciliation must never resend a prompt whose delivery is already proven")
+  assert.equal(nativePromptDispatches, droppedDispatchBefore + 1, "transcript reconciliation must not duplicate native work")
   assert.equal(
     await page.locator(".uw-message-user").getByText(DROPPED_RESPONSE_PROMPT, { exact: true }).count(),
     1,
     "transcript recovery duplicated the dropped-response prompt bubble"
   )
   assert.equal(await page.getByText(DROPPED_RESPONSE_REPLY, { exact: true }).count(), 1, "transcript recovery duplicated the dropped-response reply")
-  assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), "", "transcript-proven acceptance must clear the restored uncertain draft")
+  assert.equal(await page.getByRole("textbox", { name: "Message PI" }).inputValue(), "", "transcript-proven acceptance must leave the composer empty")
   assert.equal(droppedClientResponse, true, "the regression fixture must actually discard the accepted HTTP response")
   await page.unroute(droppedRoute)
 
