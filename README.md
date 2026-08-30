@@ -6,7 +6,7 @@
 
 **A local-first control plane for native AI coding-agent sessions.**
 
-Run, observe, resume and hand off work across **Codex CLI, Claude Code, OpenCode, Oh My Pi and PI** from desktop, web or Android — while your code, credentials and provider subscriptions stay on your own machines.
+Run, observe, resume and hand off work across **Codex CLI, Claude Code, OpenCode, Oh My Pi and PI** from desktop, web or Android — while your code, credentials, subscriptions and native Sessions stay on your own machines.
 
 [![GitHub stars](https://img.shields.io/github/stars/giuliastro/harness-remote?style=flat&logo=github)](https://github.com/giuliastro/harness-remote/stargazers)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-555)](LICENSE)
@@ -16,13 +16,12 @@ Run, observe, resume and hand off work across **Codex CLI, Claude Code, OpenCode
 
 ![Harness Remote 3 workspace](docs/images/rhv3.png)
 
-<p align="center">
-  <img src="docs/images/rhv3_mobile.png" alt="Harness Remote 3 on mobile" width="360">
-</p>
 
-Start a session in your terminal. Open it from your phone. Continue it from another device. When a different coding agent is better for the next step, hand the work over without pretending that two vendors share the same hidden memory.
+**Start in your CLI → pick it up from another device → hand it to a different coding agent → return to the native Session that did the work.**
 
-> **Harness Remote is not another coding agent.** It is the layer that connects the coding agents you already use while keeping their native Sessions as the source of truth.
+Harness Remote lets you remotely run, observe and resume the coding agents already installed on your machines. When another agent is better for the next step, continue the work there with an explicit handoff instead of copy/pasting context into an unrelated chat.
+
+> **Harness Remote is not another coding agent.** It is the continuity and remote-control layer for the coding agents you already use, while their native Sessions remain the source of truth.
 
 ## Why Harness Remote 3
 
