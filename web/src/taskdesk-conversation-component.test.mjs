@@ -53,9 +53,13 @@ test("conversation mutations reconcile ambiguous outcomes instead of blindly res
 test("an early empty assistant envelope stays behind the shared getting-started indicator", () => {
   assert.match(controller, /assistantMessageHasSignal/)
   assert.match(controller, /if \(message\.info\.error\) return true/)
+  assert.match(controller, /const \[replyPending, setReplyPending\] = useState\(false\)/)
+  assert.match(controller, /setSending\(true\)[\s\S]*setReplyPending\(true\)/)
+  assert.match(controller, /\(awaitingReplyTurnID && currentTurnHasAssistantSignal\)[\s\S]*setReplyPending\(false\)/)
   assert.match(controller, /const replyTurnID = awaitingReplyTurnID \|\| conversation\.currentTurn\?\.id \|\| null/)
   assert.match(controller, /const presentedTimeline = useMemo/)
   assert.match(controller, /message\.info\.role === "assistant"[\s\S]*!assistantMessageHasSignal\(message\)/)
+  assert.match(controller, /const preparingReply = replyPending \|\| sending/)
   assert.match(controller, /sending=\{preparingReply\}/)
   assert.doesNotMatch(controller.match(/useEffect\(\(\) => \{[\s\S]*?if \(!awaitingReplyTurnID\) return[\s\S]*?\}, \[awaitingReplyTurnID[\s\S]*?\]\)/)?.[0] || "", /conversation\.currentTurn\?\.id !== awaitingReplyTurnID/)
   assert.match(controller, /liveTurnID = \(working \|\| replySettling\)[\s\S]*currentTurnHasAssistantSignal/)
