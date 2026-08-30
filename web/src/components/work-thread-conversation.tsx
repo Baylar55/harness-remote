@@ -578,17 +578,20 @@ export function WorkThreadConversation({
     setAttachments((current) => current === recovered.attachments ? [] : current)
   }, [uncertainDelivery, uncertainDeliverySettled, conversation.currentTurn?.id, draftStorageKey, persistDraft])
 
+  // Once Send has been accepted, the awaited turn id is the only safe identity for reply state.
+  // React can render one more frame with the previous conversation.currentTurn while the native
+  // controller has already returned the new turn. Looking at that previous turn is especially bad for
+  // OpenCode because it normally has a completed assistant reply, which falsely ends the pending UI.
+  const replyTurnID = awaitingReplyTurnID || conversation.currentTurn?.id || null
   const currentTurnHasAssistantSignal = useMemo(() => {
-    const turnID = conversation.currentTurn?.id
-    if (!turnID) return false
+    if (!replyTurnID) return false
     return timeline.some((message) =>
-      message.taskdesk?.runId === turnID && assistantMessageHasSignal(message)
+      message.taskdesk?.runId === replyTurnID && assistantMessageHasSignal(message)
     )
-  }, [timeline, conversation.currentTurn?.id])
+  }, [timeline, replyTurnID])
 
   const replySettling = Boolean(
     awaitingReplyTurnID
-    && conversation.currentTurn?.id === awaitingReplyTurnID
     && !currentTurnHasAssistantSignal
     && conversation.status !== "failed"
     && conversation.status !== "cancelled"
@@ -597,24 +600,24 @@ export function WorkThreadConversation({
   useEffect(() => {
     if (!awaitingReplyTurnID) return
     if (
-      conversation.currentTurn?.id !== awaitingReplyTurnID
-      || currentTurnHasAssistantSignal
+      currentTurnHasAssistantSignal
       || conversation.status === "failed"
       || conversation.status === "cancelled"
     ) {
       setAwaitingReplyTurnID(null)
       return
     }
-    // A genuinely long-running turn keeps the normal active reconciliation indefinitely. The bounded
-    // grace starts only after the harness reports idle, covering the common Codex race where its
-    // rollout becomes readable just after the lifecycle edge.
+    // Do not clear merely because conversation.currentTurn is temporarily the previous render. The
+    // accepted turn id is durable local state and bridges that parent-update gap. A genuinely
+    // long-running turn keeps reconciliation indefinitely; once idle, the bounded grace still
+    // prevents a stale waiter from surviving forever.
     if (working) return
     const expected = awaitingReplyTurnID
     const timer = window.setTimeout(() => {
       setAwaitingReplyTurnID((current) => current === expected ? null : current)
     }, REPLY_SETTLE_IDLE_GRACE_MS)
     return () => window.clearTimeout(timer)
-  }, [awaitingReplyTurnID, conversation.currentTurn?.id, conversation.status, currentTurnHasAssistantSignal, working])
+  }, [awaitingReplyTurnID, conversation.status, currentTurnHasAssistantSignal, working])
 
   const hasMore = Object.values(feeds).some((feed) => feed.hasMore && feed.before)
 
@@ -962,17 +965,17 @@ export function WorkThreadConversation({
   // publish an empty assistant envelope early, but that transport detail must not replace the shared
   // waiting UX. The real assistant bubble takes over only once it contains reasoning/text/tool activity.
   const liveTurnID = (working || replySettling) && !hasAttention && currentTurnHasAssistantSignal
-    ? conversation.currentTurn?.id
+    ? replyTurnID || undefined
     : undefined
   const presentedTimeline = useMemo(() => {
-    const turnID = conversation.currentTurn?.id
+    const turnID = replyTurnID
     if (!preparingReply || !turnID) return visibleTimeline
     return visibleTimeline.filter((message) =>
       !(message.info.role === "assistant"
         && message.taskdesk?.runId === turnID
         && !assistantMessageHasSignal(message))
     )
-  }, [visibleTimeline, preparingReply, conversation.currentTurn?.id])
+  }, [visibleTimeline, preparingReply, replyTurnID])
 
   const waitingLabel = hasAttention
     ? "Waiting for your input"
