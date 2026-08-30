@@ -75,7 +75,8 @@ test("machine reconnect pauses mutations and resumes reconciliation in place", (
 test("transcript-proven ambiguous delivery settles the restored draft without a duplicate Send", () => {
   assert.match(controller, /uncertainDelivery/)
   assert.match(controller, /const uncertainDeliverySettled = Boolean/)
-  assert.match(controller, /message\.taskdesk\?\.runId === conversation\.currentTurn\?\.id/)
+  assert.match(controller, /conversation\.currentTurn\.id !== uncertainDelivery\.priorTurnID/)
+  assert.match(controller, /conversation\.currentTurn\.prompt\?\.trim\(\) === uncertainDelivery\.text/)
   assert.match(controller, /const visibleDraft = uncertainDeliverySettled/)
   assert.match(controller, /draft=\{visibleDraft\}/)
   assert.match(controller, /current\.trim\(\) !== recovered\.text/)
