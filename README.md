@@ -280,13 +280,13 @@ That makes it possible to add new harnesses without forcing existing ones into a
 
 ## Harness Remote 3 status
 
-Harness Remote 3 is currently the **Session-first development line**.
+Harness Remote **3.0.0 is the current stable release** and the Session-first architecture now ships from `main`.
 
-The stable release line on `main` remains Harness Remote 2.x while the v3 runtime contract is validated against real installations of OpenCode, OMP, PI, Codex and Claude Code.
+The official `v3.0.0` release supports OpenCode, OMP, PI, Codex CLI and Claude Code while preserving each harness's native Session identity and behavior. The validated release scope includes native Session discovery and continuation, multi-machine Session creation, same-machine cross-harness handoff with durable lineage, model selection, live Activity, Stop, rename/delete, transcript paging and reconnect recovery.
 
-Current v3 work intentionally prioritizes Session correctness, resume/reconnect behavior, native transcript fidelity and cross-agent continuation over adding broad orchestration features.
+Post-release work intentionally prioritizes Session correctness and maintainability over broad orchestration. Cross-machine handoff is a separate follow-up, and architectural cleanup must start from current `main` rather than reviving pre-release checkpoint/draft branches.
 
-The automatic multi-agent launcher is also still being expanded: the current checkpoint can expose one selected ACP-backed primary alongside managed OpenCode, while additional concurrent ACP host instances remain follow-up work.
+The automatic multi-agent launcher is still being expanded: the current release can expose one selected ACP-backed primary alongside managed OpenCode, while additional concurrent ACP host instances remain follow-up work.
 
 That focus is deliberate. A remote coding-agent UI is only useful if you can trust that the Session you see is the Session that actually exists.
 
