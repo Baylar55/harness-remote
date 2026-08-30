@@ -451,7 +451,7 @@ async function assertExistingContract(browser, viewport, mobile) {
   const dispatchBefore = nativePromptDispatches
   await sendPrompt(page, SUCCESS_PROMPT)
   const preparingBubble = page.locator(".uw-message-pending")
-  const preparing = preparingBubble.getByRole("status", { name: /OpenCode is getting started/ })
+  const preparing = preparingBubble.locator(".uw-message-working").filter({ hasText: "OpenCode is getting started" })
   // The common pending bubble must exist from the Send click itself, not only after a daemon event.
   await preparing.waitFor({ state: "visible", timeout: 2_000 })
   assert.equal(await preparing.locator(".bui-typing").count(), 1, "OpenCode must use the exact same animated typing dots as the other harnesses")
@@ -463,8 +463,9 @@ async function assertExistingContract(browser, viewport, mobile) {
   await preparing.waitFor({ state: "visible", timeout: 2_000 })
   assert.equal(await preparing.locator(".bui-typing").count(), 1, "OpenCode pending dots must survive the empty native assistant envelope")
   assert.equal(await preparingBubble.locator("time").count(), 0, "the shared preparation bubble must not look like a completed response")
-  assert.equal(await page.locator(".uw-message-agent:not(.uw-message-pending)").getByRole("status", { name: /OpenCode is getting started/ }).count(), 0, "an empty native OpenCode envelope must not replace the shared preparation bubble")
-  assert.equal(await page.getByRole("status", { name: /OpenCode is getting started/ }).count(), 1, "OpenCode must expose exactly one preparation identity row")
+  assert.equal(await page.locator(".uw-message-agent:not(.uw-message-pending) .uw-message-working").filter({ hasText: "OpenCode is getting started" }).count(), 0, "an empty native OpenCode envelope must not replace the shared preparation bubble")
+  assert.equal(await page.locator(".uw-message-working").filter({ hasText: "OpenCode is getting started" }).count(), 1, "OpenCode must expose exactly one preparation identity row")
+  assert.equal(await preparingBubble.getByRole("status").count(), 1, "the shared OpenCode preparation row must retain status semantics")
   assert.equal(nativePromptDispatches, dispatchBefore + 1, "one OpenCode Send must dispatch one native prompt")
   assert.equal(claimRequests, 0, "OpenCode Send must never cross the ACP claim endpoint")
   assert.equal(promptHttpBodies[httpBefore].sessionID, SESSION_ID, "OpenCode Send must target the existing native Session id")
