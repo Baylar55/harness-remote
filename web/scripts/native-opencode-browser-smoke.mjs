@@ -309,7 +309,7 @@ function startFakeDaemon() {
         setTimeout(() => {
           finishPendingTurn(sessionID, body.text, requestId)
           emitLiveEvent(sessionID)
-        }, 900)
+        }, 3_000)
         return
       }
       json(response, 200, { status: "accepted", clientRequestId: requestId })
@@ -450,12 +450,18 @@ async function assertExistingContract(browser, viewport, mobile) {
   const httpBefore = promptHttpBodies.length
   const dispatchBefore = nativePromptDispatches
   await sendPrompt(page, SUCCESS_PROMPT)
-  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")))
-  await waitFor(() => promptHttpBodies.length === httpBefore + 1, "OpenCode success HTTP attempt")
   const preparingBubble = page.locator(".uw-message-pending")
   const preparing = preparingBubble.getByRole("status", { name: /OpenCode is getting started/ })
-  await preparing.waitFor({ state: "visible", timeout: 10_000 })
+  // The common pending bubble must exist from the Send click itself, not only after a daemon event.
+  await preparing.waitFor({ state: "visible", timeout: 2_000 })
   assert.equal(await preparing.locator(".bui-typing").count(), 1, "OpenCode must use the exact same animated typing dots as the other harnesses")
+
+  await page.evaluate(() => window.dispatchEvent(new Event("pageshow")))
+  await waitFor(() => promptHttpBodies.length === httpBefore + 1, "OpenCode success HTTP attempt")
+  // The daemon has now published the real assistant envelope with no content. That transport
+  // envelope must stay behind the very same pending bubble until actual assistant activity arrives.
+  await preparing.waitFor({ state: "visible", timeout: 2_000 })
+  assert.equal(await preparing.locator(".bui-typing").count(), 1, "OpenCode pending dots must survive the empty native assistant envelope")
   assert.equal(await preparingBubble.locator("time").count(), 0, "the shared preparation bubble must not look like a completed response")
   assert.equal(await page.locator(".uw-message-agent:not(.uw-message-pending)").getByRole("status", { name: /OpenCode is getting started/ }).count(), 0, "an empty native OpenCode envelope must not replace the shared preparation bubble")
   assert.equal(await page.getByRole("status", { name: /OpenCode is getting started/ }).count(), 1, "OpenCode must expose exactly one preparation identity row")
