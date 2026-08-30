@@ -3,6 +3,14 @@
 This document describes the durable product model and engineering boundaries for Harness Remote as
 they ship on `main`.
 
+> **Status (2026-08-30):** Harness Remote 3.0.0 is released and `main` is the canonical 3.x
+> development baseline. The `v3.0.0` tag is the immutable release point. The former
+> `checkpoint/v3-session-first-working-2026-08-25` branch is retained as release-development
+> history/reference, not as the branch for new feature work.
+>
+> Post-release work is tracked as focused follow-ups: architecture simplification (#330),
+> repository branch hygiene (#290), and cross-machine native Session handoff (#347).
+
 ## 1. Product thesis
 
 Harness Remote 3.0 is a **vendor-neutral, local-first control plane for native coding-agent Sessions**.

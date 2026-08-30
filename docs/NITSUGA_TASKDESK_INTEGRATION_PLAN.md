@@ -1,12 +1,17 @@
 # Nitsuga → TaskDesk Integration Plan
 
-> **Status:** active integration plan
+> **Historical document — do not use as a current development plan.**
 >
-> **Working branch:** `integration/nitsuga-taskdesk`
+> This plan records the pre-Session-first TaskDesk integration work that led into Harness Remote 3.
+> Harness Remote 3.0.0 has since shipped from `main`; TaskDesk is historical/internal naming and
+> new work must start from current `main`, following the Session-first architecture in
+> `docs/HARNESS_3_ROADMAP.md`.
 >
-> **Baseline:** `archive/harness-3-2026-08-15`
+> Original working branch: `integration/nitsuga-taskdesk`
 >
-> **Tracking issue:** #197
+> Original baseline: `archive/harness-3-2026-08-15`
+>
+> Historical tracking issue: #197 (completed)
 
 ## Goal
 

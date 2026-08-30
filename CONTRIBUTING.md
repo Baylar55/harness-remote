@@ -203,49 +203,39 @@ your change is silently dropped and the app runs the previous version of the nat
 
 ## Cutting a release
 
-Bump `version` in `web/package.json`, commit it as `chore: release vX.Y.Z`, then tag that commit and
-push both. Everything else — the version code, the Android metadata, the signed APK, the GitHub
-release — is derived from that one field by CI.
+The release version is still sourced from `web/package.json`, but tags are now created by CI rather
+than by hand.
 
-```bash
-git tag -a v3.0.0 --cleanup=verbatim -F release-notes.txt
-git push origin main && git push origin v3.0.0
-```
+1. Bump `version` in `web/package.json`.
+2. Merge the fully validated release candidate to `main`.
+3. Make the final merge commit title exactly `Release Harness Remote X.Y.Z` (or begin with that
+   phrase) and give it a non-empty body containing the curated release summary.
+4. `.github/workflows/cut-release-tag.yml` reads the package version, creates the annotated
+   `vX.Y.Z` tag if it does not already exist, and explicitly dispatches the Android and Desktop
+   builders on that tag.
+5. The Android tagged build publishes the GitHub Release and signed APK. The Desktop tagged build
+   waits for that release and attaches Windows, macOS and Linux artifacts.
 
-**`--cleanup=verbatim` is not optional.** Git's default cleanup strips every line that starts with
-`#` as a comment, which silently deletes both `##` headings out of the message below — the tag looks
-fine, and the release renders two bullet lists with nothing naming them. Check before pushing:
+Why the explicit dispatch? GitHub intentionally does not trigger other workflows from a tag pushed
+with the repository `GITHUB_TOKEN`. Do not remove the dispatch step and assume the tag push will
+fan out by itself.
 
-```bash
-git tag -l --format='%(contents:body)' v3.0.0
-```
+**The release commit body becomes the annotated tag body and therefore the curated release notes.**
+Keep it useful to people installing the release: describe user-visible changes first, mention
+important compatibility/reliability work, and credit external contributors by name/handle when
+their work is included.
 
-**The tag annotation is the release notes.** CI publishes its body verbatim between its own
-`## Release` heading and the build notes, so write those two sections as bullets and nothing else:
+Before calling a release complete, verify all of these independently:
 
-```
-Harness Remote v2.4.0
+- `main` points at the intended release tree;
+- the `vX.Y.Z` annotated tag points at the release commit;
+- the tag annotation is non-empty;
+- the Android tagged workflow publishes the GitHub Release and signed APK;
+- the Desktop tagged workflow attaches Windows/macOS/Linux artifacts;
+- hosted GitHub Pages deployment is green.
 
-## What's Changed
-
-* One line per user-visible change, most interesting first
-* No "by @someone", no pull request numbers
-
-## Contributors
-
-* **Special thanks to [@handle](https://github.com/handle)** (Real Name) — what they built, and why it stands out
-* [@handle](https://github.com/handle) (Real Name) — what they contributed
-```
-
-The first line is the subject and is dropped from the body, so it can repeat the version.
-
-**Credit contributors, not the merge.** GitHub's generated notes are switched off deliberately. They
-list one bullet per pull request ending in `by @<whoever pressed merge>`, which on this repo means
-the maintainer collects credit for work other people did — v2.3.0 read as though the maintainer had
-written the desktop layout. Keep the bullets; they are the right format. Just describe the change and
-stop there. Then name the people whose work is in the release, say what each contributed, and give
-the largest contribution a `Special thanks`. Anyone who wants it attributed commit by commit has the
-full changelog link that CI appends.
+Do not manually move or recreate an already-published release tag to fix packaging. Fix the workflow
+or release metadata, then rerun the builders against the existing immutable tag whenever possible.
 
 ## The bridge is a network service
 
