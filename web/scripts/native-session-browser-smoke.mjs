@@ -289,6 +289,15 @@ function startFakeDaemon() {
       return
     }
 
+    const deleteMatch = /^\/v1\/agents\/pi\/session\/([^/]+)$/.exec(url.pathname)
+    if (request.method === "DELETE" && deleteMatch) {
+      const sessionID = decodeURIComponent(deleteMatch[1])
+      sessionCatalog.delete(sessionID)
+      transcripts.delete(sessionID)
+      json(response, 200, true)
+      return
+    }
+
     const claimMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/claim$/.exec(url.pathname)
     if (request.method === "POST" && claimMatch) {
       claimCount += 1
@@ -659,6 +668,40 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   await context.close()
 }
 
+async function assertMobileDeleteTransitionContract(browser) {
+  resetFakeState()
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
+  const page = await context.newPage()
+  await seed(page)
+  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+
+  await openSession(page, "PI v3-first regression session")
+  await page.getByRole("button", { name: "Delete Session" }).click()
+  const dialog = page.getByRole("dialog", { name: "Delete Session" })
+  await dialog.waitFor({ state: "visible", timeout: 10_000 })
+
+  // Hold the first post-delete discovery so the stale rail snapshot remains on screen long enough
+  // to prove it is a disabled transition row rather than a briefly clickable ghost Session.
+  blockNextSessionList = true
+  await dialog.getByRole("button", { name: "Delete Session", exact: true }).click()
+
+  const deadline = Date.now() + 10_000
+  while (typeof releaseBlockedSessionList !== "function" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assert.equal(typeof releaseBlockedSessionList, "function", "delete fixture never reached the post-delete Session refresh")
+
+  const deletingRow = page.getByRole("button", { name: /PI v3-first regression session.*Deleting/i })
+  await deletingRow.waitFor({ state: "visible", timeout: 10_000 })
+  assert.equal(await deletingRow.isDisabled(), true, "a server-deleted Session must not remain clickable while the rail is stale")
+  assert.match(await deletingRow.innerText(), /Deleting/i, "stale deleted Session must explain its transition")
+  assert.equal(await deletingRow.locator("svg").count() > 0, true, "deleting Session row must expose a loading indicator")
+
+  releaseBlockedSessionList?.()
+  await deletingRow.waitFor({ state: "detached", timeout: 10_000 })
+  await context.close()
+}
+
 async function assertCreateSessionContract(browser, viewport, mobile) {
   resetFakeState()
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
@@ -719,11 +762,13 @@ try {
   await assertExistingSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: existing mobile")
   await assertExistingSessionContract(browser, { width: 390, height: 844 }, true)
+  console.log("native PI v3-first browser smoke: mobile delete transition")
+  await assertMobileDeleteTransitionContract(browser)
   console.log("native PI v3-first browser smoke: create desktop")
   await assertCreateSessionContract(browser, { width: 1366, height: 768 }, false)
   console.log("native PI v3-first browser smoke: create mobile")
   await assertCreateSessionContract(browser, { width: 390, height: 844 }, true)
-  console.log("native PI v3-first browser smoke: startup loading transition, open-without-unlock, lazy claim, delayed first-reply settlement, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
+  console.log("native PI v3-first browser smoke: startup loading transition, mobile delete tombstone, open-without-unlock, lazy claim, delayed first-reply settlement, ordered activity, error recovery, uncertain and dropped-response reconciliation, refresh and mobile passed")
 } finally {
   if (browser) await browser.close().catch(() => {})
   for (const response of sseResponses || []) {
