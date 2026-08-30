@@ -33,6 +33,7 @@ export class AcpClient extends EventEmitter {
   #starting
   #agentInfo
   #promptCapabilities = {}
+  #sessionCapabilities = {}
   #stderr = ""
   #stderrPartial = ""
 
@@ -57,15 +58,52 @@ export class AcpClient extends EventEmitter {
     return this.#promptCapabilities
   }
 
+  /**
+   * Which session operations the agent advertised in `initialize`.
+   *
+   * ACP lets an agent offer `session/resume` next to `session/load`, and the two are not
+   * interchangeable: an agent that advertises `resume` opens a stored Session without replaying it.
+   * The bridge only ever sends a method the running adapter said it has, so an older build of the
+   * same harness keeps working on the method it does advertise.
+   */
+  get sessionCapabilities() {
+    return this.#sessionCapabilities
+  }
+
   /** PID identifies extension runtime state published by this exact ACP process. */
   get processID() {
     return Number.isInteger(this.#child?.pid) ? this.#child.pid : undefined
   }
 
-  async start() {
+  diagnostics() {
+    const now = Date.now()
+    const pendingRequests = [...this.#pending.values()].map((pending) => ({
+      method: pending.method,
+      ...(pending.sessionID ? { sessionID: pending.sessionID } : {}),
+      ...(pending.configID ? { configID: pending.configID } : {}),
+      ageMs: Math.max(0, now - pending.startedAt),
+      idleMs: Math.max(0, now - pending.lastActivityAt),
+      timeoutMs: pending.timeoutMs
+    }))
+    const listenerCounts = Object.fromEntries(
+      this.eventNames().map((eventName) => [String(eventName), this.listenerCount(eventName)])
+    )
+    return {
+      state: this.#starting ? "starting" : this.processID ? "running" : "stopped",
+      processID: this.processID,
+      startInFlight: Boolean(this.#starting),
+      pendingRequestCount: pendingRequests.length,
+      oldestPendingMs: pendingRequests.length ? Math.max(...pendingRequests.map((request) => request.ageMs)) : 0,
+      pendingRequests,
+      listenerCount: Object.values(listenerCounts).reduce((total, count) => total + count, 0),
+      listenerCounts
+    }
+  }
+
+  async start(timeoutMs = START_TIMEOUT_MS) {
     if (this.#child) return
     if (this.#starting) return this.#starting
-    this.#starting = this.#start()
+    this.#starting = this.#start(timeoutMs)
     try {
       await this.#starting
     } finally {
@@ -73,7 +111,13 @@ export class AcpClient extends EventEmitter {
     }
   }
 
-  async #start() {
+  async #start(timeoutMs) {
+    const deadline = Date.now() + Math.max(1, timeoutMs)
+    const remaining = (phase) => {
+      const value = deadline - Date.now()
+      if (value <= 0) throw new Error(`ACP adapter startup timed out during ${phase}`)
+      return value
+    }
     const windowsCommand = process.platform === "win32" && this.#spawn === spawn && /\.(cmd|bat)$/i.test(this.#command)
       ? process.env.ComSpec ?? "cmd.exe"
       : this.#command
@@ -117,9 +161,10 @@ export class AcpClient extends EventEmitter {
         protocolVersion: 1,
         clientCapabilities: {},
         clientInfo: { name: "harness-remote-bridge", version: "0.1.7" }
-      }, START_TIMEOUT_MS)
+      }, remaining("initialize"))
       this.#agentInfo = initialized.agentInfo
       this.#promptCapabilities = initialized.agentCapabilities?.promptCapabilities ?? {}
+      this.#sessionCapabilities = initialized.agentCapabilities?.sessionCapabilities ?? {}
       // The bridge always runs beside a harness the user already configured, so prefer a method
       // that uses those credentials. PI's adapter offers `anthropic-api-key` first and
       // `pi-stored-credentials` last: picking the first would claim an API key from an
@@ -133,7 +178,7 @@ export class AcpClient extends EventEmitter {
       authMethod ??= authMethods.find((method) => method?.id === "agent")
         ?? authMethods.find((method) => method?.id && method.type !== "env_var")
         ?? authMethods.find((method) => method?.id)
-      if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, START_TIMEOUT_MS)
+      if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, remaining("authenticate"))
     } catch (error) {
       this.close()
       throw error
@@ -147,14 +192,36 @@ export class AcpClient extends EventEmitter {
     const id = this.#nextID++
     const message = JSON.stringify({ jsonrpc: "2.0", id, method, params })
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const startedAt = Date.now()
+      const pending = {
+        resolve,
+        reject,
+        timer: undefined,
+        method,
+        // Every session-scoped RPC reports which Session it is waiting on, not just prompts. A stuck
+        // `session/load` or `session/set_config_option` was previously indistinguishable from any
+        // other pending request, which is what made a wedged model change impossible to attribute.
+        sessionID: typeof params?.sessionId === "string" ? params.sessionId : undefined,
+        configID: typeof params?.configId === "string" ? params.configId : undefined,
+        startedAt,
+        lastActivityAt: startedAt,
+        timeoutMs,
+        resetTimeout: undefined
+      }
+      const expire = () => {
         this.#pending.delete(id)
         reject(new Error(`ACP adapter request timed out: ${method}`))
-      }, timeoutMs)
-      this.#pending.set(id, { resolve, reject, timer })
+      }
+      pending.resetTimeout = () => {
+        pending.lastActivityAt = Date.now()
+        clearTimeout(pending.timer)
+        pending.timer = setTimeout(expire, timeoutMs)
+      }
+      pending.resetTimeout()
+      this.#pending.set(id, pending)
       this.#child.stdin.write(`${message}\n`, (error) => {
         if (error) {
-          clearTimeout(timer)
+          clearTimeout(pending.timer)
           this.#pending.delete(id)
           reject(error)
         }
@@ -201,6 +268,11 @@ export class AcpClient extends EventEmitter {
       this.emit("protocol-error", new Error("ACP adapter emitted invalid JSON"))
       return
     }
+
+    // A long ACP prompt is alive as long as that same Session keeps producing protocol traffic.
+    // Treat its timeout as an inactivity watchdog, not a wall-clock cap on legitimate long turns.
+    if (typeof message.params?.sessionId === "string") this.#touchSessionActivity(message.params.sessionId)
+
     // A JSON-RPC message carrying both an id and a method is an agent-initiated
     // request. An unanswered request would stall the agent until the prompt
     // timeout, so always reply.
@@ -222,9 +294,16 @@ export class AcpClient extends EventEmitter {
     if (message.method) this.emit("notification", message)
   }
 
+  #touchSessionActivity(sessionID) {
+    for (const pending of this.#pending.values()) {
+      if (pending.method !== "session/prompt" || pending.sessionID !== sessionID) continue
+      pending.resetTimeout?.()
+    }
+  }
+
   /**
    * A tool call stalls without an answer, and answering with an error silently stops the agent
-   * from doing any work — PI reported success while touching no file. Granting matches OMP,
+   * from doing any work. PI reported success while touching no file. Granting matches OMP,
    * whose agent approves its own tool calls and never asks, and there is no way to prompt the
    * user mid-turn on a phone. `allow_once` is preferred over `allow_always` so the grant covers
    * this call rather than writing a lasting permission into the harness's own state.
@@ -252,8 +331,8 @@ export class AcpClient extends EventEmitter {
 
   /**
    * The adapter explains a missing prerequisite on stderr; without this the caller only sees an
-   * exit code. Several lines are kept because a Windows shell error wraps the useful part —
-   * "'bun' is not recognized…" arrives split from the sentence that follows it.
+   * exit code. Several lines are kept because a Windows shell error wraps the useful part:
+   * "'bun' is not recognized..." arrives split from the sentence that follows it.
    */
   #stderrSummary() {
     const lines = this.#stderr.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)

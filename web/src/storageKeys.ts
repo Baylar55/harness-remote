@@ -5,11 +5,20 @@ import {
   LEGACY_STORAGE_KEY,
   SERVER_PROFILES_STORAGE_KEY
 } from "./serverProfiles"
+import { WORKSPACE_MACHINES_STORAGE_KEY } from "./workspaceMachines"
 
-/** Everything that describes a backend connection; language and theme are deliberately excluded. The
-    keys themselves belong to serverProfiles.ts, the only module that reads or writes them: this list
-    exists so the crash-recovery reset can clear a broken connection without importing App.tsx. */
+/**
+ * Everything the crash-recovery reset must be able to clear; language and theme are deliberately
+ * excluded.
+ *
+ * The Session-first shell boots from `workspaceMachines`, not from the 2.x server profiles. Its only
+ * persisted product-layout value is the native Session rail width. Retired Conversation-first layout
+ * keys are intentionally not part of the current recovery contract: that product surface no longer
+ * exists and must not become a dependency again.
+ */
 export const SERVER_STORAGE_KEYS = [
+  WORKSPACE_MACHINES_STORAGE_KEY,
+  "harness-remote.sessionRailWidth.v1",
   LEGACY_STORAGE_KEY,
   ACTIVE_BACKEND_STORAGE_KEY,
   BACKEND_STORAGE_KEYS.opencode,

@@ -26,6 +26,25 @@ export const HARNESS_PROFILES = {
     args: ["acp"],
     permissionMode: "allow",
     historyLoader: createOmpHistoryLoader(),
+    // OMP's journal is the only place a message has a stable identity. Its ACP stream mints a new
+    // `messageId` for every live message and mints new ones again on every `session/load` replay,
+    // so a Session read once from each source is one conversation with two sets of ids. The journal
+    // is therefore the transcript until this bridge takes the writer, and this bridge's own stream
+    // is the transcript from then on - never both at once. See AcpService#journalPageWhileOwned.
+    journalPageWhileOwned: false,
+    // OMP stores a Session's name itself - `/rename` calls `setSessionName(title, "user")`, which
+    // writes the title slot and marks it user-set so OMP's own auto-titling leaves it alone. A name
+    // kept only in this bridge's snapshot was invisible in the Session index, which reads the
+    // harness's lightweight listing, and gone entirely for a Session reopened from OMP.
+    nativeRenameCommand: "rename",
+    preferListedTitles: true,
+    // A transcript that already came from the journal must not be asked for again over ACP, so an
+    // owned OMP Session is opened with `session/resume` rather than the replaying `session/load`.
+    // Reloading on refresh would reintroduce exactly that replay.
+    reloadOnHistoryRefresh: false,
+    // OMP exposes thinking as a real ACP config option. We probe only ids the running adapter
+    // actually advertises; this list is a routing hint, never a source of invented variants.
+    modelVariantConfigIDs: ["thinking"],
     capabilities: {
       ...COMMON_CAPABILITIES,
       models: true,
@@ -40,12 +59,14 @@ export const HARNESS_PROFILES = {
   pi: {
     id: "pi",
     label: "PI",
-    // @automatalabs/pi-acp embeds PI through its published SDK and runs on Node.
-    // @victor-software-house/pi-acp declares engines.bun and shells out to `bun`, which this
-    // project deliberately does not depend on. The version is pinned because an unpinned
-    // default failed with `notarget` when a release outran its own tarball in the registry.
+    // @automatalabs/pi-acp embeds PI through its published SDK and runs on Node. Version 0.5.0
+    // advertises PI's credential- and provider-filter-aware model catalog directly over ACP, so
+    // Harness Remote must not launch a second native `pi` process just to filter membership.
+    // npx cannot reliably infer a scoped package's executable from a package spec. Add the package
+    // explicitly and invoke the binary the package publishes, otherwise npm may try to execute the
+    // literal package spec and exit 127 on a real machine.
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["-y", "@automatalabs/pi-acp@0.2.5"],
+    args: ["--yes", "--package=@automatalabs/pi-acp@0.5.0", "pi-acp"],
     adapterCommand: "pi-acp",
     permissionMode: "allow",
     historyLoader: createPiHistoryLoader(),
@@ -56,6 +77,9 @@ export const HARNESS_PROFILES = {
     preferListedTitles: true,
     // Keep the replay tail for the one real session/load used when the bridge takes ownership to prompt.
     replaySettleMs: 250,
+    // Current PI ACP calls this `thinkingLevel`. The aliases are harmless compatibility hints for
+    // adapter versions that rename the wire id; a variant is emitted only when that option exists.
+    modelVariantConfigIDs: ["thinkingLevel", "thinking_level", "thinking"],
     capabilities: {
       ...COMMON_CAPABILITIES,
       models: true,
@@ -74,13 +98,16 @@ export const HARNESS_PROFILES = {
     // run `claude login` or set ANTHROPIC_API_KEY before starting the bridge.
     // Requires Node 22+ (same as the PI adapter it mirrors).
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
-    // release appeared in the registry index before its tarball could be fetched.
-    args: ["-y", "@agentclientprotocol/claude-agent-acp@0.63.0"],
+    // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
+    // explicitly and invoke its published binary instead of relying on npx package-spec inference.
+    args: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.63.0", "claude-agent-acp"],
     adapterCommand: "claude-agent-acp",
     permissionMode: "allow",
     preserveListedTimestamps: true,
     reloadOnHistoryRefresh: false,
+    // The current adapter exposes model/mode but no low/medium/high reasoning-effort selector.
+    // Keep this empty rather than fabricating OpenCode-style variants.
+    modelVariantConfigIDs: [],
     capabilities: {
       ...COMMON_CAPABILITIES,
       // The adapter advertises a `model` config option like OMP and PI do; its values are bare ids
@@ -101,9 +128,9 @@ export const HARNESS_PROFILES = {
     // user must have run `codex login` (ChatGPT account) or set an OpenAI API key first.
     // Requires Node 22+ (same as the PI and Claude adapters it mirrors).
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    // Pinned to avoid the `notarget` scenario that PI hit: an unpinned default failed when a
-    // release appeared in the registry index before its tarball could be fetched.
-    args: ["-y", "@agentclientprotocol/codex-acp@1.1.14"],
+    // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
+    // explicitly and invoke its published binary instead of relying on npx package-spec inference.
+    args: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"],
     adapterCommand: "codex-acp",
     permissionMode: "allow",
     // The adapter offers `api-key` before `chat-gpt`; the former demands CODEX_API_KEY or
@@ -119,6 +146,8 @@ export const HARNESS_PROFILES = {
     historyLoader: createCodexHistoryLoader(),
     preserveListedTimestamps: true,
     reloadOnHistoryRefresh: false,
+    // The official adapter exposes reasoning effort independently from model selection.
+    modelVariantConfigIDs: ["reasoning_effort", "reasoningEffort"],
     capabilities: {
       ...COMMON_CAPABILITIES,
       // The adapter advertises model ids as bare ids rather than `provider/model`, which is
@@ -147,7 +176,7 @@ export function harnessProfile(id) {
  *
  * An adapter already on PATH is preferred over fetching one: it is what the user installed, it
  * starts without a network round trip, and it sidesteps environments where `npx` cannot link a
- * binary — which is exactly what happens under proot on Android.
+ * binary - which is exactly what happens under proot on Android.
  */
 export function resolveAcpLaunch(profile, { find = findExecutable } = {}) {
   if (!profile.adapterCommand) return { command: profile.command, args: [...profile.args], source: "harness" }

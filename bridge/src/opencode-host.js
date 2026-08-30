@@ -77,6 +77,27 @@ function startTimeout(host, port, timeoutMs) {
   return { promise, cancel: () => clearTimeout(timer) }
 }
 
+function forwardStderrLines(child, emitLine) {
+  if (!child?.stderr?.on) return
+  child.stderr.setEncoding?.("utf8")
+  let buffer = ""
+  child.stderr.on("data", (chunk) => {
+    buffer += String(chunk)
+    let newline = buffer.indexOf("\n")
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline).replace(/\r$/, "")
+      buffer = buffer.slice(newline + 1)
+      if (line) emitLine(line)
+      newline = buffer.indexOf("\n")
+    }
+  })
+  child.stderr.on("end", () => {
+    const line = buffer.replace(/\r$/, "")
+    buffer = ""
+    if (line) emitLine(line)
+  })
+}
+
 export class ManagedOpenCodeHost extends EventEmitter {
   constructor({
     command = "opencode",
@@ -115,6 +136,19 @@ export class ManagedOpenCodeHost extends EventEmitter {
     return Number.isInteger(this.child.pid) ? this.child.pid : undefined
   }
 
+  diagnostics() {
+    const listenerCounts = Object.fromEntries(
+      this.eventNames().map((eventName) => [String(eventName), this.listenerCount(eventName)])
+    )
+    return {
+      state: this.starting ? "starting" : this.processID ? "running" : "stopped",
+      processID: this.processID,
+      startInFlight: Boolean(this.starting),
+      listenerCount: Object.values(listenerCounts).reduce((total, count) => total + count, 0),
+      listenerCounts
+    }
+  }
+
   async start() {
     if (this.child && this.child.exitCode == null && this.child.signalCode == null) return
     if (this.starting) return this.starting
@@ -134,9 +168,9 @@ export class ManagedOpenCodeHost extends EventEmitter {
       this.environment
     )
     const child = this.spawnProcess(invocation.command, invocation.args, {
-      // OpenCode's own "server listening" banner duplicates the daemon's ready summary. Keep its
-      // error stream visible, but let the daemon be the one authoritative startup report.
-      stdio: ["ignore", "ignore", "inherit"],
+      // Keep OpenCode stdout quiet so the daemon owns the startup summary. Pipe stderr instead of
+      // inheriting it so every upstream warning can be identified as OpenCode by the parent CLI.
+      stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
       env: {
         ...this.environment,
@@ -145,6 +179,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
       }
     })
     this.child = child
+    forwardStderrLines(child, (line) => this.emit("stderr", line))
     this.windowsShellChild = this.platform === "win32" && this.spawnProcess === spawn && invocation.command !== this.command
 
     const exited = new Promise((_, reject) => {

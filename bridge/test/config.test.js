@@ -38,23 +38,22 @@ test("configures a non-OMP ACP adapter command and arguments", () => {
 })
 
 test("selects PI defaults for the ACP backend", () => {
+  const expectedArgs = ["--yes", "--package=@automatalabs/pi-acp@0.5.0", "pi-acp"]
   assert.deepEqual(parseConfig(["--backend", "pi"], {}).backend, "pi")
   assert.equal(parseConfig(["--backend", "pi"], {}).acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
-  // The adapter must run on Node: @victor-software-house/pi-acp declares engines.bun and
-  // shells out to `bun`, which this project does not depend on. The version is pinned because
-  // an unpinned default failed with `notarget` when a release outran its own tarball.
-  assert.deepEqual(parseConfig(["--backend", "pi"], {}).acpArgs, ["-y", "@automatalabs/pi-acp@0.2.5"])
-  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "pi" }).acpArgs, ["-y", "@automatalabs/pi-acp@0.2.5"])
+  assert.deepEqual(parseConfig(["--backend", "pi"], {}).acpArgs, expectedArgs)
+  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "pi" }).acpArgs, expectedArgs)
   assert.match(parseConfig(["--backend", "pi"], {}).acpArgs[1], /@\d+\.\d+\.\d+$/, "the adapter version must stay pinned")
 })
 
 test("selects Codex defaults for the ACP backend", () => {
+  const expectedArgs = ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"]
   assert.deepEqual(parseConfig(["--backend", "codex"], {}).backend, "codex")
   assert.equal(parseConfig(["--backend", "codex"], {}).acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
   // The adapter embeds @openai/codex, so no separate Codex installation is required; the
   // version is pinned for the same `notarget` reason PI and Claude document.
-  assert.deepEqual(parseConfig(["--backend", "codex"], {}).acpArgs, ["-y", "@agentclientprotocol/codex-acp@1.1.14"])
-  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "codex" }).acpArgs, ["-y", "@agentclientprotocol/codex-acp@1.1.14"])
+  assert.deepEqual(parseConfig(["--backend", "codex"], {}).acpArgs, expectedArgs)
+  assert.deepEqual(parseConfig([], { OMP_BRIDGE_BACKEND: "codex" }).acpArgs, expectedArgs)
   assert.match(parseConfig(["--backend", "codex"], {}).acpArgs[1], /@\d+\.\d+\.\d+$/, "the adapter version must stay pinned")
 })
 

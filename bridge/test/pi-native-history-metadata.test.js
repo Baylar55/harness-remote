@@ -18,6 +18,12 @@ class PiHistoryAcp extends EventEmitter {
   async request(method, params) {
     if (method === "session/load") {
       this.loadCount += 1
+      // A harness advertises what it can be asked to do. The bridge only ever sends a slash command
+      // the running adapter listed, because an unknown one is not refused - it is answered.
+      this.emit("notification", {
+        method: "session/update",
+        params: { sessionId: params.sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: [{ name: "name", description: "Rename" }] } }
+      })
       this.emit("notification", {
         method: "session/update",
         params: {
@@ -76,4 +82,17 @@ test("PI list and rename use PI's native display name", async () => {
   assert.equal(acp.prompts.at(-1), "/name Renamed from Harness Remote")
   assert.equal(renamed.title, "Renamed from Harness Remote")
   assert.equal((await service.listSessions())[0].title, "Renamed from Harness Remote")
+})
+
+test("a harness that does not advertise its rename command keeps the title here instead", async () => {
+  const acp = new PiHistoryAcp()
+  acp.request = async function request(method, params) {
+    if (method === "session/load") return { configOptions: [] }
+    return PiHistoryAcp.prototype.request.call(this, method, params)
+  }
+  const service = new AcpService(acp, { preferListedTitles: true, nativeRenameCommand: "name" })
+
+  const renamed = await service.renameSession("pi-session", "Local only")
+  assert.equal(acp.prompts.length, 0, "an unlisted slash command must never be sent as a prompt")
+  assert.equal(renamed.title, "Local only")
 })

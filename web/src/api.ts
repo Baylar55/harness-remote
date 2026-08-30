@@ -1,5 +1,6 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequest, isDesktopPlatform } from "./desktopBridge"
+import { normalizeNativeResponseData } from "./nativeResponse"
 import { streamURL } from "./opencode-events"
 import { authHeader, baseUrl, hasCredentials, isValidServerConfig, routingHeaders } from "./serverConfig"
 import type { AttachmentPart } from "./attachments"
@@ -56,6 +57,48 @@ type ResponseWithHeaders<T> = {
   headers: Record<string, string>
 }
 
+export type MessagePage = {
+  messages: MessageEnvelope[]
+  before?: string
+  hasMore: boolean
+  model?: ModelSelection
+}
+
+export type NativeSessionIdentityPayload = {
+  machineID: string
+  agentID: string
+  sessionID: string
+  directory: string
+}
+
+export type NativeSessionLinkRecord = {
+  type: "handoff"
+  source: NativeSessionIdentityPayload
+  target: NativeSessionIdentityPayload
+  createdAt: string
+  transferredContext?: string
+}
+
+export type NativeSessionHandoffMutationResponse = {
+  status: "accepted" | "pending" | "uncertain"
+  duplicate?: boolean
+  result?: {
+    target: NativeSessionIdentityPayload
+    link?: NativeSessionLinkRecord
+  }
+}
+
+function sessionModelHeader(value: string | undefined): ModelSelection | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value)) as Partial<ModelSelection>
+    if (typeof parsed.providerID !== "string" || !parsed.providerID || typeof parsed.modelID !== "string" || !parsed.modelID) return undefined
+    return { providerID: parsed.providerID, modelID: parsed.modelID, ...(typeof parsed.variant === "string" && parsed.variant ? { variant: parsed.variant } : {}) }
+  } catch {
+    return undefined
+  }
+}
+
 function responseDetail(body: unknown): string | null {
   if (!body) return null
   if (typeof body === "string") {
@@ -66,9 +109,6 @@ function responseDetail(body: unknown): string | null {
     }
   }
   if (typeof body === "object") {
-    // `data.message` and `message` are OpenCode's shapes; the bridge answers `{ "error": "..." }`,
-    // which fell through to the stringify below and put raw JSON on screen, so every bridge
-    // failure reached the user as `{"error":"Internal error: ..."}` instead of the sentence in it.
     const value = body as { data?: { message?: string }, message?: string, error?: string }
     const detail = value.data?.message ?? value.message ?? (typeof value.error === "string" ? value.error : undefined)
     return detail ?? JSON.stringify(body)
@@ -81,23 +121,6 @@ function normalizeHeaders(headers: Record<string, unknown> | undefined): Record<
   return Object.fromEntries(
     Object.entries(headers).map(([key, value]) => [key.toLowerCase(), Array.isArray(value) ? value.join(", ") : String(value)])
   )
-}
-
-/**
- * CapacitorHttp normally decodes JSON, but native engines can still hand a JSON response back as a
- * string depending on the server headers and platform. The browser path always calls response.json(),
- * so returning the string unchanged makes Android the only client that can turn a session array into
- * an iterable string. Parse JSON-looking native strings here while preserving ordinary text bodies.
- */
-function normalizeNativeResponseData(data: unknown): unknown {
-  if (typeof data !== "string") return data
-  const trimmed = data.trim()
-  if (!trimmed || (trimmed[0] !== "{" && trimmed[0] !== "[")) return data
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return data
-  }
 }
 
 type ConfigProvidersResponse = {
@@ -147,16 +170,10 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
   const target = `${baseUrl(config)}${path}`
   const headers: Record<string, string> = {
     Accept: "application/json",
-    // CapacitorHttp goes out through the platform's own HTTP client, which never preflights, so the
-    // routing hint the browser has to withhold is safe to send from the packaged Android app.
     ...routingHeaders(config, { preflight: !Capacitor.isNativePlatform() })
   }
-  if (hasCredentials(config)) {
-    headers.Authorization = authHeader(config)
-  }
-  if (options.body !== undefined) {
-    headers["Content-Type"] = "application/json"
-  }
+  if (hasCredentials(config)) headers.Authorization = authHeader(config)
+  if (options.body !== undefined) headers["Content-Type"] = "application/json"
 
   if (Capacitor.isNativePlatform()) {
     let response
@@ -191,8 +208,6 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     })
   } catch {
-    // Kept short: this text reaches a phone screen. The CORS note only means something in a
-    // browser, where it is the usual cause, and nothing at all inside the app.
     const corsHint = hasCredentials(config)
       ? " In a browser, Basic Auth also needs the bridge started with --cors for this origin."
       : ""
@@ -202,13 +217,9 @@ async function requestWithHeaders<T>(config: ServerConfig, path: string, options
   if (!response.ok) {
     let detail = response.status === 401 ? unauthorizedDetail(config) : `HTTP ${response.status}`
     try {
-      // A Response body is a one-shot stream. Read it once and let responseDetail
-      // parse JSON when applicable, so a plain-text server error remains useful.
       const body = await response.text()
       detail = responseDetail(body) ?? detail
-    } catch {
-      // Keep the HTTP status when an interrupted stream cannot be read.
-    }
+    } catch {}
     throw new Error(detail)
   }
 
@@ -290,8 +301,9 @@ export const api = {
     return request<FileEntry[]>(config, withDirectory(`/file?path=${encodeURIComponent(path)}`, directory))
   },
 
-  listCommands(config: ServerConfig) {
-    return request<CommandInfo[]>(config, "/command")
+  listCommands(config: ServerConfig, sessionID?: string) {
+    const path = sessionID ? `/command?sessionID=${encodeURIComponent(sessionID)}` : "/command"
+    return request<CommandInfo[]>(config, path)
   },
 
   async listAgents(config: ServerConfig, directory?: string) {
@@ -320,16 +332,33 @@ export const api = {
           isDefault: defaultModel === modelID
         }
         const variantIDs = Object.keys(model.variants ?? {})
-        return [
-          base,
-          ...variantIDs.map((variant) => ({ ...base, variant, isDefault: false }))
-        ]
+        return [base, ...variantIDs.map((variant) => ({ ...base, variant, isDefault: false }))]
       })
     })
   },
 
   createSession(config: ServerConfig, title?: string, model?: ModelSelection, directory?: string) {
     return request<Session>(config, withDirectory("/session", directory), { method: "POST", body: { title, model: toCreateSessionModel(model) } })
+  },
+
+  async listNativeSessionLinks(config: ServerConfig, identity: NativeSessionIdentityPayload) {
+    const params = new URLSearchParams({
+      machineID: identity.machineID,
+      agentID: identity.agentID,
+      sessionID: identity.sessionID,
+      directory: identity.directory
+    })
+    const response = await request<unknown>(config, `/v1/session-links?${params.toString()}`)
+    // Rolling upgrades must never make opening an otherwise valid native Session fatal. Older
+    // daemons may answer this unknown machine-level route with 204 (normalized to true on Android)
+    // or with another legacy payload. Treat "no verified links array" as "no lineage support yet".
+    if (!response || typeof response !== "object") return { links: [] as NativeSessionLinkRecord[] }
+    const links = (response as { links?: unknown }).links
+    return { links: Array.isArray(links) ? links as NativeSessionLinkRecord[] : [] }
+  },
+
+  registerNativeSessionLink(config: ServerConfig, link: NativeSessionLinkRecord) {
+    return request<{ link: NativeSessionLinkRecord }>(config, "/v1/session-links", { method: "POST", body: { link } })
   },
 
   renameSession(config: ServerConfig, id: string, title: string, directory?: string) {
@@ -340,9 +369,24 @@ export const api = {
     return request<boolean>(config, withDirectory(`/session/${id}`, directory), { method: "DELETE" })
   },
 
-  loadMessages(config: ServerConfig, sessionID: string, directory?: string, refreshHistory = false) {
-    const refresh = refreshHistory ? "&refresh=1" : ""
-    return request<MessageEnvelope[]>(config, withDirectory(`/session/${sessionID}/message?limit=100${refresh}`, directory))
+  async loadMessagePage(config: ServerConfig, sessionID: string, directory?: string, before?: string, limit = 100, refreshHistory = false): Promise<MessagePage> {
+    const params = new URLSearchParams({ limit: String(Math.max(1, Math.min(500, Math.trunc(limit) || 100))) })
+    if (before) params.set("before", before)
+    if (refreshHistory) params.set("refresh", "1")
+    const response = await requestWithHeaders<MessageEnvelope[]>(
+      config,
+      withDirectory(`/session/${sessionID}/message?${params.toString()}`, directory)
+    )
+    return {
+      messages: response.data,
+      before: response.headers["x-next-cursor"] || undefined,
+      hasMore: response.headers["x-has-more"] === "1",
+      model: sessionModelHeader(response.headers["x-session-model"])
+    }
+  },
+
+  async loadMessages(config: ServerConfig, sessionID: string, directory?: string, refreshHistory = false) {
+    return (await this.loadMessagePage(config, sessionID, directory, undefined, 100, refreshHistory)).messages
   },
 
   loadLatestMessage(config: ServerConfig, sessionID: string, directory?: string) {

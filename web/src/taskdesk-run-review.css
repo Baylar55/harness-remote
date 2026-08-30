@@ -1,0 +1,28 @@
+/* Reviewing an earlier Run is an explicit, on-demand action inside the Runs tab. It reuses the
+   standard TaskDesk dialog, so the only thing that needs its own styling is the affordance that
+   opens it. */
+
+.td3-run-review-button {
+  width: fit-content;
+  min-height: 27px;
+  margin-top: 7px;
+  padding: 0 9px;
+  border: 1px solid var(--td3-blue-border-soft);
+  border-radius: 7px;
+  color: var(--td3-blue-text);
+  background: var(--td3-blue-soft-2);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.td3-run-review-button:hover {
+  color: var(--td3-on-accent);
+  border-color: var(--td3-blue-border);
+  background: var(--td3-blue-soft);
+}
+
+.td3-run-review-button:focus-visible {
+  outline: 2px solid var(--td3-focus);
+  outline-offset: 2px;
+}

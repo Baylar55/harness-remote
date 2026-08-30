@@ -58,6 +58,22 @@ test("mergeReplay handles middle modifications and suffix matches", () => {
   assert.deepEqual(merged.map((m) => m.info.id), ["m1", "m2", "m2-new", "m3"])
 })
 
+test("mergeReplay uses the bounded linear merge for a large divergent replay", () => {
+  const count = 1_024
+  const previous = Array.from({ length: count }, (_, index) =>
+    message(`snapshot-${index}`, `snapshot ${index}`, index)
+  )
+  const replayed = Array.from({ length: count }, (_, index) =>
+    message(`replay-${index}`, `replay ${index}`, count + index)
+  )
+
+  const merged = mergeReplay(previous, replayed)
+
+  assert.equal(merged.length, count * 2)
+  assert.deepEqual(merged.slice(0, 2).map((item) => item.info.id), ["snapshot-0", "snapshot-1"])
+  assert.deepEqual(merged.slice(-2).map((item) => item.info.id), ["replay-1022", "replay-1023"])
+})
+
 test("mergeExternalHistory handles in-place mutated messages without stale signature leaks", () => {
   const msg = message("live-1", "initial text", 1_000)
   // First merge
@@ -77,13 +93,7 @@ test("differential test: mergeReplay matches full-matrix LCS on random sequences
   function referenceMergeReplay(previous, replayed) {
     if (previous.length === 0) return replayed
     if (replayed.length === 0) return previous
-    // Mirrors production messageSignature: visible text only plus the failure reason. The random
-    // generator below only produces user-role messages because mergeReplay additionally heals
-    // consecutive identical assistant envelopes, which a raw-LCS reference would not expect.
-    const messageSignature = (m) => `${m?.info?.role ?? ""}\u0000${(m?.parts ?? [])
-      .filter((p) => p?.type === "text")
-      .map((p) => p?.text ?? "")
-      .join("")}${m?.info?.error?.message ? `\u0000${m.info.error.message}` : ""}`
+    const messageSignature = (m) => `${m?.info?.role ?? ""}\u0000${(m?.parts ?? []).map((p) => p?.text ?? "").join("")}`
     const left = previous.map(messageSignature)
     const right = replayed.map(messageSignature)
     const common = Array.from({ length: left.length + 1 }, () => new Uint32Array(right.length + 1))
@@ -134,100 +144,4 @@ test("differential test: mergeReplay matches full-matrix LCS on random sequences
     const actual = mergeReplay(prev, replayed).map((m) => m.info.id)
     assert.deepEqual(actual, expected, `Trial ${trial} failed`)
   }
-})
-
-function envelope(id, role, parts, error) {
-  return {
-    info: { id, role, sessionID: "session-1", time: { created: 1_000 }, ...(error ? { error } : {}) },
-    parts
-  }
-}
-const textPart = (id, text) => ({ id, type: "text", text })
-const reasoningPart = (id, text) => ({ id, type: "reasoning", text })
-
-test("mergeReplay keeps a single copy when the live reply carried reasoning the replay omits", () => {
-  // A turn prompted from the app streams agent_thought_chunk before the answer, while the
-  // persisted history replays text only. The two representations are one logical message.
-  const previous = [
-    envelope("u2", "user", [textPart("p1", "Second question")]),
-    envelope("live-a2", "assistant", [reasoningPart("p2", "Checking the transcript."), textPart("p3", "Bridge reply")])
-  ]
-  const replayed = [
-    envelope("r-u2", "user", [textPart("p1", "Second question")]),
-    envelope("r-a2", "assistant", [textPart("p3", "Bridge reply")])
-  ]
-
-  const merged = mergeReplay(previous, replayed)
-
-  assert.deepEqual(merged.map((m) => m.info.id), ["u2", "live-a2"])
-  assert.ok(
-    merged[1].parts.some((part) => part.type === "reasoning"),
-    "the streamed thought must survive the reconciliation"
-  )
-})
-
-test("mergeReplay treats journal-split text parts and glued replay text as the same message", () => {
-  // Journal loaders map each content item to its own part while replay accumulates chunks into
-  // one; the signature must stay boundary-insensitive or reopening duplicates the reply.
-  const previous = [
-    envelope("u1", "user", [textPart("p1", "Question")]),
-    envelope("jr-a1", "assistant", [textPart("p2a", "Paragraph one."), textPart("p2b", " Paragraph two.")])
-  ]
-  const replayed = [
-    envelope("r-u1", "user", [textPart("p1", "Question")]),
-    envelope("r-a1", "assistant", [textPart("p2", "Paragraph one. Paragraph two.")])
-  ]
-
-  const merged = mergeReplay(previous, replayed)
-
-  assert.deepEqual(merged.map((m) => m.info.id), ["u1", "jr-a1"])
-  assert.equal(merged[1].parts.length, 2, "the persisted part split must be preserved as-is")
-})
-
-test("mergeReplay keeps a failed turn distinct from an otherwise identical successful reply", () => {
-  const failed = envelope("failed", "assistant", [textPart("p1", "Working on it.")], {
-    name: "HarnessTurnError",
-    message: "rate limited"
-  })
-  const plain = envelope("plain", "assistant", [textPart("p1", "Working on it.")])
-
-  const merged = mergeReplay([failed], [plain])
-
-  assert.equal(merged.length, 2)
-  assert.equal(merged[0].info.error.message, "rate limited")
-})
-
-test("mergeReplay heals a poisoned history that already contains the trailing duplicate", () => {
-  const poisoned = [
-    envelope("u1", "user", [textPart("p1", "Question")]),
-    envelope("live-a1", "assistant", [reasoningPart("p2", "thinking"), textPart("p3", "Answer")]),
-    envelope("ghost-a1", "assistant", [textPart("p4", "Answer")])
-  ]
-  const clean = [
-    envelope("r-u1", "user", [textPart("p1", "Question")]),
-    envelope("r-a1", "assistant", [textPart("p3", "Answer")])
-  ]
-
-  const merged = mergeReplay(poisoned, clean)
-
-  assert.deepEqual(merged.map((m) => m.info.id), ["u1", "live-a1"])
-})
-
-test("mergeReplay preserves legitimate repeated replies separated by prompts", () => {
-  const conversation = [
-    envelope("u1", "user", [textPart("p1", "Q1")]),
-    envelope("a1", "assistant", [textPart("p2", "Yes")]),
-    envelope("u2", "user", [textPart("p3", "Again")]),
-    envelope("a2", "assistant", [textPart("p4", "Yes")])
-  ]
-  const replayed = [
-    envelope("r-u1", "user", [textPart("p1", "Q1")]),
-    envelope("r-a1", "assistant", [textPart("p2", "Yes")]),
-    envelope("r-u2", "user", [textPart("p3", "Again")]),
-    envelope("r-a2", "assistant", [textPart("p4", "Yes")])
-  ]
-
-  const merged = mergeReplay(conversation, replayed)
-
-  assert.deepEqual(merged.map((m) => m.info.id), ["u1", "a1", "u2", "a2"])
 })

@@ -1,0 +1,78 @@
+/* Session-first UX refinements layered on the existing native Session browser. */
+.hr-native-session-row.deleting {
+  cursor: progress;
+  opacity: 0.68;
+  border-color: color-mix(in srgb, var(--tdw-border, rgba(127, 127, 127, 0.22)) 72%, transparent);
+  background: color-mix(in srgb, var(--tdw-card, rgba(255, 255, 255, 0.035)) 72%, transparent);
+}
+
+.hr-native-session-row.deleting:hover,
+.hr-native-session-row.deleting:focus-visible {
+  border-color: color-mix(in srgb, var(--tdw-border, rgba(127, 127, 127, 0.22)) 72%, transparent);
+  background: color-mix(in srgb, var(--tdw-card, rgba(255, 255, 255, 0.035)) 72%, transparent);
+}
+
+.hr-native-session-row.deleting .hr-native-session-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hr-native-session-row.deleting .hr-native-session-status svg {
+  flex: none;
+}
+
+.hr-native-create-machine {
+  grid-column: 1 / -1;
+}
+
+.hr-native-create-machine select {
+  font-weight: 620;
+}
+
+.hr-native-session-row.selected {
+  border-color: color-mix(in srgb, var(--td3-focus, #5b8cff) 42%, transparent);
+  background: color-mix(in srgb, var(--td3-focus, #5b8cff) 8%, var(--tdw-card, rgba(255, 255, 255, 0.035)));
+}
+
+.hr-native-session-row.selected:hover,
+.hr-native-session-row.selected:focus-visible {
+  border-color: color-mix(in srgb, var(--td3-focus, #5b8cff) 62%, transparent);
+}
+
+.hr-native-session-row.just-finished {
+  animation: hr-native-session-finished 4.8s ease-out both;
+}
+
+.hr-native-session-row.just-finished .hr-native-session-status {
+  color: var(--td3-green, #2da44e);
+  font-weight: 700;
+}
+
+.hr-native-session-row.just-finished .hr-native-session-harness i {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--td3-green, #2da44e) 16%, transparent);
+}
+
+@keyframes hr-native-session-finished {
+  0%, 18% {
+    border-color: color-mix(in srgb, var(--td3-green, #2da44e) 48%, transparent);
+    background: color-mix(in srgb, var(--td3-green, #2da44e) 10%, var(--tdw-card, rgba(255, 255, 255, 0.035)));
+  }
+  100% {
+    border-color: color-mix(in srgb, var(--td3-focus, #5b8cff) 42%, transparent);
+    background: color-mix(in srgb, var(--td3-focus, #5b8cff) 8%, var(--tdw-card, rgba(255, 255, 255, 0.035)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hr-native-session-row.just-finished {
+    animation: none;
+    border-color: color-mix(in srgb, var(--td3-green, #2da44e) 48%, transparent);
+  }
+}
+
+@media (max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px) {
+  .hr-native-create-machine {
+    grid-column: 1;
+  }
+}

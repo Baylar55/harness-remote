@@ -3,6 +3,7 @@ import path from "node:path"
 import { AcpClient } from "./acp-client.js"
 import { AcpAgentModelCatalog, HttpAgentModelCatalog } from "./agent-model-catalog.js"
 import { parseConfig, usage as bridgeUsage } from "./config.js"
+import { acpHarnessCapabilityContract, openCodeCapabilityContract } from "./harness-capability-contract.js"
 import { harnessProfile, resolveAcpLaunch } from "./harness-profiles.js"
 import { canListen, resolveLaunchPlan } from "./launcher.js"
 import { loadMachineIdentity } from "./machine-registry.js"
@@ -70,7 +71,7 @@ export function parseDaemonOptions(args, environment = process.env, detect = res
   // harness and the user names it. A daemon is started once per machine and is expected to work out
   // what that machine has: without this, a phone with PI and OpenCode installed announced `omp` as
   // its primary agent and then failed with `spawn omp ENOENT`. Resolve from PATH the way the
-  // launcher already does — it owns the ACP preference order — and let its message explain a
+  // launcher already does - it owns the ACP preference order - and let its message explain a
   // machine with nothing installed rather than starting up and failing later.
   const named = bridgeArgs.includes("--backend") || environment.HARNESS_REMOTE_BACKEND || environment.OMP_BRIDGE_BACKEND
   if (!named) bridgeArgs.push("--backend", detect(args).backend)
@@ -126,13 +127,15 @@ async function main() {
       permissionMode: profile.permissionMode,
       preferredAuthMethod: profile.authMethod
     })
-    // Model discovery owns a separate ACP connection and one durable prompt-less session. That keeps
-    // New Task catalog refreshes from interfering with user-facing ACP session history.
+    // Model discovery owns a separate ACP connection so its prompt-less technical Session cannot
+    // interfere with user-facing Session ownership. Membership and options come from the running
+    // adapter itself; do not spawn a second native harness process to filter the same catalog.
     const modelCatalog = new AcpAgentModelCatalog({
       agent: new AcpClient({ command: launch.command, args: launch.args, permissionMode: profile.permissionMode, preferredAuthMethod: profile.authMethod }),
       agentID: profile.id,
       directory: config.roots?.[0] ?? process.cwd(),
-      stateDirectory: config.stateDirectory
+      stateDirectory: config.stateDirectory,
+      variantConfigIDs: profile.modelVariantConfigIDs
     })
     // Load persisted technical-session ids before the server starts, so they never leak into lists.
     await modelCatalog.preloadState()
@@ -141,6 +144,7 @@ async function main() {
       label: profile.label,
       backend: profile.id,
       capabilities: profile.capabilities,
+      contract: acpHarnessCapabilityContract(profile),
       agent: acp,
       modelCatalog,
       bridgeConfig: agentConfig,
@@ -169,14 +173,33 @@ async function main() {
       password: config.password,
       startTimeoutMs: openCodeTimeout
     })
+    managedOpenCode.on("stderr", (line) => process.stderr.write(`[opencode] ${line}\n`))
     const openCodeModels = new HttpAgentModelCatalog({ host: managedOpenCode, agentID: "opencode" })
+    // OpenCode is intentionally lazy like the ACP harnesses. Starting its Bun server during daemon
+    // boot used resources before the user selected it and also surfaced upstream GlobalBus listener
+    // warnings immediately. Model discovery, task launch, or a routed OpenCode request starts it on
+    // first use through the host's idempotent start() path.
     daemon.registerManagedHttpHost({
       id: "opencode",
       label: "OpenCode",
       backend: "opencode",
-      capabilities: { sessions: true },
+      // These are native OpenCode HTTP primitives, not Session-first inventions. Advertising the
+      // complete mutation subset lets the UI expose the same rename/delete/stop/model controls as
+      // the direct OpenCode surface instead of treating a managed host as read-only.
+      capabilities: {
+        sessions: true,
+        prompt: true,
+        abort: true,
+        streaming: true,
+        models: true,
+        commands: true,
+        sessionRename: true,
+        sessionDelete: true
+      },
+      contract: openCodeCapabilityContract(),
       host: managedOpenCode,
-      modelCatalog: openCodeModels
+      modelCatalog: openCodeModels,
+      eager: false
     })
   }
 
@@ -209,10 +232,10 @@ async function main() {
   process.stdout.write("Active agents:\n")
   for (const host of daemon.snapshot().agents) {
     if (host.id === primaryProfile.id) {
-      process.stdout.write(`  • ${host.label} — primary (${host.transport.toUpperCase()})\n`)
+      process.stdout.write(`  • ${host.label} - primary (${host.transport.toUpperCase()})\n`)
       continue
     }
-    process.stdout.write(`  • ${host.label} — managed ${host.transport.toUpperCase()}, ${host.state}\n`)
+    process.stdout.write(`  • ${host.label} - managed ${host.transport.toUpperCase()}, ${host.state}\n`)
   }
   for (const result of managedResults) {
     if (result.status !== "available") process.stderr.write(`[${result.id}] unavailable: ${result.error?.message ?? "startup failed"}\n`)

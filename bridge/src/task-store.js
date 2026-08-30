@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { buildPersistedTaskContext } from "./task-context.js"
 
 function machineFileName(machineID) {
   const digest = createHash("sha256").update(machineID).digest("hex").slice(0, 16)
@@ -11,6 +12,20 @@ function taskError(code, message) {
   const error = new Error(message)
   error.code = code
   return error
+}
+
+function normalizeTaskHistory(task) {
+  if (!task || typeof task !== "object") return task
+  const runs = Array.isArray(task.runs)
+    ? task.runs
+    : task.run
+      ? [task.run]
+      : []
+  const normalized = { ...task, runs, finishedAt: task.finishedAt ?? null }
+  const revision = Number.isFinite(Number(task.context?.revision))
+    ? Number(task.context.revision)
+    : runs.filter((run) => run?.finishedAt).length
+  return { ...normalized, context: buildPersistedTaskContext(normalized, revision) }
 }
 
 export class TaskStore {
@@ -29,7 +44,8 @@ export class TaskStore {
     if (this.loaded) return
     try {
       const parsed = JSON.parse(await readFile(this.file, "utf8"))
-      this.tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+      const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+      this.tasks = tasks.map(normalizeTaskHistory)
     } catch (error) {
       if (error?.code === "ENOENT") {
         this.tasks = []
@@ -80,9 +96,13 @@ export class TaskStore {
       status: "draft",
       workspace: { mode: "project", path: project.path },
       run: null,
+      runs: [],
+      error: null,
+      finishedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp
     }
+    task.context = buildPersistedTaskContext(task, 0)
     this.tasks.push(task)
     await this.persist()
     return structuredClone(task)
@@ -95,6 +115,23 @@ export class TaskStore {
     const task = this.tasks[index]
     if (task.status !== "draft") throw taskError("invalid_state", "Only draft tasks can change workspace")
     const updated = { ...task, workspace: structuredClone(workspace), updatedAt: this.clock() }
+    this.tasks[index] = updated
+    await this.persist()
+    return structuredClone(updated)
+  }
+
+  async markFinished(taskID) {
+    await this.load()
+    const index = this.tasks.findIndex((task) => task.id === taskID)
+    if (index < 0) throw taskError("unknown_task", `Unknown task: ${taskID}`)
+    const task = this.tasks[index]
+    if (task.status === "starting" || task.status === "running") {
+      throw taskError("task_active", "An active task cannot be finished")
+    }
+    if (task.finishedAt) return structuredClone(task)
+    const timestamp = this.clock()
+    const updated = { ...task, finishedAt: timestamp, updatedAt: timestamp }
+    updated.context = buildPersistedTaskContext(updated, task.context?.revision ?? 0)
     this.tasks[index] = updated
     await this.persist()
     return structuredClone(updated)
@@ -114,6 +151,7 @@ export class TaskStore {
       workspace: { mode: "project", path: task.project.path },
       updatedAt: this.clock()
     }
+    updated.context = buildPersistedTaskContext(updated, task.context?.revision ?? 0)
     this.tasks[index] = updated
     await this.persist()
     return structuredClone(updated)

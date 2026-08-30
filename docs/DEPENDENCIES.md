@@ -20,31 +20,43 @@ after 30s of silence, so a server that stops beating looks dead.
 
 ### Oh My Pi (OMP) — ACP over stdio, via `omp acp`
 
-First-party command, no third party in the path. The bridge uses `session/new`, `session/load`,
-`session/list`, `session/prompt`, `session/cancel` and `session/set_config_option`.
+First-party command, no third party in the path. The bridge uses `session/new`, `session/resume`,
+`session/list`, `session/prompt`, `session/cancel` and `session/set_config_option`, and reads the
+Session's own JSONL journal directly. `session/load` is used only by an OMP old enough not to
+advertise `session/resume`.
 
-**Assumed, all observed on OMP 17.1.3 rather than read from a spec:**
+**Read from the OMP source (`can1357/oh-my-pi`, verified at 18.0.7) rather than observed:**
 
-| Assumption | What breaks if it changes |
-|---|---|
-| `session/list` returns no `title` | titles are derived from the first prompt; a real title would be ignored |
-| A submitted prompt is never echoed back as `user_message_chunk` | the deduplication acknowledgement would swallow the user's message |
-| Chunks carry a `messageId` | without one, chunk aggregation falls back to per-turn tracking |
-| No `agent_plan` is emitted | the todo panel stays empty by design |
-| The agent approves its own tool calls and never sends `session/request_permission` | the permission path would start being exercised |
-| `available_commands_update` is emitted after extension initialization and contains registered command names | optional extension actions are not discovered |
+| Fact | Where it comes from | What depends on it |
+|---|---|---|
+| `session/load` replays the whole stored transcript back over the wire, minting `crypto.randomUUID()` per replayed message | `AcpAgent.loadSession` → `#replaySessionHistory` | replay can never be a transcript identity, so the bridge does not use `session/load` to read |
+| Replay flattens `developer`, `custom`, `hookMessage`, tool results and bash/python output into `user_message_chunk` | `#messageToReplayNotifications` | a replayed Session would grow turn boundaries nobody typed |
+| `session/resume` opens the same stored Session and returns the same `configOptions` with no replay | `AcpAgent.resumeSession` → `#resumeManagedSession` (identical to `#loadManagedSession`, minus the replay) | this is how the bridge takes the writer |
+| `initialize` advertises `agentCapabilities.sessionCapabilities.resume` | `AcpAgent.initialize` | the bridge falls back to `session/load` when it is absent, so an older OMP still works |
+| The live path never emits `user_message_chunk`; only `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update` and `plan` | `acp-event-mapper.ts` | a submitted prompt is not echoed back, so the transport echo filter is a guard rather than a workaround |
+| One `messageId` per live assistant message, cleared when that message ends | `#getLiveMessageId`, `#clearLiveAssistantMessageAfterEvent` | a turn that calls a tool legitimately streams under two ids |
+| `session/prompt` resolves only after the end-of-turn updates are flushed and awaited | `AcpAgent.#trackPromptEvent` on `agent_end` | the answer is complete when the turn goes idle; no settle delay is needed |
+| `initialize` advertises `promptCapabilities.image`, and prompts accept `{type:"image", mimeType, data}` | `AcpAgent.initialize`, `#convertPromptBlocks` | the composer's attachment picker |
+| `session/list` returns `title`, `updatedAt` and `_meta.messageCount` | `AcpAgent.#toSessionInfo` | Session list metadata, and the Session index the app reads |
+| `/rename <title>` calls `setSessionName(title, "user")`, which rewrites the title slot, appends a `title_change` entry and marks the name user-set so auto-titling leaves it alone | `builtin-lifecycle.ts`, `SessionManager.setSessionName` | a Session's name is stored by OMP rather than only in this bridge; it is sent only when the command catalog advertises `rename` |
+| `available_commands_update` and `session_info_update` are pushed after new/load/resume | `#emitBootstrapUpdates` | optional extension actions are discovered from the command catalog |
 
-**Also assumed, observed on OMP 17.2.10 while adding image attachments:**
+**The journal format, from `session-entries.ts`, `session-manager.ts` and `session-migrations.ts`:**
 
-| Assumption | What breaks if it changes |
-|---|---|
-| `initialize` advertises `agentCapabilities.promptCapabilities.image` | the composer hides its attachment picker and the bridge refuses attachments; a harness that dropped the flag would lose the feature rather than fail a prompt |
-| A prompt may carry `{type:"image", mimeType, data}` blocks alongside text, and an image with no text is accepted | sending a bare screenshot would need a synthetic caption |
-| No `audio` prompt capability is advertised | voice would have to be transcribed before it reaches a prompt |
-| `session/load` replays a stored image as `user_message_chunk` with `content: {type:"image", data, mimeType}`, sharing the `messageId` of the text chunk in that turn | the thumbnail stops reappearing when a session is reopened, or lands in a message of its own |
-| Images are re-encoded on the way in: a PNG upload replays and persists as `image/webp` | a mime taken from the upload rather than from the record would mislabel the part |
-| The persisted transcript stores no filename for an image | the app labels a replayed thumbnail generically instead of by name |
-| `session/load` mints a fresh `messageId` on every load | ids cannot be used to recognise the same message across two loads, which is why history dedup elsewhere falls back to text and timestamps |
+| Fact | Where it comes from | What depends on it |
+|---|---|---|
+| Line 1 is a fixed-width `type:"title"` slot with no `id`; line 2 is a `type:"session"` header with an `id` but no `parentId` | `SessionTitleSlotEntry`, `SessionHeader` | neither is a node in the branch graph |
+| The persisted branch leaf is the last entry in file order | `SessionEntryIndex.insert` sets `#leaf` per entry; `rebuild()` replays them in order | the bridge selects the same branch OMP would resume, with no ACP round trip |
+| A branch is `parentId` walked back from the leaf | `SessionEntryIndex.pathTo` | abandoned sibling branches are not rendered |
+| v1 journals carry no `id`/`parentId`; OMP adds them in memory on first open and rewrites the file | `migrateToCurrentVersion` → `migrateV1ToV2` | an old Session must be reconstructed linearly to be readable before that rewrite, or it reads as empty |
+| A `user` message can be `synthetic` (injected) or `steering` (documented as never rendered) | `UserMessage` in `packages/ai/src/types.ts` | neither may open a conversation turn |
+| `Interrupted by user` and `__omp.silent_abort__` are abort reasons OMP's own renderers suppress | `shouldRenderAbortReason`, `isSilentAbort`, `isUserInterruptAbort` | a Stop must not leave a red error banner in the reopened transcript |
+| An assistant message carries `toolCall` blocks and the matching `toolResult` arrives as its own entry | `AssistantMessage`, `ToolResultMessage` | Activity is reconstructed from the journal instead of from replay |
+| Large images are externalised to `blob:sha256:<hash>` in `~/.omp/agent/blobs/data` | `blob-store.ts` | such a payload is not base64 and is skipped rather than rendered as a broken data URL |
+| Session files are `<timestamp>_<sessionId>.jsonl` under `~/.omp/agent/sessions`, created lazily | `SessionManager#assignSessionFile`, `getSessionsDir` | lookups match by id suffix and a miss is retried rather than remembered |
+
+**Assumed rather than read:** the agent approves its own tool calls and never sends
+`session/request_permission`.
 
 **Watch:** any of the above and new `sessionUpdate` kinds; unknown updates are ignored by design.
 
@@ -85,7 +97,7 @@ This is the only dependency that is neither ours nor first-party, and the one to
 - **Adapter:** [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp),
   Apache-2.0, in [`VikashLoomba/agentprism-workflows`](https://github.com/VikashLoomba/agentprism-workflows)
   under `packages/pi-acp`. Single maintainer (`automatalabsteam`).
-- **Pinned to `0.2.5`** in `bridge/src/harness-profiles.js`.
+- **Pinned to `0.5.0`** in `bridge/src/harness-profiles.js`.
 - **It is young and moves fast:** first published 2026-07-16, eleven versions in the following ten
   days. Treat a bump as a change worth testing, not a routine refresh.
 
@@ -95,9 +107,9 @@ adapter over PI's own RPC mode instead. Several exist. The other widely referenc
 `@victor-software-house/pi-acp`, declares `engines.bun` and shells out to `bun`; this project runs
 on Node everywhere, which is why it is not used.
 
-**Why the version is pinned.** An unpinned `npx -y` default failed live with `notarget`: version
-`0.2.6` was in the npm index and tagged `latest` while its tarball was not yet fetchable. A
-floating default breaks whenever an upstream publish goes wrong.
+**Why the version is pinned.** A floating `npx` default can break when an upstream publish is
+incomplete or changes the adapter contract. The bridge uses the tested version declared in
+`harness-profiles.js` and upgrades it only with real-harness validation.
 
 **Assumed:**
 
@@ -109,31 +121,13 @@ floating default breaks whenever an upstream publish goes wrong.
 | Streams chunks with **no** `messageId` | replies would split into one message per token, or aggregate wrongly |
 | Emits no `agent_plan` | the todo panel stays empty |
 
-**The adapter embeds its own PI.** It depends on `@earendil-works/pi-coding-agent` pinned to a
-specific version (`0.82.1` in adapter 0.2.5), so the PI that actually runs is the one bundled with
-the adapter, not the `pi` on your PATH. Your local install still matters for configuration and
-credentials, which it reads from disk. Two consequences:
+**The adapter embeds its own PI.** The PI that actually runs is bundled with the adapter, not the
+`pi` on your PATH. Your local install still matters for configuration and credentials, which the
+adapter reads from disk. Two consequences:
 
 - updating `pi` locally does not change what the bridge runs;
 - the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
 
-**Assumed:**
-
-| Assumption | What breaks if it changes |
-|---|---|
-| Launched over stdio as an `npx`-installable `bin` | the `--acp-command` / `--acp-arg` defaults in the profile |
-| Offers a non-`env_var` auth method (`pi-stored-credentials`) | the bridge would fall back to an API key from an unset environment variable and fail at inference |
-| Asks `session/request_permission` before each tool call, offering an `allow_once` option | tool calls stop happening, silently — the failure mode is "reports success, changes nothing" |
-| Streams chunks with **no** `messageId` | replies would split into one message per token, or aggregate wrongly |
-| Emits no `agent_plan` | the todo panel stays empty |
-
-**The adapter embeds its own PI.** It depends on `@earendil-works/pi-coding-agent` pinned to a
-specific version (`0.82.1` in adapter 0.2.5), so the PI that actually runs is the one bundled with
-the adapter, not the `pi` on your PATH. Your local install still matters for configuration and
-credentials, which it reads from disk. Two consequences:
-
-- updating `pi` locally does not change what the bridge runs;
-- the adapter can lag PI releases, so a PI feature can exist locally and be unavailable here.
 
 **Exit route.** If the adapter becomes unmaintained or unreliable, PI's own RPC mode
 (`packages/coding-agent/docs/rpc.md` in the PI repo) is the first-party alternative. It means
@@ -165,6 +159,12 @@ the bridge's `--root` directories. The bridge can therefore expose sessions from
 the configured browsing roots to anyone who has the bridge credentials. Treat those credentials as
 full access to the Claude Code account on that host, and use a trusted LAN, VPN or TLS-terminating
 proxy rather than exposing the bridge directly to the Internet.
+
+**Not assumed:** that every `tool_call` the adapter opens is closed by a `tool_call_update`. It is
+observed to leave calls open — those still running when a turn ends, is cancelled or fails, and those
+replayed out of a loaded session's history — so `AcpService` settles a Session's open tool calls and
+reasoning as soon as the turn behind them is no longer live (`settleUnfinishedActivity`). Without it
+an Activity section in a finished conversation reads `Working` for good, snapshot included.
 
 **Watch:** the pinned adapter version, bare model ids, ACP session update and permission-request
 shapes, and whether session visibility or image capability changes. The app intentionally does not

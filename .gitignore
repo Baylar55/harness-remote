@@ -2,6 +2,8 @@
 build/
 web/node_modules/
 web/dist/
+# Screenshots produced by the Chromium smoke scripts; CI uploads them as run artifacts.
+web/browser-artifacts/
 web/android/
 web/*.tsbuildinfo
 *.tgz
@@ -10,3 +12,6 @@ web/dist-electron/
 web/release/
 web/release-*/
 .smoke-state/
+
+# The bridge has no dependencies; CI runs its tests without installing any.
+bridge/package-lock.json

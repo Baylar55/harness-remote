@@ -1,20 +1,199 @@
+<div align="center">
+
 # Harness Remote
 
-**Run and supervise AI coding agents on the machines where your code already lives, from anywhere.**
+### Your sessions. Any coding agent. Any device.
 
-Harness Remote is a local-first control plane for AI coding agents. Connect to a machine where your repositories, CLIs, subscriptions and credentials already live, then supervise OpenCode, Claude Code, Codex CLI, Oh My Pi and PI from one interface on phone, web or desktop.
+**A local-first control plane for native AI coding-agent sessions.**
 
-**One interface. Multiple agents. Your machines, your credentials, your code.**
+Run, observe, resume and hand off work across **Codex CLI, Claude Code, OpenCode, Oh My Pi and PI** from desktop, web or Android — while your code, credentials, subscriptions and native Sessions stay on your own machines.
 
-> Harness Remote is not another coding agent. It is the control plane above them.
+[![GitHub stars](https://img.shields.io/github/stars/giuliastro/harness-remote?style=flat&logo=github)](https://github.com/giuliastro/harness-remote/stargazers)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-555)](LICENSE)
+[![Harness Remote 3](https://img.shields.io/badge/HR3-session--first-555)](docs/HARNESS_3_ROADMAP.md)
 
-Execution stays on your machines. Repositories stay on your machines. Agent credentials and model access stay on your machines.
+</div>
+
+![Harness Remote 3 workspace](docs/images/rhv3.png)
+
+
+**Start in your CLI → pick it up from another device → hand it to a different coding agent → return to the native Session that did the work.**
+
+Harness Remote lets you remotely run, observe and resume the coding agents already installed on your machines. When another agent is better for the next step, continue the work there with an explicit handoff instead of copy/pasting context into an unrelated chat.
+
+> **Harness Remote is not another coding agent.** It is the continuity and remote-control layer for the coding agents you already use, while their native Sessions remain the source of truth.
+
+## Why Harness Remote 3
+
+AI coding tools are getting better fast — and the best tool for planning, implementation, debugging or review is not always the same one.
+
+The problem is that every coding agent normally becomes its own island: its own sessions, transcript, controls, models and resume semantics.
+
+Harness Remote 3 is built around a different idea:
+
+```text
+Machine
+  Project
+    OpenCode Session A
+      └─ Continue with Codex
+    Codex Session B
+      └─ Continue with Claude
+    Claude Session C
+```
+
+Each Session remains **native to the harness that created it**.
+
+Harness Remote adds the continuity layer around those Sessions: machine and Project identity, discovery, remote access, links between Sessions, explicit handoff context and workspace visibility.
+
+That gives you three things at once:
+
+- **Freedom to change agent** without abandoning the work.
+- **Native fidelity** instead of a lowest-common-denominator reimplementation.
+- **Remote access** without moving your source code or provider credentials into another cloud.
+
+## The difference: native Sessions are the product
+
+Many multi-agent tools create their own agent/session object and use the underlying provider session as an implementation detail.
+
+Harness Remote 3 deliberately does the opposite.
+
+The native Session remains authoritative for:
+
+- transcript and message semantics;
+- reasoning and activity;
+- tool execution;
+- questions and permissions;
+- context, memory and compaction;
+- model behavior;
+- Stop / cancel behavior;
+- native resume semantics.
+
+Harness Remote owns only the control-plane layer around it:
+
+- machines and Projects;
+- harness discovery and runtime capabilities;
+- native Session discovery and presentation;
+- remote observation and control;
+- cross-agent continuation metadata;
+- handoff lineage and recovery context;
+- desktop, web and Android access;
+- reconciliation and diagnostics.
+
+**If the harness already owns a capability well, Harness Remote orchestrates it instead of cloning it.**
+
+## Continue work across coding agents
+
+Switching agent should not mean copy/pasting a half-remembered summary into a blank chat.
+
+When you continue work with another harness, Harness Remote creates a new native Session for that harness and preserves an explicit relationship to the Session it came from.
+
+The handoff can carry the useful, inspectable parts of the work — objective, decisions, unresolved items, relevant changes and checks already run — while the new harness still owns its own context from that point forward.
+
+Harness Remote does **not** claim that Claude's hidden context has somehow become Codex's, or vice versa.
+
+That distinction matters: continuity is explicit, debuggable and honest.
+
+## Start outside Harness Remote. Continue inside it.
+
+Harness Remote is designed around Sessions that belong to the coding harness, not around Sessions that only exist because Harness Remote created them.
+
+The v3 Session-first model is built so that supported native Sessions can be discovered, inspected and continued without requiring a separate "import this conversation into Harness Remote" workflow merely to make them visible.
+
+That means the natural flow can be:
+
+```text
+start coding in your normal CLI
+        ↓
+open Harness Remote later
+        ↓
+find the native Session
+        ↓
+observe / continue / hand off
+```
+
+Your existing tools remain useful on their own. Harness Remote adds a control plane; it does not demand ownership of your workflow.
+
+## One workspace across your machines
+
+Harness Remote connects to the computers where your actual development environments already live:
+
+```text
+phone / desktop / browser
+           │
+           ▼
+     Harness Remote
+           │
+     ┌─────┴─────┐
+     ▼           ▼
+ workstation   server
+     │           │
+ repo + CLIs   repo + CLIs
+ sessions      sessions
+```
+
+A machine connection exposes Projects, available harnesses, models and native Sessions through one client surface.
+
+Use the environment you already configured: local repositories, SSH/VPN networking, CLI logins, API keys and paid coding subscriptions remain on the machine that executes the work.
+
+## Supported coding agents
+
+Harness Remote 3 currently integrates with:
+
+| Coding agent | Runtime path | Native Session authority |
+| --- | --- | --- |
+| **OpenCode** | HTTP + live event stream | OpenCode |
+| **Claude Code** | ACP adapter | Claude Code |
+| **Codex CLI** | ACP adapter | Codex |
+| **Oh My Pi (OMP)** | ACP adapter | OMP |
+| **PI** | ACP adapter | PI |
+
+Harness Remote discovers model and control capabilities from the running harness instead of assuming every provider supports the same options.
+
+If a harness advertises a control, Harness Remote can surface it. If it does not, Harness Remote does not invent one.
+
+See the [Harness capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md) for the detailed runtime contract.
+
+## Desktop, Android and web
+
+Use the same machine from:
+
+- **Desktop** — Windows, macOS and Linux.
+- **Android** — native HTTP transport to your Harness Remote machine.
+- **Web / PWA** — browser client for local or remotely reachable machines.
+
+The client lets you inspect Sessions, follow live activity, send prompts, answer supported questions or permissions, Stop native turns, switch model/harness where supported and review working-tree changes.
+
+## Local-first by design
+
+Harness Remote does not require your repository to be uploaded to a hosted workspace.
+
+Your machine keeps:
+
+- source code;
+- coding-agent CLIs;
+- provider credentials;
+- provider subscriptions;
+- native Session persistence;
+- the real development environment.
+
+Harness Remote exposes a control surface over that environment.
+
+For remote access, use a trusted LAN or VPN. Do not expose the daemon directly to the public internet.
+
+> `--root` limits which directories Harness Remote exposes for Project selection. It is **not** an operating-system sandbox for the coding agent itself; native harnesses still run with the privileges of the account that launched them.
+
+See [REFERENCE.md](REFERENCE.md) for detailed security and backend notes.
 
 ## Quick start
 
-The v3 / TaskDesk path uses one launcher per machine. The launcher detects supported harness CLIs on `PATH` and chooses the appropriate runtime automatically.
+### 1. Start Harness Remote on the machine with your code
 
-From a checkout or directly from GitHub:
+Requirements:
+
+- Node.js 20+
+- at least one supported coding-agent CLI installed and authenticated
+
+Then run:
 
 ```bash
 npx github:giuliastro/harness-remote \
@@ -25,46 +204,27 @@ npx github:giuliastro/harness-remote \
   --root "$HOME/Software"
 ```
 
-The important values for a client connection are the machine address, public port, username and password. The normal public port is **4097**.
+`--root` defines the directory boundary Harness Remote may browse when you select Projects.
 
-When the machine has multiple supported harnesses, Harness Remote starts the machine daemon and exposes the detected agents through that one public endpoint. OpenCode can run as a managed internal host, normally on loopback port **4096**. That 4096 port is an implementation detail and should not be entered in the client wizard.
+The launcher detects supported CLIs on `PATH`, starts the compatible local runtime and prints the connection details.
 
-The launcher currently recognizes:
+### 2. Connect from desktop or Android
 
-- OpenCode
-- Claude Code
-- Codex CLI
-- Oh My Pi (OMP)
-- PI
+Open **Machines → Add machine** and enter the address, port, username and password printed by the launcher.
 
-If only one compatible harness is installed, the launcher may use the single-backend compatibility path automatically. The client setup does not change: connect to the public address printed by the launcher and let the connection wizard discover the available harness.
+One machine endpoint exposes the harnesses managed by that machine — you do not need a separate public endpoint for every coding agent.
 
-If `--port` is omitted, the launcher starts from the normal public port and chooses an available port when necessary. If username/password are omitted, it generates credentials and prints them.
+### 3. Or open the web client
 
-### Connecting from the app
+From a Harness Remote checkout:
 
-Use **Connect server** and follow the connection wizard:
+```bash
+cd web
+npm ci
+npm run dev
+```
 
-1. choose the harness you want to expose as that saved profile;
-2. enter the host running Harness Remote;
-3. use the public daemon port, normally `4097`;
-4. enter the credentials printed by the launcher;
-5. test the connection and save.
-
-The wizard discovers the machine and routes the saved profile to the selected harness. Multiple profiles may point to the same machine and public port while selecting different harnesses.
-
-For example, one machine can appear in the client as separate saved profiles for OpenCode, Codex, Claude, OMP and PI, while all of them use the same `host:4097` endpoint.
-
-## Using the clients
-
-All clients use the same connection wizard and the same machine endpoint.
-
-- **Desktop (Windows, macOS, Linux):** install a desktop build from GitHub Releases, open Harness Remote, choose **Connect server**, and enter the machine address, public port and credentials printed by the launcher. Desktop does not need browser CORS configuration.
-- **Android APK:** install the APK, open the app, and use the same **Connect server** wizard. Android uses native HTTP transport, so browser CORS restrictions do not apply.
-- **Web / PWA:** run the web client locally with `cd web && npm ci && npm run dev`, then open the URL printed by Vite. Because this is a browser client, the daemon must allow that exact web origin with `--cors`.
-- **GitHub Pages:** the hosted client is available at `https://giuliastro.github.io/harness-remote/` after deployments from `main`. To connect from it, start the daemon with `--cors https://giuliastro.github.io` in addition to the normal launcher options.
-
-For example, to allow both the hosted GitHub Pages client and a local Vite development client:
+For browser access, restart the machine with the exact browser origin allowed:
 
 ```bash
 npx github:giuliastro/harness-remote \
@@ -73,74 +233,67 @@ npx github:giuliastro/harness-remote \
   --username harness \
   --password "use-a-long-unique-password" \
   --root "$HOME/Software" \
-  --cors https://giuliastro.github.io \
   --cors http://localhost:5173
 ```
 
-`--cors` accepts exact origins and may be repeated. It is needed only by browser-based clients such as the Web/PWA and GitHub Pages builds, not by the native Android or desktop clients.
+Open the URL printed by Vite, normally `http://localhost:5173`.
 
-## Root and project access
+For the full launcher and daemon guide, see [Quick start](docs/QUICK_START.md).
 
-`--root` defines the filesystem boundary the remote client is allowed to browse and use. Pick a directory containing the projects you actually want Harness Remote to access, for example:
+## What Harness Remote is — and is not
 
-```bash
---root "$HOME/Software"
-```
+| Harness Remote is | Harness Remote is not |
+| --- | --- |
+| A control plane for native coding-agent Sessions | A replacement coding agent |
+| A way to supervise your own machines remotely | A hosted cloud IDE |
+| A continuity layer between different harnesses | A fake universal provider Session |
+| A local-first interface over your existing CLIs | An API reseller or inference proxy |
+| A Project + Session view of real work | A system that silently hides normal work in managed worktrees |
 
-A path outside that boundary is intentionally rejected.
+Normal Sessions run in the selected Project's real directory. Isolation can be added deliberately for parallel work; it is not a surprise default.
 
-Manual sessions can still choose a directory inside the configured root. TaskDesk is moving the normal workflow toward selecting a known **Project** and letting the daemon choose the project directory or prepare an isolated Git worktree for the task.
+## A concrete workflow
 
-## TaskDesk / v3
+Imagine a bug that moves through three phases:
 
-The v3 branch is evolving Harness Remote from a remote session viewer into a task-first control plane.
+1. **Explore with OpenCode** and identify the likely root cause.
+2. **Continue with Codex** for the implementation.
+3. **Continue with Claude Code** for an independent review.
+4. Check the result from Android while away from your desk.
+5. Return later to any linked native Session and continue from the agent that actually owns it.
 
-The backend already supports:
+Harness Remote keeps the Project, native Session chain and working-tree changes visible around that workflow without turning the three agents into one fictional mega-agent.
 
-- machine identity and agent discovery;
-- multiple harnesses behind one machine endpoint;
-- per-agent model catalogs;
-- persisted projects and tasks;
-- Task -> Run -> Session linkage;
-- project-directory or isolated Git worktree execution;
-- running/completed/failed lifecycle state;
-- restart reconciliation;
-- result/workspace inspection and explicit cleanup.
+## Why this architecture matters
 
-The client UX is being completed and stabilized before v3 replaces the current mainline experience.
+The coding-agent ecosystem changes quickly. Models, CLIs and provider-specific capabilities will keep changing.
 
-The intended product model is:
+Harness Remote is designed so the durable layer is not a specific model or vendor abstraction. It is the relationship between:
 
 ```text
-Machine
-  Projects
-    Project
-      Tasks
-        Task
-          Run / Session
+your machine
++ your project
++ the native sessions that did the work
 ```
 
-A Task chooses a machine, project, harness and model. For Git projects it can run in an isolated worktree, so the user does not have to type platform-specific filesystem paths from the phone.
+That makes it possible to add new harnesses without forcing existing ones into a single artificial behavior model.
 
-## Legacy compatibility
+## Harness Remote 3 status
 
-The repository still contains the standalone per-harness bridge and direct OpenCode compatibility code because existing installations and stable releases may depend on them.
+Harness Remote 3 is currently the **Session-first development line**.
 
-Those paths are compatibility mechanisms, not the normal v3 onboarding flow. New v3 connections should use the machine launcher and the connection wizard above.
+The stable release line on `main` remains Harness Remote 2.x while the v3 runtime contract is validated against real installations of OpenCode, OMP, PI, Codex and Claude Code.
 
-For low-level legacy setup details see [REFERENCE.md](REFERENCE.md).
+Current v3 work intentionally prioritizes Session correctness, resume/reconnect behavior, native transcript fidelity and cross-agent continuation over adding broad orchestration features.
+
+The automatic multi-agent launcher is also still being expanded: the current checkpoint can expose one selected ACP-backed primary alongside managed OpenCode, while additional concurrent ACP host instances remain follow-up work.
+
+That focus is deliberate. A remote coding-agent UI is only useful if you can trust that the Session you see is the Session that actually exists.
 
 ## Development
 
-Requirements:
-
-- Node.js 20+
-- one or more supported harness CLIs installed on the host machine
-
-Useful commands:
-
 ```bash
-# Launcher / daemon from a checkout
+# Launcher / daemon
 npm start
 
 # Bridge tests
@@ -152,18 +305,23 @@ npm ci
 npm run dev
 ```
 
-The pull-request CI type-checks and builds the web app, runs the regression suites and bridge tests on Linux/macOS/Windows, and produces a signed debug APK for test branches.
-
 ## Documentation
 
-- [Harness 3 roadmap](docs/HARNESS_3_ROADMAP.md)
-- [Nitsuga / TaskDesk integration plan](docs/NITSUGA_TASKDESK_INTEGRATION_PLAN.md)
-- [Harness dependency notes](docs/DEPENDENCIES.md)
-- [Legacy/full reference](REFERENCE.md)
+- [Quick start and launcher options](docs/QUICK_START.md)
+- [Harness Remote 3 product and architecture](docs/HARNESS_3_ROADMAP.md)
+- [Harness capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md)
+- [Dependency and adapter notes](docs/DEPENDENCIES.md)
+- [Backend-specific reference](REFERENCE.md)
 - [Contributing](CONTRIBUTING.md)
 
-## Project status
+## Help shape Harness Remote 3
 
-Harness Remote is moving toward a machine-first, task-first model while keeping compatibility with existing per-harness installations during the transition.
+If the idea of **native Sessions across coding agents and devices** matches how you want to work, star the repository, try the v3 checkpoint and report the workflows that matter most to you.
 
-The immediate v3 goal is stability: every supported harness must route to the correct sessions and models, task launch must preserve project/workspace ownership, web and Android must behave consistently, and the exact candidate SHA must pass real-device testing before promotion to `main`.
+The goal is simple:
+
+> **Keep ownership of your tools. Keep ownership of your sessions. Change agents without losing the work.**
+
+---
+
+Apache-2.0

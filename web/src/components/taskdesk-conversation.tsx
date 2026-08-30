@@ -1,0 +1,603 @@
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { ATTACHMENT_MAX_COUNT, fileToAttachment, type AttachmentPart } from "../attachments"
+import type { CommandInfo, MessageEnvelope } from "../types"
+import { ChatIcon, CloseIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, PaperclipIcon, StopCircleIcon } from "../Icons"
+import "../taskdesk-conversation.css"
+import "../taskdesk-conversation-fixes.css"
+import "../taskdesk-history-loader.css"
+import { TaskDeskMessageContent } from "./taskdesk-message-content"
+
+const HARNESS_ICON_FILES: Record<string, string> = {
+  codex: "codex.svg",
+  claude: "claude.svg",
+  opencode: "opencode.svg",
+  omp: "omp.svg",
+  pi: "pi.svg"
+}
+
+function harnessIconUrl(backend: string | undefined): string | undefined {
+  if (!backend) return undefined
+  const file = HARNESS_ICON_FILES[backend.toLowerCase()]
+  return file ? `${import.meta.env.BASE_URL}harness-icons/${file}` : undefined
+}
+
+const NEAR_BOTTOM_PX = 96
+const COMPOSER_MAX_HEIGHT_PX = 180
+const JUMP_AFFORDANCE_MAX_THRESHOLD = 320
+const JUMP_AFFORDANCE_MIN_RANGE = 240
+
+type Props = {
+  messages: MessageEnvelope[]
+  agentLabel: string
+  agentBackend?: string
+  loading?: boolean
+  waiting?: boolean
+  ready?: boolean
+  hasMore?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => Promise<void> | void
+  draft: string
+  onDraftChange: (value: string) => void
+  commands?: CommandInfo[]
+  attachments?: AttachmentPart[]
+  attachmentsSupported?: boolean
+  onAttachmentsChange?: (attachments: AttachmentPart[]) => void
+  onAttachmentError?: (message: string) => void
+  onSend: () => Promise<void> | void
+  sending?: boolean
+  sendDisabled?: boolean
+  /** Disable editing as well as Send while the owning Session is not safely writable yet. */
+  composerDisabled?: boolean
+  onStop?: () => Promise<void> | void
+  stopping?: boolean
+  workingLabel?: string
+  showWaitingIndicator?: boolean
+  placeholder?: string
+  emptyText?: string
+  directory?: string
+  footerHint?: string
+  renderMessage?: (message: MessageEnvelope) => ReactNode
+}
+
+type TranscriptProps = Pick<Props,
+  "messages" | "agentLabel" | "agentBackend" | "loading" | "waiting" | "ready" | "hasMore" |
+  "loadingOlder" | "onLoadOlder" | "sending" | "workingLabel" | "showWaitingIndicator" | "emptyText" | "renderMessage"
+>
+
+type JumpAffordances = { top: boolean; bottom: boolean }
+
+function formatClock(timestamp: number): string {
+  if (!timestamp) return ""
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(timestamp)
+}
+
+function hasTouchFirstPointer(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches === true
+}
+
+function jumpAffordancesFor(element: HTMLElement): JumpAffordances {
+  const fromTop = Math.max(0, element.scrollTop)
+  const fromBottom = Math.max(0, element.scrollHeight - element.scrollTop - element.clientHeight)
+  const range = fromTop + fromBottom
+  if (range < JUMP_AFFORDANCE_MIN_RANGE) return { top: false, bottom: false }
+  const threshold = Math.min(JUMP_AFFORDANCE_MAX_THRESHOLD, range * 0.25)
+  return { top: fromTop > threshold, bottom: fromBottom > threshold }
+}
+
+const MessageBubble = memo(function MessageBubble({ message, agentLabel }: { message: MessageEnvelope; agentLabel: string }) {
+  const isUser = message.info.role === "user"
+  return (
+    <article className={`uw-message ${isUser ? "uw-message-user" : "uw-message-agent"}`}>
+      <div className={`uw-avatar ${isUser ? "uw-avatar-user" : "uw-avatar-agent"}`} aria-hidden="true">
+        {isUser ? "You" : agentLabel.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="uw-message-body">
+        <header>
+          <strong>{isUser ? "You" : agentLabel}</strong>
+          <time>{formatClock(message.info.time.created)}</time>
+        </header>
+        <TaskDeskMessageContent message={message} />
+      </div>
+    </article>
+  )
+})
+
+/**
+ * The reply, before it has any content.
+ *
+ * The wait used to be staged in its own containers: a "getting started" card appeared, was removed,
+ * and an agent message of a different shape took its place - and then said the same thing a second
+ * time in a status row underneath its own name. Two avatars, two names, one turn.
+ *
+ * There is one identity row per reply and the wait happens *in* it. The row is the agent's avatar
+ * and the line beside it; while the turn is live that line reads "<agent> is getting started" and
+ * then "<agent> is working", and when the turn ends it reads the agent's name. Content, reasoning
+ * and tool cards fill in underneath the row that is already there. Nothing is added, removed or
+ * duplicated as the turn progresses - one line changes what it says.
+ */
+const ThinkingIndicator = memo(function ThinkingIndicator({ agentLabel, agentBackend, workingLabel }: { agentLabel: string; agentBackend?: string; workingLabel?: string }) {
+  const icon = harnessIconUrl(agentBackend)
+  return (
+    <article className="uw-message uw-message-agent uw-message-pending">
+      <div className="uw-avatar uw-avatar-agent" aria-hidden="true">
+        {icon ? <img src={icon} alt="" /> : agentLabel.slice(0, 2).toUpperCase()}
+      </div>
+      <div className="uw-message-body">
+        <header>
+          <strong className="uw-message-working" role="status" aria-live="polite">
+            {workingLabel || `${agentLabel} is working`}
+            <span className="bui-typing" aria-hidden="true"><i /><i /><i /></span>
+          </strong>
+        </header>
+      </div>
+    </article>
+  )
+})
+
+function transcriptPropsEqual(previous: TranscriptProps, next: TranscriptProps): boolean {
+  return previous.messages === next.messages
+    && previous.agentLabel === next.agentLabel
+    && previous.agentBackend === next.agentBackend
+    && previous.loading === next.loading
+    && previous.waiting === next.waiting
+    && previous.ready === next.ready
+    && previous.hasMore === next.hasMore
+    && previous.loadingOlder === next.loadingOlder
+    && previous.sending === next.sending
+    && previous.workingLabel === next.workingLabel
+    && previous.showWaitingIndicator === next.showWaitingIndicator
+    && previous.emptyText === next.emptyText
+}
+
+/**
+ * The transcript is deliberately memoized separately from the composer. Parent-owned draft state
+ * changes on every keystroke, but a long conversation must not even walk its message array unless
+ * transcript data or transcript state changed. Callback identities are intentionally ignored by the
+ * comparator: a render that matters to the transcript also changes messages, agent identity or one
+ * of the explicit transcript state props.
+ */
+const ConversationTranscript = memo(function ConversationTranscript({
+  messages,
+  agentLabel,
+  agentBackend,
+  loading = false,
+  waiting = false,
+  ready = true,
+  hasMore = false,
+  loadingOlder = false,
+  onLoadOlder,
+  sending = false,
+  workingLabel,
+  showWaitingIndicator = true,
+  emptyText = "This conversation has no messages yet.",
+  renderMessage
+}: TranscriptProps) {
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const nearBottomRef = useRef(true)
+  const preservingOlderRef = useRef(false)
+  const loadOlderRef = useRef(onLoadOlder)
+  const followFrameRef = useRef<number | undefined>(undefined)
+  const scrollFrameRef = useRef<number | undefined>(undefined)
+  const previousSendingRef = useRef(false)
+  const [jumpAffordances, setJumpAffordances] = useState<JumpAffordances>({ top: false, bottom: false })
+  loadOlderRef.current = onLoadOlder
+
+  function refreshJumpAffordances(element: HTMLElement) {
+    const next = jumpAffordancesFor(element)
+    setJumpAffordances((current) => current.top === next.top && current.bottom === next.bottom ? current : next)
+  }
+
+  useEffect(() => () => {
+    if (followFrameRef.current !== undefined) window.cancelAnimationFrame(followFrameRef.current)
+    if (scrollFrameRef.current !== undefined) window.cancelAnimationFrame(scrollFrameRef.current)
+  }, [])
+
+  useEffect(() => {
+    const transcript = transcriptRef.current
+    const startedSend = sending && !previousSendingRef.current
+    previousSendingRef.current = sending
+    if (!transcript || loading || !ready || preservingOlderRef.current) return
+
+    // A deliberate send re-enters follow mode. After that, the user's scroll position wins. Status
+    // changes such as Working -> Needs attention never move the transcript by themselves.
+    if (startedSend) nearBottomRef.current = true
+    if (!nearBottomRef.current || followFrameRef.current !== undefined) return
+
+    const followTail = () => {
+      const current = transcriptRef.current
+      if (!current || preservingOlderRef.current || !nearBottomRef.current) return
+      current.scrollTop = current.scrollHeight
+      refreshJumpAffordances(current)
+    }
+
+    followFrameRef.current = window.requestAnimationFrame(() => {
+      followTail()
+      // Sending changes both the transcript (optimistic user turn) and the composer geometry. A
+      // second frame is intentional only for that explicit Send: it waits for both layouts to settle
+      // before pinning the new user bubble above the composer. Streaming updates keep the normal
+      // single-frame follow behavior, and an upward user scroll still cancels follow via nearBottom.
+      if (startedSend && nearBottomRef.current && !preservingOlderRef.current) {
+        followFrameRef.current = window.requestAnimationFrame(() => {
+          followFrameRef.current = undefined
+          followTail()
+        })
+      } else {
+        followFrameRef.current = undefined
+      }
+    })
+  }, [messages, loading, ready, sending])
+
+  // Content can become scrollable without a scroll event (initial load, tool expansion, streaming).
+  // Refresh on transcript-state changes so the buttons never wait for the user to move first.
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const current = transcriptRef.current
+      if (current) refreshJumpAffordances(current)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [messages, loading, ready, sending, waiting])
+
+  async function loadOlder() {
+    const requestOlder = loadOlderRef.current
+    if (!requestOlder || !hasMore || loadingOlder) return
+    const transcript = transcriptRef.current
+    const previousTop = transcript?.scrollTop ?? 0
+
+    // History loading is an explicit move away from the live tail. Cancel any already-scheduled
+    // follow frame before it can race the prepend and snap the transcript back to the newest turn.
+    nearBottomRef.current = false
+    preservingOlderRef.current = true
+    if (followFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(followFrameRef.current)
+      followFrameRef.current = undefined
+    }
+
+    try {
+      await requestOlder()
+      window.requestAnimationFrame(() => {
+        const current = transcriptRef.current
+        if (current) {
+          // The history affordance is reached at the top of the transcript. Keep the same top-relative
+          // position so the newly prepended messages are actually revealed. Compensating by their
+          // added height could put a short initial page straight back at the bottom of the chat.
+          current.scrollTop = Math.max(0, Math.min(previousTop, current.scrollHeight - current.clientHeight))
+          nearBottomRef.current = false
+          refreshJumpAffordances(current)
+        }
+        preservingOlderRef.current = false
+      })
+    } catch (error) {
+      preservingOlderRef.current = false
+      throw error
+    }
+  }
+
+  function jumpToTop() {
+    const current = transcriptRef.current
+    if (!current) return
+    nearBottomRef.current = false
+    current.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  function jumpToBottom() {
+    const current = transcriptRef.current
+    if (!current) return
+    nearBottomRef.current = true
+    current.scrollTo({ top: current.scrollHeight, behavior: "smooth" })
+  }
+
+  return (
+    <div className="uw-transcript-shell">
+      <div
+        className="uw-transcript"
+        role="log"
+        aria-label="Conversation transcript"
+        ref={transcriptRef}
+        onWheel={(event) => {
+          if (event.deltaY < 0) nearBottomRef.current = false
+        }}
+        onScroll={(event) => {
+          const element = event.currentTarget
+          if (scrollFrameRef.current !== undefined) return
+          scrollFrameRef.current = window.requestAnimationFrame(() => {
+            scrollFrameRef.current = undefined
+            nearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= NEAR_BOTTOM_PX
+            refreshJumpAffordances(element)
+          })
+        }}
+      >
+        {loading || !ready ? (
+          <div className="uw-empty-panel"><LoadingIcon size={22} /><strong>Loading conversation…</strong></div>
+        ) : (
+          <>
+            {hasMore ? (
+              <div className="uw-history-loader">
+                <button
+                  type="button"
+                  className="uw-history-load"
+                  disabled={loadingOlder}
+                  onClick={() => void loadOlder()}
+                  title={loadingOlder ? "Loading earlier messages" : "Load earlier messages"}
+                  aria-label={loadingOlder ? "Loading earlier messages" : "Load earlier messages"}
+                >
+                  {loadingOlder ? <LoadingIcon size={13} /> : <JumpToTopIcon size={13} />}
+                  <span>{loadingOlder ? "Loading…" : "Earlier messages"}</span>
+                </button>
+              </div>
+            ) : null}
+            {messages.length === 0 && !waiting ? (
+              <div className="uw-empty-panel"><ChatIcon size={24} /><strong>{emptyText}</strong></div>
+            ) : renderMessage
+              ? messages.map((message) => renderMessage(message))
+              : messages.map((message) => (
+                  <MessageBubble key={message.info.id} message={message} agentLabel={agentLabel} />
+                ))}
+          </>
+        )}
+        {sending || (waiting && showWaitingIndicator) ? <ThinkingIndicator agentLabel={agentLabel} agentBackend={agentBackend} workingLabel={workingLabel} /> : null}
+      </div>
+
+      {jumpAffordances.top || jumpAffordances.bottom ? (
+        <div className="uw-transcript-jumps" aria-label="Conversation navigation">
+          {jumpAffordances.top ? (
+            <button type="button" className="uw-transcript-jump" onClick={jumpToTop} title="Jump to top" aria-label="Jump to top">
+              <JumpToTopIcon size={18} />
+            </button>
+          ) : null}
+          {jumpAffordances.bottom ? (
+            <button type="button" className="uw-transcript-jump" onClick={jumpToBottom} title="Jump to bottom" aria-label="Jump to bottom">
+              <JumpToBottomIcon size={18} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}, transcriptPropsEqual)
+
+/**
+ * The conversation surface is deliberately product-agnostic. A Native Session and a Task provide
+ * the same ordered native transcript and callbacks; this component owns how that transcript is
+ * displayed, paged, scrolled and continued so those two products cannot slowly diverge.
+ */
+export function TaskDeskConversation({
+  messages,
+  agentLabel,
+  agentBackend,
+  loading = false,
+  waiting = false,
+  ready = true,
+  hasMore = false,
+  loadingOlder = false,
+  onLoadOlder,
+  draft,
+  onDraftChange,
+  commands = [],
+  attachments = [],
+  attachmentsSupported = false,
+  onAttachmentsChange,
+  onAttachmentError,
+  onSend,
+  sending = false,
+  sendDisabled = false,
+  composerDisabled = false,
+  onStop,
+  stopping = false,
+  workingLabel,
+  showWaitingIndicator = true,
+  placeholder,
+  emptyText = "This conversation has no messages yet.",
+  directory,
+  footerHint,
+  renderMessage
+}: Props) {
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const composerFrameRef = useRef<number | undefined>(undefined)
+  const [commandIndex, setCommandIndex] = useState(0)
+  const touchFirst = hasTouchFirstPointer()
+  const commandToken = draft.startsWith("/") && !draft.includes("\n") ? draft.slice(1) : ""
+  const commandMenuOpen = Boolean(draft.startsWith("/") && !draft.includes("\n") && !/\s/.test(commandToken) && commands.length)
+  const commandMatches = useMemo(() => {
+    if (!commandMenuOpen) return []
+    const query = commandToken.toLowerCase()
+    return commands
+      .filter((command) => command.name.toLowerCase().includes(query) || (command.description || "").toLowerCase().includes(query))
+      .slice(0, 8)
+  }, [commands, commandMenuOpen, commandToken])
+  const canSend = Boolean(draft.trim() && !sending && !waiting && !sendDisabled && !composerDisabled && ready)
+  // A phone has no Ctrl or Cmd key, so telling a touch user to press Ctrl/Cmd+Enter named the one
+  // way to send that they do not have. Enter inserts a newline there; the Send button is the action.
+  const hint = footerHint ?? (touchFirst ? "Enter adds a line. Tap Send to send." : "Enter to send · Shift+Enter for a newline")
+
+  useEffect(() => {
+    if (composerFrameRef.current !== undefined) window.cancelAnimationFrame(composerFrameRef.current)
+    composerFrameRef.current = window.requestAnimationFrame(() => {
+      composerFrameRef.current = undefined
+      const composer = composerRef.current
+      if (!composer) return
+      composer.style.height = "auto"
+      composer.style.height = `${Math.min(COMPOSER_MAX_HEIGHT_PX, Math.max(66, composer.scrollHeight))}px`
+    })
+    return () => {
+      if (composerFrameRef.current !== undefined) {
+        window.cancelAnimationFrame(composerFrameRef.current)
+        composerFrameRef.current = undefined
+      }
+    }
+  }, [draft])
+
+  useEffect(() => {
+    setCommandIndex(0)
+  }, [commandToken])
+
+  function chooseCommand(command: CommandInfo) {
+    onDraftChange(`/${command.name} `)
+    window.requestAnimationFrame(() => composerRef.current?.focus())
+  }
+
+  function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (commandMatches.length) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault()
+        setCommandIndex((index) => (index + 1) % commandMatches.length)
+        return
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault()
+        setCommandIndex((index) => (index - 1 + commandMatches.length) % commandMatches.length)
+        return
+      }
+      if (event.key === "Enter" || event.key === "Tab") {
+        event.preventDefault()
+        chooseCommand(commandMatches[Math.min(commandIndex, commandMatches.length - 1)])
+        return
+      }
+    }
+    if (event.key !== "Enter") return
+    if (touchFirst) {
+      if (!event.ctrlKey && !event.metaKey) return
+    } else if (event.shiftKey) {
+      return
+    }
+    event.preventDefault()
+    if (canSend) void onSend()
+  }
+
+  return (
+    <div className="uw-conversation-core">
+      <ConversationTranscript
+        messages={messages}
+        agentLabel={agentLabel}
+        agentBackend={agentBackend}
+        loading={loading}
+        waiting={waiting}
+        ready={ready}
+        hasMore={hasMore}
+        loadingOlder={loadingOlder}
+        onLoadOlder={onLoadOlder}
+        sending={sending}
+        workingLabel={workingLabel}
+        showWaitingIndicator={showWaitingIndicator}
+        emptyText={emptyText}
+        renderMessage={renderMessage}
+      />
+
+      <div className="uw-composer-shell">
+        {attachments.length ? (
+          <div className="uw-composer-attachments" aria-label="Attached images">
+            {attachments.map((attachment, index) => (
+              <span className="uw-composer-attachment" key={`${attachment.filename}:${index}`}>
+                <strong>{attachment.filename}</strong>
+                <button
+                  type="button"
+                  onClick={() => onAttachmentsChange?.(attachments.filter((_, position) => position !== index))}
+                  aria-label={`Remove ${attachment.filename}`}
+                >
+                  <CloseIcon size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {/* A placeholder is not a label: it disappears as soon as the field has content, which left
+            the product's primary input unnamed for a screen reader.
+
+            `enterKeyHint` labels the soft keyboard's action key. Enter inserts a newline on a touch
+            device here, so promising "send" would name a behaviour that key does not have. */}
+        {commandMatches.length ? (
+          <div className="uw-command-suggestions" role="listbox" aria-label="Slash commands">
+            {commandMatches.map((command, index) => (
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === commandIndex}
+                className={index === commandIndex ? "active" : ""}
+                key={command.name}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseCommand(command)}
+              >
+                <strong>/${command.name}</strong>
+                {command.description ? <span>{command.description}</span> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <textarea
+          ref={composerRef}
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={onComposerKeyDown}
+          placeholder={waiting ? `${agentLabel} is working…` : placeholder || `Continue with ${agentLabel}…`}
+          rows={3}
+          enterKeyHint={touchFirst ? "enter" : "send"}
+          disabled={!ready || composerDisabled}
+          aria-label={`Message ${agentLabel}`}
+          aria-describedby="uw-composer-hint"
+        />
+        <div className="uw-composer-footer">
+          <span className="uw-composer-directory">{directory || ""}</span>
+          <div>
+            {attachmentsSupported ? (
+              <>
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={async (event) => {
+                    const room = Math.max(0, ATTACHMENT_MAX_COUNT - attachments.length)
+                    const chosen = Array.from(event.target.files ?? []).slice(0, room)
+                    event.target.value = ""
+                    if (!chosen.length) return
+                    try {
+                      const prepared = await Promise.all(chosen.map((file) => fileToAttachment(file)))
+                      onAttachmentsChange?.([...attachments, ...prepared])
+                    } catch (reason) {
+                      onAttachmentError?.(reason instanceof Error ? reason.message : String(reason))
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="uw-button"
+                  disabled={!ready || composerDisabled || sending || waiting || attachments.length >= ATTACHMENT_MAX_COUNT}
+                  onClick={() => attachmentInputRef.current?.click()}
+                  aria-label="Attach image"
+                  title="Attach image"
+                >
+                  <PaperclipIcon size={15} />
+                </button>
+              </>
+            ) : null}
+            <small id="uw-composer-hint">{hint}</small>
+            {waiting && onStop ? (
+              <button
+                type="button"
+                className="uw-button uw-button-danger"
+                disabled={stopping}
+                onClick={() => void onStop()}
+                aria-label={stopping ? "Stopping" : "Stop"}
+              >
+                {stopping ? <LoadingIcon size={15} /> : <StopCircleIcon size={15} />}
+                <span className="uw-button-label">{stopping ? "Stopping" : "Stop"}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="uw-button uw-button-primary"
+                disabled={!canSend}
+                onClick={() => void onSend()}
+                aria-label={sending ? "Sending" : "Send"}
+              >
+                {sending ? <LoadingIcon size={15} /> : "↑"}
+                <span className="uw-button-label">{sending ? "Sending" : "Send"}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

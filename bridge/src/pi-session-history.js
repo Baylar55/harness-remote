@@ -1,9 +1,11 @@
 import { createReadStream } from "node:fs"
-import { appendFile, readdir } from "node:fs/promises"
+import { appendFile, open, readdir } from "node:fs/promises"
 import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import path from "node:path"
 import { createInterface } from "node:readline"
+
+const BACKWARD_READ_BYTES = 64 * 1024
 
 function defaultSessionRoot() {
   if (process.env.PI_CODING_AGENT_SESSION_DIR) return process.env.PI_CODING_AGENT_SESSION_DIR
@@ -41,6 +43,48 @@ function messageError(message) {
   return { name: "HarnessTurnError", message: detail }
 }
 
+function messageEnvelope(record, sessionID) {
+  if (record?.type !== "message") return undefined
+  const role = record.message?.role
+  if (role !== "user" && role !== "assistant") return undefined
+  const messageID = record.id
+  if (typeof messageID !== "string") return undefined
+  const parts = messageParts(record.message?.content, messageID)
+  const error = messageError(record.message)
+  if (parts.length === 0 && !error) return undefined
+  const created = Date.parse(record.timestamp ?? "")
+  return {
+    info: {
+      id: messageID,
+      role,
+      sessionID,
+      time: { created: Number.isFinite(created) ? created : Date.now() },
+      ...(error ? { error } : {})
+    },
+    parts
+  }
+}
+
+function modelSelection(providerID, modelID) {
+  if (typeof providerID !== "string" || !providerID || typeof modelID !== "string" || !modelID) return undefined
+  return { providerID, modelID }
+}
+
+/** PI persists both explicit model_change entries and provider/model on terminal assistant messages. */
+function modelSelectionFromRecord(record) {
+  if (record?.type === "model_change") return modelSelection(record.provider, record.modelId)
+  if (record?.type === "message" && record.message?.role === "assistant") {
+    return modelSelection(record.message.provider, record.message.model)
+  }
+  return undefined
+}
+
+function thinkingLevelFromRecord(record) {
+  return record?.type === "thinking_level_change" && typeof record.thinkingLevel === "string" && record.thinkingLevel
+    ? record.thinkingLevel
+    : undefined
+}
+
 async function readRecords(file) {
   const records = []
   const lines = createInterface({ input: createReadStream(file), crlfDelay: Infinity })
@@ -53,6 +97,121 @@ async function readRecords(file) {
     }
   }
   return records
+}
+
+function encodePageCursor(offset, target) {
+  return Buffer.from(JSON.stringify({ offset, target }), "utf8").toString("base64url")
+}
+
+function decodePageCursor(value) {
+  try {
+    const parsed = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"))
+    if (!Number.isSafeInteger(parsed?.offset) || parsed.offset < 0 || typeof parsed?.target !== "string" || !parsed.target) {
+      return undefined
+    }
+    return parsed
+  } catch {
+    return undefined
+  }
+}
+
+function parseRecordBuffer(buffer) {
+  if (buffer.length > 0 && buffer[buffer.length - 1] === 0x0d) buffer = buffer.subarray(0, -1)
+  try {
+    const record = JSON.parse(buffer.toString("utf8"))
+    return record && typeof record === "object" ? record : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function readPiPage(file, sessionID, { limit = 100, before } = {}) {
+  const boundedLimit = Math.max(1, Math.min(500, Number(limit) || 100))
+  const handle = await open(file, "r")
+  try {
+    const { size } = await handle.stat()
+    const decoded = before ? decodePageCursor(before) : undefined
+    if (before && (!decoded || decoded.offset > size)) throw new Error("Invalid PI history cursor")
+
+    let cursor = decoded?.offset ?? size
+    let target = decoded?.target
+    let seekLeaf = !target
+    let matchedRequestedTarget = !target
+    let carry = Buffer.alloc(0)
+    const messages = []
+    let resumeCursor = null
+    let hasMore = false
+    let done = false
+    let selectedModel
+    let selectedVariant
+
+    while (cursor > 0 && !done) {
+      const start = Math.max(0, cursor - BACKWARD_READ_BYTES)
+      const chunk = Buffer.allocUnsafe(cursor - start)
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
+      const data = carry.length > 0
+        ? Buffer.concat([chunk.subarray(0, bytesRead), carry])
+        : chunk.subarray(0, bytesRead)
+
+      let lineEnd = data.length
+      const visit = (line, offset) => {
+        const record = parseRecordBuffer(line)
+        if (!record || typeof record.id !== "string") return
+        if (seekLeaf) {
+          target = record.id
+          seekLeaf = false
+          matchedRequestedTarget = true
+        }
+        if (record.id !== target) return
+        matchedRequestedTarget = true
+        // We are walking the selected branch newest -> oldest. The first model / thinking entries
+        // encountered are therefore the settings that own this native Session at its current leaf.
+        selectedModel ??= modelSelectionFromRecord(record)
+        selectedVariant ??= thinkingLevelFromRecord(record)
+        target = typeof record.parentId === "string" && record.parentId ? record.parentId : undefined
+        const message = messageEnvelope(record, sessionID)
+        if (message) {
+          if (messages.length < boundedLimit) {
+            messages.push(message)
+            if (messages.length === boundedLimit && target) resumeCursor = encodePageCursor(offset, target)
+          } else {
+            hasMore = true
+            done = true
+          }
+        }
+        if (!target) done = true
+      }
+
+      for (let index = data.length - 1; index >= 0 && !done; index -= 1) {
+        if (data[index] !== 0x0a) continue
+        const lineStart = index + 1
+        if (lineStart < lineEnd) visit(data.subarray(lineStart, lineEnd), start + lineStart)
+        lineEnd = index
+      }
+
+      if (start === 0) {
+        if (lineEnd > 0 && !done) visit(data.subarray(0, lineEnd), 0)
+        carry = Buffer.alloc(0)
+        cursor = 0
+      } else {
+        carry = lineEnd > 0 ? Buffer.from(data.subarray(0, lineEnd)) : Buffer.alloc(0)
+        cursor = start
+      }
+    }
+
+    if (decoded && !matchedRequestedTarget) throw new Error("Invalid PI history cursor")
+    const model = selectedModel
+      ? { ...selectedModel, ...(selectedVariant ? { variant: selectedVariant } : {}) }
+      : undefined
+    return {
+      messages: messages.slice(0, boundedLimit).reverse(),
+      before: hasMore ? resumeCursor : null,
+      hasMore,
+      ...(model ? { model } : {})
+    }
+  } finally {
+    await handle.close()
+  }
 }
 
 export function createPiHistoryLoader(sessionRoot = defaultSessionRoot()) {
@@ -92,28 +251,16 @@ export function createPiHistoryLoader(sessionRoot = defaultSessionRoot()) {
     }
     branch.reverse()
 
-    const messages = []
-    for (const record of branch) {
-      if (record.type !== "message") continue
-      const role = record.message?.role
-      if (role !== "user" && role !== "assistant") continue
-      const messageID = record.id
-      const parts = messageParts(record.message?.content, messageID)
-      const error = messageError(record.message)
-      if (parts.length === 0 && !error) continue
-      const created = Date.parse(record.timestamp ?? "")
-      messages.push({
-        info: {
-          id: messageID,
-          role,
-          sessionID,
-          time: { created: Number.isFinite(created) ? created : Date.now() },
-          ...(error ? { error } : {})
-        },
-        parts
-      })
-    }
-    return messages
+    return branch.flatMap((record) => {
+      const message = messageEnvelope(record, sessionID)
+      return message ? [message] : []
+    })
+  }
+
+  loadPiHistory.page = async (sessionID, options = {}) => {
+    const file = await locateSession(sessionID)
+    if (!file) return { messages: [], before: null, hasMore: false }
+    return readPiPage(file, sessionID, options)
   }
 
   // PI's JSONL journal remains the source of truth for transcript reads even after ACP takes

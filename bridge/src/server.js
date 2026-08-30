@@ -1,6 +1,7 @@
 import http from "node:http"
 import { readdir, realpath } from "node:fs/promises"
 import path from "node:path"
+import { AcpPromptEchoFilter } from "./acp-prompt-echo-filter.js"
 import { AcpService } from "./acp-service.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
@@ -9,6 +10,43 @@ const ATTACHMENT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", 
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 const MAX_ATTACHMENT_TOTAL_BYTES = 15 * 1024 * 1024
+const MAX_MESSAGE_PAGE = 500
+
+/**
+ * Claude's ACP adapter can leave the service bookkeeping flag active after the visible turn has
+ * stopped producing protocol traffic. The prompt watchdog itself gives up after 300s, so this
+ * reporting grace is deliberately longer: it cannot make a legitimately active Claude turn idle
+ * before the transport would already consider that turn stale.
+ */
+export const CLAUDE_REPORTED_BUSY_STALE_MS = 360_000
+
+/**
+ * Correct only Claude's public presentation status. Internal AcpService busy state remains untouched
+ * because it also protects queueing, transcript merge and cache semantics.
+ *
+ * The previous version also trusted the bridge's Session activity timestamp. That timestamp is
+ * deliberately refreshed by generic session.updated events, including reconciliation work, so a
+ * historical Session could look "recent" forever even though Claude had no prompt in flight. For
+ * Claude the live transport request is the narrow corroboration signal we actually need: if there is
+ * no pending session/prompt, a leftover busy flag is stale presentation state and must read idle.
+ */
+export function corroborateClaudeSessionStatus(status, sessionID, pendingRequests, _lastActivityAt, now = Date.now()) {
+  if (!status || status.type !== "busy") return status
+  const prompts = (Array.isArray(pendingRequests) ? pendingRequests : []).filter(
+    (pending) => pending?.method === "session/prompt" && pending.sessionID === sessionID
+  )
+  if (prompts.length === 0) return { ...status, type: "idle" }
+
+  let newestProtocolActivity = 0
+  for (const pending of prompts) {
+    if (!Number.isFinite(pending.idleMs)) continue
+    newestProtocolActivity = Math.max(newestProtocolActivity, now - Math.max(0, pending.idleMs))
+  }
+  if (newestProtocolActivity && now - newestProtocolActivity >= CLAUDE_REPORTED_BUSY_STALE_MS) {
+    return { ...status, type: "idle" }
+  }
+  return status
+}
 
 /** base64 carries 3 bytes per 4 characters, so measure it rather than decoding megabytes to count them. */
 function base64ByteLength(value) {
@@ -72,14 +110,46 @@ function modelWireName(model) {
   return model.providerID && modelID ? `${model.providerID}/${modelID}` : undefined
 }
 
+function sameListedDirectory(left, right) {
+  if (!left || !right) return false
+  const normalize = (value) => {
+    const resolved = path.resolve(value).replace(/[\\/]+$/, "")
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved
+  }
+  return normalize(left) === normalize(right)
+}
+
+function listedSessionView(session, status, liveUpdatedAt = 0) {
+  const listedUpdated = Date.parse(session.updatedAt ?? "")
+  const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
+  const timestamp = Math.max(listedTimestamp, liveUpdatedAt)
+  return {
+    id: session.sessionId,
+    title: session.title || `Session ${String(session.sessionId).slice(0, 8)}`,
+    directory: session.cwd,
+    time: { created: timestamp, updated: timestamp },
+    summary: { additions: 0, deletions: 0, files: 0 },
+    model: undefined,
+    status
+  }
+}
+
+function messageLimit(url) {
+  const raw = url.searchParams.get("limit")
+  if (raw === null || raw === "") return undefined
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 1) throw new Error("Message limit must be a positive integer")
+  return Math.min(value, MAX_MESSAGE_PAGE)
+}
+
 /**
  * The app's model API is OpenCode's, which names a model `provider/model`. ACP has no such rule:
- * OMP and PI happen to use that shape, while Claude Code's adapter offers bare ids — `sonnet`,
+ * OMP and PI happen to use that shape, while Claude Code's adapter offers bare ids, `sonnet`,
  * `opus[1m]`. Splitting on "/" and requiring both halves silently dropped every one of them, which
  * is why that backend looked like it exposed no models at all.
  *
  * A bare id is presented under the backend's own name instead, so it reads and behaves like the
- * others — `claude/sonnet`. `AcpService.setModel` puts it back to the id the agent knows.
+ * others, `claude/sonnet`. `AcpService.setModel` puts it back to the id the agent knows.
  */
 function providersResponse(models, fallbackProviderID) {
   const providers = new Map()
@@ -106,18 +176,98 @@ function providersResponse(models, fallbackProviderID) {
 export function createBridgeServer({ config, acp, serviceOptions, machineRegistry }) {
   const backend = config.backend ?? "omp"
   const profile = harnessProfile(backend)
-  const service = new AcpService(acp, {
+  const serviceAcp = new AcpPromptEchoFilter(acp)
+  const service = new AcpService(serviceAcp, {
     ...serviceOptions,
-    maxCachedTranscripts: config?.maxCachedTranscripts ?? serviceOptions?.maxCachedTranscripts,
     actionProviders: profile.actionProviders,
     preferListedTitles: profile.preferListedTitles,
-    nativeRenameCommand: profile.nativeRenameCommand
+    nativeRenameCommand: profile.nativeRenameCommand,
+    journalPageWhileOwned: profile.journalPageWhileOwned !== false,
+    modelVariantConfigIDs: profile.modelVariantConfigIDs ?? []
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
+  const liveSessionActivity = new Map()
+  let sseClients = 0
+  const unsubscribeActivity = service.subscribe((event) => {
+    if (!event?.sessionId) return
+    if (event.type === "session.deleted") {
+      liveSessionActivity.delete(event.sessionId)
+      return
+    }
+    if (["session.created", "session.updated", "message.updated", "todo.updated"].includes(event.type)) {
+      liveSessionActivity.set(event.sessionId, Date.now())
+    }
+  })
+  const publicSessionStatus = (sessionID, fallbackActivityAt = 0) => {
+    const status = service.status(sessionID)
+    if (backend !== "claude") return status
+    const pendingRequests = acp.diagnostics?.()?.pendingRequests ?? []
+    const lastActivityAt = Math.max(liveSessionActivity.get(sessionID) ?? 0, Number(fallbackActivityAt) || 0)
+    const corroborated = corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt)
+    // The transcript is part of the same presentation: a Session that is reported idle must not keep
+    // its Activity sections on Working, which is what correcting the status alone left on screen.
+    if (status?.type === "busy" && corroborated.type === "idle") service.settleReportedIdleActivity(sessionID)
+    return corroborated
+  }
   const listVisibleSessions = async (directory) => {
-    const sessions = await service.listSessions(directory)
+    let sessions = await service.listSessions(directory)
+    if (backend === "claude") {
+      sessions = sessions.map((session) => ({
+        ...session,
+        status: publicSessionStatus(session.id, session.time?.updated)
+      }))
+    }
     if (!hiddenSessionIDs?.size) return sessions
     return sessions.filter((session) => !hiddenSessionIDs.has(session.id))
+  }
+  // TaskDesk only needs index metadata to render the Sessions list and status counts. Calling
+  // AcpService.listSessions here used to restore every persisted transcript snapshot into memory,
+  // so merely opening the app could retain gigabytes of historical messages. The experimental
+  // global listing and status route deliberately stay on the harness's lightweight session index.
+  // Live activity is tracked separately so an active Session still sorts to the top without reading
+  // its transcript. Invalid or missing harness timestamps stay at zero instead of pretending to be
+  // freshly updated on every poll.
+  const listVisibleSessionMetadata = async (directory) => {
+    const [sessions, deletedSessionIDs] = await Promise.all([
+      acp.listSessions(),
+      service.deletedSessionIDs()
+    ])
+    const visible = new Map(
+      sessions
+        .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
+        .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
+        .filter((session) => !deletedSessionIDs.has(session.sessionId))
+        .map((session) => {
+          const liveUpdatedAt = liveSessionActivity.get(session.sessionId) ?? 0
+          const listedUpdated = Date.parse(session.updatedAt ?? "")
+          const listedTimestamp = Number.isFinite(listedUpdated) ? listedUpdated : 0
+          const view = listedSessionView(
+            session,
+            publicSessionStatus(session.sessionId, Math.max(liveUpdatedAt, listedTimestamp)),
+            liveUpdatedAt
+          )
+          return [view.id, view]
+        })
+    )
+
+    // PI can create a valid writer Session before its lightweight ACP listing exposes it. Codex and
+    // other ACP adapters may also lack a native rename primitive even though Harness Remote can keep
+    // an explicit user title for the owned Session. Overlay only those already-owned identities:
+    // native discovery remains authoritative for every other Session and no transcript snapshot is
+    // restored merely to draw the rail.
+    for (const { session, titleOverride } of service.ownedSessionIndex(directory)) {
+      if (hiddenSessionIDs?.has(session.id) || deletedSessionIDs.has(session.id)) continue
+      const listed = visible.get(session.id)
+      if (!listed) {
+        visible.set(session.id, {
+          ...session,
+          status: publicSessionStatus(session.id, session.time?.updated)
+        })
+      } else if (titleOverride) {
+        visible.set(session.id, { ...listed, title: titleOverride })
+      }
+    }
+    return [...visible.values()]
   }
 
   const server = http.createServer(async (request, response) => {
@@ -143,6 +293,23 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           return
         }
         writeJSON(response, 200, machineRegistry.snapshot())
+        return
+      }
+      if (request.method === "GET" && url.pathname === "/v1/diagnostics") {
+        const memory = process.memoryUsage()
+        writeJSON(response, 200, {
+          pid: process.pid,
+          uptimeSeconds: Math.round(process.uptime()),
+          memory: {
+            rss: memory.rss,
+            heapTotal: memory.heapTotal,
+            heapUsed: memory.heapUsed,
+            external: memory.external,
+            arrayBuffers: memory.arrayBuffers
+          },
+          sseClients,
+          service: service.diagnostics()
+        })
         return
       }
       if (request.method === "GET" && (url.pathname === "/v1/health" || url.pathname === "/global/health")) {
@@ -171,21 +338,27 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           Connection: "keep-alive"
         })
         response.write(": connected\n\n")
+        sseClients += 1
         const unsubscribe = service.subscribe((event) => writeSSE(response, event.type, event))
         const heartbeat = setInterval(() => response.write(": ping\n\n"), config.heartbeatMs ?? 10_000)
         heartbeat.unref?.()
         request.on("close", () => {
           clearInterval(heartbeat)
           unsubscribe()
+          sseClients = Math.max(0, sseClients - 1)
         })
         return
       }
-      if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session" || url.pathname === "/experimental/session")) {
+      if (request.method === "GET" && url.pathname === "/experimental/session") {
+        writeJSON(response, 200, await listVisibleSessionMetadata(directory))
+        return
+      }
+      if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session")) {
         writeJSON(response, 200, await listVisibleSessions(directory))
         return
       }
       if (request.method === "GET" && url.pathname === "/session/status") {
-        const statuses = Object.fromEntries((await listVisibleSessions(directory)).map((session) => [session.id, service.status(session.id)]))
+        const statuses = Object.fromEntries((await listVisibleSessionMetadata(directory)).map((session) => [session.id, session.status]))
         writeJSON(response, 200, statuses)
         return
       }
@@ -228,6 +401,28 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
           return
         }
         if (request.method === "GET" && operation === "message") {
+          const limit = messageLimit(url)
+          // TaskDesk used to ask for the latest message of 18 sessions every four seconds. On ACP
+          // those reads materialise complete harness journals before slicing, so one tiny preview
+          // could cost an entire transcript. In daemon mode previews are intentionally omitted until
+          // the session index carries its own lightweight preview field. The UI already falls back
+          // to directory/summary metadata, and opening the session still loads the real transcript.
+          if (machineRegistry && limit === 1 && url.searchParams.get("refresh") !== "1") {
+            writeJSON(response, 200, [])
+            return
+          }
+          if (limit !== undefined || url.searchParams.has("before")) {
+            const page = await service.messagePage(sessionID, {
+              limit: limit ?? 100,
+              before: url.searchParams.get("before") || undefined,
+              refresh: url.searchParams.get("refresh") === "1"
+            })
+            if (page.before) response.setHeader("X-Next-Cursor", page.before)
+            response.setHeader("X-Has-More", page.hasMore ? "1" : "0")
+            if (page.model) response.setHeader("X-Session-Model", encodeURIComponent(JSON.stringify(page.model)))
+            writeJSON(response, 200, page.messages)
+            return
+          }
           writeJSON(response, 200, await service.messages(sessionID, url.searchParams.get("refresh") === "1"))
           return
         }
@@ -293,6 +488,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
       writeJSON(response, 400, { error: error instanceof Error ? error.message : "Request failed" })
     }
   })
+  server.on("close", unsubscribeActivity)
   // The machine task launcher must use this exact service so task-created ACP sessions retain
   // their title, prompt, live messages, and ownership when the user switches harnesses.
   server.acpService = service

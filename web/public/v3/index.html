@@ -1028,14 +1028,14 @@
   <main id="top">
     <div class="shell">
       <header class="hero">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Harness Remote 3 · Session-first preview</div>
+        <div class="eyebrow"><span class="eyebrow-dot"></span> Harness Remote 3 · Official 3.0 release</div>
         <h1><span class="gradient-text">Your sessions.</span><br>Any coding agent. Any device.</h1>
         <p class="hero-copy">
           A <strong>local-first control plane for native AI coding-agent sessions.</strong>
           Start work in your normal CLI, pick up the same native Session remotely, and hand the work to another agent when it is the better tool for the next step.
         </p>
         <div class="hero-actions">
-          <a class="button primary" href="https://github.com/giuliastro/harness-remote/tree/checkpoint/v3-session-first-working-2026-08-25" target="_blank" rel="noopener">
+          <a class="button primary" href="https://github.com/giuliastro/harness-remote/releases/tag/v3.0.0" target="_blank" rel="noopener">
             Explore Harness Remote 3
             <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M6.1 3.8h9.1v9.1h-1.7V6.7l-8.7 8.7-1.2-1.2 8.7-8.7H6.1V3.8Z"/></svg>
           </a>
@@ -1256,23 +1256,23 @@
     <section>
       <div class="shell preview-grid">
         <div>
-          <div class="section-kicker">Available now as a preview</div>
+          <div class="section-kicker">Harness Remote 3.0 is here</div>
           <h2>Help shape Harness Remote 3.</h2>
           <p class="section-intro">
-            HR3 is the Session-first development line. The stable release line on <code style="color:#d5d8e1">main</code> remains 2.x while native-session correctness, reconnect behavior and cross-agent continuation are validated against real installations.
+            Harness Remote 3.0 is the official Session-first release. Native coding-agent Sessions, remote control, reconnect recovery and explicit cross-agent continuation now ship from <code style="color:#d5d8e1">main</code>.
           </p>
         </div>
 
         <div class="preview-card">
-          <strong>Try the v3 checkpoint</strong>
-          <p>Clone Harness Remote and switch to the current Session-first checkpoint. The checkpoint is intentionally ahead of the stable release line.</p>
+          <strong>Get Harness Remote 3.0</strong>
+          <p>Clone Harness Remote and use the official v3.0.0 tag, or follow main for the current stable release line.</p>
           <div class="code-box" id="clone-command">git clone https://github.com/giuliastro/harness-remote.git
 cd harness-remote
-git checkout checkpoint/v3-session-first-working-2026-08-25<button class="copy" type="button" aria-label="Copy clone command" title="Copy" onclick="copyCommand()">
+git checkout v3.0.0<button class="copy" type="button" aria-label="Copy clone command" title="Copy" onclick="copyCommand()">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" d="M9 8.5h8.5V17H9zM6.5 15.5H5A1.5 1.5 0 0 1 3.5 14V6.5A1.5 1.5 0 0 1 5 5h7.5A1.5 1.5 0 0 1 14 6.5V8"/></svg>
             </button></div>
           <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:16px">
-            <a class="button primary" href="https://github.com/giuliastro/harness-remote/tree/checkpoint/v3-session-first-working-2026-08-25" target="_blank" rel="noopener">Open v3 checkpoint</a>
+            <a class="button primary" href="https://github.com/giuliastro/harness-remote/releases/tag/v3.0.0" target="_blank" rel="noopener">Open v3.0.0 release</a>
             <a class="button secondary" href="https://github.com/giuliastro/harness-remote/issues" target="_blank" rel="noopener">Report a workflow</a>
           </div>
         </div>
@@ -1301,7 +1301,7 @@ git checkout checkpoint/v3-session-first-working-2026-08-25<button class="copy" 
       <span>Harness Remote · Apache-2.0</span>
       <div class="footer-links">
         <a href="https://github.com/giuliastro/harness-remote" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/giuliastro/harness-remote/blob/checkpoint/v3-session-first-working-2026-08-25/README.md" target="_blank" rel="noopener">README</a>
+        <a href="https://github.com/giuliastro/harness-remote/blob/main/README.md" target="_blank" rel="noopener">README</a>
         <a href="https://github.com/giuliastro/harness-remote/issues" target="_blank" rel="noopener">Issues</a>
         <a href="../">Current web client</a>
       </div>
@@ -1310,7 +1310,7 @@ git checkout checkpoint/v3-session-first-working-2026-08-25<button class="copy" 
 
   <script>
     function copyCommand() {
-      const command = "git clone https://github.com/giuliastro/harness-remote.git\\ncd harness-remote\\ngit checkout checkpoint/v3-session-first-working-2026-08-25";
+      const command = "git clone https://github.com/giuliastro/harness-remote.git\\ncd harness-remote\\ngit checkout v3.0.0";
       navigator.clipboard.writeText(command).then(() => {
         const button = document.querySelector(".copy");
         const original = button.innerHTML;

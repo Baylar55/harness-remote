@@ -2245,6 +2245,15 @@ a:focus-visible,
   line-height: 1;
 }
 
+/* A tool call the harness stopped reporting on: it is not running any more, and no outcome ever
+   arrived for it, so the row is marked as closed without borrowing the failure palette. */
+.message-tool-status-incomplete {
+  color: var(--muted);
+  font-size: var(--font-xs);
+  line-height: 1;
+  opacity: 0.7;
+}
+
 .message-tool-error.message-tool-output {
   color: var(--danger);
 }

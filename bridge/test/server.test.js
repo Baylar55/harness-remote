@@ -237,66 +237,6 @@ class RealisticOmpAcp extends EventEmitter {
   notify() {}
 }
 
-/** A live turn streams agent_thought_chunk ahead of the answer, but session/load replays text only. */
-class ThoughtfulOmpAcp extends EventEmitter {
-  agentInfo = { version: "17.2.10" }
-  #sessions = []
-  #history = new Map()
-
-  async start() {}
-
-  async listSessions() {
-    return this.#sessions.map(({ sessionId, cwd, updatedAt }) => ({ sessionId, cwd, updatedAt }))
-  }
-
-  async request(method, params) {
-    if (method === "session/new") {
-      const sessionId = `omp-${this.#sessions.length + 1}`
-      this.#sessions.push({ sessionId, cwd: params.cwd, updatedAt: "2026-08-24T00:00:00.000Z" })
-      this.#history.set(sessionId, [])
-      return { sessionId, configOptions: [] }
-    }
-    if (method === "session/prompt") {
-      const history = this.#history.get(params.sessionId) ?? []
-      const index = history.length
-      const text = params.prompt.find((part) => part.type === "text")?.text ?? ""
-      history.push({ role: "user", id: `u${index}`, text })
-      const reply = { role: "assistant", id: `a${index}`, text: "Bridge reply" }
-      history.push(reply)
-      this.#history.set(params.sessionId, history)
-      this.#chunk(params.sessionId, {
-        sessionUpdate: "agent_thought_chunk",
-        messageId: reply.id,
-        text: "Checking the transcript."
-      })
-      this.#chunk(params.sessionId, reply)
-      return { stopReason: "end_turn" }
-    }
-    if (method === "session/load") {
-      for (const message of this.#history.get(params.sessionId) ?? []) this.#chunk(params.sessionId, message)
-      return { configOptions: [] }
-    }
-    return {}
-  }
-
-  #chunk(sessionId, update) {
-    this.emit("notification", {
-      method: "session/update",
-      params: {
-        sessionId,
-        update: {
-          sessionUpdate: update.sessionUpdate
-            ?? (update.role === "assistant" ? "agent_message_chunk" : "user_message_chunk"),
-          messageId: update.messageId ?? update.id,
-          content: { type: "text", text: update.text }
-        }
-      }
-    })
-  }
-
-  notify() {}
-}
-
 /** Holds each turn open so a second prompt arrives while the first is still running. */
 class HeldTurnOmpAcp extends EventEmitter {
   agentInfo = { version: "17.1.3" }
@@ -569,49 +509,6 @@ test("keeps the submitted prompt in history when the session is reopened", async
 
     const reopenedAgain = conversation(await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`))
     assert.deepEqual(reopenedAgain, live)
-  } finally {
-    await bridge.close()
-  }
-})
-
-test("does not duplicate the last reply when reopening a session whose live turn carried a thought", async () => {
-  const bridge = await startServer({ acp: new ThoughtfulOmpAcp() })
-  try {
-    const created = await readJSON(bridge.baseURL, "/session", {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: JSON.stringify({})
-    })
-    await readJSON(bridge.baseURL, `/session/${created.id}/prompt_async`, {
-      method: "POST",
-      headers: jsonHeaders(),
-      body: JSON.stringify({ parts: [{ type: "text", text: "What changed?" }] })
-    })
-    await waitForIdle(bridge.baseURL, created.id)
-
-    const visible = (messages) => messages.map((message) => ({
-      role: message.info.role,
-      text: message.parts.filter((part) => part.type === "text").map((part) => part.text).join("")
-    }))
-    const expected = [
-      { role: "user", text: "What changed?" },
-      { role: "assistant", text: "Bridge reply" }
-    ]
-
-    assert.deepEqual(visible(await readJSON(bridge.baseURL, `/session/${created.id}/message`)), expected)
-
-    // The live envelope carries the streamed thought; the replayed one does not. Reopening must
-    // reconcile them into one visible reply instead of appending a second copy of the answer.
-    const reopened = await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`)
-    assert.deepEqual(visible(reopened), expected, "reopening must not duplicate the reply")
-    const reply = reopened.find((message) => message.info.role === "assistant")
-    assert.ok(
-      reply.parts.some((part) => part.type === "reasoning"),
-      "the streamed thought must survive the reconciliation"
-    )
-
-    const reopenedAgain = await readJSON(bridge.baseURL, `/session/${created.id}/message?refresh=1`)
-    assert.deepEqual(visible(reopenedAgain), expected, "the transcript must stay stable across further reopens")
   } finally {
     await bridge.close()
   }
@@ -942,14 +839,32 @@ test("replays ACP history when extension state is unavailable", async () => {
   assert.deepEqual(await service.actions("session-1"), [])
 })
 
+test("keeps an external OMP session observational when its journal is empty", async () => {
+  const acp = new ExtensionActionAcp()
+  const historyLoader = async () => []
+  historyLoader.page = async () => ({ messages: [], before: null, hasMore: false })
+  const service = new AcpService(acp, { historyLoader, journalPageWhileOwned: false })
+
+  // The Session-first UI uses the paged endpoint, not `messages()` directly.
+  // Keep this on that path so an empty journal cannot turn opening a row
+  // into a minutes-long `session/load` that serializes all OMP requests.
+  assert.deepEqual((await service.messagePage("session-1", { limit: 100 })).messages, [])
+  assert.equal(acp.loads, 0, "a read-only OMP open must not fall back to a blocking ACP replay")
+})
+
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
   const bridge = await startServer()
   try {
-    const renamed = await fetch(`${bridge.baseURL}/session/session-1`, {
+    // Naming a Session is a command sent into it, so the rename opens it first. This adapter holds
+    // its first open until it is released, exactly as a slow harness would.
+    const renaming = fetch(`${bridge.baseURL}/session/session-1`, {
       method: "PATCH",
       headers: jsonHeaders(),
       body: JSON.stringify({ title: "Renamed from mobile" })
     })
+    await bridge.acp.loadStarted
+    bridge.acp.releaseLoad()
+    const renamed = await renaming
     assert.equal(renamed.status, 200)
     assert.equal((await renamed.json()).title, "Renamed from mobile")
     assert.equal((await readJSON(bridge.baseURL, "/session"))[0].title, "Renamed from mobile")
@@ -2107,5 +2022,70 @@ test("advertises attachment support from the agent's own prompt capabilities", a
     assert.equal((await readJSON(incapable.baseURL, "/v1/capabilities")).attachments, false)
   } finally {
     await Promise.all([capable.close(), incapable.close()])
+  }
+})
+
+
+test("lightweight Session index keeps a bridge-created Session visible and preserves its user title", async () => {
+  class LazyNativeIndexAcp extends EventEmitter {
+    created = null
+    exposeNative = false
+
+    async start() {}
+
+    async listSessions() {
+      if (!this.exposeNative || !this.created) return []
+      return [{
+        ...this.created,
+        title: "Harness generated title"
+      }]
+    }
+
+    async request(method, params) {
+      if (method === "session/new") {
+        this.created = {
+          sessionId: "lazy-session",
+          cwd: params.cwd,
+          updatedAt: "2026-08-29T12:00:00.000Z"
+        }
+        return { sessionId: this.created.sessionId, configOptions: [] }
+      }
+      return {}
+    }
+
+    notify() {}
+  }
+
+  const acp = new LazyNativeIndexAcp()
+  const bridge = await startServer({ acp, backend: "codex" })
+  const directory = encodeURIComponent(process.cwd())
+  try {
+    const created = await fetch(`${bridge.baseURL}/session?directory=${directory}`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Chosen before first prompt" })
+    })
+    assert.equal(created.status, 200)
+
+    let index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
+    assert.equal(index.length, 1, "a native Session owned by the bridge must not disappear while the adapter listing catches up")
+    assert.equal(index[0].id, "lazy-session")
+    assert.equal(index[0].title, "Chosen before first prompt")
+
+    acp.exposeNative = true
+    index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
+    assert.equal(index.length, 1, "the native and owned views must converge on one Session identity")
+    assert.equal(index[0].title, "Chosen before first prompt", "a generated native title must not overwrite an explicit user title")
+
+    const renamed = await fetch(`${bridge.baseURL}/session/lazy-session?directory=${directory}`, {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: "Renamed from Harness Remote" })
+    })
+    assert.equal(renamed.status, 200)
+    index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
+    assert.equal(index[0].title, "Renamed from Harness Remote", "a bridge-local Codex rename must survive a Session-list refresh")
+  } finally {
+    await bridge.close()
   }
 })

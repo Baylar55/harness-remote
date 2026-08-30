@@ -32,6 +32,64 @@ test("POST launch returns the persisted running task", async () => {
   }
 })
 
+test("POST continue forwards prompt, harness, model and role", async () => {
+  const innerServer = new EventEmitter()
+  const calls = []
+  const server = createTaskLaunchServer({
+    innerServer,
+    config: { username: "", password: "", corsOrigins: [] },
+    taskRunController: {
+      async continue(id, options) {
+        calls.push([id, options])
+        return { id, status: "running", run: { id: "run-2", sessionId: "session-2", prompt: options.prompt } }
+      }
+    }
+  })
+  const port = await listen(server)
+  try {
+    const body = {
+      prompt: "Review the implementation",
+      agentId: "claude",
+      model: { providerID: "anthropic", modelID: "claude-test" },
+      role: "review"
+    }
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tasks/task-1/continue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    })
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).run.sessionId, "session-2")
+    assert.deepEqual(calls, [["task-1", body]])
+  } finally {
+    await close(server)
+  }
+})
+
+test("GET context returns an inspectable Task Context preview", async () => {
+  const innerServer = new EventEmitter()
+  const server = createTaskLaunchServer({
+    innerServer,
+    config: { username: "", password: "", corsOrigins: [] },
+    taskRunController: {
+      async context(id) {
+        return { version: 1, revision: 2, taskId: id, objective: "Implement OAuth", changedFiles: ["src/auth.js"] }
+      }
+    }
+  })
+  const port = await listen(server)
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/tasks/task-1/context`)
+    assert.equal(response.status, 200)
+    const context = await response.json()
+    assert.equal(context.taskId, "task-1")
+    assert.equal(context.revision, 2)
+    assert.deepEqual(context.changedFiles, ["src/auth.js"])
+  } finally {
+    await close(server)
+  }
+})
+
 test("launch maps coded missing tasks to 404 and delegates unrelated routes", async () => {
   const innerServer = new EventEmitter()
   let delegated = false
@@ -57,6 +115,12 @@ test("launch maps coded missing tasks to 404 and delegates unrelated routes", as
   }
 })
 
+test("launch status maps unavailable native Session to a conflict", () => {
+  const error = new Error("Session unavailable")
+  error.code = "session_unavailable"
+  assert.equal(launchStatus(error), 409)
+})
+
 test("launch status ignores prose when no structured code is present", () => {
   assert.equal(launchStatus(new Error("unknown task worktree unavailable")), 500)
 })
@@ -68,7 +132,7 @@ test("worktree inspection and cleanup use explicit task lifecycle actions", asyn
     innerServer,
     config: { username: "", password: "", corsOrigins: [] },
     taskRunController: {
-      async inspectWorkspace(id) { calls.push(["inspect", id]); return { managed: true, dirty: false, changeCount: 0 } },
+      async inspectWorkspace(id) { calls.push(["inspect", id]); return { managed: true, dirty: false, changeCount: 0, changedFiles: [] } },
       async cleanupWorkspace(id) { calls.push(["cleanup", id]); return { task: { id }, cleanup: { removed: true, branchDeleted: false } } }
     }
   })

@@ -1,11 +1,19 @@
-# Harness Remote
+# Harness Remote legacy and backend reference
 
-Harness Remote is a companion app for controlling coding-agent harnesses from phone or desktop, even when you are not at your main workstation.
-It is designed to make daily usage simple: connect to a backend, check active sessions, see progress, send new prompts or slash commands, and stop a running action when supported.
+This reference keeps the detailed adapter, packaging and compatibility notes that do not belong in
+the day-to-day product guide. For the current end-to-end path, start with the [README](README.md)
+and [quick start](docs/QUICK_START.md).
 
-## Supported Harnesses
+Harness Remote is a local-first control plane for the native coding-agent Sessions that already run
+on your machines. Add a machine, select a Project, and work with the native Sessions and harnesses
+it exposes. The current product does not require users to configure a separate backend profile for
+each harness.
 
-The app is backend-agnostic: you pick the harness in **Settings** and each one keeps its own saved connection, so you can switch between them without re-entering anything.
+> **Historical UI note:** screenshots and interface walkthroughs below document older client
+> surfaces retained for compatibility context. Their labels and navigation should not be treated as
+> the current v3 product guide; use the README for the current machine, Project and Session flow.
+
+## Supported harnesses and compatibility adapters
 
 | Harness | Status | How it connects |
 |---|---|---|
@@ -22,7 +30,7 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
 
 > **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
-## Screenshots
+## Legacy screenshots
 
 <!-- A raw table with 50% columns, rather than a markdown one: GitHub sizes markdown table columns
      from their content, and "Sessions" is a wider heading than "Detail", so that column took ~14px
@@ -41,7 +49,7 @@ Support levels differ by what each harness exposes. The [OpenCode](#opencode-ser
   </tr>
 </table>
 
-## What It Can Do
+## Legacy feature reference
 
 Everything in the first group works on all five harnesses. The rest depends on what the harness
 exposes, so each entry says where it applies; the app hides what a backend cannot do rather than
@@ -86,7 +94,7 @@ Depending on the harness:
   [`@baylarsadigov/omp-undo-redo`](https://github.com/Baylar55/omp-undo-redo), which from version
   1.2.0 restores supported file changes as well as the conversation, in Git and non-Git workspaces
 
-## Desktop Mode
+## Legacy desktop layout notes
 
 The app is one build with two layouts, and there is no switch to flip: open it in a window at least
 781px wide and it rearranges itself into a two-pane desktop layout. Narrow the window below that and
@@ -272,8 +280,9 @@ The default ACP launch is `omp acp`. The bridge can launch another ACP adapter w
 ```bash
 npx --yes ./bridge \
   --acp-command npx \
-  --acp-arg -y \
-  --acp-arg @automatalabs/pi-acp@0.2.5
+  --acp-arg --yes \
+  --acp-arg --package=@automatalabs/pi-acp@0.5.0 \
+  --acp-arg pi-acp
 ```
 
 The preferred environment variables are `HARNESS_REMOTE_ACP_COMMAND` and
@@ -387,7 +396,7 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `pi` backend defaults to `npx -y @automatalabs/pi-acp@0.2.5`. The version is pinned
+The `pi` backend defaults to `npx --yes --package=@automatalabs/pi-acp@0.5.0 pi-acp`. The version is pinned
 deliberately: an unpinned default failed with `notarget` when an upstream release appeared in
 the registry index before its tarball could be fetched. Use `--acp-command` and repeated
 `--acp-arg` options to track a newer adapter, or to launch one installed globally or from a

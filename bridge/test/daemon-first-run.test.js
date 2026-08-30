@@ -5,8 +5,8 @@ import { parseDaemonOptions } from "../src/daemon-cli.js"
 const detect = (backend = "pi") => () => ({ backend, detected: ["pi", "opencode"], mode: "daemon" })
 
 // A daemon is started once per machine and is expected to work out what that machine has. The
-// shared bridge parser defaults to `omp`, which is right for the standalone bridge — one server is
-// one harness and the user names it — and wrong here: a phone with PI and OpenCode installed
+// shared bridge parser defaults to `omp`, which is right for the standalone bridge - one server is
+// one harness and the user names it - and wrong here: a phone with PI and OpenCode installed
 // announced `omp` as its primary and then failed with `spawn omp ENOENT`.
 test("a daemon started without --backend resolves one from PATH", () => {
   assert.equal(parseDaemonOptions([], {}, detect()).config.backend, "pi")
@@ -26,8 +26,8 @@ test("a machine with no supported agent is refused rather than defaulted", () =>
   assert.throws(() => parseDaemonOptions([], {}, empty), /No supported agent CLI/)
 })
 
-// 15 seconds is not a universal truth. Under proot on a phone — the environment this project keeps
-// optimising for — OpenCode's first start routinely exceeds it, and the host then stays unavailable
+// 15 seconds is not a universal truth. Under proot on a phone - the environment this project keeps
+// optimising for - OpenCode's first start routinely exceeds it, and the host then stays unavailable
 // for the life of the daemon.
 test("the managed OpenCode readiness timeout can be raised", () => {
   assert.equal(parseDaemonOptions([], {}, detect()).openCodeTimeout, 15000)
@@ -45,9 +45,23 @@ test("an ACP adapter already on PATH is preferred over fetching one", async () =
   const installed = resolveAcpLaunch(harnessProfile("pi"), { find: (name) => name === "pi-acp" ? "/usr/bin/pi-acp" : null })
   assert.deepEqual(installed, { command: "/usr/bin/pi-acp", args: [], source: "path" })
 
-  const fetched = resolveAcpLaunch(harnessProfile("pi"), { find: () => null })
-  assert.equal(fetched.source, "npx")
-  assert.ok(fetched.args.includes("@automatalabs/pi-acp@0.2.5"))
+  // A scoped package spec is not itself a command. Real npm/npx can install the package successfully
+  // and then hand its literal package spec to /bin/sh, which exits 127. Always put the package on the
+  // temporary PATH explicitly and name the published executable. Keep this exact for all adapters
+  // that share the fallback seam so PI, Claude and Codex cannot regress independently.
+  const expectedFallbacks = {
+    pi: ["--yes", "--package=@automatalabs/pi-acp@0.5.0", "pi-acp"],
+    claude: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.63.0", "claude-agent-acp"],
+    codex: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"]
+  }
+  for (const [backend, args] of Object.entries(expectedFallbacks)) {
+    const profile = harnessProfile(backend)
+    const fetched = resolveAcpLaunch(profile, { find: () => null })
+    assert.equal(fetched.source, "npx")
+    assert.equal(fetched.command, process.platform === "win32" ? "npx.cmd" : "npx")
+    assert.deepEqual(fetched.args, args)
+    assert.equal(fetched.args.at(-1), profile.adapterCommand)
+  }
 
   // OMP speaks ACP itself, so there is no adapter to look for and nothing to prefer.
   assert.deepEqual(resolveAcpLaunch(harnessProfile("omp"), { find: () => "/never/used" }), {

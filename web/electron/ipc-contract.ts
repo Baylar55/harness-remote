@@ -73,6 +73,9 @@ export type DesktopRequestResult =
 export type DesktopEventSubscriptionOptions = {
   scope: "global" | "project"
   directory?: string
+  /** Optional TaskDesk route within the already approved machine profile. */
+  backend?: BackendKind
+  agentId?: string
 }
 
 export type DesktopEvent = {
@@ -126,7 +129,7 @@ export function isDesktopMenuCommand(value: unknown): value is DesktopMenuComman
 }
 
 /**
- * The renderer owns what the menu says and when each item applies — it is the side that knows the
+ * The renderer owns what the menu says and when each item applies. It is the side that knows the
  * language, the connected harness and the selected session. Main renders whatever it is handed and
  * echoes clicks back as command ids, so the platform menu and the in-app one stay one implementation
  * rather than two that drift.
