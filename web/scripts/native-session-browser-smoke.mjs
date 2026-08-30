@@ -691,10 +691,13 @@ async function assertMobileDeleteTransitionContract(browser) {
   }
   assert.equal(typeof releaseBlockedSessionList, "function", "delete fixture never reached the post-delete Session refresh")
 
-  const deletingRow = page.getByRole("button", { name: /PI v3-first regression session.*Deleting/i })
+  const deletingRow = page.locator(".hr-native-session-row.deleting")
   await deletingRow.waitFor({ state: "visible", timeout: 10_000 })
+  assert.equal(await deletingRow.count(), 1, "exactly one stale Session row must own the deletion transition")
   assert.equal(await deletingRow.isDisabled(), true, "a server-deleted Session must not remain clickable while the rail is stale")
-  assert.match(await deletingRow.innerText(), /Deleting/i, "stale deleted Session must explain its transition")
+  const deletingText = await deletingRow.innerText()
+  assert.match(deletingText, /PI v3-first regression session/, "deletion transition must stay attached to the Session that was deleted")
+  assert.match(deletingText, /Deleting|Eliminazione/i, "stale deleted Session must explain its transition")
   assert.equal(await deletingRow.locator("svg").count() > 0, true, "deleting Session row must expose a loading indicator")
 
   releaseBlockedSessionList?.()
