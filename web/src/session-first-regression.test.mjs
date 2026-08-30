@@ -202,7 +202,14 @@ for (const prefix of ['native-session-prompt.v1', 'native-session-command.v1', '
 }
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
 assert.ok(standalone.includes('<NativeSessionHome'), 'Session-first navigation must remain native discovery based')
-assert.ok(standalone.includes('<NativeSessionActions target={selected} onDeleted={handleSessionDeleted} />'), 'open Session header must own the delete action')
+assert.ok(
+  standalone.includes('<NativeSessionActions')
+    && standalone.includes('target={selected}')
+    && standalone.includes('onDeleteStarted={handleSessionDeleteStarted}')
+    && standalone.includes('onDeleteFailed={handleSessionDeleteFailed}')
+    && standalone.includes('onDeleted={handleSessionDeleted}'),
+  'open Session header must own the delete action and its optimistic/rollback lifecycle'
+)
 assert.ok(standalone.includes('<NativeSessionTitle target={selected} onRenamed={handleSessionRenamed} />'), 'open Session header must own rename as an inline edit of its own heading')
 assert.ok(standalone.includes('<CommandPalette') && standalone.includes('event.key.toLowerCase() === "k"'), 'Session-first must restore the Ctrl/Cmd+K command palette')
 assert.ok(conversation.includes('uw-command-suggestions') && conversation.includes('chooseCommand'), 'the shared composer must restore keyboard-friendly slash command discovery')
