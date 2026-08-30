@@ -330,6 +330,9 @@ function NativeSessionsWorkspace({
   // return an identical snapshot, so the Session list needs an explicit signal to re-read its
   // Sessions after a rename or delete instead of waiting up to 30s for its own refresh.
   const [listRevision, setListRevision] = useState(0)
+  // A successful DELETE is authoritative before the next Session-index read completes. Keep that
+  // stale rail row as a disabled "Deleting..." tombstone instead of briefly presenting it as usable.
+  const [deletingSessionKeys, setDeletingSessionKeys] = useState<Set<string>>(() => new Set())
   // Machines answering is only the first half of starting up; the Session list is the half the user
   // is actually waiting for. See the startup states below.
   const [sessionsDiscovered, setSessionsDiscovered] = useState(machines.length === 0)
@@ -599,6 +602,12 @@ function NativeSessionsWorkspace({
   }
 
   function handleSessionDeleted(key: string) {
+    setDeletingSessionKeys((current) => {
+      if (current.has(key)) return current
+      const next = new Set(current)
+      next.add(key)
+      return next
+    })
     setListRevision((value) => value + 1)
     if (selected?.key !== key) return
     setSelected(null)
@@ -606,6 +615,15 @@ function NativeSessionsWorkspace({
     setMobileDetailOpen(false)
     setRevision((value) => value + 1)
   }
+
+  const handleSessionDeletionSettled = useCallback((key: string) => {
+    setDeletingSessionKeys((current) => {
+      if (!current.has(key)) return current
+      const next = new Set(current)
+      next.delete(key)
+      return next
+    })
+  }, [])
 
   function handleSessionRenamed(session: Session, title: string) {
     const nextTitle = session.title?.trim() || title
@@ -685,6 +703,8 @@ function NativeSessionsWorkspace({
             onDiscoveredChange={setSessionsDiscovered}
             selectedKey={selected?.key}
             selectedState={selectedState}
+            deletingKeys={deletingSessionKeys}
+            onDeletionSettled={handleSessionDeletionSettled}
           />
         </aside>
         {/* Ported from the 2.x shell, which persisted its sidebar width while this one did not, and
