@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   tag:
@@ -33,18 +34,28 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists; nothing to do."
-            exit 0
+            echo "$TAG already exists; keeping the existing release tag."
+          else
+            BODY=$(git log -1 --format=%b "$GITHUB_SHA")
+            if [ -z "${BODY//[[:space:]]/}" ]; then
+              echo "::error::Release commit has no body; annotated release notes would be empty." >&2
+              exit 1
+            fi
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git log -1 --format=%B "$GITHUB_SHA" > "$RUNNER_TEMP/release-tag-message.txt"
+            git tag -a "$TAG" -F "$RUNNER_TEMP/release-tag-message.txt" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
           fi
 
-          BODY=$(git log -1 --format=%b "$GITHUB_SHA")
-          if [ -z "${BODY//[[:space:]]/}" ]; then
-            echo "::error::Release commit has no body; annotated release notes would be empty." >&2
-            exit 1
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git log -1 --format=%B "$GITHUB_SHA" > "$RUNNER_TEMP/release-tag-message.txt"
-          git tag -a "$TAG" -F "$RUNNER_TEMP/release-tag-message.txt" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG"
+      # Tag pushes made with GITHUB_TOKEN intentionally do not trigger other workflows. Dispatching
+      # the tag-aware builders is the supported exception and keeps Android as the release owner
+      # while Desktop waits for that release and attaches its platform artifacts.
+      - name: Dispatch tagged release builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run android-apk.yml --ref "$TAG"
+          gh workflow run desktop-apps.yml --ref "$TAG"
