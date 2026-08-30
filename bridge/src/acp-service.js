@@ -68,8 +68,41 @@ function mergeFragmentedPiSnapshot(messages) {
   return merged
 }
 
+function visibleMessageText(message) {
+  return (message?.parts ?? [])
+    .filter((part) => part?.type === "text")
+    .map((part) => part?.text ?? "")
+    .join("")
+}
+
 function messageSignature(message) {
-  return `${message?.info?.role ?? ""}\u0000${(message?.parts ?? []).map((part) => part?.text ?? "").join("")}`
+  // OMP's live ACP reply can include reasoning/tool metadata that its persisted replay omits.
+  // Visible text + terminal error is the stable identity across those two representations.
+  const error = message?.info?.error?.message ? `\u0000${message.info.error.message}` : ""
+  return `${message?.info?.role ?? ""}\u0000${visibleMessageText(message)}${error}`
+}
+
+function isConsecutiveAssistantDuplicate(previous, next) {
+  if (previous?.info?.role !== "assistant" || next?.info?.role !== "assistant") return false
+  if (messageSignature(previous) !== messageSignature(next)) return false
+  // HR3 can legitimately split reasoning/tool activity into adjacent assistant envelopes with no
+  // visible text. Never collapse those; only heal duplicate visible replies or duplicate failures.
+  return Boolean(
+    visibleMessageText(previous)
+    || previous?.info?.error?.message
+    || next?.info?.error?.message
+  )
+}
+
+function healPoisonedSnapshot(messages) {
+  if (!Array.isArray(messages) || messages.length < 2) return messages
+  const healed = []
+  for (const message of messages) {
+    const previous = healed.at(-1)
+    if (previous && isConsecutiveAssistantDuplicate(previous, message)) continue
+    healed.push(message)
+  }
+  return healed.length === messages.length ? messages : healed
 }
 
 // A complete LCS table is useful for the small, genuinely divergent replays it was written for,
@@ -174,6 +207,9 @@ function transientFailureTurnMessages(cached, failureIDs) {
 
 /** Exported for testing only. */
 export function mergeReplay(previous, replayed) {
+  // Heal snapshots already poisoned by the old live-vs-replay identity mismatch.
+  previous = healPoisonedSnapshot(previous)
+  replayed = healPoisonedSnapshot(replayed)
   if (previous.length === 0) return replayed
   if (replayed.length === 0) return previous
   const left = previous.map(messageSignature)
@@ -186,7 +222,7 @@ export function mergeReplay(previous, replayed) {
   }
 
   if (prefix === previous.length) {
-    return [...previous, ...replayed.slice(prefix)]
+    return healPoisonedSnapshot([...previous, ...replayed.slice(prefix)])
   }
 
   const midLeft = left.slice(prefix)
@@ -224,12 +260,36 @@ export function mergeReplay(previous, replayed) {
       rightIndex += 1
     }
   }
-  return [
+  const tailPrevious = midPrev.slice(leftIndex)
+  const tailReplayed = midRep.slice(rightIndex)
+
+  // The common OMP failure mode is one trailing live assistant reply vs the same persisted reply
+  // under a different id/ephemeral activity shape. Preserve the live envelope once.
+  if (
+    tailPrevious.length === 1
+    && tailReplayed.length === 1
+    && isConsecutiveAssistantDuplicate(tailPrevious[0], tailReplayed[0])
+  ) {
+    return [...previous.slice(0, prefix), ...midMerged, tailPrevious[0]]
+  }
+
+  if (
+    tailPrevious.length === tailReplayed.length
+    && tailPrevious.length > 0
+    && tailPrevious.every((message, index) =>
+      message.info.role === tailReplayed[index].info.role
+      && messageSignature(message) === messageSignature(tailReplayed[index])
+    )
+  ) {
+    return [...previous.slice(0, prefix), ...midMerged, ...tailPrevious]
+  }
+
+  return healPoisonedSnapshot([
     ...previous.slice(0, prefix),
     ...midMerged,
-    ...midPrev.slice(leftIndex),
-    ...midRep.slice(rightIndex)
-  ]
+    ...tailPrevious,
+    ...tailReplayed
+  ])
 }
 export function mergeExternalHistory(persisted, cached) {
   const persistedIDs = new Set(persisted.map((message) => message.info.id))
@@ -1324,7 +1384,9 @@ export class AcpService {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
       if (Array.isArray(snapshot.messages)) {
-        const restored = mergeFragmentedPiSnapshot(snapshot.messages)
+        const fragmented = mergeFragmentedPiSnapshot(snapshot.messages)
+        const restored = healPoisonedSnapshot(fragmented)
+        if (restored.length !== fragmented.length) this.#dirtySnapshots.add(sessionID)
         // A snapshot written mid-turn keeps that turn's open tool calls at `running`. The turn did
         // not survive the restart, so reopening the Session must not present them as live work; the
         // rewrite is left to the next persist rather than forcing one on every restore.
@@ -1354,9 +1416,12 @@ export class AcpService {
           this.#historyLoader
           && (this.#historyLoader.authoritativeHistory || this.#journalBacked(sessionID) || this.#journalSeedsOwnedTranscript())
         )
+        const cachedMessages = this.#messages.get(sessionID) ?? []
+        const healedMessages = healPoisonedSnapshot(cachedMessages)
+        if (healedMessages !== cachedMessages) this.#messages.set(sessionID, healedMessages)
         const snapshot = JSON.stringify({
           version: 1,
-          messages: journalOwnsTranscript ? [] : this.#messages.get(sessionID) ?? [],
+          messages: journalOwnsTranscript ? [] : healedMessages,
           todos: this.#todos.get(sessionID) ?? [],
           title: this.#titleFor(sessionID),
           deleted: this.#deletedSessions.has(sessionID)
