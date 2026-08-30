@@ -48,6 +48,8 @@ function mergeFragmentedPiSnapshot(messages) {
     if (
       message?.info?.role === "assistant"
       && previous?.info?.role === "assistant"
+      && !message.info?.error
+      && !previous.info?.error
       && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(message.info.id)
       && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(previous.info.id)
     ) {
