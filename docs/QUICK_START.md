@@ -4,6 +4,15 @@ Harness Remote has two parts: a launcher on the machine where your repositories 
 live, and a client you open from web, desktop or Android. The launcher runs the work; the client
 lets you see and continue the native Sessions it exposes.
 
+## Upgrading from Harness Remote 2.x
+
+Harness Remote 3 changes the normal startup contract. HR2 commonly connected the client directly to one OpenCode server or one standalone ACP bridge per harness. HR3 is machine-first: the client expects a Harness **Machine** endpoint and discovers Projects, harnesses and native Sessions through it.
+
+- Existing standalone ACP bridge commands such as `npx --yes ./bridge --backend omp|pi|claude|codex ...` are still supported as compatibility paths. They can expose native Sessions, but they do not provide the complete HR3 Project catalog/new-Session workflow.
+- A direct `opencode serve` process from an HR2 setup is not a Harness Machine endpoint and cannot be added under **Machines** in HR3.
+- HR2 saved server profiles are kept in storage for legacy code paths, but they are not automatically converted into HR3 `workspaceMachines`. After upgrading, add the machine again in **Machines → Add machine**.
+- For the full HR3 experience, stop the old per-harness public endpoints and use the launcher or machine daemon described below. Legacy single-backend startup is intended for compatibility, not as the preferred HR3 onboarding path.
+
 ## Start a machine and open the client
 
 Install Node.js 20+ and at least one supported coding-agent CLI on the machine with your code, then
