@@ -186,6 +186,8 @@ See [REFERENCE.md](REFERENCE.md) for detailed security and backend notes.
 
 ## Quick start
 
+> **Upgrading from Harness Remote 2.x?** HR3 uses a **Machine daemon** as its normal connection contract, not the old per-harness server profile model. Old standalone ACP bridge commands still start and can expose native Sessions, but they are a legacy compatibility path and do not provide the complete HR3 Machine → Project → Session workflow. A direct 2.x-style `opencode serve` endpoint is **not** an HR3 Machine endpoint. Saved 2.x server profiles are also not automatically imported into the new Machines list, so add the machine again after upgrading. For HR3, prefer the launcher/daemon setup below and connect through **Machines → Add machine**.
+
 ### 1. Start Harness Remote on the machine with your code
 
 Requirements:
