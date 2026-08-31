@@ -237,6 +237,7 @@ npx github:giuliastro/harness-remote \
 ```
 
 Open the URL printed by Vite, normally `http://localhost:5173`.
+You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/), which runs in your local browser. To connect it to a local backend, add `--cors https://giuliastro.github.io` when starting the launcher.
 
 For the full launcher and daemon guide, see [Quick start](docs/QUICK_START.md).
 
