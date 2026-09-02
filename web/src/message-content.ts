@@ -35,26 +35,6 @@ function terminalAssistantText(messages: MessageEnvelope[], start: number, end: 
 }
 
 /**
- * Return only the natural-language answer emitted after the last reasoning/tool activity in one
- * native message. Non-conversational parts such as files do not erase an otherwise valid answer.
- */
-export function terminalMessageText(message: MessageEnvelope): string {
-  return terminalAssistantText([message], 0, 1)
-}
-
-/** Never cross the latest user turn when looking for the result of the current turn. */
-export function latestAssistantTerminalText(messages: MessageEnvelope[]): string {
-  let start = 0
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].info.role === "user") {
-      start = index + 1
-      break
-    }
-  }
-  return terminalAssistantText(messages, start, messages.length)
-}
-
-/**
  * Recover the terminal answer for a particular Task run from a Session that may have been continued
  * manually afterwards. The matching user prompt is the turn boundary, so later Session-only work
  * cannot become the Task's result summary. The scan covers the whole assistant turn because some

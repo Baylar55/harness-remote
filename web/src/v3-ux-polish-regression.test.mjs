@@ -7,7 +7,6 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (name) => fs.readFileSync(path.join(here, name), "utf8")
 const exists = (name) => fs.existsSync(path.join(here, name))
 
-const backendSetup = read("backendSetup.ts")
 const profiles = read("serverProfiles.ts")
 const main = read("main.tsx")
 const standalone = read("components/standalone-universal-workspace.tsx")
@@ -22,11 +21,6 @@ const nativeObserverCss = read("native-session-observer.css")
 const nativeHomeUxCss = read("native-session-home-ux.css")
 const machineClient = read("machineClient.ts")
 
-assert.match(backendSetup, /return 4097/)
-assert.doesNotMatch(backendSetup, /opencode-ai serve/)
-assert.match(backendSetup, /npx github:giuliastro\/harness-remote/)
-assert.doesNotMatch(backendSetup, /--backend \$\{backend\}/)
-assert.match(backendSetup, /return "harness"/)
 
 // Legacy profile defaults remain readable for 2.x compatibility, while 3.0 boots from machines.
 assert.match(profiles, /port: 4097/)

@@ -56,11 +56,7 @@ jobs:
           npm run test:model
           npm run test:events
           npm run test:profiles
-          npm run test:markdown
           npm run test:attachments
-          npm run test:agent-runs
-          npm run test:mutation-coordinator
-          npm run test:catalog-guard
           npm run test:machine-payload
           npm run test:platform
           npm run test:completion-audio

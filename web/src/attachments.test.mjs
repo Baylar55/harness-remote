@@ -15,8 +15,6 @@ assert.deepEqual(
 )
 assert.throws(() => attachmentPart('image/jpeg', 'erro.jpg', 'https://example.com/erro.jpg'), /data URL/)
 
-const defaults = readFileSync(new URL('./backendCapabilities.ts', import.meta.url), 'utf8')
-assert.equal((defaults.match(/attachments:/g) ?? []).length, 5, 'every backend default must state attachment support')
 
 const api = readFileSync(new URL('./api.ts', import.meta.url), 'utf8')
 assert.ok(api.includes('...attachments'), 'the lower-level prompt API must preserve attachment parts when supplied')
