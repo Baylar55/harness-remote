@@ -3,13 +3,13 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
-import { TaskStore } from "../src/task-store.js"
+import { TaskRunStore } from "../src/task-run-store.js"
 
 test("persists machine-scoped draft tasks with project, agent and workspace identity", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-store-"))
   try {
     const project = { id: "machine-1:project", name: "repo", path: "/work/repo", kind: "git" }
-    const first = new TaskStore({
+    const first = new TaskRunStore({
       machineID: "machine-1",
       stateDirectory,
       idFactory: () => "task-1",
@@ -43,7 +43,7 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
       }
     })
 
-    const second = new TaskStore({ machineID: "machine-1", stateDirectory })
+    const second = new TaskRunStore({ machineID: "machine-1", stateDirectory })
     assert.deepEqual(await second.list(), [created])
     const disk = JSON.parse(await readFile(first.file, "utf8"))
     assert.equal(disk.version, 1)
@@ -57,7 +57,7 @@ test("persists machine-scoped draft tasks with project, agent and workspace iden
 test("legacy single-run tasks load with a compatible runs history and Task Context", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-history-"))
   try {
-    const store = new TaskStore({ machineID: "machine-1", stateDirectory })
+    const store = new TaskRunStore({ machineID: "machine-1", stateDirectory })
     await mkdir(stateDirectory, { recursive: true })
     const legacyRun = { id: "run-1", sessionId: "session-1", startedAt: "2026-08-13T13:00:00.000Z" }
     await writeFile(store.file, JSON.stringify({
@@ -82,7 +82,7 @@ test("markFinished closes a terminal task without changing its workspace", async
   try {
     let now = "2026-08-13T13:00:00.000Z"
     const project = { id: "machine-1:project", name: "repo", path: "/work/repo", kind: "git" }
-    const store = new TaskStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1", clock: () => now })
+    const store = new TaskRunStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1", clock: () => now })
     await store.create({ project, agentId: "codex", prompt: "Do work" })
     store.tasks[0] = {
       ...store.tasks[0],
@@ -105,7 +105,7 @@ test("markFinished refuses an active task", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-active-finish-"))
   try {
     const project = { id: "machine-1:project", name: "repo", path: "/work/repo", kind: "git" }
-    const store = new TaskStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
+    const store = new TaskRunStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
     await store.create({ project, agentId: "codex", prompt: "Do work" })
     store.tasks[0] = { ...store.tasks[0], status: "running" }
     await assert.rejects(() => store.markFinished("task-1"), (error) => error.code === "task_active")
@@ -118,9 +118,9 @@ test("different machine identities persist to different files", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-machine-"))
   try {
     const project = { id: "machine-1:project", name: "repo", path: "/work/repo", kind: "git" }
-    const first = new TaskStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
+    const first = new TaskRunStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
     await first.create({ project, agentId: "codex", prompt: "Do work" })
-    const other = new TaskStore({ machineID: "machine-2", stateDirectory, idFactory: () => "task-2" })
+    const other = new TaskRunStore({ machineID: "machine-2", stateDirectory, idFactory: () => "task-2" })
     assert.notEqual(first.file, other.file)
     assert.deepEqual(await other.list(), [])
     await other.create({ project: { ...project, id: "machine-2:project" }, agentId: "codex", prompt: "Other work" })
@@ -134,7 +134,7 @@ test("different machine identities persist to different files", async () => {
 test("a failed load is retryable and cannot be mistaken for an empty successful load", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-read-"))
   try {
-    const store = new TaskStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
+    const store = new TaskRunStore({ machineID: "machine-1", stateDirectory, idFactory: () => "task-1" })
     await mkdir(store.file, { recursive: true })
     await assert.rejects(() => store.list())
     assert.equal(store.loaded, false)
@@ -152,7 +152,7 @@ test("malformed task state is preserved before starting a fresh machine-scoped s
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-corrupt-"))
   try {
     const warnings = []
-    const store = new TaskStore({ machineID: "machine-1", stateDirectory, warn: (message) => warnings.push(message) })
+    const store = new TaskRunStore({ machineID: "machine-1", stateDirectory, warn: (message) => warnings.push(message) })
     await mkdir(stateDirectory, { recursive: true })
     await writeFile(store.file, "{not-json", "utf8")
     assert.deepEqual(await store.list(), [])
@@ -167,7 +167,7 @@ test("malformed task state is preserved before starting a fresh machine-scoped s
 test("setWorkspace fails loudly if the task disappeared before persistence", async () => {
   const stateDirectory = await mkdtemp(path.join(os.tmpdir(), "harness-task-missing-"))
   try {
-    const store = new TaskStore({ machineID: "machine-1", stateDirectory })
+    const store = new TaskRunStore({ machineID: "machine-1", stateDirectory })
     await assert.rejects(
       () => store.setWorkspace("missing", { mode: "worktree", path: "/tmp/worktree" }),
       /Unknown task: missing/
