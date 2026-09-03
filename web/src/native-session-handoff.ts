@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
+import { normalizeModel, sameModel } from "./native-session-model"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
 import type { ModelSelection } from "./types"
 
@@ -33,22 +34,6 @@ function storageKey(source: NativeSessionSurfaceTarget): string {
 function requestID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID()
   return `handoff-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
-function normalizeModel(value: unknown): ModelSelection | null {
-  if (!value || typeof value !== "object") return null
-  const candidate = value as Partial<ModelSelection>
-  const providerID = typeof candidate.providerID === "string" ? candidate.providerID.trim() : ""
-  const modelID = typeof candidate.modelID === "string" ? candidate.modelID.trim() : ""
-  if (!providerID || !modelID) return null
-  const variant = typeof candidate.variant === "string" && candidate.variant.trim() ? candidate.variant.trim() : undefined
-  return { providerID, modelID, ...(variant ? { variant } : {}) }
-}
-
-function sameModel(left?: ModelSelection | null, right?: ModelSelection | null): boolean {
-  if (!left && !right) return true
-  if (!left || !right) return false
-  return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
 }
 
 function loadPending(source: NativeSessionSurfaceTarget): PendingNativeSessionHandoff | null {
