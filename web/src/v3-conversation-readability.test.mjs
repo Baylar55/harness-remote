@@ -9,15 +9,15 @@ const here = path.dirname(fileURLToPath(import.meta.url))
  *  assertion written with `\n` failed locally and passed in CI. These describe CSS, not line endings. */
 const read = (name) => readFileSync(path.join(here, name), "utf8").replace(/\r\n/g, "\n")
 
-// Every stylesheet the running 3.0 shell loads, directly or through a component import.
+// Every stylesheet the running shell loads, directly or through a component import.
 const LIVE_STYLESHEETS = [
   "taskdesk-workspace-navigation.css", "taskdesk-workthreads.css", "work-thread-detail.css",
   "conversation-control-plane.css", "conversation-control-plane-overrides.css",
   "conversation-control-plane-mobile-polish.css", "model-picker.css",
-  "universal-workspace-readable.css", "universal-workspace-readable-fixes.css",
+  "universal-workspace-readable-fixes.css",
   "taskdesk-conversation.css", "taskdesk-conversation-fixes.css",
-  "taskdesk-mobile-navigation.css", "v3-polish.css", "universal-workspace.css",
-  "taskdesk-focus-layout.css", "beautiful-ui-controls.css"
+  "taskdesk-mobile-navigation.css",
+  "taskdesk-focus-layout.css", "beautiful-ui-controls.css", "session-first-workbench.css"
 ]
 
 test("no live stylesheet declares text below the 10px legibility floor", () => {

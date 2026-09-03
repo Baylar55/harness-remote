@@ -27,7 +27,7 @@
 .tdw-work-thread-conversation .uw-activity-group,
 .tdw-work-thread-conversation .uw-activity-parts,
 .tdw-work-thread-conversation .uw-reasoning,
-.tdw-work-thread-conversation .uw-reasoning .td3-markdown,
+.tdw-work-thread-conversation .uw-reasoning .uw-markdown,
 .tdw-work-thread-conversation .uw-tool-stack,
 .tdw-work-thread-conversation .uw-tool-card {
   min-width: 0;
@@ -43,7 +43,7 @@
 }
 
 .tdw-work-thread-conversation .uw-activity-parts > *,
-.tdw-work-thread-conversation .uw-reasoning .td3-markdown > * {
+.tdw-work-thread-conversation .uw-reasoning .uw-markdown > * {
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
