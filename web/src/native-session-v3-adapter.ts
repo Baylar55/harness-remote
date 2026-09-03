@@ -12,6 +12,7 @@ import { stopNativeSession } from "./native-session-stop"
 import type { ConversationContinueInput, ConversationController } from "./conversation-controller"
 import type { ConversationRuntime, ConversationTurn } from "./conversation-runtime"
 import type { MessageEnvelope, ModelSelection, ServerConfig } from "./types"
+import { messageText } from "./message-content"
 
 // Keep the value stable so drafts/local UI identity survive the architecture migration.
 const NATIVE_CONVERSATION_ID_PREFIX = "native-session-v3:"
@@ -75,13 +76,6 @@ function canonicalText(value: string): string {
   return value.replace(/\r\n/g, "\n").trim()
 }
 
-function messageText(message: MessageEnvelope): string {
-  return (message.parts || [])
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n")
-    .trim()
-}
 
 /**
  * PI can expose one logical turn under two transport identities: the live ACP cache first, then the

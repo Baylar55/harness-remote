@@ -3,7 +3,8 @@ import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import type { AttachmentPart } from "./attachments"
 import type { NativeSessionSurfaceTarget } from "./native-session-discovery"
 import { authHeader, baseUrl, hasCredentials, routingHeaders } from "./serverConfig"
-import type { MessageEnvelope, ModelSelection } from "./types"
+import type { ModelSelection } from "./types"
+import { messageText } from "./message-content"
 
 export type NativeSessionPromptStatus = "accepted" | "pending" | "uncertain"
 
@@ -75,13 +76,6 @@ function sameAttachmentKeys(left: string[] = [], right: string[] = []): boolean 
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
-function messageText(message: MessageEnvelope): string {
-  return (message.parts || [])
-    .filter((part) => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n")
-    .trim()
-}
 
 function handoffAlreadySent(target: NativeSessionSurfaceTarget): boolean {
   try { return localStorage.getItem(handoffSentKey(target)) === "1" } catch { return false }

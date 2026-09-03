@@ -534,20 +534,6 @@ export const taskClient = {
     }
   },
 
-  async listCheckpoints(config: ServerConfig, taskId: string): Promise<TaskCheckpoint[]> {
-    const path = `/v1/work-threads/${encodeURIComponent(taskId)}/checkpoints`
-    return requireArray<TaskCheckpoint>(await machineRequest<unknown>(config, path), "checkpoints", path)
-  },
-
-  async createCheckpoint(config: ServerConfig, taskId: string, input: { label?: string; kind?: string; runId?: string | null } = {}): Promise<TaskCheckpoint | null> {
-    const path = `/v1/work-threads/${encodeURIComponent(taskId)}/checkpoints`
-    const result = await machineRequest<{ checkpoint: TaskCheckpoint | null }>(config, path, { method: "POST", body: input })
-    return result.checkpoint ?? null
-  },
-
-  restoreCheckpoint(config: ServerConfig, taskId: string, checkpointId: string): Promise<TaskCheckpointRestoreResponse> {
-    return machineRequest<TaskCheckpointRestoreResponse>(config, `/v1/work-threads/${encodeURIComponent(taskId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`, { method: "POST", body: {} })
-  },
 
   inspectResult(config: ServerConfig, taskId: string): Promise<TaskWorkspaceInspection> {
     return machineRequest<TaskWorkspaceInspection>(config, `/v1/tasks/${encodeURIComponent(taskId)}/result`)
