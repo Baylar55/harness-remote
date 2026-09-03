@@ -1,21 +1,15 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
+import type { MachineProject } from "./taskClient"
 import type { MachineSnapshot, ServerConfig } from "./types"
+
+export type { MachineProject }
 
 const BROWSER_DISCOVERY_TIMEOUT_MS = 12_000
 const DISCOVERY_STALE_GRACE_MS = 45_000
 const discoveryCache = new Map<string, { snapshot: MachineSnapshot; at: number }>()
 const projectCache = new Map<string, { projects: MachineProject[]; at: number }>()
-
-export type MachineProject = {
-  id: string
-  machineId: string
-  name: string
-  path: string
-  kind: "git" | "directory" | string
-  configured?: boolean
-}
 
 function headers(config: ServerConfig): Record<string, string> {
   const value: Record<string, string> = { Accept: "application/json" }

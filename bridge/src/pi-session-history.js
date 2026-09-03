@@ -4,8 +4,7 @@ import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import path from "node:path"
 import { createInterface } from "node:readline"
-
-const BACKWARD_READ_BYTES = 64 * 1024
+import { scanLinesBackward } from "./backward-line-scan.js"
 
 function defaultSessionRoot() {
   if (process.env.PI_CODING_AGENT_SESSION_DIR) return process.env.PI_CODING_AGENT_SESSION_DIR
@@ -133,11 +132,10 @@ async function readPiPage(file, sessionID, { limit = 100, before } = {}) {
     const decoded = before ? decodePageCursor(before) : undefined
     if (before && (!decoded || decoded.offset > size)) throw new Error("Invalid PI history cursor")
 
-    let cursor = decoded?.offset ?? size
+    const from = decoded?.offset ?? size
     let target = decoded?.target
     let seekLeaf = !target
     let matchedRequestedTarget = !target
-    let carry = Buffer.alloc(0)
     const messages = []
     let resumeCursor = null
     let hasMore = false
@@ -145,58 +143,37 @@ async function readPiPage(file, sessionID, { limit = 100, before } = {}) {
     let selectedModel
     let selectedVariant
 
-    while (cursor > 0 && !done) {
-      const start = Math.max(0, cursor - BACKWARD_READ_BYTES)
-      const chunk = Buffer.allocUnsafe(cursor - start)
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
-      const data = carry.length > 0
-        ? Buffer.concat([chunk.subarray(0, bytesRead), carry])
-        : chunk.subarray(0, bytesRead)
-
-      let lineEnd = data.length
-      const visit = (line, offset) => {
-        const record = parseRecordBuffer(line)
-        if (!record || typeof record.id !== "string") return
-        if (seekLeaf) {
-          target = record.id
-          seekLeaf = false
-          matchedRequestedTarget = true
-        }
-        if (record.id !== target) return
+    const visit = (line, offset) => {
+      const record = parseRecordBuffer(line)
+      if (!record || typeof record.id !== "string") return
+      if (seekLeaf) {
+        target = record.id
+        seekLeaf = false
         matchedRequestedTarget = true
-        // We are walking the selected branch newest -> oldest. The first model / thinking entries
-        // encountered are therefore the settings that own this native Session at its current leaf.
-        selectedModel ??= modelSelectionFromRecord(record)
-        selectedVariant ??= thinkingLevelFromRecord(record)
-        target = typeof record.parentId === "string" && record.parentId ? record.parentId : undefined
-        const message = messageEnvelope(record, sessionID)
-        if (message) {
-          if (messages.length < boundedLimit) {
-            messages.push(message)
-            if (messages.length === boundedLimit && target) resumeCursor = encodePageCursor(offset, target)
-          } else {
-            hasMore = true
-            done = true
-          }
+      }
+      if (record.id !== target) return
+      matchedRequestedTarget = true
+      // We are walking the selected branch newest -> oldest. The first model / thinking entries
+      // encountered are therefore the settings that own this native Session at its current leaf.
+      selectedModel ??= modelSelectionFromRecord(record)
+      selectedVariant ??= thinkingLevelFromRecord(record)
+      target = typeof record.parentId === "string" && record.parentId ? record.parentId : undefined
+      const message = messageEnvelope(record, sessionID)
+      if (message) {
+        if (messages.length < boundedLimit) {
+          messages.push(message)
+          if (messages.length === boundedLimit && target) resumeCursor = encodePageCursor(offset, target)
+        } else {
+          hasMore = true
+          done = true
         }
-        if (!target) done = true
       }
+      if (!target) done = true
+    }
 
-      for (let index = data.length - 1; index >= 0 && !done; index -= 1) {
-        if (data[index] !== 0x0a) continue
-        const lineStart = index + 1
-        if (lineStart < lineEnd) visit(data.subarray(lineStart, lineEnd), start + lineStart)
-        lineEnd = index
-      }
-
-      if (start === 0) {
-        if (lineEnd > 0 && !done) visit(data.subarray(0, lineEnd), 0)
-        carry = Buffer.alloc(0)
-        cursor = 0
-      } else {
-        carry = lineEnd > 0 ? Buffer.from(data.subarray(0, lineEnd)) : Buffer.alloc(0)
-        cursor = start
-      }
+    for await (const { line, offset } of scanLinesBackward(handle, { from })) {
+      if (done) break
+      visit(line, offset)
     }
 
     if (decoded && !matchedRequestedTarget) throw new Error("Invalid PI history cursor")
