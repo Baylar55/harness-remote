@@ -2,8 +2,8 @@ import { createReadStream } from "node:fs"
 import { open, readdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
+import { scanLinesBackward } from "./backward-line-scan.js"
 
-const BACKWARD_READ_BYTES = 64 * 1024
 const MODEL_CONTEXT_LOOKBACK_BYTES = 4 * 1024 * 1024
 
 function trimCarriageReturn(buffer) {
@@ -98,53 +98,21 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
 
     const found = []
     let currentModel
-    let cursor = end
-    let carry = Buffer.alloc(0)
     const modelSearchFloor = Math.max(0, end - MODEL_CONTEXT_LOOKBACK_BYTES)
-    const needMore = () => found.length <= boundedLimit
-      || (!before && !currentModel && cursor > modelSearchFloor)
+    const needMore = (chunkEnd) => found.length <= boundedLimit
+      || (!before && !currentModel && chunkEnd > modelSearchFloor)
 
-    while (cursor > 0 && needMore()) {
-      const start = Math.max(0, cursor - BACKWARD_READ_BYTES)
-      const chunk = Buffer.allocUnsafe(cursor - start)
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start)
-      const data = carry.length > 0
-        ? Buffer.concat([chunk.subarray(0, bytesRead), carry])
-        : chunk.subarray(0, bytesRead)
-
-      let lineEnd = data.length
-      for (let index = data.length - 1; index >= 0 && (found.length <= boundedLimit || (!before && !currentModel)); index -= 1) {
-        if (data[index] !== 0x0a) continue
-        const lineStart = index + 1
-        if (lineStart < lineEnd) {
-          const offset = start + lineStart
-          const record = recordFromLine(data.subarray(lineStart, lineEnd))
-          // Only the newest-page read describes the Session's current model. Older page requests
-          // deliberately omit model metadata so paging cannot rewind the picker to a historical turn.
-          if (!before && !currentModel) currentModel = modelFromTurnContext(record)
-          if (found.length <= boundedLimit) {
-            const message = messageFromRecord(sessionID, record, offset)
-            if (message) found.push({ message, offset })
-          }
-        }
-        lineEnd = index
+    for await (const { line, offset, chunkEnd } of scanLinesBackward(handle, { from: end })) {
+      if (!needMore(chunkEnd)) break
+      const record = recordFromLine(line)
+      // Only the newest-page read describes the Session's current model. Older page requests
+      // deliberately omit model metadata so paging cannot rewind the picker to a historical turn.
+      if (!before && !currentModel) currentModel = modelFromTurnContext(record)
+      if (found.length <= boundedLimit) {
+        const message = messageFromRecord(sessionID, record, offset)
+        if (message) found.push({ message, offset })
       }
-
-      if (start === 0) {
-        if (lineEnd > 0 && (found.length <= boundedLimit || (!before && !currentModel))) {
-          const record = recordFromLine(data.subarray(0, lineEnd))
-          if (!before && !currentModel) currentModel = modelFromTurnContext(record)
-          if (found.length <= boundedLimit) {
-            const message = messageFromRecord(sessionID, record, 0)
-            if (message) found.push({ message, offset: 0 })
-          }
-        }
-        carry = Buffer.alloc(0)
-        cursor = 0
-      } else {
-        carry = lineEnd > 0 ? Buffer.from(data.subarray(0, lineEnd)) : Buffer.alloc(0)
-        cursor = start
-      }
+      if (found.length > boundedLimit && (before || currentModel)) break
     }
 
     const hasMore = found.length > boundedLimit
