@@ -58,26 +58,6 @@ export const ChatIcon = ({ className = "", size = 20 }: { className?: string; si
   </svg>
 )
 
-export const HelpIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="2" 
-    strokeLinecap="round" 
-    strokeLinejoin="round"
-    className={className}
-    role="img"
-    aria-label="Help"
-  >
-    <circle cx="12" cy="12" r="10"/>
-    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-    <path d="M12 17h.01"/>
-  </svg>
-)
-
 export const PlusIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
   <svg 
     width={size} 
@@ -135,24 +115,6 @@ export const StopCircleIcon = ({ className = "", size = 20 }: { className?: stri
   </svg>
 )
 
-export const SendIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="2" 
-    strokeLinecap="round" 
-    strokeLinejoin="round"
-    className={className}
-    role="img"
-    aria-label="Send"
-  >
-    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-  </svg>
-)
-
 export const PaperclipIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
   <svg
     width={size}
@@ -168,26 +130,6 @@ export const PaperclipIcon = ({ className = "", size = 20 }: { className?: strin
     aria-label="Attach"
   >
     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
-  </svg>
-)
-
-export const SaveIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="none" 
-    stroke="currentColor" 
-    strokeWidth="2" 
-    strokeLinecap="round" 
-    strokeLinejoin="round"
-    className={className}
-    role="img"
-    aria-label="Save"
-  >
-    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
-    <polyline points="17 21 17 13 7 13 7 21"/>
-    <polyline points="7 3 7 8 15 8"/>
   </svg>
 )
 
@@ -266,30 +208,6 @@ export const CloseIcon = ({ className = "", size = 20 }: { className?: string; s
     <path d="M6 6l12 12"/>
   </svg>
 )
-export const OfflineIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    role="img"
-    aria-label="Offline"
-  >
-    <path d="M2 2l20 20" />
-    <path d="M8.5 16.5a5 5 0 0 1 7 0" />
-    <path d="M5 12.86a10 10 0 0 1 3.5-2.32" />
-    <path d="M15.5 10.54A10 10 0 0 1 19 12.86" />
-    <path d="M2 8.82a15 15 0 0 1 4.17-2.65" />
-    <path d="M10.66 5.05A15 15 0 0 1 22 8.82" />
-    <path d="M12 20h.01" />
-  </svg>
-)
-
 export const JumpToTopIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
   <svg
     width={size}
@@ -364,25 +282,6 @@ export const ChevronDownIcon = ({ className = "", size = 20 }: { className?: str
     aria-label="Expand"
   >
     <path d="m6 9 6 6 6-6" />
-  </svg>
-)
-
-export const ArrowLeftIcon = ({ className = "", size = 20 }: { className?: string; size?: number }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    role="img"
-    aria-label="Back"
-  >
-    <path d="M19 12H5" />
-    <path d="m12 19-7-7 7-7" />
   </svg>
 )
 
