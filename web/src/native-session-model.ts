@@ -18,6 +18,22 @@ function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
+export function normalizeModel(value: unknown): ModelSelection | null {
+  if (!value || typeof value !== "object") return null
+  const candidate = value as Partial<ModelSelection>
+  const providerID = typeof candidate.providerID === "string" ? candidate.providerID.trim() : ""
+  const modelID = typeof candidate.modelID === "string" ? candidate.modelID.trim() : ""
+  if (!providerID || !modelID) return null
+  const variant = typeof candidate.variant === "string" && candidate.variant.trim() ? candidate.variant.trim() : undefined
+  return { providerID, modelID, ...(variant ? { variant } : {}) }
+}
+
+export function sameModel(left?: ModelSelection | null, right?: ModelSelection | null): boolean {
+  if (!left && !right) return true
+  if (!left || !right) return false
+  return left.providerID === right.providerID && left.modelID === right.modelID && (left.variant || "") === (right.variant || "")
+}
+
 function userMessageModel(info: NativeMessageInfo): ModelSelection | null {
   const providerID = text(info.model?.providerID)
   const modelID = text(info.model?.modelID) ?? text(info.model?.id)

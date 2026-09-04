@@ -317,7 +317,7 @@ function ContentGroup({ group }: { group: ContentGroupValue }) {
     <div className="uw-message-content-group">
       {text ? (
         <>
-          <div className="uw-markdown td3-markdown">
+          <div className="uw-markdown">
             <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
           </div>
           {/* Below the message rather than floating over it: a hover-revealed control is unreachable
@@ -346,7 +346,7 @@ function ActivityPart({ part }: { part: MessagePart }) {
     return (
       <div className={`uw-reasoning${part.type === "text" ? " uw-working-note" : ""}`}>
         <strong>{part.type === "reasoning" ? "Reasoning" : "Working note"}</strong>
-        <div className="uw-markdown td3-markdown">
+        <div className="uw-markdown">
           <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{part.text}</ReactMarkdown>
         </div>
       </div>

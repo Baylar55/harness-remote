@@ -1,5 +1,32 @@
-import { TaskStore } from "./task-store.js"
+import { createHash, randomUUID } from "node:crypto"
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import path from "node:path"
 import { buildPersistedTaskContext } from "./task-context.js"
+
+function machineFileName(machineID) {
+  const digest = createHash("sha256").update(machineID).digest("hex").slice(0, 16)
+  return `tasks-${digest}.json`
+}
+
+function taskError(code, message) {
+  const error = new Error(message)
+  error.code = code
+  return error
+}
+
+function normalizeTaskHistory(task) {
+  if (!task || typeof task !== "object") return task
+  const runs = Array.isArray(task.runs)
+    ? task.runs
+    : task.run
+      ? [task.run]
+      : []
+  const normalized = { ...task, runs, finishedAt: task.finishedAt ?? null }
+  const revision = Number.isFinite(Number(task.context?.revision))
+    ? Number(task.context.revision)
+    : runs.filter((run) => run?.finishedAt).length
+  return { ...normalized, context: buildPersistedTaskContext(normalized, revision) }
+}
 
 function updateRunHistory(task, run) {
   const runs = Array.isArray(task.runs) ? task.runs.map((entry) => structuredClone(entry)) : []
@@ -14,7 +41,135 @@ function persistedError(error) {
   return error ? { message: error instanceof Error ? error.message : String(error) } : null
 }
 
-export class TaskRunStore extends TaskStore {
+export class TaskRunStore {
+  constructor({ machineID, stateDirectory, idFactory = randomUUID, clock = () => new Date().toISOString(), warn = (message) => process.stderr.write(`${message}\n`) }) {
+    this.machineID = machineID
+    this.stateDirectory = stateDirectory
+    this.file = path.join(stateDirectory, machineFileName(machineID))
+    this.idFactory = idFactory
+    this.clock = clock
+    this.warn = warn
+    this.loaded = false
+    this.tasks = []
+  }
+
+  async load() {
+    if (this.loaded) return
+    try {
+      const parsed = JSON.parse(await readFile(this.file, "utf8"))
+      const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : []
+      this.tasks = tasks.map(normalizeTaskHistory)
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        this.tasks = []
+      } else if (error instanceof SyntaxError) {
+        const backup = `${this.file}.corrupt-${Date.now()}`
+        await rename(this.file, backup)
+        this.tasks = []
+        this.warn(`Task state was malformed and has been preserved at ${backup}`)
+      } else {
+        throw error
+      }
+    }
+    this.loaded = true
+  }
+
+  async persist() {
+    if (!this.loaded) throw new Error("Task store must load successfully before it can persist")
+    await mkdir(this.stateDirectory, { recursive: true })
+    const temporary = `${this.file}.${process.pid}.${Date.now()}.tmp`
+    await writeFile(temporary, `${JSON.stringify({ version: 1, machineId: this.machineID, tasks: this.tasks }, null, 2)}\n`, { mode: 0o600 })
+    await rename(temporary, this.file)
+  }
+
+  async list() {
+    await this.load()
+    return this.tasks.map((task) => structuredClone(task))
+  }
+
+  async get(taskID) {
+    await this.load()
+    const task = this.tasks.find((candidate) => candidate.id === taskID)
+    return task ? structuredClone(task) : undefined
+  }
+
+  async create({ project, agentId, prompt, model = null }) {
+    await this.load()
+    const text = typeof prompt === "string" ? prompt.trim() : ""
+    if (!text) throw new Error("A task prompt is required")
+    const timestamp = this.clock()
+    const task = {
+      id: this.idFactory(),
+      machineId: this.machineID,
+      projectId: project.id,
+      project: { name: project.name, path: project.path, kind: project.kind },
+      agentId,
+      prompt: text,
+      model,
+      status: "draft",
+      workspace: { mode: "project", path: project.path },
+      run: null,
+      runs: [],
+      error: null,
+      finishedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    }
+    task.context = buildPersistedTaskContext(task, 0)
+    this.tasks.push(task)
+    await this.persist()
+    return structuredClone(task)
+  }
+
+  async setWorkspace(taskID, workspace) {
+    await this.load()
+    const index = this.tasks.findIndex((task) => task.id === taskID)
+    if (index < 0) throw taskError("unknown_task", `Unknown task: ${taskID}`)
+    const task = this.tasks[index]
+    if (task.status !== "draft") throw taskError("invalid_state", "Only draft tasks can change workspace")
+    const updated = { ...task, workspace: structuredClone(workspace), updatedAt: this.clock() }
+    this.tasks[index] = updated
+    await this.persist()
+    return structuredClone(updated)
+  }
+
+  async markFinished(taskID) {
+    await this.load()
+    const index = this.tasks.findIndex((task) => task.id === taskID)
+    if (index < 0) throw taskError("unknown_task", `Unknown task: ${taskID}`)
+    const task = this.tasks[index]
+    if (task.status === "starting" || task.status === "running") {
+      throw taskError("task_active", "An active task cannot be finished")
+    }
+    if (task.finishedAt) return structuredClone(task)
+    const timestamp = this.clock()
+    const updated = { ...task, finishedAt: timestamp, updatedAt: timestamp }
+    updated.context = buildPersistedTaskContext(updated, task.context?.revision ?? 0)
+    this.tasks[index] = updated
+    await this.persist()
+    return structuredClone(updated)
+  }
+
+  async clearWorkspace(taskID) {
+    await this.load()
+    const index = this.tasks.findIndex((task) => task.id === taskID)
+    if (index < 0) throw taskError("unknown_task", `Unknown task: ${taskID}`)
+    const task = this.tasks[index]
+    if (task.status === "starting" || task.status === "running") {
+      throw taskError("task_active", "An active task cannot release its workspace")
+    }
+    if (task.workspace?.mode !== "worktree") return structuredClone(task)
+    const updated = {
+      ...task,
+      workspace: { mode: "project", path: task.project.path },
+      updatedAt: this.clock()
+    }
+    updated.context = buildPersistedTaskContext(updated, task.context?.revision ?? 0)
+    this.tasks[index] = updated
+    await this.persist()
+    return structuredClone(updated)
+  }
+
   async setRunState(taskID, { status, run, error = null, expectedRunId }) {
     await this.load()
     const index = this.tasks.findIndex((task) => task.id === taskID)

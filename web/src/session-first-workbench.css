@@ -2038,3 +2038,411 @@
     transition: none !important;
   }
 }
+
+/* Live bases extracted from the retired universal-workspace.css /
+   universal-workspace-readable.css (deleted). Everything else in those sheets
+   styled the retired uw-shell / uw-layout / td3-shell shells. These rules are
+   the only ones still matched by live components: conversation transcript scroll,
+   composer frame & buttons (taskdesk-conversation.tsx), and the Machines
+   manager dialog (standalone-universal-workspace.tsx). Merged from both sheets
+   (readable size bump folded in); dead variants with zero usages were dropped. */
+
+.uw-transcript {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.uw-message {
+  width: min(760px, 100%);
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0 auto 18px;
+}
+
+.uw-avatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.uw-message-body {
+  min-width: 0;
+}
+
+.uw-composer-shell {
+  width: min(790px, calc(100% - 30px));
+  margin: 0 auto 16px;
+  flex: none;
+  border: 1px solid var(--td3-border);
+  border-radius: 13px;
+  background: var(--td3-chrome);
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.17),
+    inset 0 1px 0 var(--td3-raise-1);
+  overflow: hidden;
+}
+
+.uw-composer-shell:focus-within {
+  border-color: var(--td3-blue-border);
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.18),
+    0 0 0 3px var(--td3-blue-soft-2);
+}
+
+.uw-composer-shell textarea {
+  width: 100%;
+  min-height: 66px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 11px 12px 5px;
+  border: 0;
+  outline: 0;
+  color: var(--td3-text);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.uw-composer-shell textarea::placeholder {
+  color: var(--td3-muted);
+}
+
+.uw-composer-footer {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 7px 7px 11px;
+}
+
+.uw-composer-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+
+.uw-button {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  outline: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 13px;
+  transition:
+    transform 120ms ease,
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    color 120ms ease;
+}
+
+.uw-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.uw-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.uw-button:focus-visible {
+  box-shadow: 0 0 0 3px var(--td3-blue-soft);
+}
+
+.uw-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.uw-button-primary {
+  border-color: var(--td3-blue-border);
+  color: var(--td3-on-accent);
+  background: linear-gradient(180deg, var(--td3-blue-strong), var(--td3-blue-deep));
+  box-shadow:
+    inset 0 1px 0 var(--td3-raise-3),
+    0 8px 20px var(--td3-blue-soft);
+}
+
+.uw-button-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--td3-blue-strong), var(--td3-blue-deep));
+  box-shadow:
+    inset 0 1px 0 var(--td3-raise-3),
+    0 10px 25px var(--td3-blue-border);
+}
+
+.uw-button-danger {
+  border-color: var(--td3-red-border);
+  color: var(--td3-red-text);
+  background: var(--td3-red-soft);
+}
+
+.uw-button-danger:hover:not(:disabled) {
+  background: var(--td3-red-border);
+}
+
+.uw-standalone-host {
+  min-height: 100vh;
+}
+
+.uw-manager-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--td3-veil);
+  backdrop-filter: blur(12px);
+}
+
+.uw-machine-manager {
+  width: min(780px, 96vw);
+  max-height: min(780px, 92vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--td3-border-strong);
+  border-radius: 16px;
+  color: var(--td3-text);
+  background: var(--td3-panel-2);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.uw-machine-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--td3-border);
+}
+
+.uw-machine-manager-header h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.uw-machine-manager-header p {
+  max-width: 610px;
+  margin: 7px 0 0;
+  color: var(--td3-text-3);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.uw-manager-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--td3-border);
+  border-radius: 9px;
+  color: var(--td3-text-2);
+  background: var(--td3-raise-2);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.uw-machine-manager-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 24px;
+  overflow: auto;
+}
+
+.uw-machine-config-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 16px;
+  border: 1px solid var(--td3-border);
+  border-radius: 12px;
+  background: var(--td3-control);
+}
+
+.uw-machine-config-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.uw-machine-config-main strong {
+  font-size: 15px;
+}
+
+.uw-machine-config-main span {
+  color: var(--td3-text-2);
+  font-size: 13px;
+}
+
+.uw-machine-config-main small {
+  color: var(--td3-text-3);
+  font-size: 11.5px;
+}
+
+.uw-machine-config-actions,
+.uw-machine-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Inline removal confirmation, in place of a native window.confirm the Android WebView renders as
+   an unstyled system alert on top of the app. */
+.uw-machine-confirm {
+  color: var(--td3-red-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.uw-manager-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--td3-border-strong);
+  border-radius: 9px;
+  color: var(--td3-text);
+  background: var(--td3-raise-2);
+  font: 600 12.5px/1 Inter, ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.uw-manager-button:hover:not(:disabled) {
+  background: var(--td3-raise-3);
+}
+
+.uw-manager-button.primary {
+  border-color: var(--td3-blue-border);
+  background: var(--td3-blue);
+  color: white;
+}
+
+.uw-manager-button.danger {
+  color: var(--td3-red-text);
+  border-color: var(--td3-red-border);
+  background: var(--td3-red-soft);
+}
+
+.uw-manager-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.uw-machine-editor {
+  padding: 18px;
+  border: 1px solid var(--td3-blue-border);
+  border-radius: 12px;
+  background: var(--td3-blue-soft-2);
+}
+
+.uw-machine-editor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+}
+
+.uw-machine-editor-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.uw-machine-editor-grid label > span {
+  color: var(--td3-text-3);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.uw-machine-editor-grid input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px;
+  border: 1px solid var(--td3-border-strong);
+  border-radius: 9px;
+  outline: none;
+  color: var(--td3-text);
+  background: var(--td3-panel-2);
+  font-size: 14px;
+}
+
+.uw-machine-editor-grid input:focus {
+  border-color: var(--td3-focus);
+  box-shadow: 0 0 0 3px var(--td3-blue-soft);
+}
+
+.uw-machine-editor-wide {
+  grid-column: 1 / -1;
+}
+
+.uw-machine-editor-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.uw-machine-test-result {
+  margin-top: 13px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.uw-machine-test-result.ok {
+  color: var(--td3-green-text);
+  background: var(--td3-green-soft);
+}
+
+.uw-machine-test-result.error {
+  color: var(--td3-text-2);
+  background: var(--td3-red-border);
+}
+
+.uw-machine-manager-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px;
+  border: 1px dashed var(--td3-border-strong);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.uw-machine-manager-empty strong {
+  font-size: 15px;
+}
+
+.uw-machine-manager-empty span {
+  color: var(--td3-text-3);
+  font-size: 13px;
+}
+
+.uw-machine-manager-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid var(--td3-border);
+}
+
+.uw-machine-manager-footer > span {
+  color: var(--td3-text-3);
+  font-size: 12.5px;
+}

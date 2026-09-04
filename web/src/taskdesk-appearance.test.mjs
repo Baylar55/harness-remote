@@ -5,15 +5,11 @@ import test from "node:test"
 const read = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8")
 
 const SHEETS = [
-  "taskdesk-v3.css",
   "taskdesk-v3-unified.css",
-  "taskdesk-run-review.css",
-  "v3-polish.css",
-  "universal-workspace.css",
-  "universal-workspace-readable.css",
   "universal-workspace-readable-fixes.css",
   "conversation-control-plane.css",
-  "conversation-control-plane-overrides.css"
+  "conversation-control-plane-overrides.css",
+  "session-first-workbench.css"
 ]
 
 /** Every colour literal, ignoring the black used for shadows and any hex inside a url() or var name. */
@@ -56,19 +52,20 @@ test("no TaskDesk surface hard-codes a colour outside the palette", () => {
   }
 })
 
-test("control resets never outrank the components built from them", () => {
-  const v3 = read("taskdesk-v3.css")
-  const workspace = read("universal-workspace.css")
-
-  // `.td3-shell button` is (0,1,1) and beat every single-class component rule that followed — and,
-  // because taskdesk-v3.css loads after universal-workspace.css, it also overrode the Sessions
-  // pane's own button colours from a different sheet. At (0,0,0) authored rules win either way.
-  assert.match(v3, /:where\(\.td3-shell button, \.td3-shell input, \.td3-shell textarea, \.td3-shell select\) \{ font: inherit; \}/)
-  assert.match(v3, /:where\(\.td3-shell button\) \{ color: inherit; \}/)
-  assert.doesNotMatch(v3, /^\.td3-shell button\b/m)
-  assert.match(workspace, /:where\(\.uw-shell button, \.uw-shell input, \.uw-shell textarea, \.uw-shell select\)/)
-  assert.match(workspace, /:where\(\.uw-shell button\) \{\s*color: inherit;/)
-  assert.doesNotMatch(workspace, /^\.uw-shell button,$/m)
+test("live conversation and button bases survived the retired-sheet deletion", () => {
+  // The retired universal-workspace*.css sheets owned these; they now live in
+  // session-first-workbench.css. If either goes missing the transcript scroll,
+  // composer frame/buttons and Machines dialog render unstyled or break containment.
+  const workbench = read("session-first-workbench.css")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-transcript\s*\{[^}]*?overflow-y:\s*auto;/, ".uw-transcript must bound height with overflow-y: auto")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-transcript\s*\{[^}]*?flex:\s*1;/, ".uw-transcript must expand in conversation flex column")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-message\s*\{[^}]*?display:\s*grid;/, ".uw-message must declare grid layout")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-composer-shell\s*\{[^}]*?flex:\s*none;/, ".uw-composer-shell must not stretch with flex: none")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-composer-footer > div\s*\{[^}]*?display:\s*flex;/, ".uw-composer-footer > div must declare flex alignment")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-button-primary\s*\{[^}]*?background:/, ".uw-button-primary has no base background")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-button-danger\s*\{[^}]*?background:/, ".uw-button-danger has no base background")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-manager-button\s*\{/, ".uw-manager-button has no base rule")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-machine-manager\s*\{[^}]*?display:\s*flex;/, ".uw-machine-manager has no modal flex rule")
 })
 
 test("no TaskDesk text is authored below a readable size", () => {
@@ -77,10 +74,6 @@ test("no TaskDesk text is authored below a readable size", () => {
     const css = read(sheet)
     const sizes = [...css.matchAll(/font-size:\s*([0-9.]+)px/g)].map((match) => Number(match[1]))
     const tooSmall = sizes.filter((size) => size < floor)
-    // universal-workspace.css still declares its historical 7-8.5px sizes; the readable sheets raise
-    // them. That is only acceptable while every one of them is actually overridden, which the live
-    // measurement in the PR covers — so the floor is enforced on the sheets that have the last word.
-    if (sheet === "universal-workspace.css") continue
     assert.deepEqual(tooSmall, [], `${sheet} declares ${tooSmall.join(", ")}px text`)
   }
 })
@@ -108,9 +101,8 @@ test("appearance and language are applied before any shell renders", () => {
 
   assert.match(main, /installAppPreferences\(\)/)
   assert.match(main, /import "\.\/taskdesk-theme\.css"/)
-  // The palette has to be in the cascade before the sheets that consume it, and the unified sheet
-  // after the base sheet it overrides.
-  const order = ["styles.css", "taskdesk-theme.css", "universal-workspace.css", "taskdesk-v3.css", "taskdesk-v3-unified.css", "v3-polish.css"]
+  // The palette has to be in the cascade before the sheets that consume it.
+  const order = ["styles.css", "taskdesk-theme.css", "taskdesk-v3-unified.css", "session-first-workbench.css"]
   const positions = order.map((name) => main.indexOf(`import "./${name}"`))
   for (const position of positions) assert.notEqual(position, -1)
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right), "TaskDesk sheets must load base-to-override")
