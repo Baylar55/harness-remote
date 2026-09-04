@@ -2042,10 +2042,95 @@
 /* Live bases extracted from the retired universal-workspace.css /
    universal-workspace-readable.css (deleted). Everything else in those sheets
    styled the retired uw-shell / uw-layout / td3-shell shells. These rules are
-   the only ones still matched by live components: the composer Send/Stop/
-   Attach buttons (taskdesk-conversation.tsx) and the Machines manager dialog
-   (standalone-universal-workspace.tsx). Merged from both sheets (readable size
-   bump folded in); dead variants with zero usages were dropped. */
+   the only ones still matched by live components: conversation transcript scroll,
+   composer frame & buttons (taskdesk-conversation.tsx), and the Machines
+   manager dialog (standalone-universal-workspace.tsx). Merged from both sheets
+   (readable size bump folded in); dead variants with zero usages were dropped. */
+
+.uw-transcript {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.uw-message {
+  width: min(760px, 100%);
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  margin: 0 auto 18px;
+}
+
+.uw-avatar {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.uw-message-body {
+  min-width: 0;
+}
+
+.uw-composer-shell {
+  width: min(790px, calc(100% - 30px));
+  margin: 0 auto 16px;
+  flex: none;
+  border: 1px solid var(--td3-border);
+  border-radius: 13px;
+  background: var(--td3-chrome);
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.17),
+    inset 0 1px 0 var(--td3-raise-1);
+  overflow: hidden;
+}
+
+.uw-composer-shell:focus-within {
+  border-color: var(--td3-blue-border);
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.18),
+    0 0 0 3px var(--td3-blue-soft-2);
+}
+
+.uw-composer-shell textarea {
+  width: 100%;
+  min-height: 66px;
+  max-height: 180px;
+  resize: vertical;
+  padding: 11px 12px 5px;
+  border: 0;
+  outline: 0;
+  color: var(--td3-text);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.uw-composer-shell textarea::placeholder {
+  color: var(--td3-muted);
+}
+
+.uw-composer-footer {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 7px 7px 11px;
+}
+
+.uw-composer-footer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 
 .uw-button {
   min-height: 38px;

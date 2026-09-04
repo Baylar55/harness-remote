@@ -52,14 +52,20 @@ test("no TaskDesk surface hard-codes a colour outside the palette", () => {
   }
 })
 
-test("live button bases survived the retired-sheet deletion", () => {
+test("live conversation and button bases survived the retired-sheet deletion", () => {
   // The retired universal-workspace*.css sheets owned these; they now live in
-  // session-first-workbench.css. If either goes missing the composer Send/Stop
-  // and the Machines dialog render unstyled.
+  // session-first-workbench.css. If either goes missing the transcript scroll,
+  // composer frame/buttons and Machines dialog render unstyled or break containment.
   const workbench = read("session-first-workbench.css")
-  for (const selector of [".uw-button-primary", ".uw-button-danger", ".uw-manager-button", ".uw-machine-manager"]) {
-    assert.ok(workbench.includes(selector), `${selector} has no base rule`)
-  }
+  assert.match(workbench, /(?:^|\r?\n)\.uw-transcript\s*\{[^}]*?overflow-y:\s*auto;/, ".uw-transcript must bound height with overflow-y: auto")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-transcript\s*\{[^}]*?flex:\s*1;/, ".uw-transcript must expand in conversation flex column")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-message\s*\{[^}]*?display:\s*grid;/, ".uw-message must declare grid layout")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-composer-shell\s*\{[^}]*?flex:\s*none;/, ".uw-composer-shell must not stretch with flex: none")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-composer-footer > div\s*\{[^}]*?display:\s*flex;/, ".uw-composer-footer > div must declare flex alignment")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-button-primary\s*\{[^}]*?background:/, ".uw-button-primary has no base background")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-button-danger\s*\{[^}]*?background:/, ".uw-button-danger has no base background")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-manager-button\s*\{/, ".uw-manager-button has no base rule")
+  assert.match(workbench, /(?:^|\r?\n)\.uw-machine-manager\s*\{[^}]*?display:\s*flex;/, ".uw-machine-manager has no modal flex rule")
 })
 
 test("no TaskDesk text is authored below a readable size", () => {
