@@ -110,11 +110,12 @@ assert.match(read("components/taskdesk-message-content.tsx"), /status === "runni
 assert.match(overrides, /prefers-reduced-motion/)
 
 // Model discovery is machine-scoped for native Sessions and must not restart on object identity churn.
-assert.match(chat, /const scope = routing \? NATIVE_ROUTE_MODEL_SCOPE/)
+assert.match(chat, /const scope = routing && routeChanged \? NATIVE_ROUTE_MODEL_SCOPE/)
 assert.match(chat, /taskClient\.listAgentModels\(destinationConfig, targetAgentID, scope\)/)
 assert.match(chat, /routingSignature/)
-assert.match(chat, /const modelScopeKey = modelScope \?/)
-assert.match(observer, /const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = \{\}/)
+assert.match(chat, /const modelScopeKey = modelScope\s+\?/)
+assert.match(observer, /const nativeSessionModelScope = useMemo<AgentModelScope>/)
+assert.match(observer, /modelScope=\{nativeSessionModelScope\}/)
 assert.match(observer, /deferModelFallback/)
 assert.doesNotMatch(
   read("native-session-v3-adapter.ts"),
