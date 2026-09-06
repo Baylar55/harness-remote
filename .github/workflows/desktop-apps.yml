@@ -83,16 +83,7 @@ jobs:
         working-directory: web
 
       - name: Run web regression tests
-        run: |
-          npm run test:i18n
-          npm run test:config
-          npm run test:ui
-          npm run test:settings
-          npm run test:platform
-          npm run test:model
-          npm run test:events
-          npm run test:profiles
-          npm run test:desktop
+        run: npm run test:ci:desktop
         working-directory: web
 
       # The unit tests can only check the menu template the app builds, not that Electron accepts it.

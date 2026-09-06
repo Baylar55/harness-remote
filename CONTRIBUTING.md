@@ -76,27 +76,22 @@ default and refuses non-loopback bind without `--username` and `--password`.
 
 ## The checks you must run
 
-CI runs all of these before it packages anything, so a PR that skips them will fail there instead:
+The complete web regression suite now has one canonical entry point, so local verification and CI
+cannot silently drift into different copied lists:
 
 ```bash
 cd web
 npm run build
 npm run build:electron
-npm run test:i18n
-npm run test:config
-npm run test:ui
-npm run test:settings
-npm run test:model
-npm run test:events
-npm run test:profiles
-npm run test:desktop
+npm run test:ci:full
 
 cd ../bridge
 npm test
 ```
 
-`npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles.
-
+`npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles. Packaging workflows
+use narrower named tiers where appropriate (`test:ci:baseline`, `test:ci:pages`, and
+`test:ci:desktop`) while PR validation uses `test:ci:full`.
 
 ## Product and compatibility rules
 

@@ -45,17 +45,9 @@ jobs:
         working-directory: web
 
       # Deploying on every merge only works if a bad merge cannot reach the URL, so this gates on the
-      # same suites as the APK release rather than on the type-check alone.
+      # same coverage tier as before, but the command now lives in package.json instead of being copied here.
       - name: Run web regression tests
-        run: |
-          npm run test:i18n
-          npm run test:config
-          npm run test:ui
-          npm run test:settings
-          npm run test:model
-          npm run test:events
-          npm run test:profiles
-          npm run test:attachments
+        run: npm run test:ci:pages
         working-directory: web
 
       - name: Build web app
