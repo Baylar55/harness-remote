@@ -218,7 +218,9 @@ try {
   const pageErrors = []
   page.on("pageerror", (error) => pageErrors.push(error.message))
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  // The Session workspace deliberately keeps a live event stream open. Network-idle can therefore
+  // never be the readiness contract; the assertions below wait for the actual UI state we need.
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   await openAndAssert(page, TITLE_A, MARKER_A, MARKER_B)
   await openAndAssert(page, TITLE_B, MARKER_B, MARKER_A)
