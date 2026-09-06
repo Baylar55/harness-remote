@@ -1414,7 +1414,11 @@ export class AcpService {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
-      if (Array.isArray(snapshot.messages)) {
+      // A freshly created Session is already loaded in this process. Its first snapshot can still
+      // contain the empty pre-prompt transcript while a real prompt has since been recorded in
+      // memory; restoring that stale file here would erase the visible user turn. Snapshots only
+      // seed a Session that has not been loaded yet (restart or cache eviction).
+      if (!this.#loaded.has(sessionID) && Array.isArray(snapshot.messages)) {
         const fragmented = mergeFragmentedPiSnapshot(snapshot.messages)
         const restored = healPoisonedSnapshot(fragmented)
         if (restored.length !== fragmented.length) {

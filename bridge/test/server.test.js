@@ -1306,6 +1306,47 @@ test("restores messages from disk when ACP replay is empty or partial after rest
   }
 })
 
+test("an empty initial snapshot cannot erase the first prompt of a loaded journal-backed Session", async () => {
+  class FreshSessionAcp extends EventEmitter {
+    async start() {}
+
+    async listSessions() {
+      return [{ sessionId: "fresh-session", cwd: process.cwd(), updatedAt: "2026-09-06T00:00:00.000Z" }]
+    }
+
+    async request(method) {
+      if (method === "session/new") {
+        return {
+          sessionId: "fresh-session",
+          configOptions: [{ id: "model", currentValue: "free", options: [{ value: "free" }] }]
+        }
+      }
+      return {}
+    }
+
+    notify() {}
+  }
+
+  const snapshotDirectory = await mkdtemp(path.join(tmpdir(), "harness-remote-fresh-snapshot-"))
+  try {
+    const service = new AcpService(new FreshSessionAcp(), {
+      snapshotDirectory,
+      historyLoader: async () => [],
+      journalPageWhileOwned: false
+    })
+    const created = await service.createSession({ directory: process.cwd() })
+    await service.flushSnapshots()
+    await service.prompt(created.id, "Keep the first prompt")
+    assert.deepEqual(
+      (await service.messages(created.id)).map((message) => [message.info.role, message.parts[0]?.text]),
+      [["user", "Keep the first prompt"]]
+    )
+    await service.flushSnapshots()
+  } finally {
+    await rm(snapshotDirectory, { recursive: true, force: true })
+  }
+})
+
 test("reads external history without loading and interrupting the ACP session", async () => {
   const message = (id, text) => ({
     info: { id, role: "assistant", sessionID: "session-1", time: { created: Date.now() } },
