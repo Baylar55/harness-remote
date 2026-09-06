@@ -1,4 +1,5 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
+import { api } from "./api"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import { unwrapPayload } from "./machinePayload"
 import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
@@ -141,6 +142,8 @@ export type AgentModelCatalog = {
 export type AgentModelScope = {
   projectId?: string
   workThreadId?: string
+  sessionID?: string
+  directory?: string
 }
 
 export type TaskContinueInput = {
@@ -176,6 +179,7 @@ function cacheKey(config: ServerConfig): string {
 }
 
 function modelScopeKey(scope: AgentModelScope): string {
+  if (scope.sessionID) return `session:${scope.sessionID}:${scope.directory || ""}`
   if (scope.workThreadId) return `conversation:${scope.workThreadId}`
   if (scope.projectId) return `project:${scope.projectId}`
   return "default"
@@ -383,6 +387,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function loadAgentModelCatalog(config: ServerConfig, agentId: string, scope: AgentModelScope): Promise<AgentModelCatalog> {
+  if (scope.sessionID) {
+    return {
+      models: await api.listModels({ ...config, agentId }, scope.directory, scope.sessionID),
+      stale: false,
+      refreshedAt: new Date().toISOString(),
+      source: "native-session-config-options"
+    }
+  }
   const path = modelCatalogPath(agentId, scope)
   const started = Date.now()
   while (true) {
