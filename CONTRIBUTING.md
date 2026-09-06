@@ -198,7 +198,8 @@ your change is silently dropped and the app runs the previous version of the nat
 
 ## Cutting a release
 
-The release version is still sourced from `web/package.json`, but tags are now created by CI rather than by hand.
+The release version is still sourced from `web/package.json`, but tags are now created by CI rather
+than by hand.
 
 1. Bump `version` in `web/package.json`.
 2. Merge the fully validated release candidate to `main`.
@@ -251,7 +252,7 @@ Commit subjects use a conventional prefix. The ones actually in use here are `fi
 
 Write the body to explain **why**, not what — the diff already says what. If a change fixes
 something subtle, say what the failure looked like and how you confirmed it is gone. A commit that
-recordss the reasoning is worth more than one that records the edit.
+records the reasoning is worth more than one that records the edit.
 
 Group commits by intent rather than by the order you happened to write them, and keep each one
 building and passing on its own so a bisect lands somewhere useful.
