@@ -32,8 +32,7 @@ function parseArgumentList(value, fallback) {
   return parsed
 }
 
-function parseBackend(value, { allowOpenCode = false } = {}) {
-  if (allowOpenCode && value === "opencode") return value
+function parseBackend(value) {
   return harnessProfile(value).id
 }
 
@@ -43,10 +42,10 @@ function environmentValue(environment, name) {
 }
 
 
-export function parseConfig(args, environment = process.env, { allowOpenCodeBackend = false } = {}) {
-  const backend = parseBackend(environmentValue(environment, "BACKEND") ?? "omp", { allowOpenCode: allowOpenCodeBackend })
-  const profile = backend === "opencode" && allowOpenCodeBackend ? null : harnessProfile(backend)
-  const launch = profile ? resolveAcpLaunch(profile) : { command: "", args: [] }
+export function parseConfig(args, environment = process.env) {
+  const backend = parseBackend(environmentValue(environment, "BACKEND") ?? "omp")
+  const profile = harnessProfile(backend)
+  const launch = resolveAcpLaunch(profile)
   const acpCommand = environmentValue(environment, "ACP_COMMAND")
   const acpArgs = environmentValue(environment, "ACP_ARGS")
   const root = environmentValue(environment, "ROOT")
@@ -71,18 +70,11 @@ export function parseConfig(args, environment = process.env, { allowOpenCodeBack
     const option = args[index]
     switch (option) {
       case "--backend":
-        config.backend = parseBackend(requireValue(args, index, option), { allowOpenCode: allowOpenCodeBackend })
+        config.backend = parseBackend(requireValue(args, index, option))
         {
-          const selected = config.backend === "opencode" && allowOpenCodeBackend
-            ? null
-            : resolveAcpLaunch(harnessProfile(config.backend))
-          if (selected) {
-            if (!acpCommandOverridden) config.acpCommand = selected.command
-            if (!acpArgsOverridden) config.acpArgs = [...selected.args]
-          } else {
-            if (!acpCommandOverridden) config.acpCommand = ""
-            if (!acpArgsOverridden) config.acpArgs = []
-          }
+          const selected = resolveAcpLaunch(harnessProfile(config.backend))
+          if (!acpCommandOverridden) config.acpCommand = selected.command
+          if (!acpArgsOverridden) config.acpArgs = [...selected.args]
         }
         index += 1
         break
