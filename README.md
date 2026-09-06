@@ -284,9 +284,11 @@ That makes it possible to add new harnesses without forcing existing ones into a
 
 ## Harness Remote 3 status
 
-Harness Remote **3.0.0 is the current stable release** and the Session-first architecture now ships from `main`.
+The Session-first architecture ships from `main`.
 
-The official `v3.0.0` release supports OpenCode, OMP, PI, Codex CLI and Claude Code while preserving each harness's native Session identity and behavior. The validated release scope includes native Session discovery and continuation, multi-machine Session creation, same-machine cross-harness handoff with durable lineage, model selection, live Activity, Stop, rename/delete, transcript paging and reconnect recovery.
+Harness Remote supports OpenCode, OMP, PI, Codex CLI and Claude Code while preserving each harness's native Session identity and behavior. The validated scope includes native Session discovery and continuation, multi-machine Session creation, same-machine cross-harness handoff with durable lineage, model selection, live Activity, Stop, rename/delete, transcript paging and reconnect recovery.
+
+ACP-backed Session recovery also protects freshly created Sessions from stale initial snapshots: an older empty snapshot cannot overwrite the first prompt of a Session that is already loaded in memory.
 
 Post-release work intentionally prioritizes Session correctness and maintainability over broad orchestration. Cross-machine handoff is a separate follow-up, and architectural cleanup must start from current `main` rather than reviving pre-release checkpoint/draft branches.
 
