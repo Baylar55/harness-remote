@@ -20,6 +20,7 @@ const mobileParity = read("v3-mobile-product-parity.css")
 const nativeObserverCss = read("native-session-observer.css")
 const nativeHomeUxCss = read("native-session-home-ux.css")
 const machineClient = read("machineClient.ts")
+const machineLiveRefresh = read("machine-live-refresh.ts")
 
 
 // Legacy profile defaults remain readable for 2.x compatibility, while 3.0 boots from machines.
@@ -70,7 +71,8 @@ assert.match(sessionWorkbench, /\.hr-native-workspace-session-actions > code[\s\
 assert.match(nativeObserverCss, /\.hr-native-session-observer \.tdw-conversation-toolbar[\s\S]*display: grid !important;[\s\S]*grid-template-columns: minmax\(0, 1fr\) auto !important;/)
 assert.match(nativeObserverCss, /\.hr-control-plane \.hr-native-session-observer \.tdw-conversation-state[\s\S]*grid-column: 2 !important;/)
 assert.match(nativeObserverCss, /\.tdw-connection-notice/)
-assert.match(standalone, /MACHINE_RECONNECT_POLL_MS = 1_500/)
+assert.match(standalone, /MACHINE_RECONNECT_POLL_MS/)
+assert.match(machineLiveRefresh, /MACHINE_RECONNECT_POLL_MS = 1_500/)
 assert.match(machineClient, /allowCachedOnTransportFailure/)
 assert.match(standalone, /allowCachedOnTransportFailure: false/)
 assert.match(standalone, /selectedInteractionEnabled/)
