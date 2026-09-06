@@ -1,18 +1,14 @@
 name: PR checks
 
-# The regression suites only ran on `main`, inside the Pages deploy, so a pull request was merged
-# blind and a red suite was discovered after the fact, by which point the deploy that gates the
-# hosted app had already failed. The same gap hid the APK: it is built on `main` and on tags, so a
-# change to the app could not be installed on a phone until after it landed. Both run here instead,
-# on the pull request, which is where the answer is still cheap to act on.
+# This workflow is intended to become the required pre-merge gate for main. It must therefore
+# exist for every pull request: a workflow-level paths filter can make required status contexts
+# disappear entirely on docs-only or otherwise out-of-scope PRs, leaving those PRs unmergeable.
+# Keep the gate universal first; optimize heavy jobs with always-present path-aware logic only after
+# branch protection is enforced and the required-context contract is stable.
 
 "on":
   workflow_dispatch: {}
-  pull_request:
-    paths:
-      - 'web/**'
-      - 'bridge/**'
-      - '.github/workflows/pr-checks.yml'
+  pull_request: {}
 
 permissions:
   contents: read
