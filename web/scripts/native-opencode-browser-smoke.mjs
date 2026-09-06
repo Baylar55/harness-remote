@@ -575,7 +575,7 @@ async function assertExistingContract(browser, viewport, mobile) {
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   await openSession(page, "OpenCode v3-first regression session")
   assert.equal(claimRequests, 0, "OpenCode open must never use ACP writer claim")
@@ -617,7 +617,7 @@ async function assertExistingContract(browser, viewport, mobile) {
   await waitForReady(page)
   const promptsBeforeReload = promptHttpBodies.length
   const dispatchesBeforeReload = nativePromptDispatches
-  await page.reload({ waitUntil: "networkidle" })
+  await page.reload({ waitUntil: "domcontentloaded" })
   await openSession(page, "OpenCode v3-first regression session")
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "OpenCode reload must never emit a prompt")
   assert.equal(nativePromptDispatches, dispatchesBeforeReload, "OpenCode reload must never dispatch work")
@@ -708,7 +708,7 @@ async function assertCreateContract(browser, viewport, mobile) {
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   await page.getByRole("button", { name: "New Session" }).click()
   const panel = page.getByRole("group", { name: "Create native Session" })
@@ -735,7 +735,7 @@ async function assertCreateContract(browser, viewport, mobile) {
   assert.equal(claimRequests, 0)
 
   await waitForReady(page)
-  await page.reload({ waitUntil: "networkidle" })
+  await page.reload({ waitUntil: "domcontentloaded" })
   await openSession(page, CREATE_TITLE)
   assert.equal(await page.getByText(CREATE_PROMPT, { exact: true }).count(), 1, "created OpenCode prompt disappeared or duplicated after reload")
   assert.equal(await page.getByText(CREATE_REPLY, { exact: true }).count(), 1, "created OpenCode reply disappeared or duplicated after reload")

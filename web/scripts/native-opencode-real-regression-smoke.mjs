@@ -495,13 +495,13 @@ async function runScenario(browser, viewport, label) {
   const context = await browser.newContext({ viewport, hasTouch: viewport.width < 600 })
   const page = await context.newPage()
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   await openPrimary(page)
   await assertCompletionAndModel(page, PROMPT, REASONING, FINAL, `${label} first turn`)
 
   // Remount must still be correct, but it is no longer required to make the first final appear.
-  await page.reload({ waitUntil: "networkidle" })
+  await page.reload({ waitUntil: "domcontentloaded" })
   await openPrimary(page)
   await page.getByText(FINAL, { exact: true }).waitFor({ state: "visible", timeout: 2_000 })
   await page.locator(".tdw-conversation-state.ready").waitFor({ state: "attached", timeout: 2_000 })

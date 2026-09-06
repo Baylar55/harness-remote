@@ -547,7 +547,7 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   if (mobile) {
     await page.locator('.hr-mobile-nav button[aria-current="page"]').filter({ hasText: "Sessions" }).waitFor({ state: "visible" })
@@ -693,7 +693,7 @@ async function assertExistingSessionContract(browser, viewport, mobile) {
   await waitForReady(page)
   const promptsBeforeReload = promptHttpBodies.length
   const dispatchesBeforeReload = nativePromptDispatches
-  await page.reload({ waitUntil: "networkidle" })
+  await page.reload({ waitUntil: "domcontentloaded" })
   await openSession(page, "PI v3-first regression session")
   assert.equal(claimCount, 1, "reopening a Session must stay read-only until another mutation is attempted")
   assert.equal(promptHttpBodies.length, promptsBeforeReload, "refresh must never emit a native PI prompt")
@@ -717,7 +717,7 @@ async function assertMobileDeleteTransitionContract(browser) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   await openSession(page, "PI v3-first regression session")
   await page.getByRole("button", { name: "Delete Session" }).click()
@@ -767,7 +767,7 @@ async function assertCreateSessionContract(browser, viewport, mobile) {
   const context = await browser.newContext({ viewport, isMobile: mobile, hasTouch: mobile, deviceScaleFactor: 1 })
   const page = await context.newPage()
   await seed(page)
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
 
   await page.getByRole("button", { name: "New Session" }).click()
   await page.getByRole("group", { name: "Create native Session" }).waitFor({ state: "visible" })
@@ -789,7 +789,7 @@ async function assertCreateSessionContract(browser, viewport, mobile) {
   assert.equal(promptHttpBodies.filter((body) => body.sessionID === CREATED_SESSION_ID && body.text === CREATE_PROMPT).length, 1, "created PI Session prompt must target the returned native id exactly once")
 
   await waitForReady(page)
-  await page.reload({ waitUntil: "networkidle" })
+  await page.reload({ waitUntil: "domcontentloaded" })
   await openSession(page, CREATE_TITLE)
   assert.equal(claimCount, 0, "reopening the created Session must not claim merely to show its transcript")
   assert.equal(await page.getByText(CREATE_PROMPT, { exact: true }).count(), 1, "created Session prompt disappeared or duplicated after reopen")

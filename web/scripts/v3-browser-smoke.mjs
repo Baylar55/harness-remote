@@ -283,7 +283,7 @@ async function assertStartupFeedback(browser) {
   await startup.getByText("Connecting to your machines…", { exact: true }).waitFor({ state: "visible" })
   await startup.getByText(/Discovering Projects, installed coding agents and native Sessions/).waitFor({ state: "visible" })
   await assertNoDocumentOverflow(page, "startup feedback")
-  await page.waitForLoadState("networkidle")
+  await page.waitForLoadState("domcontentloaded")
   await context.close()
 }
 
@@ -305,7 +305,7 @@ async function runMobileAudit(browser) {
     localStorage.setItem(key, JSON.stringify(machines))
   }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
 
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
   await assertMobileHome(page, "portrait")
 
   await page.locator(".hr-mobile-nav").getByRole("button", { name: /Settings/ }).click()
@@ -341,7 +341,7 @@ async function runDesktopAudit(browser) {
       config: { backend: "opencode", host: "127.0.0.1", port: fixture.port, username: user, password }
     }))))
   }, { key: STORAGE_KEY, fixtures, user: AUTH_USER, password: AUTH_PASSWORD })
-  await page.goto(APP_ORIGIN, { waitUntil: "networkidle" })
+  await page.goto(APP_ORIGIN, { waitUntil: "domcontentloaded" })
   await assertSessionFirstHome(page, false)
   await page.locator(".hr-native-machine-group", { hasText: "Windows Test" }).waitFor({ state: "visible" })
   await page.locator(".hr-native-machine-group", { hasText: "Linux Test" }).waitFor({ state: "visible" })
