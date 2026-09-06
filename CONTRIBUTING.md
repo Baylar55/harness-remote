@@ -76,27 +76,22 @@ default and refuses non-loopback bind without `--username` and `--password`.
 
 ## The checks you must run
 
-CI runs all of these before it packages anything, so a PR that skips them will fail there instead:
+The complete web regression suite now has one canonical entry point, so local verification and CI
+cannot silently drift into different copied lists:
 
 ```bash
 cd web
 npm run build
 npm run build:electron
-npm run test:i18n
-npm run test:config
-npm run test:ui
-npm run test:settings
-npm run test:model
-npm run test:events
-npm run test:profiles
-npm run test:desktop
+npm run test:ci:full
 
 cd ../bridge
 npm test
 ```
 
-`npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles.
-
+`npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles. Packaging workflows
+use narrower named tiers where appropriate (`test:ci:baseline`, `test:ci:pages`, and
+`test:ci:desktop`) while PR validation uses `test:ci:full`.
 
 ## Product and compatibility rules
 
@@ -203,8 +198,7 @@ your change is silently dropped and the app runs the previous version of the nat
 
 ## Cutting a release
 
-The release version is still sourced from `web/package.json`, but tags are now created by CI rather
-than by hand.
+The release version is still sourced from `web/package.json`, but tags are now created by CI rather than by hand.
 
 1. Bump `version` in `web/package.json`.
 2. Merge the fully validated release candidate to `main`.
@@ -257,7 +251,7 @@ Commit subjects use a conventional prefix. The ones actually in use here are `fi
 
 Write the body to explain **why**, not what — the diff already says what. If a change fixes
 something subtle, say what the failure looked like and how you confirmed it is gone. A commit that
-records the reasoning is worth more than one that records the edit.
+recordss the reasoning is worth more than one that records the edit.
 
 Group commits by intent rather than by the order you happened to write them, and keep each one
 building and passing on its own so a bisect lands somewhere useful.
