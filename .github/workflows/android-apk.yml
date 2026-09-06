@@ -24,8 +24,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          # Release notes are built from the tag's own annotation and the tag before it, and a
+          # depth-1 clone has neither.
           fetch-depth: 0
 
+      # checkout writes the tag ref pointing at the commit rather than at the tag object, so the
+      # annotation is not in the clone even with fetch-depth: 0. `git describe` keeps working — it is
+      # happy with a lightweight tag — which is how v2.4.0 published a release carrying the full
+      # changelog link and none of the curated notes. Re-fetching the tags brings the objects back.
       - name: Restore annotated tags
         if: startsWith(github.ref, 'refs/tags/v')
         run: git fetch --tags --force
@@ -44,7 +50,6 @@ jobs:
       - name: Build web app
         run: npm run build
         working-directory: web
-
       - name: Run web regression tests
         run: npm run test:ci:baseline
         working-directory: web
@@ -141,6 +146,11 @@ jobs:
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose web/android/app/build/outputs/apk/release/app-release-signed.apk
 
+      # A file's basename becomes its release asset name, and Gradle's app-release-signed.apk names
+      # neither the app nor the version — next to the desktop artifacts on a release it reads like it
+      # belongs to a different project. Rename it to the shape they use,
+      # Harness-Remote-<version>-<platform>[-unsigned].<ext>, keeping -unsigned meaningful: the APK
+      # only carries the suffix when the signing secrets were absent.
       - name: Select release APK path
         id: apk
         env:
@@ -163,12 +173,22 @@ jobs:
           name: harness-remote-release-apk-v${{ steps.version.outputs.app_version }}
           path: ${{ steps.apk.outputs.path }}
 
+      # The release summary and its credits come from the annotated tag message, written by hand when
+      # the release is cut. generate_release_notes is deliberately off: it lists one line per pull
+      # request attributed to whoever merged it, which credits the maintainer for work contributors
+      # did. CI cannot tell those apart, so it does not try — it publishes the curated text and links
+      # the full changelog for anyone who wants the commit-level detail.
       - name: Compose release notes
         id: notes
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           SUMMARY=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 --exclude="$GITHUB_REF_NAME" 2>/dev/null || true)
+          # An empty summary used to be tolerated, on the grounds that a terse release beats a failed
+          # one. v2.4.0 showed what that actually produces: a release with no changes listed and no
+          # contributors named, which is the one outcome the whole convention exists to prevent, and
+          # nobody notices until someone reads the release. A failure here is cheap — fix the tag and
+          # re-run — so it fails.
           if [ -z "$SUMMARY" ]; then
             echo "::error::$GITHUB_REF_NAME carries no annotation body, so the release would have no notes and credit nobody. Re-create it with 'git tag -a -F <file> --cleanup=verbatim' and force-push the tag." >&2
             exit 1
