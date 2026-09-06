@@ -29,6 +29,9 @@ concurrency:
 
 jobs:
   package:
+    # A release commit is immediately followed by a v* tag on the same SHA. Build it only for the
+    # tag: starting the main copy and cancelling it later leaves the main commit looking failed even
+    # though the release build itself is healthy. Manual runs are always allowed.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.ref, 'refs/tags/v') ||
@@ -36,6 +39,7 @@ jobs:
     name: Package ${{ matrix.platform }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # One desktop failing should still leave the other two attachable to the release.
       fail-fast: false
       matrix:
         include:
@@ -44,6 +48,9 @@ jobs:
             script: package:win
             artifacts: |
               web/release/Harness-Remote-*-win-x64-unsigned.exe
+          # Matched by extension rather than by artifactName: electron-builder normalises the
+          # filename for some targets (deb in particular), and if-no-files-found: error would then
+          # fail a build that actually succeeded. release/ holds nothing but build output.
           - platform: macos
             os: macos-latest
             script: package:mac
@@ -79,6 +86,8 @@ jobs:
         run: npm run test:ci:desktop
         working-directory: web
 
+      # The unit tests can only check the menu template the app builds, not that Electron accepts it.
+      # Boot Electron on the desktop runners that can exercise the native menu and read it back.
       - name: Verify the application menu installs
         if: runner.os == 'macOS' || runner.os == 'Windows'
         run: npm run test:desktop:menu
@@ -92,6 +101,8 @@ jobs:
         run: npm run ${{ matrix.script }}
         working-directory: web
         env:
+          # Nothing here is signed. Left on, electron-builder goes looking for a macOS identity in
+          # the runner's keychain and fails the build when it does not find one.
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload ${{ matrix.platform }} artifacts
@@ -100,9 +111,14 @@ jobs:
           name: harness-remote-desktop-${{ matrix.platform }}-${{ github.sha }}
           path: ${{ matrix.artifacts }}
           if-no-files-found: error
+          # These exist to hand the builds to the release job below, which runs minutes later. The
+          # default 90 days would keep a second copy of every desktop build — roughly 800MB a
+          # release — long after the permanent copy is attached to the release itself.
           retention-days: 7
 
   release:
+    # Only tagged builds publish release assets. Historical one-shot repair paths do not belong in
+    # the permanent release workflow once the affected release has been repaired.
     if: startsWith(github.ref, 'refs/tags/v')
     needs: package
     runs-on: ubuntu-latest
@@ -135,6 +151,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          # This job never checks the repository out, so gh cannot read the remote from a .git
+          # directory and every call has to name the repository itself.
           REPO: ${{ github.repository }}
         run: |
           shopt -s nullglob
