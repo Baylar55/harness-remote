@@ -416,6 +416,11 @@ async function seed(page) {
 
 async function openPrimary(page) {
   await page.locator('.hr-native-workspace[aria-label="Sessions"]').waitFor({ state: "visible" })
+  const primaryButton = page.getByRole("button", { name: new RegExp(`Open ${PRIMARY_TITLE}`) })
+  const olderButton = page.getByRole("button", { name: new RegExp(`Open ${OLDER_TITLE}`) })
+  await primaryButton.waitFor({ state: "visible", timeout: 5_000 })
+  await olderButton.waitFor({ state: "visible", timeout: 5_000 })
+
   const titles = await page.locator(".hr-native-session-row .hr-native-session-copy strong").allTextContents()
   assert.deepEqual(
     titles.slice(0, 2),
@@ -423,7 +428,7 @@ async function openPrimary(page) {
     "Session order must follow native recent activity, not Working status"
   )
 
-  await page.getByRole("button", { name: new RegExp(`Open ${PRIMARY_TITLE}`) }).click()
+  await primaryButton.click()
   await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible" })
   await page.locator(".uw-composer-shell").waitFor({ state: "visible" })
   const deadline = Date.now() + 5_000
