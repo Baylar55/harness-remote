@@ -322,7 +322,7 @@ npm run dev
 
 ## Help shape Harness Remote 3
 
-If the idea of **native Sessions across coding agents and devices** matches how you want to work, star the repository, try the v3 checkpoint and report the workflows that matter most to you.
+If the idea of **native Sessions across coding agents and devices** matches how you want to work, star the repository, try Harness Remote and report the workflows that matter most to you.
 
 The goal is simple:
 
