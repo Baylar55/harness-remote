@@ -9,7 +9,8 @@ const SHEETS = [
   "universal-workspace-readable-fixes.css",
   "conversation-control-plane.css",
   "conversation-control-plane-overrides.css",
-  "session-first-workbench.css"
+  "session-first-workbench.css",
+  "conversation-base.css"
 ]
 
 /** Every colour literal, ignoring the black used for shadows and any hex inside a url() or var name. */
@@ -53,10 +54,10 @@ test("no TaskDesk surface hard-codes a colour outside the palette", () => {
 })
 
 test("live conversation and button bases survived the retired-sheet deletion", () => {
-  // The retired universal-workspace*.css sheets owned these; they now live in
-  // session-first-workbench.css. If either goes missing the transcript scroll,
-  // composer frame/buttons and Machines dialog render unstyled or break containment.
+  // #361 moved the transcript/composer primitives into session-first-workbench.css but accidentally
+  // dropped the still-live Activity/tool disclosure primitives. Keep both halves guarded explicitly.
   const workbench = read("session-first-workbench.css")
+  const conversation = read("conversation-base.css")
   assert.match(workbench, /(?:^|\r?\n)\.uw-transcript\s*\{[^}]*?overflow-y:\s*auto;/, ".uw-transcript must bound height with overflow-y: auto")
   assert.match(workbench, /(?:^|\r?\n)\.uw-transcript\s*\{[^}]*?flex:\s*1;/, ".uw-transcript must expand in conversation flex column")
   assert.match(workbench, /(?:^|\r?\n)\.uw-message\s*\{[^}]*?display:\s*grid;/, ".uw-message must declare grid layout")
@@ -66,6 +67,13 @@ test("live conversation and button bases survived the retired-sheet deletion", (
   assert.match(workbench, /(?:^|\r?\n)\.uw-button-danger\s*\{[^}]*?background:/, ".uw-button-danger has no base background")
   assert.match(workbench, /(?:^|\r?\n)\.uw-manager-button\s*\{/, ".uw-manager-button has no base rule")
   assert.match(workbench, /(?:^|\r?\n)\.uw-machine-manager\s*\{[^}]*?display:\s*flex;/, ".uw-machine-manager has no modal flex rule")
+
+  assert.match(conversation, /\.uw-tool-card\s*>\s*summary\s*\{[^}]*?display:\s*grid;/s, "Activity summary must remain a grid")
+  assert.match(conversation, /\.uw-tool-card\s*>\s*summary\s*\{[^}]*?grid-template-columns:\s*20px\s+auto\s+minmax\(0,\s*1fr\)\s+auto;/s, "Activity summary columns must remain aligned")
+  assert.match(conversation, /\.uw-tool-card\s*>\s*summary\s*\{[^}]*?list-style:\s*none;/s, "Activity summary must suppress the native disclosure marker")
+  assert.match(conversation, /\.uw-tool-card\s*>\s*summary::?-webkit-details-marker\s*\{[^}]*?display:\s*none;/s, "WebKit disclosure triangle must stay hidden")
+  assert.match(conversation, /\.uw-tool-card\s*>\s*summary::marker\s*\{[^}]*?content:\s*"";/s, "standards disclosure marker must stay hidden")
+  assert.match(conversation, /\.uw-tool-stack\s*\{[^}]*?display:\s*grid;/s, "tool stack must retain its base layout")
 })
 
 test("no TaskDesk text is authored below a readable size", () => {
@@ -101,8 +109,8 @@ test("appearance and language are applied before any shell renders", () => {
 
   assert.match(main, /installAppPreferences\(\)/)
   assert.match(main, /import "\.\/taskdesk-theme\.css"/)
-  // The palette has to be in the cascade before the sheets that consume it.
-  const order = ["styles.css", "taskdesk-theme.css", "taskdesk-v3-unified.css", "session-first-workbench.css"]
+  // The palette and structural bases have to precede the final product refinements.
+  const order = ["styles.css", "taskdesk-theme.css", "taskdesk-v3-unified.css", "session-first-workbench.css", "conversation-base.css", "beautiful-ui-controls.css"]
   const positions = order.map((name) => main.indexOf(`import "./${name}"`))
   for (const position of positions) assert.notEqual(position, -1)
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right), "TaskDesk sheets must load base-to-override")
