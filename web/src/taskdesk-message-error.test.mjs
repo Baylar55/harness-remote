@@ -25,6 +25,13 @@ test("a native turn failure wins over a stale live-active bit before reload", ()
   assert.match(source, /const turnError = liveAssistant \|\| hasFinalText \? "" : reportedError/)
 })
 
+test("assistant wording can never classify a message as an error", () => {
+  assert.match(source, /const error = message\.info\.error/)
+  assert.match(source, /if \(!error\) return ""/)
+  assert.doesNotMatch(source, /PROVIDER_FAILURE_TEXT/)
+  assert.doesNotMatch(source, /inferredProviderErrorText/)
+})
+
 test("provider error text duplication is not mistaken for a model final answer", () => {
   assert.match(source, /function textMirrorsReportedError/)
   assert.match(source, /function normalizeErrorComparable/)
@@ -32,10 +39,12 @@ test("provider error text duplication is not mistaken for a model final answer",
   assert.match(source, /return !\(reportedError && part\.type === "text" && textMirrorsReportedError\(part\.text, reportedError\)\)/)
 })
 
-test("provider diagnostics are compacted before they reach the red error card", () => {
+test("provider diagnostics are compacted only after a structured error exists", () => {
   assert.match(source, /function cleanReportedErrorText/)
   assert.match(source, /raw-http-request=\\S\+/)
   assert.match(source, /function collapseRepeatedErrorBody/)
+  assert.match(source, /const error = message\.info\.error/)
+  assert.match(source, /if \(!error\) return ""/)
   assert.match(source, /const mirroredText = message\.parts\.find/)
   assert.match(source, /return cleanReportedErrorText\(mirroredText \|\| raw\)/)
 })
@@ -52,7 +61,7 @@ test("a terminal assistant turn with only reasoning or tools is never silently p
   assert.match(source, /assistantTurnCompleted\(message\)/)
 })
 
-test("a later real final answer suppresses a stale transport or intermediate turn error", () => {
+test("a later real final answer suppresses a stale transport or intermediate structured turn error", () => {
   assert.match(source, /const hasFinalText = hasTerminalAssistantText\(message\.parts, reportedError\)/)
   assert.match(source, /if \(reportedError && textMirrorsReportedError\(part\.text, reportedError\)\) continue/)
   assert.match(source, /return true/)
