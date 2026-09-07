@@ -78,12 +78,69 @@ const MARKDOWN_COMPONENTS: Components = {
   }
 }
 
-function hasTerminalAssistantText(parts: MessagePart[]): boolean {
+/** Provider failures sometimes arrive twice: once as `message.info.error` and once as a normal text
+ * part, with an HTTP status / `(type=...)` / `raw-http-request=...` suffix added by the transport.
+ * Compare the human message rather than those wrappers so that copy is never mistaken for a real
+ * final answer. */
+function normalizeErrorComparable(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/^\d{3}\s+/, "")
+    .replace(/\s+raw-http-request=\S+/gi, "")
+    .replace(/\s+\(type=[^)]+\)/gi, "")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function textMirrorsReportedError(text: string | undefined, reportedError: string): boolean {
+  if (!text?.trim() || !reportedError.trim()) return false
+  const candidate = normalizeErrorComparable(text)
+  const expected = normalizeErrorComparable(reportedError)
+  if (!candidate || !expected) return false
+  if (candidate === expected) return true
+  const longer = candidate.length >= expected.length ? candidate : expected
+  const shorter = candidate.length >= expected.length ? expected : candidate
+  if (!longer.startsWith(shorter)) return false
+  // The field failure that motivated this guard repeats the provider sentence exactly twice. Keep
+  // the tolerance bounded so a genuine recovery answer that merely quotes the old error still wins.
+  return longer.length <= shorter.length * 2.35
+}
+
+function collapseRepeatedErrorBody(value: string): string {
+  const words = value.trim().split(/\s+/).filter(Boolean)
+  if (words.length < 4) return value.trim()
+  const midpoint = words.length / 2
+  for (let split = Math.max(1, Math.floor(midpoint) - 1); split <= Math.min(words.length - 1, Math.ceil(midpoint) + 1); split += 1) {
+    const left = words.slice(0, split).join(" ")
+    const right = words.slice(split).join(" ")
+    if (normalizeErrorComparable(left) && normalizeErrorComparable(left) === normalizeErrorComparable(right)) return left.trim()
+  }
+  return value.trim()
+}
+
+function cleanReportedErrorText(value: string): string {
+  const raw = value.trim()
+  if (!raw) return ""
+  const status = raw.match(/^(\d{3})\s+/)?.[1] || ""
+  const type = raw.match(/\(type=[^)]+\)/i)?.[0] || ""
+  let body = raw
+    .replace(/^\d{3}\s+/, "")
+    .replace(/\s+raw-http-request=\S+/gi, "")
+    .replace(/\s+\(type=[^)]+\)/gi, "")
+    .trim()
+  body = collapseRepeatedErrorBody(body)
+  return [status, body, type].filter(Boolean).join(" ")
+}
+
+function hasTerminalAssistantText(parts: MessagePart[], reportedError = ""): boolean {
   for (let index = parts.length - 1; index >= 0; index -= 1) {
     const part = parts[index]
     if (isInternalProtocolPart(part)) continue
     if (part.type === "text") {
-      if (typeof part.text === "string" && part.text.trim()) return true
+      if (typeof part.text === "string" && part.text.trim()) {
+        if (reportedError && textMirrorsReportedError(part.text, reportedError)) continue
+        return true
+      }
       continue
     }
     if (part.type === "reasoning" || part.type === "tool") return false
@@ -430,7 +487,19 @@ function readableErrorValue(value: unknown, depth = 0): string {
 function messageErrorText(message: MessageEnvelope): string {
   const error = message.info.error
   if (!error) return ""
-  return readableErrorValue(error.data?.message) || readableErrorValue(error.message) || error.name || "The coding agent failed to complete this turn."
+  const raw = readableErrorValue(error.data?.message)
+    || readableErrorValue(error.message)
+    || error.name
+    || "The coding agent failed to complete this turn."
+  const mirroredText = message.parts.find((part) =>
+    part.type === "text"
+    && typeof part.text === "string"
+    && textMirrorsReportedError(part.text, raw)
+  )?.text
+  // Prefer the transport copy only when it mirrors the structured error: it may carry the useful
+  // HTTP status / provider type that the structured payload omitted. Cleaning below removes only
+  // duplicate prose and the private raw-request path.
+  return cleanReportedErrorText(mirroredText || raw)
 }
 
 function assistantTurnCompleted(message: MessageEnvelope): boolean {
@@ -445,17 +514,30 @@ function assistantTurnCompleted(message: MessageEnvelope): boolean {
  * body, while reasoning, tools and working narration remain inside Activity. Internal OpenCode
  * step/snapshot/patch markers stay protocol data and never leak into the chat. While a Run is live,
  * the whole assistant payload stays inside Activity so streamed chunks never jump between working
- * state and final dialogue.
+ * state and final dialogue. A provider error can arrive one live-refresh frame before the owning
+ * Conversation flips from running to failed; that terminal error wins over the stale active bit.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
-  const liveAssistant = message.info.role === "assistant" && Boolean((message as TaskDeskEnvelope).taskdesk?.active)
-  const visibleParts = message.parts.filter((part) => !isInternalProtocolPart(part))
+  const reportedError = messageErrorText(message)
+  const hasFinalText = hasTerminalAssistantText(message.parts, reportedError)
+  // Preserve recovery semantics: an old/intermediate error must not replace a later real answer.
+  // When there is no final answer, however, the native error is already authoritative even if the
+  // Conversation runtime still says running for one reconciliation frame.
+  const liveTurnFailed = Boolean(reportedError) && !hasFinalText
+  const liveAssistant = message.info.role === "assistant"
+    && Boolean((message as TaskDeskEnvelope).taskdesk?.active)
+    && !liveTurnFailed
+  const visibleParts = message.parts.filter((part) => {
+    if (isInternalProtocolPart(part)) return false
+    // Some native providers emit their terminal failure as both structured error metadata and a
+    // normal assistant text chunk. That chunk is transport duplication, not model prose.
+    return !(reportedError && part.type === "text" && textMirrorsReportedError(part.text, reportedError))
+  })
   const groups = groupConversationParts(visibleParts, {
     forceActivity: liveAssistant,
     forceRunning: liveAssistant
   })
-  const hasFinalText = hasTerminalAssistantText(message.parts)
-  const turnError = liveAssistant || hasFinalText ? "" : messageErrorText(message)
+  const turnError = liveAssistant || hasFinalText ? "" : reportedError
   const hasActivity = visibleParts.some((part) => part.type === "reasoning" || part.type === "tool")
   const interruptedWithoutFinal = message.info.role === "assistant"
     && !liveAssistant
