@@ -192,6 +192,58 @@ assert.equal(page.records[0].key, "codex:older-codex")
 assert.deepEqual(page.records[0].status, { type: "idle" })
 assert.equal(page.nextCursor, "tail")
 
+const nonPaginatedAgents = [
+  { id: "opencode", label: "OpenCode", backend: "opencode", transport: "http" },
+  { id: "omp", label: "Oh My Pi", backend: "omp", transport: "acp" },
+  { id: "pi", label: "PI", backend: "pi", transport: "acp" },
+  { id: "claude", label: "Claude Code", backend: "claude", transport: "acp" },
+  { id: "codex", label: "Codex", backend: "codex", transport: "acp" }
+].map((agent) => ({
+  ...agent,
+  managed: true,
+  state: "available",
+  capabilities: { sessions: true, abort: true, models: true },
+  contract: { sessions: { stop: "owned-session-native-cancel" } }
+}))
+const nonPaginatedCalls = []
+const nonPaginatedClient = {
+  async listGlobalSessionPage(config, cursor) {
+    nonPaginatedCalls.push([config.backend, config.agentId, cursor])
+    return {
+      sessions: [{
+        id: `${config.agentId}-existing`,
+        title: `${config.agentId} existing Session`,
+        directory: "/repo",
+        time: { created: 1, updated: 2 },
+        status: { type: "idle" }
+      }]
+    }
+  },
+  async listSessions() {
+    throw new Error("a successful single-page read must not use the stable fallback")
+  },
+  async listStatuses() {
+    throw new Error("inline page status must avoid a duplicate status read")
+  }
+}
+
+for (const agent of nonPaginatedAgents) {
+  const singlePage = await discoverAgentNativeSessionPage(base, agent, undefined, nonPaginatedClient)
+  assert.equal(singlePage.nextCursor, undefined, `${agent.id} must not expose a load-older cursor when none was returned`)
+  assert.deepEqual(singlePage.records.map((record) => ({
+    key: record.key,
+    backend: record.backend,
+    transport: record.transport,
+    status: record.status
+  })), [{
+    key: `${agent.id}:${agent.id}-existing`,
+    backend: agent.backend,
+    transport: agent.transport,
+    status: { type: "idle" }
+  }])
+}
+assert.deepEqual(nonPaginatedCalls, nonPaginatedAgents.map((agent) => [agent.backend, agent.id, undefined]))
+
 let pagedFallbackReads = 0
 const initialFallback = await discoverAgentNativeSessionPage(base, pi, undefined, {
   async listGlobalSessionPage() {

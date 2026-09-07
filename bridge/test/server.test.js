@@ -2188,3 +2188,56 @@ test("lightweight Session index exposes one ACP page and forwards its opaque cur
     await bridge.close()
   }
 })
+
+test("lightweight Session index preserves non-paginated behavior across ACP backends", async () => {
+  class SinglePageAcp extends EventEmitter {
+    agentInfo = { version: "1.0.0" }
+    cursors = []
+
+    constructor(backend) {
+      super()
+      this.backend = backend
+    }
+
+    async start() {}
+
+    async listSessionPage(cursor) {
+      this.cursors.push(cursor)
+      return {
+        sessions: [{
+          sessionId: `${this.backend}-session`,
+          title: `${this.backend} Session`,
+          cwd: process.cwd(),
+          updatedAt: "2026-09-01T00:00:00.000Z"
+        }]
+      }
+    }
+
+    async listSessions() {
+      throw new Error("the lightweight index must use the shared single-page path")
+    }
+
+    async request() { return {} }
+    notify() {}
+  }
+
+  for (const backend of ["omp", "pi", "claude", "codex"]) {
+    const acp = new SinglePageAcp(backend)
+    const bridge = await startServer({ acp, backend })
+    try {
+      const response = await fetch(`${bridge.baseURL}/experimental/session`, { headers: authHeaders() })
+      assert.equal(response.status, 200, backend)
+      assert.equal(response.headers.get("x-next-cursor"), null, `${backend} must remain a one-page listing without a cursor`)
+      assert.deepEqual((await response.json()).map((session) => ({ id: session.id, title: session.title })), [{
+        id: `${backend}-session`,
+        title: `${backend} Session`
+      }])
+
+      const statuses = await readJSON(bridge.baseURL, "/session/status")
+      assert.deepEqual(Object.keys(statuses), [`${backend}-session`], `${backend} status discovery must keep using page one`)
+      assert.deepEqual(acp.cursors, [undefined, undefined], `${backend} must not invent or follow a cursor`)
+    } finally {
+      await bridge.close()
+    }
+  }
+})
