@@ -25,6 +25,7 @@ import "./v3-mobile-a11y-fix.css"
 import "./v3-mobile-product-parity.css"
 import "./session-first-navigation.css"
 import "./session-first-workbench.css"
+import "./conversation-base.css"
 import "./session-first-centering-fix.css"
 import "./session-handoff-routing.css"
 // Loaded last: the ported controls refine rules the sheets above already set, and settling those
