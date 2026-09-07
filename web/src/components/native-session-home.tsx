@@ -86,8 +86,10 @@ type Props = {
   selectedState?: SessionPresentationState
   /** Fires when native Session discovery has settled at least once for the current machines. */
   onDiscoveredChange?: (discovered: boolean) => void
-  /** Session keys already deleted server-side but still present in the last discovered rail snapshot. */
+  /** Session keys whose delete transition is still visible, including the in-flight request. */
   deletingKeys?: ReadonlySet<string>
+  /** Successful deletes suppressed from cached pages even when an older page cannot be re-read. */
+  deletedKeys?: ReadonlySet<string>
   /** Called once a fresh discovery proves a deleting Session has disappeared from the native index. */
   onDeletionSettled?: (key: string) => void
 }
@@ -331,6 +333,7 @@ export function NativeSessionHome({
   selectedKey,
   selectedState,
   deletingKeys,
+  deletedKeys,
   onDeletionSettled
 }: Props) {
   const t = useTranslator()
@@ -497,7 +500,7 @@ export function NativeSessionHome({
           }))
           const refreshed = refreshCursorPage(existing, firstRecords, page.nextCursor, recordKey)
           const recordsForScope = uniqueSessionRecords(refreshed.records)
-            .filter((item) => !deletingKeys?.has(recordKey(item)))
+            .filter((item) => !deletedKeys?.has(recordKey(item)))
           pageCache.current.set(scope, {
             machine: result.machine,
             machineID: result.snapshot.machine.id,
@@ -530,7 +533,7 @@ export function NativeSessionHome({
       if (!cancelled) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [sources, revision, refreshToken, discoveryReady, machineSignature, deletingKeys])
+  }, [sources, revision, refreshToken, discoveryReady, machineSignature, deletedKeys])
 
   useEffect(() => {
     if (!loaded || document.visibilityState !== "visible") return
@@ -731,7 +734,7 @@ export function NativeSessionHome({
         ...current,
         ...appended,
         records: uniqueSessionRecords(appended.records)
-          .filter((item) => !deletingKeys?.has(recordKey(item)))
+          .filter((item) => !deletedKeys?.has(recordKey(item)))
       })
     }
     setRecords(uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records)))
