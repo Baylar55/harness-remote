@@ -445,17 +445,25 @@ function assistantTurnCompleted(message: MessageEnvelope): boolean {
  * body, while reasoning, tools and working narration remain inside Activity. Internal OpenCode
  * step/snapshot/patch markers stay protocol data and never leak into the chat. While a Run is live,
  * the whole assistant payload stays inside Activity so streamed chunks never jump between working
- * state and final dialogue.
+ * state and final dialogue. A provider error can arrive one live-refresh frame before the owning
+ * Conversation flips from running to failed; that terminal error wins over the stale active bit.
  */
 export function TaskDeskMessageContent({ message }: { message: MessageEnvelope }) {
-  const liveAssistant = message.info.role === "assistant" && Boolean((message as TaskDeskEnvelope).taskdesk?.active)
+  const hasFinalText = hasTerminalAssistantText(message.parts)
+  const reportedError = messageErrorText(message)
+  // Preserve recovery semantics: an old/intermediate error must not replace a later real answer.
+  // When there is no final answer, however, the native error is already authoritative even if the
+  // Conversation runtime still says running for one reconciliation frame.
+  const liveTurnFailed = Boolean(reportedError) && !hasFinalText
+  const liveAssistant = message.info.role === "assistant"
+    && Boolean((message as TaskDeskEnvelope).taskdesk?.active)
+    && !liveTurnFailed
   const visibleParts = message.parts.filter((part) => !isInternalProtocolPart(part))
   const groups = groupConversationParts(visibleParts, {
     forceActivity: liveAssistant,
     forceRunning: liveAssistant
   })
-  const hasFinalText = hasTerminalAssistantText(message.parts)
-  const turnError = liveAssistant || hasFinalText ? "" : messageErrorText(message)
+  const turnError = liveAssistant || hasFinalText ? "" : reportedError
   const hasActivity = visibleParts.some((part) => part.type === "reasoning" || part.type === "tool")
   const interruptedWithoutFinal = message.info.role === "assistant"
     && !liveAssistant
