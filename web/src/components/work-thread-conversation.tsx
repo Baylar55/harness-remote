@@ -349,6 +349,7 @@ export function WorkThreadConversation({
   const [awaitingReplyTurnID, setAwaitingReplyTurnID] = useState<string | null>(null)
   const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [transcriptError, setTranscriptError] = useState<string | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
   const [questions, setQuestions] = useState<QuestionRequest[]>([])
   const [permissions, setPermissions] = useState<PermissionRequest[]>([])
@@ -438,6 +439,7 @@ export function WorkThreadConversation({
     feedsRef.current = {}
     setLoading(true)
     setError(null)
+    setTranscriptError(null)
     setModelError(null)
     setQuestions([])
     setPermissions([])
@@ -495,7 +497,9 @@ export function WorkThreadConversation({
       if (Object.keys(feedsRef.current).length === 0) setLoading(true)
       return
     }
+    setTranscriptError(null)
     if (Object.keys(feedsRef.current).length === 0) setLoading(true)
+    let firstFailure: string | null = null
     void Promise.all(missing.map(async (target) => {
       try {
         const feed = await loadInitialTarget(target)
@@ -503,11 +507,15 @@ export function WorkThreadConversation({
         setFeeds((current) => current[target.sessionID] ? current : { ...current, [target.sessionID]: feed })
       } catch (reason) {
         if (isTransportFailure(reason)) onConnectionIssueRef.current?.()
+        firstFailure ??= reason instanceof Error ? reason.message : String(reason)
         // Durable Session history can outlive a live transport. Persisted turn outcome/error is the safe
         // fallback; do not invent a transcript association when the Session cannot be read.
       }
     })).finally(() => {
-      if (!cancelled && loadGeneration.current === generation) setLoading(false)
+      if (!cancelled && loadGeneration.current === generation) {
+        setTranscriptError(firstFailure)
+        setLoading(false)
+      }
     })
     return () => { cancelled = true }
   }, [targetSignature, loadInitialTarget, interactionEnabled])
@@ -1109,6 +1117,7 @@ export function WorkThreadConversation({
         stopping={stopping}
         placeholder={`Message ${agentLabel(destinationAgents, targetAgentID)}…`}
         emptyText="Start the conversation. You can continue with another coding agent at any time."
+        transcriptError={transcriptError || undefined}
         footerHint={hasAttention
           ? "Your input is required before the agent can continue"
           : modelBootstrapBlocked

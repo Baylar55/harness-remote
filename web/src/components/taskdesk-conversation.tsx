@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { ATTACHMENT_MAX_COUNT, fileToAttachment, type AttachmentPart } from "../attachments"
 import type { CommandInfo, MessageEnvelope } from "../types"
-import { ChatIcon, CloseIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, PaperclipIcon, StopCircleIcon } from "../Icons"
+import { AlertIcon, ChatIcon, CloseIcon, JumpToBottomIcon, JumpToTopIcon, LoadingIcon, PaperclipIcon, StopCircleIcon } from "../Icons"
 import "../taskdesk-conversation.css"
 import "../taskdesk-conversation-fixes.css"
 import "../taskdesk-history-loader.css"
@@ -54,6 +54,8 @@ type Props = {
   showWaitingIndicator?: boolean
   placeholder?: string
   emptyText?: string
+  /** A failed transcript read is not a valid empty conversation and must remain visible as such. */
+  transcriptError?: string
   directory?: string
   footerHint?: string
   renderMessage?: (message: MessageEnvelope) => ReactNode
@@ -61,7 +63,8 @@ type Props = {
 
 type TranscriptProps = Pick<Props,
   "messages" | "agentLabel" | "agentBackend" | "loading" | "waiting" | "ready" | "hasMore" |
-  "loadingOlder" | "onLoadOlder" | "sending" | "workingLabel" | "showWaitingIndicator" | "emptyText" | "renderMessage"
+  "loadingOlder" | "onLoadOlder" | "sending" | "workingLabel" | "showWaitingIndicator" | "emptyText" |
+  "transcriptError" | "renderMessage"
 >
 
 type JumpAffordances = { top: boolean; bottom: boolean }
@@ -147,6 +150,7 @@ function transcriptPropsEqual(previous: TranscriptProps, next: TranscriptProps):
     && previous.workingLabel === next.workingLabel
     && previous.showWaitingIndicator === next.showWaitingIndicator
     && previous.emptyText === next.emptyText
+    && previous.transcriptError === next.transcriptError
 }
 
 /**
@@ -170,6 +174,7 @@ const ConversationTranscript = memo(function ConversationTranscript({
   workingLabel,
   showWaitingIndicator = true,
   emptyText = "This conversation has no messages yet.",
+  transcriptError,
   renderMessage
 }: TranscriptProps) {
   const transcriptRef = useRef<HTMLDivElement>(null)
@@ -325,7 +330,14 @@ const ConversationTranscript = memo(function ConversationTranscript({
                 </button>
               </div>
             ) : null}
-            {messages.length === 0 && !waiting ? (
+            {transcriptError ? (
+              <div className="uw-empty-panel uw-transcript-error" role="alert">
+                <AlertIcon size={24} />
+                <strong>Session history could not be loaded.</strong>
+                <span>{transcriptError}</span>
+              </div>
+            ) : null}
+            {messages.length === 0 && !waiting && !transcriptError ? (
               <div className="uw-empty-panel"><ChatIcon size={24} /><strong>{emptyText}</strong></div>
             ) : renderMessage
               ? messages.map((message) => renderMessage(message))
@@ -387,6 +399,7 @@ export function TaskDeskConversation({
   showWaitingIndicator = true,
   placeholder,
   emptyText = "This conversation has no messages yet.",
+  transcriptError,
   directory,
   footerHint,
   renderMessage
@@ -480,6 +493,7 @@ export function TaskDeskConversation({
         workingLabel={workingLabel}
         showWaitingIndicator={showWaitingIndicator}
         emptyText={emptyText}
+        transcriptError={transcriptError}
         renderMessage={renderMessage}
       />
 

@@ -8,16 +8,19 @@ const DAEMON_PORT = 4425
 const APP_ORIGIN = `http://127.0.0.1:${PREVIEW_PORT}`
 const STORAGE_KEY = "harness-remote.workspace.machines.v1"
 const DIRECTORY = "/work/native-navigation"
-const SESSION_A = "native-pi-navigation-a"
-const SESSION_B = "native-pi-navigation-b"
+const SESSION_A = "native-codex-navigation-a"
+const SESSION_B = "native-codex-navigation-b"
+const SESSION_BROKEN = "native-codex-navigation-broken"
 const TITLE_A = "Navigation Session A"
 const TITLE_B = "Navigation Session B"
+const TITLE_BROKEN = "Navigation Session With Failed History"
 const MARKER_A = "NAVIGATION-TRANSCRIPT-A"
 const MARKER_B = "NAVIGATION-TRANSCRIPT-B"
 
 const sessions = [
   { id: SESSION_A, title: TITLE_A, directory: DIRECTORY, external: true, time: { created: 1000, updated: 1001 } },
-  { id: SESSION_B, title: TITLE_B, directory: DIRECTORY, external: true, time: { created: 2000, updated: 2001 } }
+  { id: SESSION_B, title: TITLE_B, directory: DIRECTORY, external: true, time: { created: 2000, updated: 2001 } },
+  { id: SESSION_BROKEN, title: TITLE_BROKEN, directory: DIRECTORY, external: true, time: { created: 3000, updated: 3001 } }
 ]
 
 const transcripts = new Map([
@@ -31,7 +34,23 @@ const transcripts = new Map([
   }]]
 ])
 
-let modelReads = 0
+const CODEX_MODELS = [{
+  providerID: "codex",
+  providerName: "Codex",
+  modelID: "gpt-codex-navigation",
+  modelName: "Codex Navigation",
+  isDefault: true,
+  tools: true
+}]
+const OMP_MODELS = [{
+  providerID: "omp",
+  providerName: "Oh My Pi",
+  modelID: "omp-navigation",
+  modelName: "OMP Navigation",
+  isDefault: true,
+  tools: true
+}]
+const modelRoutes = []
 let sseResponses = new Set()
 
 function corsHeaders() {
@@ -60,16 +79,30 @@ function startFakeDaemon() {
     if (request.method === "GET" && url.pathname === "/v1/machine") {
       json(response, 200, {
         machine: { id: "machine-native-navigation", name: "Native Navigation Test", createdAt: new Date().toISOString() },
-        agents: [{
-          id: "pi",
-          label: "PI",
-          backend: "pi",
-          transport: "acp",
-          managed: true,
-          state: "available",
-          capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
-          contract: { sessions: { stop: "owned-session-native-cancel" } }
-        }]
+        // OMP is deliberately the saved machine profile's primary harness. Opening the Codex row
+        // below must use the Codex URL identity and must never carry OMP as a routing override.
+        agents: [
+          {
+            id: "omp",
+            label: "OMP",
+            backend: "omp",
+            transport: "acp",
+            managed: true,
+            state: "available",
+            capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+            contract: { sessions: { stop: "owned-session-native-cancel" } }
+          },
+          {
+            id: "codex",
+            label: "Codex",
+            backend: "codex",
+            transport: "acp",
+            managed: true,
+            state: "available",
+            capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true },
+            contract: { sessions: { stop: "owned-session-native-cancel" } }
+          }
+        ]
       })
       return
     }
@@ -81,37 +114,55 @@ function startFakeDaemon() {
       return
     }
 
-    if (request.method === "GET" && url.pathname === "/v1/agents/pi/experimental/session") {
+    if (request.method === "GET" && url.pathname === "/v1/agents/omp/experimental/session") {
+      json(response, 200, [])
+      return
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/agents/codex/experimental/session") {
       json(response, 200, sessions)
       return
     }
 
-    if (request.method === "GET" && url.pathname === "/v1/agents/pi/session/status") {
-      json(response, 200, { [SESSION_A]: { type: "idle" }, [SESSION_B]: { type: "idle" } })
+    if (request.method === "GET" && url.pathname === "/v1/agents/omp/session/status") {
+      json(response, 200, {})
       return
     }
 
-    if (request.method === "GET" && url.pathname === "/v1/agents/pi/models") {
-      modelReads += 1
+    if (request.method === "GET" && url.pathname === "/v1/agents/codex/session/status") {
       json(response, 200, {
-        models: [{
-          providerID: "pi",
-          providerName: "PI",
-          modelID: "pi-coding",
-          modelName: "PI Coding",
-          isDefault: true,
-          tools: true
-        }],
-        stale: false,
-        refreshedAt: new Date().toISOString(),
-        source: "native-navigation-smoke"
+        [SESSION_A]: { type: "idle" },
+        [SESSION_B]: { type: "idle" },
+        [SESSION_BROKEN]: { type: "idle" }
       })
       return
     }
 
-    const messageMatch = /^\/v1\/agents\/pi\/session\/([^/]+)\/message$/.exec(url.pathname)
+    const modelMatch = /^\/v1\/agents\/(codex|omp)\/models$/.exec(url.pathname)
+    if (request.method === "GET" && modelMatch) {
+      const pathAgent = modelMatch[1]
+      const routedBackend = String(request.headers["x-harness-backend"] || "")
+      modelRoutes.push({ pathAgent, routedBackend })
+      // Mirror the daemon rule relevant to the reverted #381 behavior: an explicit mismatched
+      // routing header wins, while a machine-scoped request with no header follows its agent path.
+      const routedAgent = routedBackend || pathAgent
+      const models = routedAgent === "omp" ? OMP_MODELS : CODEX_MODELS
+      json(response, 200, {
+        models,
+        stale: false,
+        refreshedAt: new Date().toISOString(),
+        source: `native-navigation-smoke:${routedBackend || pathAgent}`
+      })
+      return
+    }
+
+    const messageMatch = /^\/v1\/agents\/codex\/session\/([^/]+)\/message$/.exec(url.pathname)
     if (request.method === "GET" && messageMatch) {
       const sessionID = decodeURIComponent(messageMatch[1])
+      if (sessionID === SESSION_BROKEN) {
+        json(response, 500, { error: "Simulated persisted Codex history failure" })
+        return
+      }
       json(response, 200, transcripts.get(sessionID) || [], { "X-Has-More": "0" })
       return
     }
@@ -170,7 +221,7 @@ async function seed(page) {
     localStorage.setItem(key, JSON.stringify([{
       id: "machine-native-navigation",
       name: "Native Navigation Test",
-      config: { backend: "opencode", host: "127.0.0.1", port, username: "harness", password: "testpw" }
+      config: { backend: "omp", host: "127.0.0.1", port, username: "harness", password: "testpw" }
     }]))
   }, { key: STORAGE_KEY, port: DAEMON_PORT })
 }
@@ -197,12 +248,30 @@ async function openAndAssert(page, title, marker, absentMarker) {
   await page.locator(".tdw-work-thread-conversation").waitFor({ state: "visible", timeout: 12_000 })
   await page.getByText(marker, { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   await page.locator(".uw-composer-shell").waitFor({ state: "visible", timeout: 12_000 })
-  const composer = page.getByRole("textbox", { name: "Message PI" })
+  const composer = page.getByRole("textbox", { name: "Message Codex" })
   await composer.waitFor({ state: "visible", timeout: 12_000 })
   assert.equal(await composer.isDisabled(), false, `${title} composer stayed disabled`)
   assert.equal(await page.getByText("Loading Session into the v3 controller...", { exact: true }).count(), 0, `${title} stayed in native controller loading state`)
   assert.equal(await page.getByText(marker, { exact: true }).count(), 1, `${title} transcript duplicated its marker`)
   assert.equal(await page.getByText(absentMarker, { exact: true }).count(), 0, `${title} retained the previous Session transcript`)
+  const modelPicker = page.locator(".tdw-model-trigger")
+  await modelPicker.waitFor({ state: "visible", timeout: 12_000 })
+  await modelPicker.click()
+  const catalogText = await page.locator(".tdw-model-picker").innerText()
+  assert.match(catalogText, /Codex Navigation/, `${title} did not receive Codex's model catalog`)
+  assert.doesNotMatch(catalogText, /OMP Navigation/, `${title} received the machine primary harness's catalog`)
+  await page.keyboard.press("Escape")
+}
+
+async function openAndAssertHistoryFailure(page) {
+  await page.locator('.hr-native-workspace[aria-label="Sessions"]').waitFor({ state: "visible", timeout: 12_000 })
+  await page.getByRole("button", { name: new RegExp(TITLE_BROKEN) }).click()
+  await page.getByRole("heading", { name: TITLE_BROKEN }).waitFor({ state: "visible", timeout: 12_000 })
+  const failure = page.locator(".uw-transcript-error")
+  await failure.waitFor({ state: "visible", timeout: 12_000 })
+  assert.match(await failure.innerText(), /Session history could not be loaded/)
+  assert.match(await failure.innerText(), /Simulated persisted Codex history failure/)
+  assert.equal(await page.getByText(/Start the conversation/).count(), 0, "a failed history read masqueraded as a valid empty Session")
 }
 
 let daemon
@@ -224,12 +293,15 @@ try {
 
   await openAndAssert(page, TITLE_A, MARKER_A, MARKER_B)
   await openAndAssert(page, TITLE_B, MARKER_B, MARKER_A)
+  await openAndAssertHistoryFailure(page)
   await openAndAssert(page, TITLE_A, MARKER_A, MARKER_B)
   await openAndAssert(page, TITLE_B, MARKER_B, MARKER_A)
 
-  assert.ok(modelReads >= 1, "sequential Session navigation never reached the mature model catalog path")
+  const codexModelRoutes = modelRoutes.filter((route) => route.pathAgent === "codex")
+  assert.ok(codexModelRoutes.length >= 1, "sequential Codex navigation never reached the model catalog path")
+  assert.ok(codexModelRoutes.every((route) => !route.routedBackend || route.routedBackend === "codex"), `Codex catalog request carried mismatched routing: ${JSON.stringify(codexModelRoutes)}`)
   assert.deepEqual(pageErrors, [], `browser errors during A -> B -> A -> B navigation: ${pageErrors.join(" | ")}`)
-  console.log("native Session sequential navigation smoke: A -> B -> A -> B passed")
+  console.log("native Codex Session navigation, model routing, and failed-history smoke passed")
   await context.close()
 } finally {
   if (browser) await browser.close().catch(() => {})
