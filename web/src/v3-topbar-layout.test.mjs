@@ -37,11 +37,12 @@ test("the native Session rail disappears when the mobile detail takes over", () 
   assert.equal(existsSync(new URL("./components/conversation-workspace.tsx", import.meta.url)), false)
 })
 
-test("the native Session conversation centers inside the detail pane", () => {
-  assert.match(centering, /--hrsf-optical-shift: 0px;/)
+test("the native Session conversation uses a bounded optical offset", () => {
+  assert.match(centering, /--hrsf-optical-shift: min\(calc\(var\(--hrsf-rail-width\) \/ 5\), 64px\);/)
+  assert.match(centering, /@media \(max-width: 780px\)[\s\S]*?--hrsf-optical-shift: 0px;/)
   assert.match(centering, /\.hr-native-session-observer \.uw-empty-panel \{[\s\S]*?align-items: center;[\s\S]*?text-align: center;/)
   assert.ok(
     main.indexOf('session-first-centering-fix.css') > main.indexOf('session-first-workbench.css'),
-    "the centering correction must load after the workbench rules it corrects"
+    "the optical correction must load after the workbench rules it refines"
   )
 })
