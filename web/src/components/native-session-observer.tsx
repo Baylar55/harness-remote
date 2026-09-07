@@ -44,6 +44,14 @@ function visualState(conversation: ConversationRuntime, attention = false): Nati
 
 export { nativeSessionIsWorking }
 
+/**
+ * The daemon owns one model catalog per machine + harness, which is what its capability contract
+ * reports as `cacheScope: "machine"`. A native Session therefore asks for exactly that catalog and
+ * must not invent a Work Thread identity the daemon has never heard of. Keeping this constant module
+ * scoped also keeps the object identity stable across renders.
+ */
+const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
+
 function targetForInitialRuntime(target: NativeSessionSurfaceTarget): NativeSessionSurfaceTarget {
   // OpenCode's Session list model is provider/default metadata rather than reliable per-turn truth,
   // and Codex's list can likewise expose the adapter default while the rollout carries the model
@@ -136,12 +144,6 @@ export function NativeSessionObserver({
       commands: commands.length > 0
     }
   }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported, commands.length])
-  // Existing ACP Sessions can retain a different option set from a fresh technical Session. Keep
-  // the native identity in the scope so the picker shows only values this exact Session accepts.
-  const nativeSessionModelScope = useMemo<AgentModelScope>(() => ({
-    sessionID: target.sessionID,
-    directory: target.directory
-  }), [target.sessionID, target.directory])
 
   const routableRoutes = useMemo<NativeSessionRouteMachine[]>(() => routes.flatMap((machine) => {
     if (machine.machineID !== target.machineID) return []
@@ -221,7 +223,7 @@ export function NativeSessionObserver({
         conversation={conversation}
         baseConfig={target.config}
         agents={[agent]}
-        modelScope={nativeSessionModelScope}
+        modelScope={NATIVE_SESSION_MODEL_SCOPE}
         deferModelFallback
         controller={controller}
         onConversationUpdate={handleConversationUpdate}

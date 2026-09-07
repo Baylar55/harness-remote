@@ -55,8 +55,7 @@ assert.match(machineClient, /export async function discoverMachine/)
 assert.match(home, /snapshot\.agents\.filter\(canCreateNativeSession\)/)
 assert.match(home, /createNativeSessionTarget/)
 assert.doesNotMatch(home, /taskClient\.createTask/)
-assert.match(observer, /const nativeSessionModelScope = useMemo<AgentModelScope>/)
-assert.match(observer, /modelScope=\{nativeSessionModelScope\}/)
+assert.match(observer, /const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = \{\}/)
 assert.match(observer, /deferModelFallback/)
 
 // Routing remains agent-scoped below the machine endpoint. Browser and desktop transports share the
