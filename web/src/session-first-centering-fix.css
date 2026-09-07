@@ -1,0 +1,25 @@
+/* Session pane centering
+   Keep the reading column centered inside the detail pane. PR #309 intentionally shifted the
+   transcript left by half the Session rail to center it against the whole browser window; in the
+   current Session-first layout that makes the transcript, empty state and composer all read as
+   left-shifted inside the pane. The rail is navigation chrome, not part of the conversation's
+   containing block, so the conversation should center within the detail surface itself. */
+.hr-native-workspace {
+  --hrsf-optical-shift: 0px;
+}
+
+/* Empty/loading states are not message rows. Keep their icon and copy together as a centered state
+   so the Chat icon cannot be mistaken for an avatar or for the corner activity indicator. */
+.hr-native-session-observer .uw-empty-panel {
+  min-height: clamp(140px, 28vh, 280px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.hr-native-session-observer .uw-empty-panel > strong {
+  max-width: 560px;
+}
