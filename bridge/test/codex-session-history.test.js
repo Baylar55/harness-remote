@@ -52,6 +52,37 @@ test("reads a Codex rollout as the conversation the user saw", async () => {
   }
 })
 
+test("reads current Codex item-completed rollout events without exposing model input", async () => {
+  const root = await writeRollout([
+    { timestamp: "2026-09-03T07:55:05.000Z", type: "response_item", payload: { type: "message", role: "developer", content: [{ type: "input_text", text: "<skills_instructions>private model input</skills_instructions>" }] } },
+    { timestamp: "2026-09-03T07:55:05.100Z", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "# AGENTS.md instructions" }] } },
+    { timestamp: "2026-09-03T07:55:05.200Z", type: "event_msg", payload: { type: "item_completed", item: { type: "UserMessage", id: "user-1", content: [{ type: "text", text: "Clona e testa i branch", text_elements: [] }] } } },
+    { timestamp: "2026-09-03T07:55:06.000Z", type: "event_msg", payload: { type: "item_completed", item: { type: "Reasoning", id: "reasoning-1", summary_text: ["**Inspecting the branches**", "**Planning the tests**"], raw_content: [] } } },
+    { timestamp: "2026-09-03T07:55:07.000Z", type: "event_msg", payload: { type: "item_completed", item: { type: "CommandExecution", id: "command-1", command: ["git", "status"], status: "completed" } } },
+    { timestamp: "2026-09-03T07:55:08.000Z", type: "event_msg", payload: { type: "item_completed", item: { type: "AgentMessage", id: "assistant-1", content: [{ type: "text", text: "I test sono passati." }], phase: "final_answer" } } }
+  ])
+
+  try {
+    const loader = createCodexHistoryLoader(root)
+    const messages = await loader(sessionID)
+    assert.deepEqual(
+      messages.map((message) => [message.info.role, message.parts[0].type, message.parts[0].text]),
+      [
+        ["user", "text", "Clona e testa i branch"],
+        ["assistant", "reasoning", "**Inspecting the branches**\n\n**Planning the tests**"],
+        ["assistant", "text", "I test sono passati."]
+      ]
+    )
+
+    const page = await loader.page(sessionID, { limit: 2 })
+    assert.deepEqual(page.messages, messages.slice(-2))
+    assert.equal(page.hasMore, true)
+    assert.ok(page.before)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("restores the current Codex model and reasoning effort from the newest native turn context", async () => {
   const root = await writeRollout([
     { timestamp: "2026-08-07T09:28:49.000Z", type: "turn_context", payload: { model: "gpt-5.6-codex", effort: "medium" } },

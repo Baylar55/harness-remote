@@ -18,16 +18,35 @@ function recordFromLine(line) {
   }
 }
 
+function textFromCompletedItem(item) {
+  if (item?.type === "Reasoning") {
+    return Array.isArray(item.summary_text)
+      ? item.summary_text.filter((text) => typeof text === "string" && text).join("\n\n")
+      : ""
+  }
+  if (item?.type !== "UserMessage" && item?.type !== "AgentMessage") return ""
+  return Array.isArray(item.content)
+    ? item.content
+      .filter((part) => typeof part?.text === "string" && part.text)
+      .map((part) => part.text)
+      .join("\n\n")
+    : ""
+}
+
 function messageFromRecord(sessionID, record, offset) {
   if (record?.type !== "event_msg") return undefined
   const payload = record.payload
-  const role = payload?.type === "user_message" ? "user"
-    : payload?.type === "agent_message" || payload?.type === "agent_reasoning" ? "assistant"
-    : undefined
+  const completedItem = payload?.type === "item_completed" ? payload.item : undefined
+  const role = payload?.type === "user_message" || completedItem?.type === "UserMessage" ? "user"
+    : payload?.type === "agent_message" || payload?.type === "agent_reasoning"
+      || completedItem?.type === "AgentMessage" || completedItem?.type === "Reasoning" ? "assistant"
+      : undefined
   if (!role) return undefined
 
-  const type = payload.type === "agent_reasoning" ? "reasoning" : "text"
-  const text = payload.type === "agent_reasoning" ? payload.text : payload.message
+  const type = payload.type === "agent_reasoning" || completedItem?.type === "Reasoning" ? "reasoning" : "text"
+  const text = completedItem ? textFromCompletedItem(completedItem)
+    : payload.type === "agent_reasoning" ? payload.text
+      : payload.message
   if (typeof text !== "string" || !text) return undefined
 
   // Rollouts are append-only. A byte offset is therefore both unique inside the file and stable as
@@ -138,9 +157,11 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
  * lock, so those sessions can be shown even while Codex itself owns them.
  *
  * The transcript comes from the `event_msg` records rather than the `response_item` ones: only the
- * former carry what the user actually saw. The latter also hold the instruction blocks Codex feeds
- * the model, AGENTS.md, the plugin list and desktop app context, under the `user` role, which would
- * surface as the user's own turns.
+ * former carry what the user actually saw. Current Codex versions wrap visible turns in
+ * `item_completed` (`UserMessage`, `AgentMessage`, and `Reasoning`), while older rollouts use the
+ * direct `user_message`, `agent_message`, and `agent_reasoning` event types. The `response_item`
+ * records also hold instruction blocks Codex feeds the model, AGENTS.md, the plugin list and desktop
+ * app context under the `user` role, which would surface as the user's own turns.
  */
 export function createCodexHistoryLoader(sessionRoot = path.join(homedir(), ".codex", "sessions")) {
   const sessionFiles = new Map()
