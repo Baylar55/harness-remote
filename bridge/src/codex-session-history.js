@@ -198,7 +198,10 @@ export function createCodexHistoryLoader(sessionRoot = path.join(homedir(), ".co
 
   loadCodexHistory.page = async (sessionID, options = {}) => {
     const file = await locateSession(sessionID)
-    if (!file) return { messages: [], before: null, hasMore: false }
+    // Absence is not proof of an empty Session: a rollout may live outside this installation's
+    // local tree while ACP session/load can still replay it. Let AcpService distinguish that from a
+    // located, genuinely empty rollout and fall through to the protocol source.
+    if (!file) return undefined
     return readCodexPage(file, sessionID, options)
   }
 

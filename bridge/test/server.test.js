@@ -852,6 +852,27 @@ test("keeps an external OMP session observational when its journal is empty", as
   assert.equal(acp.loads, 0, "a read-only OMP open must not fall back to a blocking ACP replay")
 })
 
+test("falls back to ACP replay when a paged journal cannot locate the Session", async () => {
+  class MissingJournalReplayAcp extends ReplayAcp {
+    loads = 0
+
+    async request(method, params) {
+      if (method === "session/load") this.loads += 1
+      return super.request(method, params)
+    }
+  }
+
+  const acp = new MissingJournalReplayAcp()
+  const historyLoader = async () => []
+  historyLoader.page = async () => undefined
+  const service = new AcpService(acp, { historyLoader })
+
+  const page = await service.messagePage("session-1", { limit: 100 })
+  assert.ok(page.messages.some((message) => message.parts.some((part) => part.text === "Persist this prompt")))
+  assert.ok(page.messages.some((message) => message.parts.some((part) => part.text === "Persist this response")))
+  assert.equal(acp.loads, 1, "an absent journal file must not masquerade as a valid empty transcript")
+})
+
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
   const bridge = await startServer()
   try {
