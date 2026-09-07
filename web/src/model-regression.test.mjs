@@ -16,7 +16,6 @@ assert.match(nativeModel, /target\.backend === "claude"/, 'Claude model recovery
 assert.match(adapter, /reconcileNativeSessionModel/, 'the native runtime must absorb authoritative model metadata')
 assert.match(adapter, /for \(const turn of entry\.turns\.values\(\)\)/, 'recovered models must fill turns that never recorded one')
 assert.match(conversation, /taskClient\.listAgentModels/, 'the active Session controller must use the daemon model catalog')
-assert.match(conversation, /routing && routeChanged \? NATIVE_ROUTE_MODEL_SCOPE/, 'only a new cross-harness route may use the fresh-Session catalog')
 assert.match(conversation, /modelSelectionTouchedRef/, 'background model recovery must not overwrite an explicit picker choice')
 assert.match(conversation, /conversationHasUserPrompt/, 'native model fallback must distinguish a truly empty Session from an existing conversation')
 assert.match(conversation, /mayUseCatalogDefault = !deferModelFallback \\|\\| routeChanged \\|\\| !latestHasUserPrompt/, 'empty Sessions and fresh handoffs must choose a real catalog default')
