@@ -20,7 +20,9 @@ test("Session list never fans out transcript reads for card previews", () => {
   const home = read("./components/native-session-home.tsx")
   assert.doesNotMatch(home, /loadMessagePage/)
   assert.doesNotMatch(home, /loadLatestMessage/)
-  assert.match(home, /discoverMachineNativeSessions/)
+  assert.match(home, /discoverAgentNativeSessionPage\(machine\.config, agent\)/)
+  assert.match(home, /loadOlderSessions/)
+  assert.doesNotMatch(home, /discoverMachineNativeSessions/)
 })
 
 test("Session detail keeps bounded paging and memoized transcript rendering", () => {
@@ -40,6 +42,8 @@ test("ACP bridge retains lightweight Session indexing, cursor paging and diagnos
   const service = read("../../bridge/src/acp-service.js")
 
   assert.match(source, /const listVisibleSessionMetadata = async/)
+  assert.match(source, /acp\.listSessionPage\(cursor\)/)
+  assert.match(source, /setHeader\("x-next-cursor"/)
   assert.match(source, /const MAX_MESSAGE_PAGE = 500/)
   assert.match(source, /service\.messagePage\(sessionID/)
   assert.match(source, /X-Next-Cursor/)

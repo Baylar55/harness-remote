@@ -2082,6 +2082,13 @@ test("lightweight Session index keeps a bridge-created Session visible and prese
       }]
     }
 
+    async listSessionPage(cursor) {
+      if (cursor === "older" && this.exposeNative && this.created) {
+        return { sessions: [{ ...this.created, title: "Harness generated title" }] }
+      }
+      return { sessions: [], ...(this.exposeNative ? { nextCursor: "older" } : {}) }
+    }
+
     async request(method, params) {
       if (method === "session/new") {
         this.created = {
@@ -2126,6 +2133,57 @@ test("lightweight Session index keeps a bridge-created Session visible and prese
     assert.equal(renamed.status, 200)
     index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
     assert.equal(index[0].title, "Renamed from Harness Remote", "a bridge-local Codex rename must survive a Session-list refresh")
+
+    const older = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}&cursor=older`)
+    assert.equal(older[0].title, "Renamed from Harness Remote", "an older native page must retain the bridge-owned title override")
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("lightweight Session index exposes one ACP page and forwards its opaque cursor", async () => {
+  class PagedNativeIndexAcp extends EventEmitter {
+    agentInfo = { version: "1.0.0" }
+    cursors = []
+
+    async start() {}
+
+    async listSessionPage(cursor) {
+      this.cursors.push(cursor)
+      return cursor
+        ? {
+            sessions: [{ sessionId: "older", title: "Older", cwd: process.cwd(), updatedAt: "2026-08-01T00:00:00.000Z" }]
+          }
+        : {
+            sessions: [{ sessionId: "recent", title: "Recent", cwd: process.cwd(), updatedAt: "2026-09-01T00:00:00.000Z" }],
+            nextCursor: "opaque+/cursor=="
+          }
+    }
+
+    async listSessions() {
+      throw new Error("the paged metadata route must not fall back to an eager listing")
+    }
+
+    async request() { return {} }
+    notify() {}
+  }
+
+  const acp = new PagedNativeIndexAcp()
+  const bridge = await startServer({ acp, backend: "codex" })
+  try {
+    const first = await fetch(`${bridge.baseURL}/experimental/session`, { headers: authHeaders() })
+    assert.equal(first.status, 200)
+    assert.equal(first.headers.get("x-next-cursor"), "opaque+/cursor==")
+    assert.deepEqual((await first.json()).map((session) => session.id), ["recent"])
+
+    const second = await fetch(`${bridge.baseURL}/experimental/session?cursor=${encodeURIComponent("opaque+/cursor==")}`, { headers: authHeaders() })
+    assert.equal(second.status, 200)
+    assert.equal(second.headers.get("x-next-cursor"), null)
+    assert.deepEqual((await second.json()).map((session) => session.id), ["older"])
+
+    const statuses = await readJSON(bridge.baseURL, "/session/status")
+    assert.deepEqual(Object.keys(statuses), ["recent"], "status polling must remain bounded to the first page")
+    assert.deepEqual(acp.cursors, [undefined, "opaque+/cursor==", undefined])
   } finally {
     await bridge.close()
   }

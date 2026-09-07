@@ -171,6 +171,9 @@ export type Session = {
     pattern?: string
     action?: string
   }>
+  /** Lightweight native discovery includes status on each page so loading older Sessions does not
+   * require a second full-index status request. */
+  status?: SessionStatus
 }
 
 export type SessionStatus = {

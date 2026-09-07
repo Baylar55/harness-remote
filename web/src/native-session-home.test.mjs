@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { sessionTreeRows } from "./components/native-session-home.tsx"
+import { appendCursorPage, refreshCursorPage, sessionTreeRows } from "./components/native-session-home.tsx"
 import { canCreateNativeSession } from "./native-session-create.ts"
 
 function item(id, parentID) {
@@ -46,6 +46,46 @@ assert.deepEqual(rows.map(({ item: row, depth }) => [row.record.session.id, dept
 ])
 assert.equal(new Set(rows.map(({ item: row }) => row.record.session.id)).size, 7, "cycles or missing parents must never hide or duplicate a native Session")
 
+const byID = (record) => record.id
+let cursorPage = refreshCursorPage(undefined, [
+  { id: "recent-1", title: "Recent one" },
+  { id: "recent-2", title: "Recent two" }
+], "page-2", byID)
+assert.deepEqual(cursorPage, {
+  records: [
+    { id: "recent-1", title: "Recent one" },
+    { id: "recent-2", title: "Recent two" }
+  ],
+  firstPageCursor: "page-2",
+  nextCursor: "page-2",
+  loadedOlder: false
+})
+
+cursorPage = appendCursorPage(cursorPage, [
+  { id: "older-1", title: "Older" },
+  { id: "recent-2", title: "Updated at the page boundary" }
+], "page-3", byID)
+assert.equal(cursorPage.loadedOlder, true)
+assert.equal(cursorPage.nextCursor, "page-3")
+assert.equal(cursorPage.records.find((record) => record.id === "recent-2").title, "Updated at the page boundary")
+
+cursorPage = refreshCursorPage(cursorPage, [
+  { id: "newest", title: "Newest" },
+  { id: "recent-1", title: "Fresh status/title" }
+], "new-page-2", byID)
+assert.deepEqual(new Set(cursorPage.records.map(byID)), new Set(["newest", "recent-1", "recent-2", "older-1"]))
+assert.equal(cursorPage.records.find((record) => record.id === "recent-1").title, "Fresh status/title")
+assert.equal(cursorPage.firstPageCursor, "new-page-2", "a failed old tail can restart from the latest first-page cursor")
+assert.equal(cursorPage.nextCursor, "page-3", "a recurring refresh must not silently jump an in-progress older-page chain")
+
+const replacementPage = refreshCursorPage({
+  records: [{ id: "stale", title: "Stale" }],
+  firstPageCursor: "old",
+  nextCursor: "old",
+  loadedOlder: false
+}, [{ id: "current", title: "Current" }], undefined, byID)
+assert.deepEqual(replacementPage.records.map(byID), ["current"], "before manual pagination, page one remains an exact refresh")
+
 for (const [backend, transport] of [
   ["opencode", "http"],
   ["omp", "acp"],
@@ -77,7 +117,7 @@ assert.equal(canCreateNativeSession({
 const source = readFileSync(new URL("./components/native-session-home.tsx", import.meta.url), "utf8")
 assert.match(source, /presentationOverrides/, "live detail status must survive selecting another Session")
 assert.match(source, /\{ \.\.\.current, \[selectedKey\]: selectedState \}/, "the status bridge must be keyed by native Session identity")
-assert.match(source, /setPresentationOverrides\(\{\}\)[\s\S]*setRecords\(results\.flatMap/, "a successful native discovery must retire temporary presentation overrides")
+assert.match(source, /setPresentationOverrides\(\{\}\)[\s\S]*setRecords\(uniqueSessionRecords/, "a successful native discovery must retire temporary presentation overrides")
 assert.match(source, /presentationOverrides\[targetKey\]/, "non-selected rows must retain their last observed live state until discovery reconciles them")
 assert.match(source, /createMachineID/, "native Session creation must have an explicit machine selection independent of the list filter")
 assert.match(source, /createMachines\.map/, "the create panel must render the available machine choices")
@@ -92,5 +132,10 @@ assert.match(source, /if \(!loaded \|\| createMachines\.length === 0\) return/, 
 assert.match(source, /t\("sf\.loadingSessions"\)/, "the empty rail must say Sessions are loading instead of implying the machine is disconnected")
 assert.match(source, /const discoveryReady = sources\.every\(\(\{ state \}\) => state !== "loading"\)/, "Session discovery must not settle while machine probes are still in flight")
 assert.match(source, /if \(!discoveryReady\) \{[\s\S]*setLoading\(true\)[\s\S]*return/, "the rail must remain explicitly loading until machine discovery can produce real Session results")
+assert.match(source, /discoverAgentNativeSessionPage\(machine\.config, agent\)/, "recurring discovery must fetch exactly the first native Session page")
+assert.doesNotMatch(source, /discoverMachineNativeSessions/, "the recurring rail must not eagerly flatten every Session page")
+assert.match(source, /entry\.nextCursor[\s\S]*loadOlderSessions/, "older native Session pages must require an explicit user action")
+assert.match(source, /refreshCursorPage\(existing, firstRecords, page\.nextCursor/, "a recurring first-page refresh must preserve the manual pagination tail")
+assert.match(source, /agent\.processID/, "adapter restarts must invalidate connection-bound ACP cursors")
 
 console.log("native Session Home tree, create parity and stable-selection UX tests passed")

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { listMachineProjects, type MachineProject } from "../machineClient"
 import { canCreateNativeSession, createNativeSessionTarget } from "../native-session-create"
 import {
-  discoverMachineNativeSessions,
+  discoverAgentNativeSessionPage,
   nativeSessionSurfaceTarget,
   type NativeSessionRecord,
   type NativeSessionSurfaceTarget
@@ -56,6 +56,20 @@ type CreateProject = {
 type ActivityAnchor = {
   key: string
   updatedAt: number
+}
+
+export type CursorPageState<T> = {
+  records: T[]
+  firstPageCursor?: string
+  nextCursor?: string
+  loadedOlder: boolean
+}
+
+type AgentPageCache = CursorPageState<RecordWithMachine> & {
+  machine: WorkspaceMachine
+  machineID: string
+  agent: MachineAgentHost
+  projects: MachineProject[]
 }
 
 type SessionPresentationState = "working" | "attention" | "stopped" | "ready"
@@ -129,6 +143,54 @@ function harnessIconUrl(backend: string): string | undefined {
 
 function recordKey(item: RecordWithMachine): string {
   return `${item.machineID}:${item.record.key}`
+}
+
+function pageScopeKey(machineID: string, agentID: string): string {
+  return `${machineID}\u0000${agentID}`
+}
+
+function uniqueSessionRecords(records: RecordWithMachine[]): RecordWithMachine[] {
+  const unique = new Map<string, RecordWithMachine>()
+  for (const item of records) unique.set(recordKey(item), item)
+  return [...unique.values()].sort(sessionActivityCompare)
+}
+
+function uniquePageRecords<T>(records: T[], key: (record: T) => string): T[] {
+  const unique = new Map<string, T>()
+  for (const record of records) unique.set(key(record), record)
+  return [...unique.values()]
+}
+
+/** Overlay a fresh first page without losing rows that moved across its boundary after older pages
+ * were loaded. Before pagination begins, a refresh remains an exact replacement. */
+export function refreshCursorPage<T>(
+  current: CursorPageState<T> | undefined,
+  records: T[],
+  nextCursor: string | undefined,
+  key: (record: T) => string
+): CursorPageState<T> {
+  const loadedOlder = current?.loadedOlder === true
+  return {
+    records: uniquePageRecords([...(loadedOlder ? current.records : []), ...records], key),
+    firstPageCursor: nextCursor,
+    nextCursor: loadedOlder ? current?.nextCursor : nextCursor,
+    loadedOlder
+  }
+}
+
+/** Add one explicitly requested older page and advance only that cursor chain. */
+export function appendCursorPage<T>(
+  current: CursorPageState<T>,
+  records: T[],
+  nextCursor: string | undefined,
+  key: (record: T) => string
+): CursorPageState<T> {
+  return {
+    ...current,
+    records: uniquePageRecords([...current.records, ...records], key),
+    nextCursor,
+    loadedOlder: true
+  }
 }
 
 function activityTimestamp(item: RecordWithMachine, anchor?: ActivityAnchor | null): number {
@@ -295,6 +357,8 @@ export function NativeSessionHome({
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [olderSessionError, setOlderSessionError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<SessionFilter>("all")
   const [machineFilter, setMachineFilter] = useState("")
@@ -304,6 +368,8 @@ export function NativeSessionHome({
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   const previousSelectedState = useRef<{ key?: string; state?: SessionPresentationState }>({})
   const completionTimer = useRef<number | null>(null)
+  const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
+  const pageCacheSignature = useRef<string | null>(null)
   // The selected Session receives live status before the 30s discovery list refreshes. Keep that
   // last observed state by Session key while the user navigates elsewhere, otherwise the row falls
   // back to its stale discovery snapshot and visibly flips Working <-> Ready. The next successful
@@ -317,7 +383,8 @@ export function NativeSessionHome({
       machine.config.host,
       machine.config.port,
       machine.config.agentId || "",
-      snapshot?.machine.id || state
+      snapshot?.machine.id || state,
+      snapshot?.agents.map((agent) => `${agent.id}:${agent.backend}:${agent.transport}:${agent.processID ?? ""}:${agent.state}`).join(",") || ""
     ].join(":")
   ).join("|")
   const loaded = discoveryReady && loadedSignature === machineSignature
@@ -376,9 +443,12 @@ export function NativeSessionHome({
 
   useEffect(() => {
     if (!sources.length) {
+      pageCache.current.clear()
+      pageCacheSignature.current = machineSignature
       setRecords([])
       setProjectsByMachine({})
       setPresentationOverrides({})
+      setOlderSessionError(null)
       setLoadedSignature(machineSignature)
       setLoading(false)
       return
@@ -395,29 +465,58 @@ export function NativeSessionHome({
     let cancelled = false
     setLoading(true)
     setDiscoveryError(null)
+    setOlderSessionError(null)
     void Promise.all(sources.map(async ({ machine, snapshot }) => {
-      if (!snapshot) return { machine, projects: [] as MachineProject[], records: [] as RecordWithMachine[] }
-      const [sessions, projects] = await Promise.all([
-        discoverMachineNativeSessions(machine.config, snapshot.agents),
+      if (!snapshot) return { machine, snapshot, projects: [] as MachineProject[], pages: [] }
+      const [pages, projects] = await Promise.all([
+        Promise.all(snapshot.agents.map(async (agent) => ({
+          agent,
+          page: await discoverAgentNativeSessionPage(machine.config, agent).catch(() => null)
+        }))),
         listMachineProjects(machine.config).catch(() => [] as MachineProject[])
       ])
-      return {
-        machine,
-        projects,
-        records: sessions.map((record) => ({
-          machine,
-          machineID: snapshot.machine.id,
-          record,
-          project: catalogProject(record, projects, snapshot.machine.id)
-        }))
-      }
+      return { machine, snapshot, projects, pages }
     })).then((results) => {
       if (cancelled) return
       setProjectsByMachine(Object.fromEntries(results.map((result) => [result.machine.id, result.projects])))
+      if (pageCacheSignature.current !== machineSignature) pageCache.current.clear()
+      pageCacheSignature.current = machineSignature
+      const activeScopes = new Set<string>()
+      for (const result of results) {
+        if (!result.snapshot) continue
+        for (const { agent, page } of result.pages) {
+          const scope = pageScopeKey(result.machine.id, agent.id)
+          activeScopes.add(scope)
+          const existing = pageCache.current.get(scope)
+          if (!page) continue
+          const firstRecords = page.records.map((record) => ({
+            machine: result.machine,
+            machineID: result.snapshot!.machine.id,
+            record,
+            project: catalogProject(record, result.projects, result.snapshot!.machine.id)
+          }))
+          const refreshed = refreshCursorPage(existing, firstRecords, page.nextCursor, recordKey)
+          const recordsForScope = uniqueSessionRecords(refreshed.records)
+            .filter((item) => !deletingKeys?.has(recordKey(item)))
+          pageCache.current.set(scope, {
+            machine: result.machine,
+            machineID: result.snapshot.machine.id,
+            agent,
+            projects: result.projects,
+            records: recordsForScope,
+            firstPageCursor: refreshed.firstPageCursor,
+            nextCursor: refreshed.nextCursor,
+            loadedOlder: refreshed.loadedOlder
+          })
+        }
+      }
+      for (const scope of pageCache.current.keys()) {
+        if (!activeScopes.has(scope)) pageCache.current.delete(scope)
+      }
       // This is a fresh status read from every harness, so it supersedes any presentation bridge
       // remembered only to span the gap between a detail event and this discovery cycle.
       setPresentationOverrides({})
-      setRecords(results.flatMap((result) => result.records).sort(sessionActivityCompare))
+      setRecords(uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records)))
       setLoadedSignature(machineSignature)
     }).catch((reason) => {
       // Preserve an already loaded list, but never present a failed refresh as a genuinely empty machine.
@@ -431,7 +530,7 @@ export function NativeSessionHome({
       if (!cancelled) setLoading(false)
     })
     return () => { cancelled = true }
-  }, [sources, revision, refreshToken, discoveryReady, machineSignature])
+  }, [sources, revision, refreshToken, discoveryReady, machineSignature, deletingKeys])
 
   useEffect(() => {
     if (!loaded || document.visibilityState !== "visible") return
@@ -588,6 +687,58 @@ export function NativeSessionHome({
     })
     .sort((left, right) => right.updatedAt - left.updatedAt || left.label.localeCompare(right.label)), [agentFilter, filter, filteredGroups, machineFilter, presentationForItem, query, sources])
 
+  const olderPageTargets = [...pageCache.current.entries()].filter(([, entry]) =>
+    entry.nextCursor
+    && (!machineFilter || entry.machine.id === machineFilter)
+    && (!agentFilter || entry.agent.id === agentFilter)
+  )
+
+  async function loadOlderSessions() {
+    if (loadingOlder || olderPageTargets.length === 0) return
+    setLoadingOlder(true)
+    setOlderSessionError(null)
+    const outcomes = await Promise.all(olderPageTargets.map(async ([scope, entry]) => {
+      const cursor = entry.nextCursor!
+      try {
+        const page = await discoverAgentNativeSessionPage(entry.machine.config, entry.agent, cursor)
+        if (page.nextCursor === cursor) throw new Error("Session listing returned the same pagination cursor twice.")
+        const records = page.records.map((record) => ({
+          machine: entry.machine,
+          machineID: entry.machineID,
+          record,
+          project: catalogProject(record, entry.projects, entry.machineID)
+        }))
+        return { ok: true as const, scope, cursor, page, records }
+      } catch (error) {
+        return { ok: false as const, scope, cursor, error: error instanceof Error ? error.message : String(error) }
+      }
+    }))
+
+    let firstError: string | null = null
+    for (const outcome of outcomes) {
+      const current = pageCache.current.get(outcome.scope)
+      if (!current || current.nextCursor !== outcome.cursor) continue
+      if (!outcome.ok) {
+        firstError ??= outcome.error
+        pageCache.current.set(outcome.scope, {
+          ...current,
+          nextCursor: current.firstPageCursor
+        })
+        continue
+      }
+      const appended = appendCursorPage(current, outcome.records, outcome.page.nextCursor, recordKey)
+      pageCache.current.set(outcome.scope, {
+        ...current,
+        ...appended,
+        records: uniqueSessionRecords(appended.records)
+          .filter((item) => !deletingKeys?.has(recordKey(item)))
+      })
+    }
+    setRecords(uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records)))
+    setOlderSessionError(firstError)
+    setLoadingOlder(false)
+  }
+
   const createMachines = useMemo<CreateMachine[]>(() => sources.flatMap(({ machine, snapshot, state, error }) =>
     snapshot && state === "online" && !error
       ? [{ machine, snapshot, label: snapshot.machine.name || machine.name }]
@@ -686,8 +837,22 @@ export function NativeSessionHome({
         directory: selectedCreateProject.project.path,
         title: createTitle
       })
+      const createdRecord = {
+        machine: selectedCreateMachine.machine,
+        machineID: selectedCreateMachine.snapshot.machine.id,
+        record,
+        project: selectedCreateProject.project
+      }
+      const scope = pageScopeKey(selectedCreateMachine.machine.id, selectedCreateAgent.id)
+      const cached = pageCache.current.get(scope)
+      if (cached) {
+        pageCache.current.set(scope, {
+          ...cached,
+          records: uniqueSessionRecords([...cached.records, createdRecord])
+        })
+      }
       setRecords((current) => [
-        { machine: selectedCreateMachine.machine, machineID: selectedCreateMachine.snapshot.machine.id, record, project: selectedCreateProject.project },
+        createdRecord,
         ...current.filter((item) => !(item.machine.id === selectedCreateMachine.machine.id && item.record.key === record.key))
       ].sort(sessionActivityCompare))
       setCreateTitle("")
@@ -832,6 +997,12 @@ export function NativeSessionHome({
         <div className="hr-native-home-notice" role="alert">
           <span><strong>{t("sf.refreshFailed")}</strong> {t("sf.refreshFailedDetail")}</span>
           <button type="button" className="tdw-button secondary" onClick={() => setRevision((value) => value + 1)} disabled={loading}>{t("sf.retry")}</button>
+        </div>
+      ) : null}
+      {olderSessionError ? (
+        <div className="hr-native-home-notice" role="alert">
+          <span><strong>{t("sf.olderSessionsFailed")}</strong> {olderSessionError}</span>
+          <button type="button" className="tdw-button secondary" onClick={() => olderPageTargets.length ? void loadOlderSessions() : setRevision((value) => value + 1)} disabled={loading || loadingOlder}>{t("sf.retry")}</button>
         </div>
       ) : null}
 
@@ -990,6 +1161,15 @@ export function NativeSessionHome({
           )
         })}
       </div>
+
+      {loaded && olderPageTargets.length > 0 ? (
+        <div className="hr-native-home-pagination">
+          <button type="button" className="tdw-button secondary" onClick={() => void loadOlderSessions()} disabled={loading || loadingOlder} aria-busy={loadingOlder}>
+            {loadingOlder ? <LoadingIcon size={14} /> : null}
+            {t(loadingOlder ? "sf.loadingOlderSessions" : "sf.loadOlderSessions")}
+          </button>
+        </div>
+      ) : null}
 
       {loaded && records.length > 0 && filteredGroups.length === 0 ? (
         <div className="hr-native-home-empty compact"><SearchIcon size={18} /><span>{t("sf.noMatch")}</span></div>

@@ -186,6 +186,67 @@ export function nativeSessionSurfaceTarget(
 
 export type NativeSessionReadApi = Pick<typeof api, "listGlobalSessions" | "listSessions" | "listStatuses">
 
+export type NativeSessionPageReadApi = Pick<typeof api, "listGlobalSessionPage" | "listSessions" | "listStatuses">
+
+export type NativeSessionRecordPage = {
+  records: NativeSessionRecord[]
+  nextCursor?: string
+}
+
+function nativeSessionRecords(
+  agent: MachineAgentHost,
+  config: ServerConfig,
+  sessions: Session[],
+  statuses: Record<string, SessionStatus> = {}
+): NativeSessionRecord[] {
+  return sessions.map((session) => ({
+    key: `${agent.id}:${session.id}`,
+    agentId: agent.id,
+    agentLabel: agent.label || agent.id,
+    backend: config.backend,
+    transport: agent.transport,
+    stopCapability: agent.contract?.sessions?.stop,
+    abortSupported: agent.capabilities?.abort === true,
+    modelsSupported: agent.capabilities?.models === true,
+    commandsSupported: agent.capabilities?.commands === true,
+    renameSupported: agent.capabilities?.sessionRename === true,
+    deleteSupported: agent.capabilities?.sessionDelete === true,
+    session,
+    status: statuses[session.id] ?? session.status
+  }))
+}
+
+/**
+ * Read exactly one lightweight native Session page. A cursor belongs to the adapter connection and
+ * is forwarded untouched; only the initial page may fall back to the stable non-paged endpoint.
+ */
+export async function discoverAgentNativeSessionPage(
+  base: ServerConfig,
+  agent: MachineAgentHost,
+  cursor?: string,
+  client: NativeSessionPageReadApi = api
+): Promise<NativeSessionRecordPage> {
+  if (agent.capabilities?.sessions === false) return { records: [] }
+  const config = nativeSessionConfig(base, agent)
+  try {
+    const page = await client.listGlobalSessionPage(config, cursor)
+    const statuses = page.sessions.some((session) => !session.status)
+      ? await client.listStatuses(config).catch(() => ({} as Record<string, SessionStatus>))
+      : {}
+    return {
+      records: nativeSessionRecords(agent, config, page.sessions, statuses),
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {})
+    }
+  } catch (error) {
+    if (cursor) throw error
+    const sessions = await client.listSessions(config)
+    const statuses = sessions.some((session) => !session.status)
+      ? await client.listStatuses(config).catch(() => ({} as Record<string, SessionStatus>))
+      : {}
+    return { records: nativeSessionRecords(agent, config, sessions, statuses) }
+  }
+}
+
 /**
  * Read-only discovery for one native harness. The experimental global listing is preferred because
  * it already provides pagination for large histories; harnesses that do not expose it fall back to
@@ -203,21 +264,7 @@ export async function discoverAgentNativeSessions(
   const config = nativeSessionConfig(base, agent)
   const sessions = await client.listGlobalSessions(config).catch(() => client.listSessions(config))
   const statuses = await client.listStatuses(config).catch(() => ({} as Record<string, SessionStatus>))
-  return sessions.map((session) => ({
-    key: `${agent.id}:${session.id}`,
-    agentId: agent.id,
-    agentLabel: agent.label || agent.id,
-    backend: config.backend,
-    transport: agent.transport,
-    stopCapability: agent.contract?.sessions?.stop,
-    abortSupported: agent.capabilities?.abort === true,
-    modelsSupported: agent.capabilities?.models === true,
-    commandsSupported: agent.capabilities?.commands === true,
-    renameSupported: agent.capabilities?.sessionRename === true,
-    deleteSupported: agent.capabilities?.sessionDelete === true,
-    session,
-    status: statuses[session.id]
-  }))
+  return nativeSessionRecords(agent, config, sessions, statuses)
 }
 
 /**

@@ -565,6 +565,25 @@ export class AcpService {
     })
   }
 
+  /**
+   * Seed lightweight ACP listing metadata without restoring a transcript snapshot.
+   *
+   * The paged Session index can reveal an older Session before any stable endpoint or mutation
+   * addresses it. Remembering that metadata lets a later open/claim resolve the native identity
+   * without turning every recurring index refresh into an eager walk of the full history.
+   */
+  rememberListedSessions(sessions) {
+    return sessions.map((session) => {
+      const known = this.#sessions.get(session.sessionId)
+      const updatedAt = this.#preserveListedTimestamps && known?.updatedAt
+        ? known.updatedAt
+        : session.updatedAt ?? known?.updatedAt ?? new Date().toISOString()
+      const normalized = { ...session, updatedAt }
+      this.#sessions.set(normalized.sessionId, normalized)
+      return normalized
+    })
+  }
+
   async createSession({ directory, title, model }) {
     await this.#acp.start()
     const result = await this.#acp.request("session/new", { cwd: directory, mcpServers: [] })
@@ -1746,17 +1765,8 @@ export class AcpService {
   async #refreshSessions() {
     if (!this.#sessionListing) {
       this.#sessionListing = this.#acp.listSessions().then((sessions) => {
-        const listed = new Set()
-        const refreshed = sessions.map((session) => {
-          listed.add(session.sessionId)
-          const known = this.#sessions.get(session.sessionId)
-          const updatedAt = this.#preserveListedTimestamps && known?.updatedAt
-            ? known.updatedAt
-            : session.updatedAt ?? known?.updatedAt ?? new Date().toISOString()
-          const normalized = { ...session, updatedAt }
-          this.#sessions.set(normalized.sessionId, normalized)
-          return normalized
-        })
+        const listed = new Set(sessions.map((session) => session.sessionId))
+        const refreshed = this.rememberListedSessions(sessions)
         for (const [sessionID, session] of this.#sessions) {
           if (this.#ownedSessions.has(sessionID) && !listed.has(sessionID)) refreshed.push(session)
         }

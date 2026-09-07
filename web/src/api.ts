@@ -64,6 +64,11 @@ export type MessagePage = {
   model?: ModelSelection
 }
 
+export type SessionPage = {
+  sessions: Session[]
+  nextCursor?: string
+}
+
 export type NativeSessionIdentityPayload = {
   machineID: string
   agentID: string
@@ -277,14 +282,27 @@ export const api = {
     return request<Session[]>(config, withDirectory("/session", directory))
   },
 
+  async listGlobalSessionPage(config: ServerConfig, cursor?: string): Promise<SessionPage> {
+    const path = cursor ? `/experimental/session?cursor=${encodeURIComponent(cursor)}` : "/experimental/session"
+    const response = await requestWithHeaders<Session[]>(config, path)
+    return {
+      sessions: response.data,
+      ...(response.headers["x-next-cursor"] ? { nextCursor: response.headers["x-next-cursor"] } : {})
+    }
+  },
+
   async listGlobalSessions(config: ServerConfig) {
     const sessions: Session[] = []
     let cursor: string | undefined
+    const seenCursors = new Set<string>()
     do {
-      const path = cursor ? `/experimental/session?cursor=${encodeURIComponent(cursor)}` : "/experimental/session"
-      const response = await requestWithHeaders<Session[]>(config, path)
-      sessions.push(...response.data)
-      cursor = response.headers["x-next-cursor"]
+      const page = await api.listGlobalSessionPage(config, cursor)
+      sessions.push(...page.sessions)
+      if (page.nextCursor && seenCursors.has(page.nextCursor)) {
+        throw new Error("Session listing returned the same pagination cursor twice.")
+      }
+      if (page.nextCursor) seenCursors.add(page.nextCursor)
+      cursor = page.nextCursor
     } while (cursor)
     return sessions
   },
