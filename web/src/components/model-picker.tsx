@@ -59,9 +59,9 @@ function groupModels(models: ModelOption[]): ModelGroup[] {
 
   return [...groups.entries()].map(([id, options]) => {
     const base = options.find((option) => !option.variant) || options.find((option) => option.isDefault) || options[0]
-    const variants = options
-      .filter((option) => Boolean(option.variant))
-      .sort((left, right) => String(left.variant).localeCompare(String(right.variant)))
+    // The harness/catalog already advertises variants in its intended order. Preserve that order
+    // instead of guessing semantics from variant labels in the UI.
+    const variants = options.filter((option) => Boolean(option.variant))
     return {
       id,
       providerID: base.providerID,
