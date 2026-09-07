@@ -1,6 +1,6 @@
 /*
  * Live conversation primitives that were accidentally removed with the retired
- * universal-workspace styles in #361. These selectors are still emitted by the
+ * universal-workspace styles in PR 361. These selectors are still emitted by the
  * shared Session/Work Thread renderer. Keep this sheet structural: typography
  * and product-specific polish stay in the readable, Session and Beautiful UI
  * layers that load around it.
