@@ -5,6 +5,8 @@ import test from "node:test"
 const css = readFileSync(new URL("./taskdesk-workthreads.css", import.meta.url), "utf8")
 const workspace = readFileSync(new URL("./components/standalone-universal-workspace.tsx", import.meta.url), "utf8")
 const workbench = readFileSync(new URL("./session-first-workbench.css", import.meta.url), "utf8")
+const centering = readFileSync(new URL("./session-first-centering-fix.css", import.meta.url), "utf8")
+const main = readFileSync(new URL("./main.tsx", import.meta.url), "utf8")
 const topbar = css.match(/\.tdw-topbar \{[\s\S]*?\n\}/)?.[0] || ""
 
 test("the top bar action group is content-sized", () => {
@@ -33,4 +35,14 @@ test("the native Session rail disappears when the mobile detail takes over", () 
   assert.match(workbench, /\.hr-native-workspace-body \{[\s\S]*?grid-template-columns: 1fr/)
   assert.match(workbench, /\.hr-rail-resizer \{[\s\S]*?display: none/)
   assert.equal(existsSync(new URL("./components/conversation-workspace.tsx", import.meta.url)), false)
+})
+
+test("the native Session conversation uses a bounded optical offset", () => {
+  assert.match(centering, /--hrsf-optical-shift: min\(calc\(var\(--hrsf-rail-width\) \/ 5\), 64px\);/)
+  assert.match(centering, /@media \(max-width: 780px\)[\s\S]*?--hrsf-optical-shift: 0px;/)
+  assert.match(centering, /\.hr-native-session-observer \.uw-empty-panel \{[\s\S]*?align-items: center;[\s\S]*?text-align: center;/)
+  assert.ok(
+    main.indexOf('session-first-centering-fix.css') > main.indexOf('session-first-workbench.css'),
+    "the optical correction must load after the workbench rules it refines"
+  )
 })
