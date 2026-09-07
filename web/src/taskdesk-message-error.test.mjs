@@ -19,14 +19,30 @@ test("native provider and harness failures remain visible inside the persisted c
 
 test("a native turn failure wins over a stale live-active bit before reload", () => {
   assert.match(source, /const reportedError = messageErrorText\(message\)/)
+  assert.match(source, /const hasFinalText = hasTerminalAssistantText\(message\.parts, reportedError\)/)
   assert.match(source, /const liveTurnFailed = Boolean\(reportedError\) && !hasFinalText/)
   assert.match(source, /Boolean\(\(message as TaskDeskEnvelope\)\.taskdesk\?\.active\)[\s\S]*&& !liveTurnFailed/)
   assert.match(source, /const turnError = liveAssistant \|\| hasFinalText \? "" : reportedError/)
 })
 
+test("provider error text duplication is not mistaken for a model final answer", () => {
+  assert.match(source, /function textMirrorsReportedError/)
+  assert.match(source, /function normalizeErrorComparable/)
+  assert.match(source, /if \(reportedError && textMirrorsReportedError\(part\.text, reportedError\)\) continue/)
+  assert.match(source, /return !\(reportedError && part\.type === "text" && textMirrorsReportedError\(part\.text, reportedError\)\)/)
+})
+
+test("provider diagnostics are compacted before they reach the red error card", () => {
+  assert.match(source, /function cleanReportedErrorText/)
+  assert.match(source, /raw-http-request=\\S\+/)
+  assert.match(source, /function collapseRepeatedErrorBody/)
+  assert.match(source, /const mirroredText = message\.parts\.find/)
+  assert.match(source, /return cleanReportedErrorText\(mirroredText \|\| raw\)/)
+})
+
 test("OpenCode protocol bookkeeping never leaks into the visible chat", () => {
   assert.match(source, /INTERNAL_PROTOCOL_PARTS = new Set\(\["step-start", "step-finish", "snapshot", "patch"\]\)/)
-  assert.match(source, /visibleParts = message\.parts\.filter\(\(part\) => !isInternalProtocolPart\(part\)\)/)
+  assert.match(source, /if \(isInternalProtocolPart\(part\)\) return false/)
 })
 
 test("a terminal assistant turn with only reasoning or tools is never silently presented as complete", () => {
@@ -36,8 +52,10 @@ test("a terminal assistant turn with only reasoning or tools is never silently p
   assert.match(source, /assistantTurnCompleted\(message\)/)
 })
 
-test("a later final answer suppresses a stale transport or intermediate turn error", () => {
-  assert.match(source, /const hasFinalText = hasTerminalAssistantText\(message\.parts\)/)
+test("a later real final answer suppresses a stale transport or intermediate turn error", () => {
+  assert.match(source, /const hasFinalText = hasTerminalAssistantText\(message\.parts, reportedError\)/)
+  assert.match(source, /if \(reportedError && textMirrorsReportedError\(part\.text, reportedError\)\) continue/)
+  assert.match(source, /return true/)
   assert.match(source, /const liveTurnFailed = Boolean\(reportedError\) && !hasFinalText/)
   assert.match(source, /const turnError = liveAssistant \|\| hasFinalText \? "" : reportedError/)
 })
