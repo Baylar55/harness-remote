@@ -226,13 +226,13 @@ responder = (url) => {
   if (url.includes('/config/providers')) {
     return new Response(JSON.stringify({
       providers: [{
-        id: 'claude',
-        name: 'Claude Code',
+        id: 'codex',
+        name: 'Codex CLI',
         models: {
-          'claude-fable-5-1': { id: 'claude-fable-5-1', name: 'Fable 5.1' }
+          'gpt-5.6-sol': { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }
         }
       }],
-      default: { claude: 'claude-fable-5-1' }
+      default: { codex: 'gpt-5.6-sol' }
     }), { status: 200 })
   }
   return new Response(JSON.stringify({
@@ -250,21 +250,24 @@ responder = (url) => {
 // Start from a deliberately mismatched primary profile. The Session scope must replace both the
 // path agent and backend header, which is the half of the earlier fix that regressed Codex on a
 // multi-harness machine.
+const claudePrimaryConfig = {
+  backend: 'claude', host: '127.0.0.1', port: 4099, username: 'harness', password: 'pw', agentId: 'claude'
+}
 const sessionCatalog = await taskClient.listAgentModels(
-  { backend: 'codex', host: '127.0.0.1', port: 4099, username: 'harness', password: 'pw', agentId: 'codex' },
-  'claude',
-  { sessionID: 'claude-session', directory: '/repo', backend: 'claude' }
+  claudePrimaryConfig,
+  'codex',
+  { sessionID: 'codex-session', directory: '/repo', backend: 'codex' }
 )
-assert.equal(sessionCatalog.models[0]?.modelID, 'claude-fable-5-1')
+assert.equal(sessionCatalog.models[0]?.modelID, 'gpt-5.6-sol')
 assert.equal(sent.length, 1, 'native Session model discovery must be one Session-scoped request')
 const sessionCatalogRequest = new URL(sent[0].url)
-assert.equal(sessionCatalogRequest.pathname, '/v1/agents/claude/config/providers')
-assert.equal(sessionCatalogRequest.searchParams.get('sessionID'), 'claude-session')
+assert.equal(sessionCatalogRequest.pathname, '/v1/agents/codex/config/providers')
+assert.equal(sessionCatalogRequest.searchParams.get('sessionID'), 'codex-session')
 assert.equal(sessionCatalogRequest.searchParams.get('directory'), '/repo')
-assert.equal(sent[0].headers['X-Harness-Backend'], 'claude')
+assert.equal(sent[0].headers['X-Harness-Backend'], 'codex')
 
 sent.length = 0
-const freshCatalog = await taskClient.listAgentModels(target().config, 'claude')
+const freshCatalog = await taskClient.listAgentModels(claudePrimaryConfig, 'claude')
 assert.equal(freshCatalog.models[0]?.modelID, 'claude-opus-5-1[1m]')
 assert.equal(sent.length, 1, 'fresh Session discovery must remain one machine catalog request')
 const freshCatalogRequest = new URL(sent[0].url)
