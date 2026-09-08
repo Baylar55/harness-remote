@@ -53,6 +53,20 @@ test("setModel applies the model before its harness-advertised variant", async (
   assert.deepEqual(configCalls(acp), ["model=openai/b", "thinking=high"])
 })
 
+test("setModel resolves a raw Session variant through the exact adapter options", async () => {
+  const acp = new RecordingAcp()
+  const service = new AcpService(acp, { modelVariantConfigIDs: ["thinking"] })
+  await service.setModel("s1", "openai/b", "high")
+  assert.deepEqual(configCalls(acp), ["model=openai/b", "thinking=high"])
+})
+
+test("setModel refuses a raw Session variant no advertised control accepts", async () => {
+  const acp = new RecordingAcp()
+  const service = new AcpService(acp, { modelVariantConfigIDs: ["thinking"] })
+  await assert.rejects(service.setModel("s1", "openai/b", "invented"), /variant is not available/)
+  assert.deepEqual(configCalls(acp), ["model=openai/b"])
+})
+
 test("setModel refuses a variant the running adapter never advertised", async () => {
   const acp = new RecordingAcp()
   const service = new AcpService(acp, {})

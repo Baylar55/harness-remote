@@ -31,6 +31,7 @@ const {
   markPendingNativeSessionPromptAccepted
 } = await import('./native-session-prompt.ts')
 const { lastNativeMessageModel } = await import('./native-session-model.ts')
+const { taskClient } = await import('./taskClient.ts')
 
 function target(overrides = {}) {
   return {
@@ -60,8 +61,12 @@ const MODEL_Y = { providerID: 'anthropic', modelID: 'claude-opus-4-8', variant: 
 let responder = () => new Response('{}', { status: 200 })
 const sent = []
 globalThis.fetch = async (url, options) => {
-  sent.push({ url: String(url), body: JSON.parse(options.body) })
-  return responder()
+  sent.push({
+    url: String(url),
+    headers: options?.headers,
+    body: options?.body ? JSON.parse(String(options.body)) : undefined
+  })
+  return responder(String(url), options)
 }
 
 // --- 1. A definite daemon refusal must not leave a record that blocks the next prompt ------------
@@ -214,5 +219,56 @@ assert.deepEqual(
   { providerID: 'anthropic', modelID: 'claude-sonnet-4-6', variant: 'high' },
   'a flat OpenCode assistant envelope must inherit the matching immediately preceding user variant'
 )
+
+// --- 9. An existing native Session owns its exact, coherently routed model catalog ---------------
+sent.length = 0
+responder = (url) => {
+  if (url.includes('/config/providers')) {
+    return new Response(JSON.stringify({
+      providers: [{
+        id: 'claude',
+        name: 'Claude Code',
+        models: {
+          'claude-fable-5-1': { id: 'claude-fable-5-1', name: 'Fable 5.1' }
+        }
+      }],
+      default: { claude: 'claude-fable-5-1' }
+    }), { status: 200 })
+  }
+  return new Response(JSON.stringify({
+    models: [{
+      providerID: 'claude',
+      providerName: 'Claude Code',
+      modelID: 'claude-opus-5-1[1m]',
+      modelName: 'Opus 5.1 1M'
+    }],
+    stale: false,
+    refreshedAt: '2026-09-08T00:00:00.000Z'
+  }), { status: 200 })
+}
+
+// Start from a deliberately mismatched primary profile. The Session scope must replace both the
+// path agent and backend header, which is the half of the earlier fix that regressed Codex on a
+// multi-harness machine.
+const sessionCatalog = await taskClient.listAgentModels(
+  { backend: 'codex', host: '127.0.0.1', port: 4099, username: 'harness', password: 'pw', agentId: 'codex' },
+  'claude',
+  { sessionID: 'claude-session', directory: '/repo', backend: 'claude' }
+)
+assert.equal(sessionCatalog.models[0]?.modelID, 'claude-fable-5-1')
+assert.equal(sent.length, 1, 'native Session model discovery must be one Session-scoped request')
+const sessionCatalogRequest = new URL(sent[0].url)
+assert.equal(sessionCatalogRequest.pathname, '/v1/agents/claude/config/providers')
+assert.equal(sessionCatalogRequest.searchParams.get('sessionID'), 'claude-session')
+assert.equal(sessionCatalogRequest.searchParams.get('directory'), '/repo')
+assert.equal(sent[0].headers['X-Harness-Backend'], 'claude')
+
+sent.length = 0
+const freshCatalog = await taskClient.listAgentModels(target().config, 'claude')
+assert.equal(freshCatalog.models[0]?.modelID, 'claude-opus-5-1[1m]')
+assert.equal(sent.length, 1, 'fresh Session discovery must remain one machine catalog request')
+const freshCatalogRequest = new URL(sent[0].url)
+assert.equal(freshCatalogRequest.pathname, '/v1/agents/claude/models')
+assert.equal(freshCatalogRequest.searchParams.get('sessionID'), null)
 
 console.log('native-session model lifecycle regressions: OK')

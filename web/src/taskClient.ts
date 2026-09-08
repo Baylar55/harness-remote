@@ -1,9 +1,10 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
+import { api } from "./api"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import { unwrapPayload } from "./machinePayload"
 import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
 import type { AttachmentPart } from "./attachments"
-import type { ModelOption, ModelSelection, ServerConfig } from "./types"
+import type { BackendKind, ModelOption, ModelSelection, ServerConfig } from "./types"
 
 const BROWSER_MACHINE_REQUEST_TIMEOUT_MS = 12_000
 const LIST_STALE_GRACE_MS = 45_000
@@ -141,6 +142,9 @@ export type AgentModelCatalog = {
 export type AgentModelScope = {
   projectId?: string
   workThreadId?: string
+  sessionID?: string
+  directory?: string
+  backend?: BackendKind
 }
 
 export type TaskContinueInput = {
@@ -176,6 +180,7 @@ function cacheKey(config: ServerConfig): string {
 }
 
 function modelScopeKey(scope: AgentModelScope): string {
+  if (scope.sessionID) return `session:${scope.backend || ""}:${scope.sessionID}:${scope.directory || ""}`
   if (scope.workThreadId) return `conversation:${scope.workThreadId}`
   if (scope.projectId) return `project:${scope.projectId}`
   return "default"
@@ -383,6 +388,22 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function loadAgentModelCatalog(config: ServerConfig, agentId: string, scope: AgentModelScope): Promise<AgentModelCatalog> {
+  if (scope.sessionID) {
+    // A native ACP Session owns the model options it was created with. Address both halves of the
+    // route explicitly: baseUrl uses agentId for the path while routingHeaders uses backend. Letting
+    // either value leak from the machine's primary profile can query a different harness entirely.
+    const sessionConfig: ServerConfig = {
+      ...config,
+      agentId,
+      backend: scope.backend ?? config.backend
+    }
+    return {
+      models: await api.listModels(sessionConfig, scope.directory, scope.sessionID),
+      stale: false,
+      refreshedAt: new Date().toISOString(),
+      source: "native-session-config-options"
+    }
+  }
   const path = modelCatalogPath(agentId, scope)
   const started = Date.now()
   while (true) {

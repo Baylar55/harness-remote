@@ -360,7 +360,9 @@ export function WorkThreadConversation({
   const [targetModelKey, setTargetModelKey] = useState(initialModelKey)
   // The catalog effect must depend on the scope's value, not a caller's object identity: a fresh
   // object per render would restart model discovery on every render.
-  const modelScopeKey = modelScope ? `${modelScope.workThreadId ?? ""}|${modelScope.projectId ?? ""}` : ""
+  const modelScopeKey = modelScope
+    ? `${modelScope.workThreadId ?? ""}|${modelScope.projectId ?? ""}|${modelScope.backend ?? ""}|${modelScope.sessionID ?? ""}|${modelScope.directory ?? ""}`
+    : ""
   const loadGeneration = useRef(0)
   const modelGeneration = useRef(0)
   const draftRef = useRef(draft)
@@ -787,7 +789,9 @@ export function WorkThreadConversation({
     setModels([])
     setModelsLoading(true)
     setModelError(null)
-    const scope = routing ? NATIVE_ROUTE_MODEL_SCOPE : (modelScope ?? {})
+    // The open native Session owns its exact options. Only changing to another harness creates a
+    // fresh Session, whose choice must come from that harness's machine-wide fresh-session catalog.
+    const scope = routing && routeChanged ? NATIVE_ROUTE_MODEL_SCOPE : (modelScope ?? {})
     void taskClient.listAgentModels(destinationConfig, targetAgentID, scope).then((catalog) => {
       if (modelGeneration.current !== current) return
       setModels(catalog.models)

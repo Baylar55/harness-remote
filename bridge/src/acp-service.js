@@ -1166,13 +1166,25 @@ export class AcpService {
    * level is invented, and a level the current model does not support is refused rather than sent.
    */
   async #setModelVariant(sessionID, variant) {
-    const configId = typeof variant?.configId === "string" ? variant.configId : ""
-    const value = typeof variant?.value === "string" ? variant.value : ""
-    if (!configId || !value) return
-    const option = this.#configOptions.get(sessionID)?.find((item) => item.id === configId)
+    const value = typeof variant === "string"
+      ? variant
+      : typeof variant?.value === "string" ? variant.value : ""
+    if (!value) return
+    const requestedConfigId = typeof variant?.configId === "string" ? variant.configId : ""
+    const options = this.#configOptions.get(sessionID) ?? []
+    // Session-first callers carry the native variant value without borrowing a config id from the
+    // global technical Session. Resolve its control against this exact Session after the model
+    // change, because the supported id and range belong to the adapter and may differ per model.
+    const option = requestedConfigId
+      ? options.find((item) => item.id === requestedConfigId)
+      : this.#modelVariantConfigIDs
+        .map((configId) => options.find((item) => item.id === configId))
+        .find((candidate) => candidate?.options?.some((item) => item?.value === value))
+    const configId = requestedConfigId || option?.id || ""
     if (!option?.options?.some((candidate) => candidate?.value === value)) {
       const offered = (option?.options ?? []).map((candidate) => candidate?.value).filter(Boolean)
-      const error = new Error(`Harness model variant is not available: ${configId}=${value}${offered.length ? ` (this model offers ${offered.join(", ")})` : ""}`)
+      const selection = configId ? `${configId}=${value}` : value
+      const error = new Error(`Harness model variant is not available: ${selection}${offered.length ? ` (this model offers ${offered.join(", ")})` : ""}`)
       error.code = "model_variant_unavailable"
       throw error
     }
