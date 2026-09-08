@@ -852,6 +852,27 @@ test("keeps an external OMP session observational when its journal is empty", as
   assert.equal(acp.loads, 0, "a read-only OMP open must not fall back to a blocking ACP replay")
 })
 
+test("falls back to ACP replay when a paged journal cannot locate the Session", async () => {
+  class MissingJournalReplayAcp extends ReplayAcp {
+    loads = 0
+
+    async request(method, params) {
+      if (method === "session/load") this.loads += 1
+      return super.request(method, params)
+    }
+  }
+
+  const acp = new MissingJournalReplayAcp()
+  const historyLoader = async () => []
+  historyLoader.page = async () => undefined
+  const service = new AcpService(acp, { historyLoader })
+
+  const page = await service.messagePage("session-1", { limit: 100 })
+  assert.ok(page.messages.some((message) => message.parts.some((part) => part.text === "Persist this prompt")))
+  assert.ok(page.messages.some((message) => message.parts.some((part) => part.text === "Persist this response")))
+  assert.equal(acp.loads, 1, "an absent journal file must not masquerade as a valid empty transcript")
+})
+
 test("renames and hides ACP sessions through OpenCode-compatible endpoints", async () => {
   const bridge = await startServer()
   try {
@@ -2082,6 +2103,13 @@ test("lightweight Session index keeps a bridge-created Session visible and prese
       }]
     }
 
+    async listSessionPage(cursor) {
+      if (cursor === "older" && this.exposeNative && this.created) {
+        return { sessions: [{ ...this.created, title: "Harness generated title" }] }
+      }
+      return { sessions: [], ...(this.exposeNative ? { nextCursor: "older" } : {}) }
+    }
+
     async request(method, params) {
       if (method === "session/new") {
         this.created = {
@@ -2126,7 +2154,111 @@ test("lightweight Session index keeps a bridge-created Session visible and prese
     assert.equal(renamed.status, 200)
     index = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}`)
     assert.equal(index[0].title, "Renamed from Harness Remote", "a bridge-local Codex rename must survive a Session-list refresh")
+
+    const older = await readJSON(bridge.baseURL, `/experimental/session?directory=${directory}&cursor=older`)
+    assert.equal(older[0].title, "Renamed from Harness Remote", "an older native page must retain the bridge-owned title override")
   } finally {
     await bridge.close()
+  }
+})
+
+test("lightweight Session index exposes one ACP page and forwards its opaque cursor", async () => {
+  class PagedNativeIndexAcp extends EventEmitter {
+    agentInfo = { version: "1.0.0" }
+    cursors = []
+
+    async start() {}
+
+    async listSessionPage(cursor) {
+      this.cursors.push(cursor)
+      return cursor
+        ? {
+            sessions: [{ sessionId: "older", title: "Older", cwd: process.cwd(), updatedAt: "2026-08-01T00:00:00.000Z" }]
+          }
+        : {
+            sessions: [{ sessionId: "recent", title: "Recent", cwd: process.cwd(), updatedAt: "2026-09-01T00:00:00.000Z" }],
+            nextCursor: "opaque+/cursor=="
+          }
+    }
+
+    async listSessions() {
+      throw new Error("the paged metadata route must not fall back to an eager listing")
+    }
+
+    async request() { return {} }
+    notify() {}
+  }
+
+  const acp = new PagedNativeIndexAcp()
+  const bridge = await startServer({ acp, backend: "codex" })
+  try {
+    const first = await fetch(`${bridge.baseURL}/experimental/session`, { headers: authHeaders() })
+    assert.equal(first.status, 200)
+    assert.equal(first.headers.get("x-next-cursor"), "opaque+/cursor==")
+    assert.deepEqual((await first.json()).map((session) => session.id), ["recent"])
+
+    const second = await fetch(`${bridge.baseURL}/experimental/session?cursor=${encodeURIComponent("opaque+/cursor==")}`, { headers: authHeaders() })
+    assert.equal(second.status, 200)
+    assert.equal(second.headers.get("x-next-cursor"), null)
+    assert.deepEqual((await second.json()).map((session) => session.id), ["older"])
+
+    const statuses = await readJSON(bridge.baseURL, "/session/status")
+    assert.deepEqual(Object.keys(statuses), ["recent"], "status polling must remain bounded to the first page")
+    assert.deepEqual(acp.cursors, [undefined, "opaque+/cursor==", undefined])
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("lightweight Session index preserves non-paginated behavior across ACP backends", async () => {
+  class SinglePageAcp extends EventEmitter {
+    agentInfo = { version: "1.0.0" }
+    cursors = []
+
+    constructor(backend) {
+      super()
+      this.backend = backend
+    }
+
+    async start() {}
+
+    async listSessionPage(cursor) {
+      this.cursors.push(cursor)
+      return {
+        sessions: [{
+          sessionId: `${this.backend}-session`,
+          title: `${this.backend} Session`,
+          cwd: process.cwd(),
+          updatedAt: "2026-09-01T00:00:00.000Z"
+        }]
+      }
+    }
+
+    async listSessions() {
+      throw new Error("the lightweight index must use the shared single-page path")
+    }
+
+    async request() { return {} }
+    notify() {}
+  }
+
+  for (const backend of ["omp", "pi", "claude", "codex"]) {
+    const acp = new SinglePageAcp(backend)
+    const bridge = await startServer({ acp, backend })
+    try {
+      const response = await fetch(`${bridge.baseURL}/experimental/session`, { headers: authHeaders() })
+      assert.equal(response.status, 200, backend)
+      assert.equal(response.headers.get("x-next-cursor"), null, `${backend} must remain a one-page listing without a cursor`)
+      assert.deepEqual((await response.json()).map((session) => ({ id: session.id, title: session.title })), [{
+        id: `${backend}-session`,
+        title: `${backend} Session`
+      }])
+
+      const statuses = await readJSON(bridge.baseURL, "/session/status")
+      assert.deepEqual(Object.keys(statuses), [`${backend}-session`], `${backend} status discovery must keep using page one`)
+      assert.deepEqual(acp.cursors, [undefined, undefined], `${backend} must not invent or follow a cursor`)
+    } finally {
+      await bridge.close()
+    }
   }
 })

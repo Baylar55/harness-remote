@@ -42,6 +42,7 @@ export class AcpPromptEchoFilter extends EventEmitter {
   get processID() { return this.#acp.processID }
 
   start(...args) { return this.#acp.start(...args) }
+  listSessionPage(...args) { return this.#acp.listSessionPage(...args) }
   listSessions(...args) { return this.#acp.listSessions(...args) }
   notify(...args) { return this.#acp.notify(...args) }
   close(...args) { return this.#acp.close?.(...args) }

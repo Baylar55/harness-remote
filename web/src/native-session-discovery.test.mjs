@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  discoverAgentNativeSessionPage,
   discoverAgentNativeSessions,
   discoverMachineNativeSessions,
   nativeSessionConfig,
@@ -163,6 +164,111 @@ assert.deepEqual(await discoverAgentNativeSessions(base, disabled, {
   async listStatuses() { disabledReads += 1; return {} }
 }), [])
 assert.equal(disabledReads, 0)
+
+const pageCalls = []
+const page = await discoverAgentNativeSessionPage(base, codex, "opaque+/cursor==", {
+  async listGlobalSessionPage(config, cursor) {
+    pageCalls.push([config.agentId, cursor])
+    return {
+      sessions: [{
+        id: "older-codex",
+        title: "Older Codex",
+        directory: "/repo",
+        time: { created: 1, updated: 5 },
+        status: { type: "idle" }
+      }],
+      nextCursor: "tail"
+    }
+  },
+  async listSessions() {
+    throw new Error("a paged read must not fall back")
+  },
+  async listStatuses() {
+    throw new Error("inline page status must avoid a duplicate status read")
+  }
+})
+assert.deepEqual(pageCalls, [["codex", "opaque+/cursor=="]])
+assert.equal(page.records[0].key, "codex:older-codex")
+assert.deepEqual(page.records[0].status, { type: "idle" })
+assert.equal(page.nextCursor, "tail")
+
+const nonPaginatedAgents = [
+  { id: "opencode", label: "OpenCode", backend: "opencode", transport: "http" },
+  { id: "omp", label: "Oh My Pi", backend: "omp", transport: "acp" },
+  { id: "pi", label: "PI", backend: "pi", transport: "acp" },
+  { id: "claude", label: "Claude Code", backend: "claude", transport: "acp" },
+  { id: "codex", label: "Codex", backend: "codex", transport: "acp" }
+].map((agent) => ({
+  ...agent,
+  managed: true,
+  state: "available",
+  capabilities: { sessions: true, abort: true, models: true },
+  contract: { sessions: { stop: "owned-session-native-cancel" } }
+}))
+const nonPaginatedCalls = []
+const nonPaginatedClient = {
+  async listGlobalSessionPage(config, cursor) {
+    nonPaginatedCalls.push([config.backend, config.agentId, cursor])
+    return {
+      sessions: [{
+        id: `${config.agentId}-existing`,
+        title: `${config.agentId} existing Session`,
+        directory: "/repo",
+        time: { created: 1, updated: 2 },
+        status: { type: "idle" }
+      }]
+    }
+  },
+  async listSessions() {
+    throw new Error("a successful single-page read must not use the stable fallback")
+  },
+  async listStatuses() {
+    throw new Error("inline page status must avoid a duplicate status read")
+  }
+}
+
+for (const agent of nonPaginatedAgents) {
+  const singlePage = await discoverAgentNativeSessionPage(base, agent, undefined, nonPaginatedClient)
+  assert.equal(singlePage.nextCursor, undefined, `${agent.id} must not expose a load-older cursor when none was returned`)
+  assert.deepEqual(singlePage.records.map((record) => ({
+    key: record.key,
+    backend: record.backend,
+    transport: record.transport,
+    status: record.status
+  })), [{
+    key: `${agent.id}:${agent.id}-existing`,
+    backend: agent.backend,
+    transport: agent.transport,
+    status: { type: "idle" }
+  }])
+}
+assert.deepEqual(nonPaginatedCalls, nonPaginatedAgents.map((agent) => [agent.backend, agent.id, undefined]))
+
+let pagedFallbackReads = 0
+const initialFallback = await discoverAgentNativeSessionPage(base, pi, undefined, {
+  async listGlobalSessionPage() {
+    throw new Error("unsupported")
+  },
+  async listSessions() {
+    pagedFallbackReads += 1
+    return [{ id: "fallback-page", title: "Fallback", directory: "/repo", time: { created: 1, updated: 2 } }]
+  },
+  async listStatuses() {
+    return { "fallback-page": { type: "busy" } }
+  }
+})
+assert.equal(pagedFallbackReads, 1)
+assert.deepEqual(initialFallback.records.map((record) => record.key), ["pi:fallback-page"])
+assert.deepEqual(initialFallback.records[0].status, { type: "busy" })
+
+await assert.rejects(
+  discoverAgentNativeSessionPage(base, pi, "cursor-that-cannot-fall-back", {
+    async listGlobalSessionPage() { throw new Error("expired cursor") },
+    async listSessions() { throw new Error("must not be called") },
+    async listStatuses() { throw new Error("must not be called") }
+  }),
+  /expired cursor/
+)
 
 const machineClient = {
   async listGlobalSessions(config) {

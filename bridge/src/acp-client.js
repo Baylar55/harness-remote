@@ -236,10 +236,17 @@ export class AcpClient extends EventEmitter {
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`)
   }
 
-  async listSessions() {
+  async listSessionPage(cursor) {
     await this.start()
-    const result = await this.request("session/list", {})
-    return result.sessions ?? []
+    const result = await this.request("session/list", cursor ? { cursor } : {})
+    return {
+      sessions: result.sessions ?? [],
+      ...(typeof result.nextCursor === "string" && result.nextCursor ? { nextCursor: result.nextCursor } : {})
+    }
+  }
+
+  async listSessions() {
+    return (await this.listSessionPage()).sessions
   }
 
   close() {

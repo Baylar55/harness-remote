@@ -43,6 +43,15 @@ test("shared conversation owns paging and scroll preservation", () => {
   assert.match(component, /nearBottomRef/)
 })
 
+test("a failed initial transcript read cannot masquerade as an empty conversation", () => {
+  assert.match(controller, /const \[transcriptError, setTranscriptError\] = useState/)
+  assert.match(controller, /catch \(reason\)[\s\S]*setTranscriptError\(firstFailure\)/)
+  assert.match(controller, /transcriptError=\{transcriptError \|\| undefined\}/)
+  assert.match(component, /className="uw-empty-panel uw-transcript-error" role="alert"/)
+  assert.match(component, />Session history could not be loaded\.</)
+  assert.match(component, /messages\.length === 0 && !waiting && !transcriptError/)
+})
+
 test("conversation mutations reconcile ambiguous outcomes instead of blindly resending", () => {
   assert.match(taskClient, /clientRequestId/)
   assert.match(taskClient, /PENDING_CONTINUE_STORAGE_PREFIX/)

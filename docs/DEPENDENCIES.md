@@ -188,7 +188,7 @@ read from a spec:**
 |---|---|
 | `session/list` enumerates every Codex thread on the machine | the session list empties |
 | Rollouts stay at `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<sessionId>.jsonl` | `createCodexHistoryLoader` finds nothing and every session Codex holds open shows as empty |
-| A rollout records the turns the user saw as `event_msg` records — `user_message.message`, `agent_message.message`, `agent_reasoning.text` | the transcript of an externally-held session goes empty, or starts showing the instruction blocks Codex feeds the model, which `response_item` carries under the `user` role |
+| A rollout records the turns the user saw as `event_msg` records. Current rollouts use `item_completed` with `UserMessage.content[type=text]`, `AgentMessage.content[type=Text]`, and `Reasoning.summary_text`; legacy rollouts use `user_message.message`, `agent_message.message`, and `agent_reasoning.text` | the transcript of an externally-held session goes empty, or starts showing the instruction blocks Codex feeds the model, which `response_item` carries under the `user` role |
 | Model config option ids are bare (`gpt-5.2`), not `provider/model` | covered by the same bare-id handling the Claude Code backend proved; if ids gain a provider prefix they still parse, under that provider name |
 | `reasoning_effort` and `mode` config options are advertised but not exposed | they stay invisible in the app; no crash, just unused surface |
 | `plan` / `plan_update` notifications carry entries addressed as `{content, status, priority}` | todo updates stop rendering |

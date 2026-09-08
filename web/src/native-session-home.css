@@ -291,6 +291,18 @@
   color: var(--tdw-text, #f5f6f8);
 }
 
+.hr-native-home-pagination {
+  display: flex;
+  justify-content: center;
+  padding: 12px 4px 2px;
+}
+
+.hr-native-home-pagination .tdw-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .hr-native-project-group + .hr-native-project-group {
   margin-top: 16px;
 }
@@ -542,6 +554,7 @@
   .hr-native-project-heading small { max-width: 62vw; }
   .hr-native-session-row { min-height: 56px; padding-block: 8px; }
   .hr-native-project-more { min-height: 44px; }
+  .hr-native-home-pagination .tdw-button { min-height: 44px; }
   .hr-native-create-panel { grid-template-columns: 1fr; }
   .hr-native-create-panel > label,
   .hr-native-create-actions { grid-column: 1; }

@@ -197,7 +197,7 @@ test("reports no history rather than failing when a rollout is absent", async ()
   try {
     const loadHistory = createCodexHistoryLoader(root)
     assert.deepEqual(await loadHistory(sessionID), [])
-    assert.deepEqual(await loadHistory.page(sessionID, { limit: 10 }), { messages: [], before: null, hasMore: false })
+    assert.equal(await loadHistory.page(sessionID, { limit: 10 }), undefined)
     assert.deepEqual(await loadHistory("../escape"), [], "a session id must not be able to walk the filesystem")
     assert.deepEqual(await createCodexHistoryLoader(path.join(root, "missing"))(sessionID), [])
   } finally {

@@ -343,6 +343,9 @@ function NativeSessionsWorkspace({
   // A successful DELETE is authoritative before the next Session-index read completes. Keep that
   // stale rail row as a disabled "Deleting..." tombstone instead of briefly presenting it as usable.
   const [deletingSessionKeys, setDeletingSessionKeys] = useState<Set<string>>(() => new Set())
+  // Paginated discovery cannot re-read every cached older page after DELETE. Once the server accepts
+  // the mutation, suppress that exact native identity from retained pages for this app lifetime.
+  const [deletedSessionKeys, setDeletedSessionKeys] = useState<Set<string>>(() => new Set())
   // Machines answering is only the first half of starting up; the Session list is the half the user
   // is actually waiting for. See the startup states below.
   const [sessionsDiscovered, setSessionsDiscovered] = useState(machines.length === 0)
@@ -691,6 +694,12 @@ function NativeSessionsWorkspace({
   function handleSessionDeleted(key: string) {
     // Session discovery is the only data that changed. Refreshing the whole machine here used to
     // light the global top-right spinner and could leave it spinning behind a perfectly valid DELETE.
+    setDeletedSessionKeys((current) => {
+      if (current.has(key)) return current
+      const next = new Set(current)
+      next.add(key)
+      return next
+    })
     setListRevision((value) => value + 1)
     if (selected?.key !== key) return
     setSelected(null)
@@ -779,6 +788,7 @@ function NativeSessionsWorkspace({
             selectedKey={selected?.key}
             selectedState={selectedState}
             deletingKeys={deletingSessionKeys}
+            deletedKeys={deletedSessionKeys}
             onDeletionSettled={handleSessionDeletionSettled}
           />
         </aside>

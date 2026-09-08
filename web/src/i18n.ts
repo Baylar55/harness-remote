@@ -332,6 +332,9 @@ type TranslationKey =
   | 'sf.groupSessions'
   | 'sf.showMore'
   | 'sf.showLess'
+  | 'sf.loadOlderSessions'
+  | 'sf.loadingOlderSessions'
+  | 'sf.olderSessionsFailed'
   | 'sf.noWorkingDirectory'
   | 'sf.findingSessions'
   | 'sf.refreshFailed'
@@ -799,6 +802,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.groupSessions': '{name} Sessions',
     'sf.showMore': 'Show {count} more',
     'sf.showLess': 'Show less',
+    'sf.loadOlderSessions': 'Load older Sessions',
+    'sf.loadingOlderSessions': 'Loading older Sessions…',
+    'sf.olderSessionsFailed': 'Older Sessions could not be loaded.',
     'sf.noWorkingDirectory': 'No working directory',
     'sf.findingSessions': 'Finding Sessions from your coding agents…',
     'sf.refreshFailed': 'Session refresh failed.',
@@ -1266,6 +1272,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.groupSessions': 'Sessioni di {name}',
     'sf.showMore': 'Mostra altre {count}',
     'sf.showLess': 'Mostra meno',
+    'sf.loadOlderSessions': 'Carica sessioni precedenti',
+    'sf.loadingOlderSessions': 'Caricamento sessioni precedenti…',
+    'sf.olderSessionsFailed': 'Impossibile caricare le sessioni precedenti.',
     'sf.noWorkingDirectory': 'Nessuna directory di lavoro',
     'sf.findingSessions': 'Ricerca delle sessioni nei tuoi coding agent…',
     'sf.refreshFailed': 'Aggiornamento delle sessioni non riuscito.',
@@ -1685,6 +1694,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.groupSessions': '{name} 的工作階段',
     'sf.showMore': '再顯示 {count} 個',
     'sf.showLess': '顯示較少',
+    'sf.loadOlderSessions': '載入較舊的工作階段',
+    'sf.loadingOlderSessions': '正在載入較舊的工作階段…',
+    'sf.olderSessionsFailed': '無法載入較舊的工作階段。',
     'sf.noWorkingDirectory': '沒有工作目錄',
     'sf.findingSessions': '正在從編碼代理尋找工作階段…',
     'sf.refreshFailed': '工作階段重新整理失敗。',
@@ -2149,6 +2161,9 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.groupSessions': '{name} 的会话',
     'sf.showMore': '再显示 {count} 个',
     'sf.showLess': '收起',
+    'sf.loadOlderSessions': '加载较早的会话',
+    'sf.loadingOlderSessions': '正在加载较早的会话…',
+    'sf.olderSessionsFailed': '无法加载较早的会话。',
     'sf.noWorkingDirectory': '没有工作目录',
     'sf.findingSessions': '正在从编码代理查找会话…',
     'sf.refreshFailed': '会话刷新失败。',

@@ -27,6 +27,12 @@ server = createServer(async (request, response) => {
     response.end(JSON.stringify({ ok: true }))
     return
   }
+  if (request.url === '/cursor' && request.method === 'GET') {
+    response.setHeader('content-type', 'application/json')
+    response.setHeader('x-next-cursor', 'opaque+/cursor==')
+    response.end('[]')
+    return
+  }
   if (request.url === '/v1/agents/opencode/query?directory=%2Fwork%2Frepo' && request.method === 'GET') {
     response.setHeader('content-type', 'application/json')
     response.end(JSON.stringify({ url: request.url }))
@@ -149,6 +155,7 @@ test('window restore selects saved monitor and keeps title bar visible', async (
 
 test('request transport enforces approved profile target and HTTP contract', async () => {
   assert.deepEqual((await executeDesktopRequest(localProfile, { path: '/json' })).response.data, { ok: true })
+  assert.equal((await executeDesktopRequest(localProfile, { path: '/cursor' })).response.headers['x-next-cursor'], 'opaque+/cursor==')
   assert.deepEqual((await executeDesktopRequest(localProfile, { path: '/body', method: 'POST', body: { value: 2 } })).response.data, { method: 'POST', body: { value: 2 } })
   assert.equal((await executeDesktopRequest(localProfile, { path: '/empty' })).response.data, true)
   const httpError = await executeDesktopRequest(localProfile, { path: '/error' })

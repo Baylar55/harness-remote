@@ -227,13 +227,18 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   // Live activity is tracked separately so an active Session still sorts to the top without reading
   // its transcript. Invalid or missing harness timestamps stay at zero instead of pretending to be
   // freshly updated on every poll.
-  const listVisibleSessionMetadata = async (directory) => {
-    const [sessions, deletedSessionIDs] = await Promise.all([
-      acp.listSessions(),
+  const listVisibleSessionMetadata = async (directory, cursor) => {
+    const [page, deletedSessionIDs] = await Promise.all([
+      typeof acp.listSessionPage === "function"
+        ? acp.listSessionPage(cursor)
+        : cursor
+          ? { sessions: [] }
+          : acp.listSessions().then((sessions) => ({ sessions })),
       service.deletedSessionIDs()
     ])
+    service.rememberListedSessions(page.sessions)
     const visible = new Map(
-      sessions
+      page.sessions
         .filter((session) => !directory || sameListedDirectory(session.cwd, directory))
         .filter((session) => !hiddenSessionIDs?.has(session.sessionId))
         .filter((session) => !deletedSessionIDs.has(session.sessionId))
@@ -250,24 +255,26 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
         })
     )
 
-    // PI can create a valid writer Session before its lightweight ACP listing exposes it. Codex and
-    // other ACP adapters may also lack a native rename primitive even though Harness Remote can keep
-    // an explicit user title for the owned Session. Overlay only those already-owned identities:
-    // native discovery remains authoritative for every other Session and no transcript snapshot is
-    // restored merely to draw the rail.
+    // PI can create a valid writer Session before its lightweight ACP listing exposes it. Add that
+    // missing identity only to page one. A title override, however, must decorate whichever native
+    // page contains the Session; otherwise loading its older page would overwrite the title page
+    // one already supplied. No transcript snapshot is restored merely to draw either view.
     for (const { session, titleOverride } of service.ownedSessionIndex(directory)) {
       if (hiddenSessionIDs?.has(session.id) || deletedSessionIDs.has(session.id)) continue
       const listed = visible.get(session.id)
-      if (!listed) {
+      if (listed && titleOverride) {
+        visible.set(session.id, { ...listed, title: titleOverride })
+      } else if (!cursor && !listed) {
         visible.set(session.id, {
           ...session,
           status: publicSessionStatus(session.id, session.time?.updated)
         })
-      } else if (titleOverride) {
-        visible.set(session.id, { ...listed, title: titleOverride })
       }
     }
-    return [...visible.values()]
+    return {
+      sessions: [...visible.values()],
+      ...(page.nextCursor ? { nextCursor: page.nextCursor } : {})
+    }
   }
 
   const server = http.createServer(async (request, response) => {
@@ -350,7 +357,9 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
         return
       }
       if (request.method === "GET" && url.pathname === "/experimental/session") {
-        writeJSON(response, 200, await listVisibleSessionMetadata(directory))
+        const page = await listVisibleSessionMetadata(directory, url.searchParams.get("cursor") || undefined)
+        if (page.nextCursor) response.setHeader("x-next-cursor", page.nextCursor)
+        writeJSON(response, 200, page.sessions)
         return
       }
       if (request.method === "GET" && (url.pathname === "/v1/sessions" || url.pathname === "/session")) {
@@ -358,7 +367,8 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
         return
       }
       if (request.method === "GET" && url.pathname === "/session/status") {
-        const statuses = Object.fromEntries((await listVisibleSessionMetadata(directory)).map((session) => [session.id, session.status]))
+        const page = await listVisibleSessionMetadata(directory)
+        const statuses = Object.fromEntries(page.sessions.map((session) => [session.id, session.status]))
         writeJSON(response, 200, statuses)
         return
       }

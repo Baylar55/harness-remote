@@ -80,6 +80,36 @@ test("initializes, authenticates, and lists ACP sessions", async () => {
   assert.equal(client.processID, undefined)
 })
 
+test("preserves ACP Session pagination and sends an opaque cursor unchanged", async () => {
+  const listRequests = []
+  const client = new AcpClient({
+    spawnProcess: fakeSpawn((child, request) => {
+      respondToHandshake(child, request)
+      if (request.method === "session/list") {
+        listRequests.push(request.params)
+        child.respond({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            sessions: [{ sessionId: request.params.cursor ? "session-2" : "session-1" }],
+            ...(request.params.cursor ? {} : { nextCursor: "opaque+/cursor==" })
+          }
+        })
+      }
+    })
+  })
+
+  assert.deepEqual(await client.listSessionPage(), {
+    sessions: [{ sessionId: "session-1" }],
+    nextCursor: "opaque+/cursor=="
+  })
+  assert.deepEqual(await client.listSessionPage("opaque+/cursor=="), {
+    sessions: [{ sessionId: "session-2" }]
+  })
+  assert.deepEqual(listRequests, [{}, { cursor: "opaque+/cursor==" }])
+  client.close()
+})
+
 test("launches an ACP adapter with the configured command and arguments", async () => {
   const calls = []
   const client = new AcpClient({
