@@ -173,7 +173,10 @@ export function canListen(port, host) {
 function bindProbeHosts(host) {
   const normalized = host.trim().toLowerCase()
   if (normalized === "0.0.0.0") {
-    return ["0.0.0.0", "127.0.0.1", "::1", ...lanAddresses()]
+    // A v4 wildcard can coexist with a more specific v4 listener on Windows. That listener wins
+    // for its address, so accepting the wildcard would expose a different service to the client.
+    // Do not also probe IPv6 here: an IPv4-only bind does not claim ::1 and IPv6 may be disabled.
+    return ["0.0.0.0", "127.0.0.1", ...lanAddresses()]
   }
   if (normalized === "::") {
     return ["::", "::1", "127.0.0.1", ...lanAddresses()]
@@ -190,6 +193,10 @@ export async function canListenForBind(port, host, probe = canListen) {
     if (!(await probe(port, probeHost))) return false
   }
   return true
+}
+
+export function harnessPortUnavailableMessage(port, host) {
+  return `Harness Remote cannot use ${host}:${port} because another service is already listening there. Choose another --port or omit --port to select one automatically.`
 }
 
 export async function findAvailablePort(startPort = 4097, host = "0.0.0.0", attempts = 20, excludedPorts = []) {
@@ -275,7 +282,7 @@ async function main() {
   let port
   if (hasOption(args, "--port")) {
     if (!(await canListenForBind(requestedPort, host))) {
-      throw new Error(`Port ${requestedPort} is not available on ${host}. Choose another port or omit --port for automatic selection.`)
+      throw new Error(harnessPortUnavailableMessage(requestedPort, host))
     }
     port = requestedPort
   } else {
@@ -377,7 +384,7 @@ function isDirectInvocation() {
 
 if (isDirectInvocation()) {
   main().catch((error) => {
-    process.stderr.write(`${error.message}\n\n${launcherUsage()}\n`)
+    process.stderr.write(`${error.message}\n`)
     process.exitCode = 1
   })
 }

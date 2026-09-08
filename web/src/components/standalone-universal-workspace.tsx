@@ -326,6 +326,7 @@ function NativeSessionsWorkspace({
   runtimesRef.current = runtimes
   const [loaded, setLoaded] = useState(machines.length === 0)
   const [refreshing, setRefreshing] = useState(false)
+  const [sessionRefreshPending, setSessionRefreshPending] = useState(false)
   const [revision, setRevision] = useState(0)
   // Which machines currently hold a live event stream. A streaming machine reports its own changes,
   // so it does not need the discovery timer; one that does not stream still does.
@@ -352,6 +353,27 @@ function NativeSessionsWorkspace({
   const [railWidth, setRailWidth] = useState<number | null>(loadRailWidth)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const refreshGeneration = useRef(0)
+  const pendingSessionRefreshToken = useRef<number | null>(null)
+
+  const requestRefresh = useCallback(() => {
+    // Machine discovery and the Session index are separate refresh loops. Refreshing only the
+    // machine snapshot can preserve an identical runtime and previously left the visible list
+    // unchanged, making the command appear to do nothing.
+    setRefreshing(true)
+    setRevision((value) => value + 1)
+    setListRevision((value) => {
+      const next = value + 1
+      pendingSessionRefreshToken.current = next
+      setSessionRefreshPending(true)
+      return next
+    })
+  }, [])
+
+  const completeSessionRefresh = useCallback((refreshToken: number) => {
+    if (pendingSessionRefreshToken.current === null || refreshToken < pendingSessionRefreshToken.current) return
+    pendingSessionRefreshToken.current = null
+    setSessionRefreshPending(false)
+  }, [])
 
   useEffect(() => {
     if (railWidth === null) return
@@ -651,6 +673,7 @@ function NativeSessionsWorkspace({
 
   const startupPhase: "machines" | "sessions" | "ready" =
     !loaded || loadingCount > 0 ? "machines" : !sessionsDiscovered ? "sessions" : "ready"
+  const workspaceRefreshing = refreshing || sessionRefreshPending
 
   function openSession(target: NativeSessionSurfaceTarget) {
     setSelectedState(undefined)
@@ -735,7 +758,7 @@ function NativeSessionsWorkspace({
       group: "Sessions",
       label: t("sf.refresh"),
       keywords: "reload refresh sessions",
-      run: () => setRevision((value) => value + 1)
+      run: requestRefresh
     },
     ...(selected ? [{
       id: "back-to-sessions",
@@ -744,7 +767,7 @@ function NativeSessionsWorkspace({
       keywords: "close current session list",
       run: () => setMobileDetailOpen(false)
     }] : [])
-  ], [onManageMachines, onManageSettings, selected, t])
+  ], [onManageMachines, onManageSettings, requestRefresh, selected, t])
 
   return (
     <section className="tdw-shell hr-control-plane hr-native-workspace" aria-label={t("nav.sessions")}>
@@ -756,12 +779,16 @@ function NativeSessionsWorkspace({
           {selected ? <><b>/</b><em>{selected.title}</em></> : null}
         </div>
         <div className="tdw-top-actions">
-          <span className="tdw-machine-health">
-            <i className={startupPhase !== "ready" || reconnectingCount > 0 ? "loading" : onlineCount > 0 ? "online" : "offline"} />
+          <span className="tdw-machine-health" role="status" aria-live="polite">
+            <i className={startupPhase !== "ready" || workspaceRefreshing || reconnectingCount > 0 ? "loading" : onlineCount > 0 ? "online" : "offline"} />
             {startupPhase === "machines"
               ? t("sf.connecting")
               : startupPhase === "sessions"
                 ? t("sf.loadingSessions")
+                : refreshing
+                  ? t("sf.refreshingMachines")
+                  : sessionRefreshPending
+                    ? t("sf.refreshingSessions")
                 : reconnectingCount > 0
                   ? t("sf.connecting")
                   : t("sf.machineCount", { online: onlineCount, total: machines.length })}
@@ -769,8 +796,8 @@ function NativeSessionsWorkspace({
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> {t("sf.machines")}</button>
           <button type="button" className="palette-hint" onClick={() => setPaletteOpen(true)} title="Command palette"><span>⌘K</span></button>
           <button type="button" className="tdw-icon-button" onClick={onManageSettings} title={t("nav.settings")} aria-label={t("nav.settings")}><SettingsIcon size={16} /></button>
-          <button type="button" className="tdw-icon-button hr-refresh-button" onClick={() => setRevision((value) => value + 1)} title={t("sf.refresh")} aria-label={refreshing ? t("sf.refreshingMachines") : t("sf.refresh")} aria-busy={refreshing} disabled={refreshing}>
-            {refreshing ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
+          <button type="button" className="tdw-icon-button hr-refresh-button" onClick={requestRefresh} title={t("sf.refresh")} aria-label={workspaceRefreshing ? t("sf.refreshingSessions") : t("sf.refresh")} aria-busy={workspaceRefreshing} disabled={workspaceRefreshing}>
+            {workspaceRefreshing ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
           </button>
         </div>
       </header>
@@ -785,6 +812,7 @@ function NativeSessionsWorkspace({
             refreshToken={listRevision}
             onAttentionCountChange={onAttentionCountChange}
             onDiscoveredChange={setSessionsDiscovered}
+            onRefreshComplete={completeSessionRefresh}
             selectedKey={selected?.key}
             selectedState={selectedState}
             deletingKeys={deletingSessionKeys}
@@ -934,7 +962,7 @@ function NativeSessionsWorkspace({
               <span>{t("sf.machinesUnavailable")}</span>
               <strong>{t("sf.couldNotConnect")}</strong>
               <p>{t("sf.offlineBody", { count: offlineCount })}</p>
-              <div><button type="button" className="tdw-button secondary" onClick={onManageMachines}>{t("sf.manageMachines")}</button><button type="button" className="tdw-button primary" onClick={() => setRevision((value) => value + 1)}>{t("sf.retry")}</button></div>
+              <div><button type="button" className="tdw-button secondary" onClick={onManageMachines}>{t("sf.manageMachines")}</button><button type="button" className="tdw-button primary" onClick={requestRefresh}>{t("sf.retry")}</button></div>
             </div>
           ) : (
             <div className="hr-native-workspace-empty hr-native-startup ready">

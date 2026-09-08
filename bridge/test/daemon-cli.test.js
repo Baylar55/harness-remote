@@ -70,12 +70,19 @@ test("daemon preflight accepts a free managed OpenCode port", async () => {
   })
 })
 
+test("daemon OpenCode preflight has a working default listener probe", async () => {
+  await ensureOpenCodePortAvailable({
+    port: 0,
+    host: "127.0.0.1"
+  })
+})
+
 test("daemon preflight rejects a wildcard port shadowed by a local listener", async () => {
   await assert.rejects(ensureHarnessPortAvailable({
     port: 4097,
     host: "0.0.0.0",
     canListenImpl: async () => false
-  }), /Harness daemon port.*--port for Harness/)
+  }), /Harness Remote cannot use 0\.0\.0\.0:4097.*omit --port/)
 })
 
 test("daemon preflight accepts a free wildcard port", async () => {

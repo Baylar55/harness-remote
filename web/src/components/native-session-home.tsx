@@ -86,6 +86,8 @@ type Props = {
   selectedState?: SessionPresentationState
   /** Fires when native Session discovery has settled at least once for the current machines. */
   onDiscoveredChange?: (discovered: boolean) => void
+  /** Confirms that a shell-requested Session-index refresh has settled. */
+  onRefreshComplete?: (refreshToken: number) => void
   /** Session keys whose delete transition is still visible, including the in-flight request. */
   deletingKeys?: ReadonlySet<string>
   /** Successful deletes suppressed from cached pages even when an older page cannot be re-read. */
@@ -330,6 +332,7 @@ export function NativeSessionHome({
   refreshToken = 0,
   onAttentionCountChange,
   onDiscoveredChange,
+  onRefreshComplete,
   selectedKey,
   selectedState,
   deletingKeys,
@@ -373,6 +376,8 @@ export function NativeSessionHome({
   const completionTimer = useRef<number | null>(null)
   const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
   const pageCacheSignature = useRef<string | null>(null)
+  const onRefreshCompleteRef = useRef(onRefreshComplete)
+  onRefreshCompleteRef.current = onRefreshComplete
   // The selected Session receives live status before the 30s discovery list refreshes. Keep that
   // last observed state by Session key while the user navigates elsewhere, otherwise the row falls
   // back to its stale discovery snapshot and visibly flips Working <-> Ready. The next successful
@@ -385,6 +390,8 @@ export function NativeSessionHome({
       machine.id,
       machine.config.host,
       machine.config.port,
+      machine.config.username,
+      machine.config.password,
       machine.config.agentId || "",
       snapshot?.machine.id || state,
       snapshot?.agents.map((agent) => `${agent.id}:${agent.backend}:${agent.transport}:${agent.processID ?? ""}:${agent.state}`).join(",") || ""
@@ -454,6 +461,7 @@ export function NativeSessionHome({
       setOlderSessionError(null)
       setLoadedSignature(machineSignature)
       setLoading(false)
+      onRefreshCompleteRef.current?.(refreshToken)
       return
     }
     // A configured connection is not yet a discoverable machine while its daemon probe is still in
@@ -530,7 +538,10 @@ export function NativeSessionHome({
         setDiscoveryError(reason instanceof Error ? reason.message : String(reason))
       }
     }).finally(() => {
-      if (!cancelled) setLoading(false)
+      if (!cancelled) {
+        setLoading(false)
+        onRefreshCompleteRef.current?.(refreshToken)
+      }
     })
     return () => { cancelled = true }
   }, [sources, revision, refreshToken, discoveryReady, machineSignature, deletedKeys])

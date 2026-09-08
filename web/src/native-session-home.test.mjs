@@ -133,6 +133,8 @@ assert.match(source, /t\("sf\.loadingSessions"\)/, "the empty rail must say Sess
 assert.match(source, /const discoveryReady = sources\.every\(\(\{ state \}\) => state !== "loading"\)/, "Session discovery must not settle while machine probes are still in flight")
 assert.match(source, /if \(!discoveryReady\) \{[\s\S]*setLoading\(true\)[\s\S]*return/, "the rail must remain explicitly loading until machine discovery can produce real Session results")
 assert.match(source, /discoverAgentNativeSessionPage\(machine\.config, agent\)/, "recurring discovery must fetch exactly the first native Session page")
+assert.match(source, /machine\.config\.username,[\s\S]*machine\.config\.password/, "a corrected machine credential must invalidate the Session index")
+assert.match(source, /onRefreshCompleteRef\.current\?\.\(refreshToken\)/, "a requested Session refresh must settle only after its index read completes")
 assert.doesNotMatch(source, /discoverMachineNativeSessions/, "the recurring rail must not eagerly flatten every Session page")
 assert.match(source, /entry\.nextCursor[\s\S]*loadOlderSessions/, "older native Session pages must require an explicit user action")
 assert.match(source, /refreshCursorPage\(existing, firstRecords, page\.nextCursor/, "a recurring first-page refresh must preserve the manual pagination tail")

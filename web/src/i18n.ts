@@ -311,6 +311,7 @@ type TranslationKey =
   | 'sf.machines'
   | 'sf.refresh'
   | 'sf.refreshingMachines'
+  | 'sf.refreshingSessions'
   | 'sf.machineCount'
   | 'sf.connecting'
   | 'sf.mainNavigation'
@@ -781,6 +782,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': 'Machines',
     'sf.refresh': 'Refresh',
     'sf.refreshingMachines': 'Refreshing machines',
+    'sf.refreshingSessions': 'Refreshing Sessions',
     'sf.machineCount': '{online}/{total} machines',
     'sf.connecting': 'Connecting',
     'sf.mainNavigation': 'Main navigation',
@@ -1251,6 +1253,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': 'Macchine',
     'sf.refresh': 'Aggiorna',
     'sf.refreshingMachines': 'Aggiornamento macchine',
+    'sf.refreshingSessions': 'Aggiornamento sessioni',
     'sf.machineCount': '{online}/{total} macchine',
     'sf.connecting': 'Connessione',
     'sf.mainNavigation': 'Navigazione principale',
@@ -1673,6 +1676,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': '機器',
     'sf.refresh': '重新整理',
     'sf.refreshingMachines': '正在重新整理機器',
+    'sf.refreshingSessions': '正在重新整理工作階段',
     'sf.machineCount': '{online}/{total} 部機器',
     'sf.connecting': '連線中',
     'sf.mainNavigation': '主要導覽',
@@ -2140,6 +2144,7 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': '机器',
     'sf.refresh': '刷新',
     'sf.refreshingMachines': '正在刷新机器',
+    'sf.refreshingSessions': '正在刷新会话',
     'sf.machineCount': '{online}/{total} 台机器',
     'sf.connecting': '连接中',
     'sf.mainNavigation': '主导航',

@@ -123,3 +123,15 @@ test("treats a wildcard bind as unavailable when localhost is already occupied",
   assert.ok(probes.includes("0.0.0.0"))
   assert.ok(probes.includes("127.0.0.1"))
 })
+
+test("does not require IPv6 to validate an IPv4 wildcard bind", async () => {
+  const probes = []
+  const available = await canListenForBind(4097, "0.0.0.0", async (_port, host) => {
+    probes.push(host)
+    return true
+  })
+  assert.equal(available, true)
+  assert.ok(probes.includes("0.0.0.0"))
+  assert.ok(probes.includes("127.0.0.1"))
+  assert.ok(!probes.includes("::1"))
+})
