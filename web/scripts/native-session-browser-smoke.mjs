@@ -273,6 +273,28 @@ function startFakeDaemon() {
       return
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/agents/pi/config/providers") {
+      modelCatalogReads += 1
+      json(response, 200, {
+        providers: [{
+          id: "pi",
+          name: "PI",
+          models: {
+            "pi-coding": {
+              id: "pi-coding",
+              name: "PI Coding",
+              description: "PI coding model",
+              capabilities: { tools: true },
+              limit: { context: 200000, output: 64000 },
+              variants: { high: {} }
+            }
+          }
+        }],
+        default: { pi: "pi-coding" }
+      })
+      return
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/agents/pi/models") {
       modelCatalogReads += 1
       json(response, 200, MODEL_CATALOG)

@@ -287,6 +287,34 @@ function startFakeDaemon() {
       return
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/agents/opencode/config/providers") {
+      json(response, 200, {
+        providers: [
+          {
+            id: "openai",
+            name: "OpenAI",
+            models: {
+              "gpt-5.6-codex": { id: "gpt-5.6-codex", name: "GPT-5.6 Codex", capabilities: { tools: true } }
+            }
+          },
+          {
+            id: LAST_MODEL.providerID,
+            name: "Anthropic",
+            models: {
+              [LAST_MODEL.modelID]: {
+                id: LAST_MODEL.modelID,
+                name: "Claude Sonnet 4.6",
+                capabilities: { tools: true },
+                variants: { [LAST_MODEL.variant]: {} }
+              }
+            }
+          }
+        ],
+        default: { openai: "gpt-5.6-codex" }
+      })
+      return
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/agents/opencode/models") {
       json(response, 200, MODEL_CATALOG)
       return

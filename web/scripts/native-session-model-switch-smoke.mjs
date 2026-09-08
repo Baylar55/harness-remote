@@ -214,12 +214,33 @@ function startFakeDaemon() {
         json(response, 200, { attachments: agentID === "pi", commands: false })
         return
       }
-      if (request.method === "GET" && rest === "models") {
+      if (request.method === "GET" && (rest === "models" || rest === "config/providers")) {
         modelReads[agentID] += 1
         if (blockNextModelReadFor === agentID) {
           blockNextModelReadFor = null
           await new Promise((resolve) => { releaseBlockedModelRead = resolve })
           releaseBlockedModelRead = null
+        }
+        if (rest === "config/providers") {
+          const providers = new Map()
+          const defaults = {}
+          for (const model of agent.models) {
+            let provider = providers.get(model.providerID)
+            if (!provider) {
+              provider = { id: model.providerID, name: model.providerName, models: {} }
+              providers.set(model.providerID, provider)
+            }
+            const entry = provider.models[model.modelID] ?? {
+              id: model.modelID,
+              name: model.modelName,
+              capabilities: { tools: model.tools }
+            }
+            if (model.variant) entry.variants = { ...(entry.variants ?? {}), [model.variant]: {} }
+            provider.models[model.modelID] = entry
+            if (model.isDefault) defaults[model.providerID] = model.modelID
+          }
+          json(response, 200, { providers: [...providers.values()], default: defaults })
+          return
         }
         json(response, 200, {
           models: agent.models,
