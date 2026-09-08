@@ -5,7 +5,7 @@ import { AcpAgentModelCatalog, HttpAgentModelCatalog } from "./agent-model-catal
 import { parseConfig, usage as bridgeUsage } from "./config.js"
 import { acpHarnessCapabilityContract, openCodeCapabilityContract } from "./harness-capability-contract.js"
 import { harnessProfile, resolveAcpLaunch } from "./harness-profiles.js"
-import { canListen, resolveLaunchPlan } from "./launcher.js"
+import { canListenForBind, resolveLaunchPlan } from "./launcher.js"
 import { loadMachineIdentity } from "./machine-registry.js"
 import { MachineDaemon, createMachineDaemonServer } from "./machine-daemon.js"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
@@ -88,6 +88,11 @@ export async function ensureOpenCodePortAvailable({ port, host, canListenImpl = 
   throw new Error(`OpenCode port ${port} is already in use on ${host}. Is OpenCode already running? Use --opencode-port to choose another.`)
 }
 
+export async function ensureHarnessPortAvailable({ port, host, canListenImpl = canListenForBind }) {
+  if (await canListenImpl(port, host)) return
+  throw new Error(`Harness daemon port ${port} is already in use on ${host}. Choose another --port for Harness.`)
+}
+
 async function main() {
   let parsed
   try {
@@ -108,6 +113,7 @@ async function main() {
     throw new Error(`OpenCode port ${openCodePort} conflicts with the Harness daemon port`)
   }
   if (openCode) await ensureOpenCodePortAvailable({ port: openCodePort, host: openCodeHost })
+  await ensureHarnessPortAvailable({ port: config.port, host: config.host })
 
   const identity = await loadMachineIdentity(config.stateDirectory)
   const daemon = new MachineDaemon(identity)

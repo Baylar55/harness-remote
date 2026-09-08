@@ -170,13 +170,35 @@ export function canListen(port, host) {
   })
 }
 
+function bindProbeHosts(host) {
+  const normalized = host.trim().toLowerCase()
+  if (normalized === "0.0.0.0") {
+    return ["0.0.0.0", "127.0.0.1", "::1", ...lanAddresses()]
+  }
+  if (normalized === "::") {
+    return ["::", "::1", "127.0.0.1", ...lanAddresses()]
+  }
+  return [host]
+}
+
+/**
+ * A wildcard listener can coexist with a more specific listener on Windows. Probe the wildcard,
+ * loopback, and local interface addresses so localhost cannot silently resolve to another service.
+ */
+export async function canListenForBind(port, host, probe = canListen) {
+  for (const probeHost of new Set(bindProbeHosts(host))) {
+    if (!(await probe(port, probeHost))) return false
+  }
+  return true
+}
+
 export async function findAvailablePort(startPort = 4097, host = "0.0.0.0", attempts = 20, excludedPorts = []) {
   const excluded = new Set(excludedPorts)
   for (let offset = 0; offset < attempts; offset += 1) {
     const port = startPort + offset
     if (port > 65_535) break
     if (excluded.has(port)) continue
-    if (await canListen(port, host)) return port
+    if (await canListenForBind(port, host)) return port
   }
   throw new Error(`No available port found from ${startPort} through ${Math.min(65_535, startPort + attempts - 1)}.`)
 }
@@ -252,7 +274,7 @@ async function main() {
 
   let port
   if (hasOption(args, "--port")) {
-    if (!(await canListen(requestedPort, host))) {
+    if (!(await canListenForBind(requestedPort, host))) {
       throw new Error(`Port ${requestedPort} is not available on ${host}. Choose another port or omit --port for automatic selection.`)
     }
     port = requestedPort
