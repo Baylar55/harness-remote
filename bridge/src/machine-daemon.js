@@ -44,6 +44,13 @@ function acpPromptAttachments(attachments = []) {
   })
 }
 
+/** Only a variant the current harness catalog resolved from adapter-advertised options is applied. */
+function acpModelVariant(model) {
+  return model?.variant && model?.variantConfigId
+    ? { configId: model.variantConfigId, value: model.variant }
+    : undefined
+}
+
 /*
  * How long sending a prompt may wait for model discovery before proceeding without it.
  *
@@ -56,9 +63,8 @@ function acpPromptAttachments(attachments = []) {
 const PROMPT_MODEL_RESOLVE_BUDGET_MS = 8_000
 
 /**
- * A native HTTP Session that the harness can still serve must not be made unusable, or unusably
- * slow, by model discovery. Existing ACP Sessions bypass this global catalog entirely: their loaded
- * config options are the authority for both membership and variants.
+ * A native Session that the harness can still serve must not be made unusable, or unusably slow, by
+ * model discovery.
  *
  * `model_unavailable` is an authoritative catalog answer about the user's explicit choice and stays a
  * conflict. Any other outcome - a cold adapter, a timeout, a transport error, or discovery simply
@@ -266,19 +272,19 @@ export function createMachineDaemonServer({
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
     const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
+    const resolvedModel = await resolvePromptModel(daemon, agentID, requestedModel, directory)
 
     if (entry.kind === "acp") {
       const service = acpService(agentID)
       if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
-      // The exact Session's configOptions are authoritative. A machine-wide technical Session can
-      // legitimately advertise a different model set, so consulting it here can reject a value the
-      // target Session already holds. AcpService loads and validates the target, resolves its native
-      // variant control, applies model before variant, and defers both while a turn is running.
-      await service.prompt(sessionID, text, modelWireName(requestedModel), acpPromptAttachments(attachments), requestedModel?.variant)
+      // Model and variant travel with the prompt through AcpService so they are applied in the one
+      // place that already loads configOptions, orders the model before its variant, and defers both
+      // to dequeue when a turn is still running. Setting them here directly reordered the model
+      // after the variant and mutated a live turn's configuration.
+      await service.prompt(sessionID, text, modelWireName(resolvedModel), acpPromptAttachments(attachments), acpModelVariant(resolvedModel))
       return
     }
 
-    const resolvedModel = await resolvePromptModel(daemon, agentID, requestedModel, directory)
     const host = entry.host
     try {
       await host.start?.()
@@ -324,16 +330,16 @@ export function createMachineDaemonServer({
     const entry = daemon.hostEntry(agentID)
     if (!entry) throw daemonError("unknown_agent", `Unknown agent: ${agentID}`)
     const requestedModel = model ? { ...model, ...(variant ? { variant } : {}) } : null
+    const resolvedModel = await resolvePromptModel(daemon, agentID, requestedModel, directory)
     const text = argumentsText ? `/${command} ${argumentsText}` : `/${command}`
 
     if (entry.kind === "acp") {
       const service = acpService(agentID)
       if (!service) throw daemonError("session_unavailable", `Agent ${agentID} cannot load native Sessions`)
-      await service.prompt(sessionID, text, modelWireName(requestedModel), [], requestedModel?.variant)
+      await service.prompt(sessionID, text, modelWireName(resolvedModel), [], acpModelVariant(resolvedModel))
       return
     }
 
-    const resolvedModel = await resolvePromptModel(daemon, agentID, requestedModel, directory)
     const host = entry.host
     try {
       await host.start?.()

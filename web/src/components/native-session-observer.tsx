@@ -44,6 +44,12 @@ function visualState(conversation: ConversationRuntime, attention = false): Nati
 
 export { nativeSessionIsWorking }
 
+/**
+ * The daemon owns one current model catalog per machine + harness. A historical native Session may
+ * contribute its current/per-turn model to the timeline, but never widens selectable membership.
+ */
+const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
+
 function targetForInitialRuntime(target: NativeSessionSurfaceTarget): NativeSessionSurfaceTarget {
   // OpenCode's Session list model is provider/default metadata rather than reliable per-turn truth,
   // and Codex's list can likewise expose the adapter default while the rollout carries the model
@@ -136,13 +142,6 @@ export function NativeSessionObserver({
       commands: commands.length > 0
     }
   }), [target.agentID, target.agentLabel, target.backend, target.transport, target.canStop, target.modelsSupported, attachmentsSupported, commands.length])
-  // An existing ACP Session can retain a different option set from a fresh technical Session. Keep
-  // its full route in the scope: agentID selects the path and backend selects the routing header.
-  const nativeSessionModelScope = useMemo<AgentModelScope>(() => ({
-    sessionID: target.sessionID,
-    directory: target.directory,
-    backend: target.backend
-  }), [target.sessionID, target.directory, target.backend])
 
   const routableRoutes = useMemo<NativeSessionRouteMachine[]>(() => routes.flatMap((machine) => {
     if (machine.machineID !== target.machineID) return []
@@ -222,7 +221,7 @@ export function NativeSessionObserver({
         conversation={conversation}
         baseConfig={target.config}
         agents={[agent]}
-        modelScope={nativeSessionModelScope}
+        modelScope={NATIVE_SESSION_MODEL_SCOPE}
         deferModelFallback
         controller={controller}
         onConversationUpdate={handleConversationUpdate}

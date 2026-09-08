@@ -1,5 +1,4 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
-import { api } from "./api"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import { unwrapPayload } from "./machinePayload"
 import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
@@ -142,9 +141,6 @@ export type AgentModelCatalog = {
 export type AgentModelScope = {
   projectId?: string
   workThreadId?: string
-  sessionID?: string
-  directory?: string
-  backend?: BackendKind
 }
 
 export type TaskContinueInput = {
@@ -180,10 +176,22 @@ function cacheKey(config: ServerConfig): string {
 }
 
 function modelScopeKey(scope: AgentModelScope): string {
-  if (scope.sessionID) return `session:${scope.backend || ""}:${scope.sessionID}:${scope.directory || ""}`
   if (scope.workThreadId) return `conversation:${scope.workThreadId}`
   if (scope.projectId) return `project:${scope.projectId}`
   return "default"
+}
+
+const AGENT_BACKENDS = new Set<BackendKind>(["opencode", "omp", "pi", "claude", "codex"])
+
+/**
+ * Model membership belongs to the selected harness, not to the machine profile that happened to
+ * open the workspace. Keep the agent path and desktop routing identity coherent at this shared
+ * boundary so every picker call addresses the same harness on a multi-harness machine.
+ */
+export function modelCatalogConfig(config: ServerConfig, agentId: string): ServerConfig {
+  const candidate = agentId as BackendKind
+  const backend = AGENT_BACKENDS.has(candidate) ? candidate : config.backend
+  return { ...config, agentId, backend }
 }
 
 function modelCatalogPath(agentId: string, scope: AgentModelScope): string {
@@ -388,22 +396,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 async function loadAgentModelCatalog(config: ServerConfig, agentId: string, scope: AgentModelScope): Promise<AgentModelCatalog> {
-  if (scope.sessionID) {
-    // A native ACP Session owns the model options it was created with. Address both halves of the
-    // route explicitly: baseUrl uses agentId for the path while routingHeaders uses backend. Letting
-    // either value leak from the machine's primary profile can query a different harness entirely.
-    const sessionConfig: ServerConfig = {
-      ...config,
-      agentId,
-      backend: scope.backend ?? config.backend
-    }
-    return {
-      models: await api.listModels(sessionConfig, scope.directory, scope.sessionID),
-      stale: false,
-      refreshedAt: new Date().toISOString(),
-      source: "native-session-config-options"
-    }
-  }
   const path = modelCatalogPath(agentId, scope)
   const started = Date.now()
   while (true) {
@@ -482,10 +474,11 @@ export const taskClient = {
   },
 
   async listAgentModels(config: ServerConfig, agentId: string, scope: AgentModelScope = {}): Promise<AgentModelCatalog> {
-    const key = `${cacheKey(config)}|${agentId}|${modelScopeKey(scope)}`
+    const selectedConfig = modelCatalogConfig(config, agentId)
+    const key = `${cacheKey(selectedConfig)}|${agentId}|${modelScopeKey(scope)}`
     const existing = modelCatalogRequests.get(key)
     if (existing) return existing
-    const operation = loadAgentModelCatalog(config, agentId, scope)
+    const operation = loadAgentModelCatalog(selectedConfig, agentId, scope)
     let wrapped: Promise<AgentModelCatalog>
     wrapped = operation.finally(() => {
       if (modelCatalogRequests.get(key) === wrapped) modelCatalogRequests.delete(key)

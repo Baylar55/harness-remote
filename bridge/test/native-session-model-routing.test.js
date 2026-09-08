@@ -37,14 +37,17 @@ function passthroughServerOptions(daemon, primaryAcp, service, sessionLinkStore 
   return claimOptions
 }
 
-test("ACP native Session prompt hands the raw model and variant to the exact AcpService", async () => {
+test("ACP native Session prompt hands model and native variant to AcpService so the variant is applied after the model", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-acp", name: "workstation" })
   const acp = new FakeAcp()
   daemon.registerAcpHost({
     id: "codex",
     agent: acp,
     modelCatalog: {
-      async resolve() { throw new Error("the global catalog must not be consulted") }
+      async resolve(model) {
+        assert.deepEqual(model, { providerID: "openai", modelID: "gpt-5.6", variant: "high" })
+        return { ...model, variantConfigId: "reasoning_effort" }
+      }
     }
   })
   const prompts = []
@@ -69,18 +72,21 @@ test("ACP native Session prompt hands the raw model and variant to the exact Acp
     "Continue once",
     "openai/gpt-5.6",
     [],
-    "high"
+    { configId: "reasoning_effort", value: "high" }
   ]])
 })
 
-test("ACP native Session command uses the exact AcpService model options too", async () => {
+test("ACP native Session command resolves the current catalog before applying its model options", async () => {
   const daemon = new MachineDaemon({ id: "machine-command-model-acp", name: "workstation" })
   const acp = new FakeAcp()
   daemon.registerAcpHost({
     id: "codex",
     agent: acp,
     modelCatalog: {
-      async resolve() { throw new Error("the global catalog must not be consulted") }
+      async resolve(model) {
+        assert.deepEqual(model, { providerID: "openai", modelID: "gpt-5.6", variant: "high" })
+        return { ...model, variantConfigId: "reasoning_effort" }
+      }
     }
   })
   const prompts = []
@@ -104,22 +110,18 @@ test("ACP native Session command uses the exact AcpService model options too", a
     "/help models",
     "openai/gpt-5.6",
     [],
-    "high"
+    { configId: "reasoning_effort", value: "high" }
   ]])
 })
 
-test("ACP native Session prompt remains usable when the global catalog rejects its retained model", async () => {
+test("ACP native Session prompt keeps a Session usable when model discovery fails for a non-catalog reason", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-degraded", name: "workstation" })
   const acp = new FakeAcp()
   daemon.registerAcpHost({
     id: "codex",
     agent: acp,
     modelCatalog: {
-      async resolve() {
-        const error = new Error("Selected model is no longer available: openai/gpt-5.6")
-        error.code = "model_unavailable"
-        throw error
-      }
+      async resolve() { throw new Error("codex model catalog timed out after 90000ms") }
     }
   })
   const prompts = []
@@ -136,11 +138,11 @@ test("ACP native Session prompt remains usable when the global catalog rejects i
     variant: "high"
   })
 
-  // The exact Session, not a machine-wide technical Session, validates this retained selection.
-  assert.deepEqual(prompts, [["native-acp-degraded", "Continue once", "openai/gpt-5.6", "high"]])
+  // The requested model still reaches the harness; only the variant enrichment is lost.
+  assert.deepEqual(prompts, [["native-acp-degraded", "Continue once", "openai/gpt-5.6", undefined]])
 })
 
-test("ACP native Session prompt still reports a model the exact Session rejects", async () => {
+test("ACP native Session prompt still rejects a model the catalog says is gone", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-gone", name: "workstation" })
   const acp = new FakeAcp()
   daemon.registerAcpHost({
@@ -156,7 +158,7 @@ test("ACP native Session prompt still reports a model the exact Session rejects"
   })
   const claimOptions = passthroughServerOptions(daemon, acp, {
     async claimSession() {},
-    async prompt() { throw new Error("Harness model is not available: openai/gpt-5.6") },
+    async prompt() { throw new Error("prompt must not be dispatched") },
     async abort() {}
   })
 
@@ -166,7 +168,7 @@ test("ACP native Session prompt still reports a model the exact Session rejects"
       directory: "/repo",
       model: { providerID: "openai", modelID: "gpt-5.6" }
     }),
-    /Harness model is not available/
+    /no longer available/
   )
 })
 
@@ -330,7 +332,7 @@ test("OpenCode cross-agent handoff snapshots Sessions then creates a bare recove
   assert.equal(result.target.sessionID, "opencode-native-new")
 })
 
-test("ACP native Session prompt neither waits for nor loses a variant to a cold global catalog", async () => {
+test("ACP native Session prompt does not wait out a cold catalog's whole discovery budget", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-cold", name: "workstation" })
   const acp = new FakeAcp()
   let resolveDiscovery
@@ -358,7 +360,8 @@ test("ACP native Session prompt neither waits for nor loses a variant to a cold 
   })
   const waited = Date.now() - started
 
-  assert.ok(waited < 1_000, `sending must not block on unrelated global discovery (waited ${waited}ms)`)
-  assert.deepEqual(prompts, [["openai/gpt-5.6", "high"]])
-  assert.equal(resolveDiscovery, undefined, "the global catalog must not be started for an existing ACP Session")
+  assert.ok(waited < 30_000, `sending must not block on cold discovery (waited ${waited}ms)`)
+  // The requested model still reaches the harness; only the variant enrichment is deferred.
+  assert.deepEqual(prompts, [["openai/gpt-5.6", undefined]])
+  resolveDiscovery?.({ providerID: "openai", modelID: "gpt-5.6" })
 })

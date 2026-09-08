@@ -26,7 +26,14 @@ globalThis.window = {
     },
     request(profileId, request) {
       calls.request.push({ profileId, request })
-      return Promise.resolve({ ok: true, response: { status: 200, data: { ok: true }, headers: {} } })
+      const data = request.path.startsWith("/v1/agents/")
+        ? {
+            models: [{ providerID: "codex", providerName: "Codex", modelID: "gpt-5.6-sol", modelName: "GPT-5.6-Sol" }],
+            stale: false,
+            refreshedAt: "2026-09-08T00:00:00.000Z"
+          }
+        : { ok: true }
+      return Promise.resolve({ ok: true, response: { status: 200, data, headers: {} } })
     },
     subscribeEvents(profileId, options) {
       calls.subscribe.push({ profileId, options })
@@ -43,6 +50,7 @@ globalThis.window = {
 }
 
 const bridge = await import("./desktopBridge.ts")
+const { taskClient } = await import("./taskClient.ts")
 
 // A fresh renderer must send its canonical snapshot even when it is empty. Otherwise Electron can
 // retain stale profiles loaded from desktop-profiles.json after an application restart.
@@ -93,6 +101,18 @@ await firstRequest
 assert.equal(calls.request.length, 1)
 assert.equal(calls.request[0].profileId, "machine-local")
 assert.deepEqual(calls.request[0].request.route, { backend: "codex", agentId: "codex" })
+
+const catalog = await taskClient.listAgentModels(
+  { ...machine.config, backend: "claude", agentId: "claude" },
+  "codex"
+)
+assert.equal(catalog.models[0]?.modelID, "gpt-5.6-sol")
+assert.match(calls.request[1].request.path, /^\/v1\/agents\/codex\/models\?/)
+assert.deepEqual(
+  calls.request[1].request.route,
+  { backend: "codex", agentId: "codex" },
+  "desktop model discovery must not combine the selected agent path with the machine primary backend"
+)
 assert.equal(
   bridge.desktopProfileID({ ...machine.config, backend: "pi", agentId: "pi" }),
   "machine-local",

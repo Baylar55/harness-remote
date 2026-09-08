@@ -31,7 +31,7 @@ const {
   markPendingNativeSessionPromptAccepted
 } = await import('./native-session-prompt.ts')
 const { lastNativeMessageModel } = await import('./native-session-model.ts')
-const { taskClient } = await import('./taskClient.ts')
+const { modelCatalogConfig, taskClient } = await import('./taskClient.ts')
 
 function target(overrides = {}) {
   return {
@@ -220,58 +220,34 @@ assert.deepEqual(
   'a flat OpenCode assistant envelope must inherit the matching immediately preceding user variant'
 )
 
-// --- 9. An existing native Session owns its exact, coherently routed model catalog ---------------
+// --- 9. Picker membership stays on the selected harness's current catalog ------------------------
 sent.length = 0
 responder = (url) => {
-  if (url.includes('/config/providers')) {
-    return new Response(JSON.stringify({
-      providers: [{
-        id: 'codex',
-        name: 'Codex CLI',
-        models: {
-          'gpt-5.6-sol': { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' }
-        }
-      }],
-      default: { codex: 'gpt-5.6-sol' }
-    }), { status: 200 })
-  }
+  assert.doesNotMatch(url, /config\/providers/, 'picker membership must never load historical Session options')
   return new Response(JSON.stringify({
     models: [{
-      providerID: 'claude',
-      providerName: 'Claude Code',
-      modelID: 'claude-opus-5-1[1m]',
-      modelName: 'Opus 5.1 1M'
+      providerID: 'codex',
+      providerName: 'Codex CLI',
+      modelID: 'gpt-5.6-sol',
+      modelName: 'GPT-5.6-Sol'
     }],
     stale: false,
     refreshedAt: '2026-09-08T00:00:00.000Z'
   }), { status: 200 })
 }
 
-// Start from a deliberately mismatched primary profile. The Session scope must replace both the
-// path agent and backend header, which is the half of the earlier fix that regressed Codex on a
-// multi-harness machine.
+// Start from a deliberately mismatched primary profile. The shared catalog boundary must replace
+// both routing fields even though the browser's machine-scoped URL needs only the explicit path;
+// desktop transport also carries this coherent pair as routing metadata.
 const claudePrimaryConfig = {
   backend: 'claude', host: '127.0.0.1', port: 4099, username: 'harness', password: 'pw', agentId: 'claude'
 }
-const sessionCatalog = await taskClient.listAgentModels(
-  claudePrimaryConfig,
-  'codex',
-  { sessionID: 'codex-session', directory: '/repo', backend: 'codex' }
-)
-assert.equal(sessionCatalog.models[0]?.modelID, 'gpt-5.6-sol')
-assert.equal(sent.length, 1, 'native Session model discovery must be one Session-scoped request')
-const sessionCatalogRequest = new URL(sent[0].url)
-assert.equal(sessionCatalogRequest.pathname, '/v1/agents/codex/config/providers')
-assert.equal(sessionCatalogRequest.searchParams.get('sessionID'), 'codex-session')
-assert.equal(sessionCatalogRequest.searchParams.get('directory'), '/repo')
-assert.equal(sent[0].headers['X-Harness-Backend'], 'codex')
-
-sent.length = 0
-const freshCatalog = await taskClient.listAgentModels(claudePrimaryConfig, 'claude')
-assert.equal(freshCatalog.models[0]?.modelID, 'claude-opus-5-1[1m]')
-assert.equal(sent.length, 1, 'fresh Session discovery must remain one machine catalog request')
-const freshCatalogRequest = new URL(sent[0].url)
-assert.equal(freshCatalogRequest.pathname, '/v1/agents/claude/models')
-assert.equal(freshCatalogRequest.searchParams.get('sessionID'), null)
+assert.deepEqual(modelCatalogConfig(claudePrimaryConfig, 'codex'), { ...claudePrimaryConfig, backend: 'codex', agentId: 'codex' })
+const currentCatalog = await taskClient.listAgentModels(claudePrimaryConfig, 'codex')
+assert.equal(currentCatalog.models[0]?.modelID, 'gpt-5.6-sol')
+assert.equal(sent.length, 1, 'native Session model discovery must be one current-catalog request')
+const currentCatalogRequest = new URL(sent[0].url)
+assert.equal(currentCatalogRequest.pathname, '/v1/agents/codex/models')
+assert.equal(currentCatalogRequest.searchParams.get('sessionID'), null)
 
 console.log('native-session model lifecycle regressions: OK')

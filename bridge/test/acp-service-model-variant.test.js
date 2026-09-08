@@ -12,9 +12,11 @@ class RecordingAcp {
   #listeners = new Set()
   promptCapabilities = {}
   processID = 4242
-  constructor({ holdPrompt = false } = {}) {
+  constructor({ holdPrompt = false, models = ["openai/a", "openai/b"], currentModel = models[0] } = {}) {
     this.holdPrompt = holdPrompt
     this.releasePrompt = undefined
+    this.models = models
+    this.currentModel = currentModel
   }
   on() { return this }
   off() { return this }
@@ -25,7 +27,7 @@ class RecordingAcp {
   async listSessions() { return [{ sessionId: "s1", cwd: "/repo", title: "S1", updatedAt: new Date().toISOString() }] }
   #configOptions() {
     return [
-      { id: "model", currentValue: "openai/a", options: [{ value: "openai/a" }, { value: "openai/b" }] },
+      { id: "model", currentValue: this.currentModel, options: this.models.map((value) => ({ value })) },
       { id: "thinking", currentValue: "off", options: [{ value: "off" }, { value: "high" }] }
     ]
   }
@@ -53,20 +55,6 @@ test("setModel applies the model before its harness-advertised variant", async (
   assert.deepEqual(configCalls(acp), ["model=openai/b", "thinking=high"])
 })
 
-test("setModel resolves a raw Session variant through the exact adapter options", async () => {
-  const acp = new RecordingAcp()
-  const service = new AcpService(acp, { modelVariantConfigIDs: ["thinking"] })
-  await service.setModel("s1", "openai/b", "high")
-  assert.deepEqual(configCalls(acp), ["model=openai/b", "thinking=high"])
-})
-
-test("setModel refuses a raw Session variant no advertised control accepts", async () => {
-  const acp = new RecordingAcp()
-  const service = new AcpService(acp, { modelVariantConfigIDs: ["thinking"] })
-  await assert.rejects(service.setModel("s1", "openai/b", "invented"), /variant is not available/)
-  assert.deepEqual(configCalls(acp), ["model=openai/b"])
-})
-
 test("setModel refuses a variant the running adapter never advertised", async () => {
   const acp = new RecordingAcp()
   const service = new AcpService(acp, {})
@@ -83,6 +71,13 @@ test("setModel with no variant leaves other config options untouched", async () 
   const service = new AcpService(acp, {})
   await service.setModel("s1", "openai/b")
   assert.deepEqual(configCalls(acp), ["model=openai/b"])
+})
+
+test("setModel translates the stable bare Claude id to the current adapter's decorated option", async () => {
+  const acp = new RecordingAcp({ models: ["default", "claude-fable-5-1[1m]"], currentModel: "default" })
+  const service = new AcpService(acp, {})
+  await service.setModel("s1", "claude/claude-fable-5-1")
+  assert.deepEqual(configCalls(acp), ["model=claude-fable-5-1[1m]"])
 })
 
 test("a prompt queued behind a running turn defers both model and variant to dequeue", async () => {

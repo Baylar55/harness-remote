@@ -1680,7 +1680,7 @@ test("drops an injected user chunk while keeping the surrounding conversation", 
 // like it exposed no models — the reason its profile carried `models: false`. Both directions are
 // asserted here: the list the app receives, and the value that reaches the agent when one is picked.
 class FlatModelAcp extends EventEmitter {
-  agentInfo = { version: "0.63.0" }
+  agentInfo = { version: "0.75.1" }
   models = []
 
   async start() {}
@@ -1699,7 +1699,8 @@ class FlatModelAcp extends EventEmitter {
           options: [
             { value: "default", name: "Default (recommended)", description: "Sonnet 5 · Efficient for routine tasks" },
             { value: "sonnet", name: "Sonnet", description: "Sonnet 5 · Efficient for routine tasks" },
-            { value: "opus[1m]", name: "Opus (1M context)", description: "Opus 5 with 1M context" }
+            { value: "opus[1m]", name: "Opus (1M context)", description: "Opus 5 with 1M context" },
+            { value: "claude-fable-5-1[1m]", name: "Fable", description: "Fable 5.1" }
           ]
         }]
       }
@@ -1725,11 +1726,12 @@ test("offers models a harness names without a provider prefix, and sets them bac
     const provider = body.providers[0]
     assert.equal(provider.id, "claude", "a bare id is presented under the backend's own name")
     assert.equal(provider.name, "claude")
-    assert.deepEqual(Object.keys(provider.models).sort(), ["default", "opus[1m]", "sonnet"])
+    assert.deepEqual(Object.keys(provider.models).sort(), ["claude-fable-5-1", "default", "opus[1m]", "sonnet"])
     assert.equal(provider.models.sonnet.name, "Sonnet")
     // The harness puts the model version in the description; dropping it left the picker showing
     // "Sonnet" with no way to tell which Sonnet.
     assert.equal(provider.models["opus[1m]"].description, "Opus 5 with 1M context")
+    assert.equal(provider.models["claude-fable-5-1"].name, "Fable")
     assert.equal(provider.models.sonnet.description, "Sonnet 5 · Efficient for routine tasks")
     assert.equal(body.default[provider.id], "default", "the current model is reported as the default")
 
@@ -1742,6 +1744,18 @@ test("offers models a harness names without a provider prefix, and sets them bac
     assert.equal(prompted.status, 200)
     await new Promise((resolve) => setImmediate(resolve))
     assert.deepEqual(acp.models, ["opus[1m]"], "a bare id must not be re-joined into provider/model")
+
+    // The current adapter advertises Fable with a context decoration but accepts the stable bare
+    // canonical id too. The picker exposes that stable id and the service maps it back to the exact
+    // option advertised by this running Session before mutation.
+    const fablePrompt = await fetch(`${bridge.baseURL}/session/session-1/prompt_async`, {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ parts: [{ type: "text", text: "hello again" }], model: { providerID: provider.id, modelID: "claude-fable-5-1" } })
+    })
+    assert.equal(fablePrompt.status, 200)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(acp.models, ["opus[1m]", "claude-fable-5-1[1m]"])
   } finally {
     await bridge.close()
   }

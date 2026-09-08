@@ -138,36 +138,11 @@ function startFakeDaemon() {
       return
     }
 
-    const sessionModelMatch = /^\/v1\/agents\/(codex|omp)\/config\/providers$/.exec(url.pathname)
-    if (request.method === "GET" && sessionModelMatch) {
-      const pathAgent = sessionModelMatch[1]
-      const routedBackend = String(request.headers["x-harness-backend"] || "")
-      const sessionID = url.searchParams.get("sessionID")
-      const directory = url.searchParams.get("directory")
-      modelRoutes.push({ scope: "session", pathAgent, routedBackend, sessionID, directory })
-      const routedAgent = routedBackend || pathAgent
-      const models = routedAgent === "omp" ? OMP_MODELS : CODEX_MODELS
-      const providerID = models[0].providerID
-      json(response, 200, {
-        providers: [{
-          id: providerID,
-          name: models[0].providerName,
-          models: Object.fromEntries(models.map((model) => [model.modelID, {
-            id: model.modelID,
-            name: model.modelName,
-            capabilities: { tools: model.tools }
-          }]))
-        }],
-        default: { [providerID]: models.find((model) => model.isDefault)?.modelID }
-      })
-      return
-    }
-
     const modelMatch = /^\/v1\/agents\/(codex|omp)\/models$/.exec(url.pathname)
     if (request.method === "GET" && modelMatch) {
       const pathAgent = modelMatch[1]
       const routedBackend = String(request.headers["x-harness-backend"] || "")
-      modelRoutes.push({ scope: "fresh", pathAgent, routedBackend })
+      modelRoutes.push({ pathAgent, routedBackend })
       // Mirror the daemon rule relevant to the reverted #381 behavior: an explicit mismatched
       // routing header wins, while a machine-scoped request with no header follows its agent path.
       const routedAgent = routedBackend || pathAgent
@@ -322,10 +297,9 @@ try {
   await openAndAssert(page, TITLE_A, MARKER_A, MARKER_B)
   await openAndAssert(page, TITLE_B, MARKER_B, MARKER_A)
 
-  const codexModelRoutes = modelRoutes.filter((route) => route.scope === "session" && route.pathAgent === "codex")
+  const codexModelRoutes = modelRoutes.filter((route) => route.pathAgent === "codex")
   assert.ok(codexModelRoutes.length >= 1, "sequential Codex navigation never reached the model catalog path")
-  assert.ok(codexModelRoutes.every((route) => route.routedBackend === "codex"), `Codex catalog request carried mismatched routing: ${JSON.stringify(codexModelRoutes)}`)
-  assert.ok(codexModelRoutes.every((route) => route.sessionID && route.directory === DIRECTORY), `Codex Session catalog request lost its exact scope: ${JSON.stringify(codexModelRoutes)}`)
+  assert.ok(codexModelRoutes.every((route) => !route.routedBackend || route.routedBackend === "codex"), `Codex catalog request carried mismatched routing: ${JSON.stringify(codexModelRoutes)}`)
   assert.deepEqual(pageErrors, [], `browser errors during A -> B -> A -> B navigation: ${pageErrors.join(" | ")}`)
   console.log("native Codex Session navigation, model routing, and failed-history smoke passed")
   await context.close()

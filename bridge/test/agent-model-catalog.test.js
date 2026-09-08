@@ -7,6 +7,7 @@ import test from "node:test"
 import {
   AcpAgentModelCatalog,
   HttpAgentModelCatalog,
+  modelsFromConfigOptions,
   modelsFromProvidersResponse,
   modelsFromRuntimeProvidersResponse
 } from "../src/agent-model-catalog.js"
@@ -38,6 +39,35 @@ class FakeAcp extends EventEmitter {
     throw new Error(`unexpected method ${method}`)
   }
 }
+
+test("Claude catalog normalizes a lone decorated canonical id to the bare value the adapter accepts", () => {
+  const models = modelsFromConfigOptions([{
+    id: "model",
+    currentValue: "claude-fable-5-1[1m]",
+    options: [
+      { value: "default", name: "Default" },
+      { value: "opus[1m]", name: "Opus (1M context)" },
+      { value: "claude-fable-5-1[1m]", name: "Fable" }
+    ]
+  }], "claude")
+
+  assert.deepEqual(models.map((model) => model.modelID), ["default", "opus[1m]", "claude-fable-5-1"])
+  assert.equal(models.at(-1).isDefault, true)
+})
+
+test("Claude catalog preserves the 1M suffix when it distinguishes two advertised rows", () => {
+  const models = modelsFromConfigOptions([{
+    id: "model",
+    currentValue: "claude-sonnet-5[1m]",
+    options: [
+      { value: "claude-sonnet-5", name: "Sonnet" },
+      { value: "claude-sonnet-5[1m]", name: "Sonnet (1M context)" }
+    ]
+  }], "claude")
+
+  assert.deepEqual(models.map((model) => model.modelID), ["claude-sonnet-5", "claude-sonnet-5[1m]"])
+  assert.equal(models.at(-1).isDefault, true)
+})
 
 test("ACP model discovery keeps one warm catalog per adapter lifetime and explicit refresh uses a fresh technical session", async () => {
   const stateDirectory = await mkdtemp(path.join(tmpdir(), "harness-model-catalog-"))

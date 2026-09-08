@@ -307,28 +307,6 @@ function startFakeDaemon() {
       return
     }
 
-    if (request.method === "GET" && url.pathname === "/v1/agents/opencode/config/providers") {
-      modelCatalogReads += 1
-      json(response, 200, {
-        providers: [{
-          id: "openai",
-          name: "OpenAI",
-          models: {
-            "gpt-5.6-codex": {
-              id: "gpt-5.6-codex",
-              name: "GPT-5.6 Codex",
-              description: "OpenCode coding model",
-              capabilities: { tools: true },
-              limit: { context: 200000, output: 64000 },
-              variants: { high: {} }
-            }
-          }
-        }],
-        default: { openai: "gpt-5.6-codex" }
-      })
-      return
-    }
-
     if (request.method === "GET" && url.pathname === "/v1/agents/opencode/models") {
       modelCatalogReads += 1
       json(response, 200, MODEL_CATALOG)
