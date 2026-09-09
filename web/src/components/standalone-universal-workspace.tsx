@@ -36,6 +36,7 @@ import {
   createWorkspaceMachine,
   type WorkspaceMachine
 } from "../workspaceMachines"
+import { sameMachineConnection } from "../machineConnection"
 import { reuseList } from "../workspace-runtime-merge"
 import { useDialogDismiss } from "../useDialogDismiss"
 import { useTranslator } from "../useTranslator"
@@ -424,9 +425,15 @@ function NativeSessionsWorkspace({
     }
 
     setRefreshing(true)
+    // Keep the configuration from before this discovery pass. The state updater below immediately
+    // installs the new machine object, so consulting runtimesRef from the failed request would make
+    // every attempt look like the same endpoint and could retain a stale, successful snapshot.
+    const previousRuntimes = new Map(runtimesRef.current.map((runtime) => [runtime.machine.id, runtime]))
     setRuntimes((current) => reuseList(current, machines.map((machine) => {
       const previous = current.find((runtime) => runtime.machine.id === machine.id)
-      return previous ? { ...previous, machine } : { machine, snapshot: null, state: "loading" }
+      return previous && sameMachineConnection(previous.machine.config, machine.config)
+        ? { ...previous, machine }
+        : { machine, snapshot: null, state: "loading", consecutiveFailures: 0 }
     })))
 
     void Promise.all(machines.map(async (machine): Promise<NativeMachineRuntime> => {
@@ -438,10 +445,8 @@ function NativeSessionsWorkspace({
           : { machine, snapshot: null, state: "offline", error: "This endpoint is not a Harness machine daemon.", consecutiveFailures: MACHINE_OFFLINE_FAILURE_THRESHOLD }
       } catch (reason) {
         const error = reason instanceof Error ? reason.message : String(reason)
-        const previous = runtimesRef.current.find((runtime) => runtime.machine.id === machine.id)
-        const sameEndpoint = previous?.machine.config.host === machine.config.host
-          && previous?.machine.config.port === machine.config.port
-          && previous?.machine.config.username === machine.config.username
+        const previous = previousRuntimes.get(machine.id)
+        const sameEndpoint = Boolean(previous && sameMachineConnection(previous.machine.config, machine.config))
         const consecutiveFailures = (previous?.consecutiveFailures || 0) + 1
         if (sameEndpoint && previous?.snapshot && consecutiveFailures < MACHINE_OFFLINE_FAILURE_THRESHOLD) {
           return {
@@ -480,7 +485,7 @@ function NativeSessionsWorkspace({
   // Endpoint identity, not array identity: the parent rebuilds the machine list on every persist,
   // and re-subscribing on each render would tear down healthy streams.
   const streamEndpoints = machines
-    .map((machine) => [machine.id, machine.config.host, machine.config.port, machine.config.username, machine.config.password].join("\u0000"))
+    .map((machine) => [machine.id, machine.config.host, machine.config.port, machine.config.username, machine.config.password, machine.config.agentId || ""].join("\u0000"))
     .join("\u0001")
   const streamTargets = useMemo(
     () => machines.map((machine) => ({ id: machine.id, config: machine.config })),
@@ -516,11 +521,16 @@ function NativeSessionsWorkspace({
   }, [streamTargets])
 
   const reconnectingStreamCount = streamTargets.filter(({ id }) => reconnectingStreams[id]).length
+  // A stream for an unreachable machine reconnects on its own schedule. Polling it every 1.5s can
+  // repeatedly cancel the browser's 12s machine probe before it settles, leaving Refresh visibly
+  // active forever. Reserve the fast cadence for a machine that was actually online and is now
+  // recovering; an offline saved endpoint remains on the normal safety-net cadence.
+  const hasReachableMachine = runtimes.some((runtime) => runtime.state === "online" && Boolean(runtime.snapshot))
 
   useEffect(() => {
     if (!loaded) return
     const interval = machinePollIntervalMs({
-      reconnecting: reconnectingCount > 0 || reconnectingStreamCount > 0,
+      reconnecting: reconnectingCount > 0 || (hasReachableMachine && reconnectingStreamCount > 0),
       machineCount: streamTargets.length,
       connectedStreamCount: streamTargets.filter(({ id }) => liveMachines[id]).length
     })
@@ -535,7 +545,7 @@ function NativeSessionsWorkspace({
       window.clearInterval(timer)
       document.removeEventListener("visibilitychange", onVisibility)
     }
-  }, [loaded, reconnectingCount, reconnectingStreamCount, streamTargets, liveMachines])
+  }, [loaded, reconnectingCount, reconnectingStreamCount, hasReachableMachine, streamTargets, liveMachines])
 
   const onlineCount = runtimes.filter((runtime) => runtime.state === "online").length
   const loadingCount = runtimes.filter((runtime) => runtime.state === "loading").length
@@ -962,7 +972,12 @@ function NativeSessionsWorkspace({
               <span>{t("sf.machinesUnavailable")}</span>
               <strong>{t("sf.couldNotConnect")}</strong>
               <p>{t("sf.offlineBody", { count: offlineCount })}</p>
-              <div><button type="button" className="tdw-button secondary" onClick={onManageMachines}>{t("sf.manageMachines")}</button><button type="button" className="tdw-button primary" onClick={requestRefresh}>{t("sf.retry")}</button></div>
+              <div>
+                <button type="button" className="tdw-button secondary" onClick={onManageMachines}>{t("sf.manageMachines")}</button>
+                <button type="button" className="tdw-button primary" onClick={requestRefresh} disabled={workspaceRefreshing} aria-busy={workspaceRefreshing}>
+                  {workspaceRefreshing ? <><LoadingIcon size={15} /> {t("sf.refreshingMachines")}</> : t("sf.retry")}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="hr-native-workspace-empty hr-native-startup ready">
