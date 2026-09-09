@@ -160,7 +160,8 @@ async function main() {
         preserveListedTimestamps: profile.preserveListedTimestamps,
         hiddenSessionIDs: modelCatalog.hiddenSessionIDs,
         reloadOnHistoryRefresh: profile.reloadOnHistoryRefresh,
-        replaySettleMs: profile.replaySettleMs
+        replaySettleMs: profile.replaySettleMs,
+        promptSettleMs: profile.promptSettleMs
       }
     })
     acpHosts.set(profile.id, acp)
@@ -219,7 +220,8 @@ async function main() {
       preserveListedTimestamps: primaryProfile.preserveListedTimestamps,
       hiddenSessionIDs: daemon.hostEntry(primaryProfile.id).modelCatalog.hiddenSessionIDs,
       reloadOnHistoryRefresh: primaryProfile.reloadOnHistoryRefresh,
-      replaySettleMs: primaryProfile.replaySettleMs
+      replaySettleMs: primaryProfile.replaySettleMs,
+      promptSettleMs: primaryProfile.promptSettleMs
     }
   })
 

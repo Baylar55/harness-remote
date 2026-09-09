@@ -117,6 +117,8 @@ assert.ok(adapter.includes('OPENCODE_IDLE_CONFIRM_MS = 750') && adapter.includes
 assert.ok(adapter.includes('const terminalError = Boolean(latestAssistant.info.error)') && adapter.includes('if (!terminalError || entry.forcedStatus !== "running") return'), 'OpenCode terminal provider/model errors must have a transcript fallback when the legacy status endpoint omits the Session')
 assert.ok(adapter.includes('terminalError ? now + OPENCODE_RECOVERY_WATCH_MS : 0'), 'OpenCode transcript-confirmed errors must retain the bounded late-retry recovery window')
 assert.ok(adapter.includes('OPENCODE_RECOVERY_WATCH_MS') && adapter.includes('openCodeRecoveryWatchUntil'), 'OpenCode must retract a terminal-looking interruption when a bounded late retry becomes busy again')
+assert.ok(adapter.includes('OPENCODE_SILENT_TURN_GRACE_MS = 15_000') && adapter.includes('armOpenCodeSilentTurnRecovery(entry, id)'), 'an accepted OpenCode prompt with no response must schedule a bounded orphan-turn recovery')
+assert.ok(adapter.includes('api.listStatuses(entry.target.config, entry.target.directory)') && adapter.includes('OpenCode ended this request without a response'), 'OpenCode must surface a terminal no-response error only after an authoritative status/transcript check')
 assert.ok(adapter.includes('const statuses = await api.listStatuses(entry.target.config)'), 'non-OpenCode projections must retain native status enrichment')
 assert.equal(adapter.includes('WORKING_STATUS_GRACE_MS'), false, 'web adapter must not invent a generic stale-working timeout across harnesses')
 assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not render chat')
