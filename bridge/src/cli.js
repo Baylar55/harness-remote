@@ -46,7 +46,8 @@ if (config) {
       historyLoader: profile.historyLoader,
       preserveListedTimestamps: profile.preserveListedTimestamps,
       reloadOnHistoryRefresh: profile.reloadOnHistoryRefresh,
-      replaySettleMs: profile.replaySettleMs
+      replaySettleMs: profile.replaySettleMs,
+      promptSettleMs: profile.promptSettleMs
     }
   })
   let shuttingDown = false

@@ -26,6 +26,10 @@ const OPENCODE_IDLE_CONFIRM_MS = 750
 // the terminal-looking interruption. This watch is event-driven in the normal case; it does not add
 // fast polling and expires so an old failed turn cannot be resurrected indefinitely.
 const OPENCODE_RECOVERY_WATCH_MS = 2 * 60 * 1000
+// A rejected provider can make OpenCode accept prompt_async, then produce neither an assistant
+// envelope nor a session.status entry. Leave enough room for a real slow first token, then turn
+// that orphaned optimistic turn into a visible failure instead of spinning until navigation.
+const OPENCODE_SILENT_TURN_GRACE_MS = 15_000
 
 type NativeTurnRecord = {
   id: string
@@ -46,7 +50,9 @@ type NativeConversationEntry = {
   // legacy status endpoint omits the Session it can instead be the newest assistant error envelope.
   openCodeIdleObservedAt: number | null
   openCodeRecoveryWatchUntil: number
+  openCodeSilentTurn: { id: string; timer: ReturnType<typeof setTimeout> } | null
   currentModel: ModelSelection | null
+  error: { message: string } | null
   initialPageCaptured: boolean
   piTailMessages: MessageEnvelope[]
   writerReady: boolean
@@ -294,32 +300,9 @@ function reconcileOpenCodeTranscriptStatus(entry: NativeConversationEntry, page:
   const recoveryWatchActive = entry.openCodeRecoveryWatchUntil > Date.now()
   if (entry.forcedStatus !== "running" && !recoveryWatchActive) return
 
-  const orderedTurns = [...entry.turns.values()].sort((left, right) => left.created - right.created || left.id.localeCompare(right.id))
-  const current = orderedTurns[orderedTurns.length - 1]
-  const prompt = canonicalText(current?.prompt || "")
-  if (!current || !prompt) return
-
-  const occurrence = orderedTurns.slice(0, -1).filter((turn) => canonicalText(turn.prompt) === prompt).length
-  let seen = 0
-  let userIndex = -1
-  for (let index = 0; index < page.messages.length; index += 1) {
-    const message = page.messages[index]
-    if (message.info.role !== "user" || visiblePrompt(message) !== prompt) continue
-    if (seen === occurrence) {
-      userIndex = index
-      break
-    }
-    seen += 1
-  }
-  if (userIndex < 0) return
-
-  let latestAssistant: MessageEnvelope | null = null
-  for (let index = userIndex + 1; index < page.messages.length; index += 1) {
-    const message = page.messages[index]
-    if (message.info.role === "user") break
-    if (message.info.role === "assistant") latestAssistant = message
-  }
+  const latestAssistant = latestOpenCodeAssistantForCurrentTurn(entry, page)
   if (!latestAssistant) return
+  clearOpenCodeSilentTurn(entry)
 
   const now = Date.now()
   const completedByTranscript = openCodeAssistantProvesTurnCompleted(latestAssistant)
@@ -341,11 +324,96 @@ function reconcileOpenCodeTranscriptStatus(entry: NativeConversationEntry, page:
   const priorStatus = conversationStatus(entry)
   entry.statusType = "idle"
   entry.forcedStatus = null
+  entry.error = null
   entry.openCodeIdleObservedAt = null
   entry.openCodeRecoveryWatchUntil = terminalError ? now + OPENCODE_RECOVERY_WATCH_MS : 0
   const completedAt = Number(latestAssistant.info.time?.completed) || Number(latestAssistant.info.time?.created) || 0
   if (completedAt) entry.updatedAt = Math.max(entry.updatedAt, completedAt)
   if (conversationStatus(entry) !== priorStatus) notify(entry)
+}
+
+/** Locate the assistant envelope belonging to the latest logical turn, including repeated prompts. */
+function latestOpenCodeAssistantForCurrentTurn(entry: NativeConversationEntry, page: MessagePage): MessageEnvelope | null {
+  const orderedTurns = [...entry.turns.values()].sort((left, right) => left.created - right.created || left.id.localeCompare(right.id))
+  const current = orderedTurns[orderedTurns.length - 1]
+  const prompt = canonicalText(current?.prompt || "")
+  if (!current || !prompt) return null
+
+  const occurrence = orderedTurns.slice(0, -1).filter((turn) => canonicalText(turn.prompt) === prompt).length
+  let seen = 0
+  let userIndex = -1
+  for (let index = 0; index < page.messages.length; index += 1) {
+    const message = page.messages[index]
+    if (message.info.role !== "user" || visiblePrompt(message) !== prompt) continue
+    if (seen === occurrence) {
+      userIndex = index
+      break
+    }
+    seen += 1
+  }
+  if (userIndex < 0) return null
+
+  let latestAssistant: MessageEnvelope | null = null
+  for (let index = userIndex + 1; index < page.messages.length; index += 1) {
+    const message = page.messages[index]
+    if (message.info.role === "user") break
+    if (message.info.role === "assistant") latestAssistant = message
+  }
+  return latestAssistant
+}
+
+function clearOpenCodeSilentTurn(entry: NativeConversationEntry): void {
+  if (!entry.openCodeSilentTurn) return
+  clearTimeout(entry.openCodeSilentTurn.timer)
+  entry.openCodeSilentTurn = null
+}
+
+function armOpenCodeSilentTurnRecovery(entry: NativeConversationEntry, turnID: string): void {
+  if (entry.target.backend !== "opencode") return
+  clearOpenCodeSilentTurn(entry)
+  const timer = setTimeout(() => {
+    void settleOpenCodeSilentTurn(entry, turnID)
+  }, OPENCODE_SILENT_TURN_GRACE_MS)
+  entry.openCodeSilentTurn = { id: turnID, timer }
+}
+
+async function settleOpenCodeSilentTurn(entry: NativeConversationEntry, turnID: string): Promise<void> {
+  if (entry.openCodeSilentTurn?.id !== turnID) return
+  entry.openCodeSilentTurn = null
+  const orderedTurns = [...entry.turns.values()].sort((left, right) => left.created - right.created || left.id.localeCompare(right.id))
+  const newestTurn = orderedTurns[orderedTurns.length - 1]
+  if (entry.target.backend !== "opencode" || newestTurn?.id !== turnID) return
+
+  try {
+    const [statuses, page] = await Promise.all([
+      api.listStatuses(entry.target.config, entry.target.directory),
+      api.loadMessagePage(entry.target.config, entry.target.sessionID, entry.target.directory, undefined, 200, true)
+    ])
+    captureUserTurns(entry, page)
+    reconcileOpenCodeTranscriptStatus(entry, page)
+    // Any assistant envelope is a real response lifecycle. It may still be streaming, but it is no
+    // longer the silent provider failure this recovery is for.
+    if (latestOpenCodeAssistantForCurrentTurn(entry, page)) return
+
+    const reported = statuses[entry.target.sessionID]?.type
+    if (nativeSessionIsWorking(reported)) {
+      armOpenCodeSilentTurnRecovery(entry, turnID)
+      return
+    }
+  } catch {
+    // A transport read cannot prove that the native prompt failed. Keep its ordinary live state.
+    return
+  }
+
+  // prompt_async was accepted, but OpenCode has produced neither a response nor a status record.
+  // Preserve a recovery watch: a delayed retry can still make the turn running again on a later edge.
+  entry.statusType = "idle"
+  entry.forcedStatus = null
+  entry.error = { message: "OpenCode ended this request without a response. Check the selected model/provider credentials and try again." }
+  entry.openCodeIdleObservedAt = null
+  entry.openCodeRecoveryWatchUntil = Date.now() + OPENCODE_RECOVERY_WATCH_MS
+  entry.updatedAt = Date.now()
+  notify(entry)
 }
 
 function iso(timestamp: number): string {
@@ -370,6 +438,7 @@ function entryForRead(config: ServerConfig, sessionID: string, directory?: strin
 }
 
 function conversationStatus(entry: NativeConversationEntry): string {
+  if (entry.error) return "failed"
   if (entry.forcedStatus) return entry.forcedStatus
   return nativeSessionIsWorking(entry.statusType) ? "running" : "completed"
 }
@@ -406,6 +475,7 @@ function sortedTurns(entry: NativeConversationEntry): ConversationTurn[] {
     directory: entry.target.directory,
     prompt: turn.prompt,
     startedAt: iso(turn.created),
+    ...(index === ordered.length - 1 && entry.error ? { error: entry.error } : {}),
     ...(index === ordered.length - 1 && status === "running" ? {} : { finishedAt: iso(Math.max(turn.created, entry.updatedAt)) })
   }))
 }
@@ -426,7 +496,7 @@ function conversationSnapshot(entry: NativeConversationEntry): ConversationRunti
     directory: entry.target.directory,
     currentTurn: current,
     turns,
-    error: null,
+    error: entry.error,
     createdAt: iso(entry.createdAt),
     updatedAt: iso(entry.updatedAt),
     ...(status === "running" ? {} : { finishedAt: iso(entry.updatedAt) })
@@ -596,7 +666,10 @@ function appendAcceptedTurn(entry: NativeConversationEntry, prompt: string, mode
   entry.statusType = "running"
   entry.openCodeIdleObservedAt = null
   entry.openCodeRecoveryWatchUntil = 0
-  return notify(entry)
+  entry.error = null
+  const conversation = notify(entry)
+  armOpenCodeSilentTurnRecovery(entry, id)
+  return conversation
 }
 
 async function refreshStatus(entry: NativeConversationEntry): Promise<void> {
@@ -622,6 +695,7 @@ async function refreshStatus(entry: NativeConversationEntry): Promise<void> {
     if (entry.target.backend === "opencode") {
       if (nativeSessionIsWorking(next)) {
         entry.statusType = next
+        entry.error = null
         entry.openCodeIdleObservedAt = null
         if (openCodeRecoveryWatchActive && entry.forcedStatus !== "running") {
           entry.forcedStatus = "running"
@@ -748,6 +822,8 @@ function nativeConversationController(entry: NativeConversationEntry): Conversat
         throw new Error(`Stop delivery is ${result.status}. The existing native cancel request will be reconciled instead of repeated.`)
       }
       entry.forcedStatus = "cancelled"
+      entry.error = null
+      clearOpenCodeSilentTurn(entry)
       entry.statusType = "idle"
       entry.openCodeIdleObservedAt = null
       entry.openCodeRecoveryWatchUntil = 0
@@ -773,7 +849,9 @@ export function registerNativeSessionV3Adapter(
       forcedStatus: null,
       openCodeIdleObservedAt: null,
       openCodeRecoveryWatchUntil: 0,
+      openCodeSilentTurn: null,
       currentModel: target.model,
+      error: null,
       initialPageCaptured: false,
       piTailMessages: [],
       writerReady: !target.requiresExplicitClaim,
@@ -794,7 +872,10 @@ export function registerNativeSessionV3Adapter(
     controller: nativeConversationController(entry),
     dispose: () => {
       entry?.listeners.delete(onConversationUpdate)
-      if (entry && entry.listeners.size === 0) conversations.delete(id)
+      if (entry && entry.listeners.size === 0) {
+        clearOpenCodeSilentTurn(entry)
+        conversations.delete(id)
+      }
     }
   }
 }
