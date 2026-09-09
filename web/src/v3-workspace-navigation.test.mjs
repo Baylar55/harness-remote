@@ -70,5 +70,5 @@ test("removing the last machine does not leave Refresh disabled forever", () => 
   const guard = workspace.match(/if \(machines\.length === 0\) \{[\s\S]*?\n    \}/)?.[0] || ""
   assert.match(guard, /setRuntimes\(\[\]\)/)
   assert.match(guard, /setLoaded\(true\)/)
-  assert.match(guard, /setRefreshing\(false\)/)
+  assert.match(guard, /setMachineRefreshPending\(false\)/)
 })

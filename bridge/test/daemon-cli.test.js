@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { ensureOpenCodePortAvailable, parseDaemonOptions } from "../src/daemon-cli.js"
+import { ensureHarnessPortAvailable, ensureOpenCodePortAvailable, parseDaemonOptions } from "../src/daemon-cli.js"
 
 const loopbackEnv = {
   HARNESS_REMOTE_HOST: "127.0.0.1",
@@ -66,6 +66,29 @@ test("daemon preflight accepts a free managed OpenCode port", async () => {
   await ensureOpenCodePortAvailable({
     port: 4096,
     host: "127.0.0.1",
+    canListenImpl: async () => true
+  })
+})
+
+test("daemon OpenCode preflight has a working default listener probe", async () => {
+  await ensureOpenCodePortAvailable({
+    port: 0,
+    host: "127.0.0.1"
+  })
+})
+
+test("daemon preflight rejects a wildcard port shadowed by a local listener", async () => {
+  await assert.rejects(ensureHarnessPortAvailable({
+    port: 4097,
+    host: "0.0.0.0",
+    canListenImpl: async () => false
+  }), /Harness Remote cannot use 0\.0\.0\.0:4097.*omit --port/)
+})
+
+test("daemon preflight accepts a free wildcard port", async () => {
+  await ensureHarnessPortAvailable({
+    port: 4097,
+    host: "0.0.0.0",
     canListenImpl: async () => true
   })
 })

@@ -170,13 +170,42 @@ export function canListen(port, host) {
   })
 }
 
+function bindProbeHosts(host) {
+  const normalized = host.trim().toLowerCase()
+  if (normalized === "0.0.0.0") {
+    // A v4 wildcard can coexist with a more specific v4 listener on Windows. That listener wins
+    // for its address, so accepting the wildcard would expose a different service to the client.
+    // Do not also probe IPv6 here: an IPv4-only bind does not claim ::1 and IPv6 may be disabled.
+    return ["0.0.0.0", "127.0.0.1", ...lanAddresses()]
+  }
+  if (normalized === "::") {
+    return ["::", "::1", "127.0.0.1", ...lanAddresses()]
+  }
+  return [host]
+}
+
+/**
+ * A wildcard listener can coexist with a more specific listener on Windows. Probe the wildcard,
+ * loopback, and local interface addresses so localhost cannot silently resolve to another service.
+ */
+export async function canListenForBind(port, host, probe = canListen) {
+  for (const probeHost of new Set(bindProbeHosts(host))) {
+    if (!(await probe(port, probeHost))) return false
+  }
+  return true
+}
+
+export function harnessPortUnavailableMessage(port, host) {
+  return `Harness Remote cannot use ${host}:${port} because another service is already listening there. Choose another --port or omit --port to select one automatically.`
+}
+
 export async function findAvailablePort(startPort = 4097, host = "0.0.0.0", attempts = 20, excludedPorts = []) {
   const excluded = new Set(excludedPorts)
   for (let offset = 0; offset < attempts; offset += 1) {
     const port = startPort + offset
     if (port > 65_535) break
     if (excluded.has(port)) continue
-    if (await canListen(port, host)) return port
+    if (await canListenForBind(port, host)) return port
   }
   throw new Error(`No available port found from ${startPort} through ${Math.min(65_535, startPort + attempts - 1)}.`)
 }
@@ -252,8 +281,8 @@ async function main() {
 
   let port
   if (hasOption(args, "--port")) {
-    if (!(await canListen(requestedPort, host))) {
-      throw new Error(`Port ${requestedPort} is not available on ${host}. Choose another port or omit --port for automatic selection.`)
+    if (!(await canListenForBind(requestedPort, host))) {
+      throw new Error(harnessPortUnavailableMessage(requestedPort, host))
     }
     port = requestedPort
   } else {
@@ -355,7 +384,7 @@ function isDirectInvocation() {
 
 if (isDirectInvocation()) {
   main().catch((error) => {
-    process.stderr.write(`${error.message}\n\n${launcherUsage()}\n`)
+    process.stderr.write(`${error.message}\n`)
     process.exitCode = 1
   })
 }

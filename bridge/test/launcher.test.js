@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import path from "node:path"
 import test from "node:test"
-import { bridgeEnvironment, buildBridgeArgs, buildDaemonArgs, createManagedShutdown, detectBackends, lanAddresses, resolveBackend, resolveLaunchPlan, startManagedOpenCode } from "../src/launcher.js"
+import { bridgeEnvironment, buildBridgeArgs, buildDaemonArgs, canListenForBind, createManagedShutdown, detectBackends, lanAddresses, resolveBackend, resolveLaunchPlan, startManagedOpenCode } from "../src/launcher.js"
 
 test("detects executable agent files on PATH without running them", () => {
   const pathValue = ["/bin", "/tools"].join(path.delimiter)
@@ -111,4 +111,27 @@ test("prefers physical LAN addresses over obvious virtual interfaces", () => {
 
 test("falls back to virtual candidates when no physical-looking address exists", () => {
   assert.deepEqual(lanAddresses({ docker0: [{ family: "IPv4", internal: false, address: "172.17.0.1" }] }), ["172.17.0.1"])
+})
+
+test("treats a wildcard bind as unavailable when localhost is already occupied", async () => {
+  const probes = []
+  const available = await canListenForBind(4097, "0.0.0.0", async (_port, host) => {
+    probes.push(host)
+    return host !== "127.0.0.1"
+  })
+  assert.equal(available, false)
+  assert.ok(probes.includes("0.0.0.0"))
+  assert.ok(probes.includes("127.0.0.1"))
+})
+
+test("does not require IPv6 to validate an IPv4 wildcard bind", async () => {
+  const probes = []
+  const available = await canListenForBind(4097, "0.0.0.0", async (_port, host) => {
+    probes.push(host)
+    return true
+  })
+  assert.equal(available, true)
+  assert.ok(probes.includes("0.0.0.0"))
+  assert.ok(probes.includes("127.0.0.1"))
+  assert.ok(!probes.includes("::1"))
 })

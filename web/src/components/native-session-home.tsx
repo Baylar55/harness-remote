@@ -86,6 +86,8 @@ type Props = {
   selectedState?: SessionPresentationState
   /** Fires when native Session discovery has settled at least once for the current machines. */
   onDiscoveredChange?: (discovered: boolean) => void
+  /** Confirms that a shell-requested Session-index refresh has settled. */
+  onRefreshComplete?: (refreshToken: number) => void
   /** Session keys whose delete transition is still visible, including the in-flight request. */
   deletingKeys?: ReadonlySet<string>
   /** Successful deletes suppressed from cached pages even when an older page cannot be re-read. */
@@ -330,6 +332,7 @@ export function NativeSessionHome({
   refreshToken = 0,
   onAttentionCountChange,
   onDiscoveredChange,
+  onRefreshComplete,
   selectedKey,
   selectedState,
   deletingKeys,
@@ -373,6 +376,8 @@ export function NativeSessionHome({
   const completionTimer = useRef<number | null>(null)
   const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
   const pageCacheSignature = useRef<string | null>(null)
+  const onRefreshCompleteRef = useRef(onRefreshComplete)
+  onRefreshCompleteRef.current = onRefreshComplete
   // The selected Session receives live status before the 30s discovery list refreshes. Keep that
   // last observed state by Session key while the user navigates elsewhere, otherwise the row falls
   // back to its stale discovery snapshot and visibly flips Working <-> Ready. The next successful
@@ -385,6 +390,8 @@ export function NativeSessionHome({
       machine.id,
       machine.config.host,
       machine.config.port,
+      machine.config.username,
+      machine.config.password,
       machine.config.agentId || "",
       snapshot?.machine.id || state,
       snapshot?.agents.map((agent) => `${agent.id}:${agent.backend}:${agent.transport}:${agent.processID ?? ""}:${agent.state}`).join(",") || ""
@@ -454,6 +461,7 @@ export function NativeSessionHome({
       setOlderSessionError(null)
       setLoadedSignature(machineSignature)
       setLoading(false)
+      onRefreshCompleteRef.current?.(refreshToken)
       return
     }
     // A configured connection is not yet a discoverable machine while its daemon probe is still in
@@ -530,7 +538,10 @@ export function NativeSessionHome({
         setDiscoveryError(reason instanceof Error ? reason.message : String(reason))
       }
     }).finally(() => {
-      if (!cancelled) setLoading(false)
+      if (!cancelled) {
+        setLoading(false)
+        onRefreshCompleteRef.current?.(refreshToken)
+      }
     })
     return () => { cancelled = true }
   }, [sources, revision, refreshToken, discoveryReady, machineSignature, deletedKeys])
@@ -870,15 +881,13 @@ export function NativeSessionHome({
   }
 
   return (
-    <section className="hr-native-home" aria-label="Sessions">
+    <section className="hr-native-home" aria-label="Sessions" aria-busy={!loaded || undefined}>
       <div className="hr-native-home-heading">
         <div>
           <h2>{t("nav.sessions")}</h2>
-          <span>{!loaded
-            ? t("sf.findingSessions")
-            : activeCount
+          {loaded ? <span>{activeCount
               ? t("sf.workingShown", { working: activeCount, shown: scopedRecords.length })
-              : t("sf.recentCount", { count: scopedRecords.length })}</span>
+              : t("sf.recentCount", { count: scopedRecords.length })}</span> : null}
         </div>
         {/* Rename and Delete live in the chat header of the open Session, and refreshing is owned by
             the workspace top bar plus the automatic discovery cycle. The Session list keeps exactly
@@ -890,9 +899,8 @@ export function NativeSessionHome({
             onClick={openCreatePanel}
             aria-label={t("sf.newSession")}
             disabled={!loaded || createMachines.length === 0}
-            aria-busy={!loaded}
           >
-            {!loaded ? <LoadingIcon size={15} /> : <PlusIcon size={15} />} <span>{t("sf.newSession")}</span>
+            <PlusIcon size={15} /> <span>{t("sf.newSession")}</span>
           </button>
         </div>
       </div>
@@ -995,7 +1003,6 @@ export function NativeSessionHome({
         </div>
       ) : null}
 
-      {!loaded && loading ? <div className="hr-native-home-empty"><LoadingIcon size={18} /><span>{t("sf.findingSessions")}</span></div> : null}
       {discoveryError ? (
         <div className="hr-native-home-notice" role="alert">
           <span><strong>{t("sf.refreshFailed")}</strong> {t("sf.refreshFailedDetail")}</span>
@@ -1026,24 +1033,22 @@ export function NativeSessionHome({
                   <i data-state={state} aria-hidden="true" />
                   <span>
                     <strong>{label}</strong>
-                    <small title={error || machine.config.host}>{state === "loading" || reconnecting ? t("sf.machineConnecting") : state === "offline" ? error || t("sf.machineOffline") : machine.config.host}</small>
+                    <small title={state === "offline" ? error || t("sf.machineOffline") : machine.config.host}>{state === "offline" ? error || t("sf.machineOffline") : machine.config.host}</small>
                   </span>
                 </span>
                 <span className="hr-native-machine-metrics">
                   {machineAttentionCount ? <b>{t("sf.attentionCount", { count: machineAttentionCount })}</b> : null}
                   {workingCount ? <em>{t("sf.liveCount", { count: workingCount })}</em> : null}
-                  <small>{state === "online" ? (loaded && !reconnecting ? sessionCount : "…") : state === "loading" ? "…" : t("sf.offline")}</small>
+                  <small>{state === "online" && loaded && !reconnecting ? sessionCount : state === "offline" ? t("sf.offline") : ""}</small>
                   <i className="hr-native-machine-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i>
                 </span>
               </button>
               {machineCollapsed ? null : (
                 <>
-                  {projects.length === 0 ? (
+                  {projects.length === 0 && state !== "loading" && !(state === "online" && (!loaded || reconnecting)) ? (
                     <div className="hr-native-machine-empty">
-                      {state === "loading" || (state === "online" && (!loaded || reconnecting)) ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
-                      <span>{state === "loading" || (state === "online" && (!loaded || reconnecting))
-                        ? t("sf.loadingSessions")
-                        : state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
+                      <ServerIcon size={15} />
+                      <span>{state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
                     </div>
                   ) : null}
 

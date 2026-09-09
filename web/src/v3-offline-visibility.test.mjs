@@ -16,6 +16,19 @@ test("an offline machine remains visible in the Session-first workspace", () => 
   assert.match(workspace, /t\("sf\.couldNotConnect"\)/)
   assert.match(workspace, /t\("sf\.offlineBody", \{ count: offlineCount \}\)/)
   assert.match(workspace, /onClick=\{onManageMachines\}/)
+  assert.ok(workspace.includes('onClick={() => requestRefresh("offline")} disabled={workspaceRefreshing}'))
+  assert.ok(workspace.includes('offlineRefreshing ? <><LoadingIcon size={15} /> {t("sf.refreshingMachines")}</> : t("sf.retry")'))
+})
+
+test("loading feedback has one visible owner", () => {
+  assert.ok(workspace.includes('const toolbarRefreshing = workspaceRefreshing && refreshOrigin !== "offline"'))
+  assert.ok(workspace.includes('const offlineRefreshing = workspaceRefreshing && refreshOrigin === "offline"'))
+  assert.ok(workspace.includes("setMachineRefreshPending(true)"))
+  assert.equal(workspace.includes('startupPhase === "machines"\n              ? t("sf.connecting")'), false)
+  assert.equal(workspace.includes('startupPhase === "sessions"\n                ? t("sf.loadingSessions")'), false)
+  assert.equal(home.includes('t("sf.findingSessions")'), false)
+  assert.equal(home.includes('t("sf.loadingSessions")'), false)
+  assert.equal(home.includes('!loaded ? <LoadingIcon size={15} />'), false)
 })
 
 test("the Session rail preserves each machine state and its real error", () => {
@@ -29,6 +42,11 @@ test("a machine is not called offline before discovery resolves", () => {
   assert.match(workspace, /state: "loading"/)
   assert.match(workspace, /loadingCount > 0/)
   assert.match(workspace, /t\("sf\.connectingMachines"\)/)
+})
+
+test("an offline stream cannot cancel its own discovery probe forever", () => {
+  assert.match(workspace, /const hasReachableMachine = runtimes\.some/)
+  assert.match(workspace, /reconnecting: reconnectingCount > 0 \|\| \(hasReachableMachine && reconnectingStreamCount > 0\)/)
 })
 
 test("the attention surface is announced and its options report their state", () => {
