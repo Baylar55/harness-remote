@@ -403,7 +403,7 @@ export function WorkThreadConversation({
   const routeChanged = Boolean(routing && targetAgentID !== currentAgentID)
   const routeAgentLabel = agentLabel(destinationAgents, targetAgentID)
   const routingSignature = routing
-    ? routing.machines.map((machine) => `${machine.machineID}:${machine.agents.map((agent) => agent.id).join(",")}`).join("|")
+    ? routing.machines.map((machine) => `${machine.machineID}:${machine.agents.map((agent) => `${agent.id}:${agent.backend}`).join(",")}`).join("|")
     : ""
   const working = isActive(conversation)
   // A truly empty native Session has no persisted model to protect yet. In that one state, and for
@@ -787,8 +787,11 @@ export function WorkThreadConversation({
     setModels([])
     setModelsLoading(true)
     setModelError(null)
+    // Native and routed pickers both use the selected harness's current catalog. Historical Session
+    // state remains timeline/runtime metadata and cannot reintroduce removed selectable models.
     const scope = routing ? NATIVE_ROUTE_MODEL_SCOPE : (modelScope ?? {})
-    void taskClient.listAgentModels(destinationConfig, targetAgentID, scope).then((catalog) => {
+    const catalogConfig = configForAgent(destinationConfig, destinationAgents, targetAgentID)
+    void taskClient.listAgentModels(catalogConfig, targetAgentID, scope).then((catalog) => {
       if (modelGeneration.current !== current) return
       setModels(catalog.models)
       const prior = !routing || targetMachineID === routing.currentMachineID

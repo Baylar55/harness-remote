@@ -76,6 +76,44 @@ test("ACP native Session prompt hands model and native variant to AcpService so 
   ]])
 })
 
+test("ACP native Session command resolves the current catalog before applying its model options", async () => {
+  const daemon = new MachineDaemon({ id: "machine-command-model-acp", name: "workstation" })
+  const acp = new FakeAcp()
+  daemon.registerAcpHost({
+    id: "codex",
+    agent: acp,
+    modelCatalog: {
+      async resolve(model) {
+        assert.deepEqual(model, { providerID: "openai", modelID: "gpt-5.6", variant: "high" })
+        return { ...model, variantConfigId: "reasoning_effort" }
+      }
+    }
+  })
+  const prompts = []
+  const claimOptions = passthroughServerOptions(daemon, acp, {
+    async claimSession() {},
+    async prompt(sessionID, text, model, attachments, variant) { prompts.push([sessionID, text, model, attachments, variant]) },
+    async abort() {}
+  })
+
+  await claimOptions.commandSession("codex", "native-acp-command-model", {
+    command: "help",
+    arguments: "models",
+    directory: "/repo",
+    model: { providerID: "openai", modelID: "gpt-5.6" },
+    variant: "high"
+  })
+
+  assert.deepEqual(acp.configCalls, [])
+  assert.deepEqual(prompts, [[
+    "native-acp-command-model",
+    "/help models",
+    "openai/gpt-5.6",
+    [],
+    { configId: "reasoning_effort", value: "high" }
+  ]])
+})
+
 test("ACP native Session prompt keeps a Session usable when model discovery fails for a non-catalog reason", async () => {
   const daemon = new MachineDaemon({ id: "machine-model-degraded", name: "workstation" })
   const acp = new FakeAcp()

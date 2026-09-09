@@ -69,9 +69,23 @@ function dedupeModels(models) {
   })
 }
 
+export function selectableAcpModelValue(value, option, providerID) {
+  if (providerID !== "claude" || !/^claude-[a-z0-9._-]+\[1m\]$/i.test(value)) return value
+  const bare = value.replace(/\[1m\]$/i, "")
+  // Current Claude ACP can advertise a lone canonical 1M id (Fable) with the context decoration
+  // even though session/set_config_option accepts and canonicalizes the undecorated id. The bare
+  // form also round-trips through older Sessions. If both rows exist, however, the suffix carries
+  // real picker meaning and must remain so the two selectable context lanes do not collapse.
+  const hasBareSibling = option?.options?.some((candidate) =>
+    typeof candidate?.value === "string" && candidate.value.toLowerCase() === bare.toLowerCase()
+  )
+  return hasBareSibling ? value : bare
+}
+
 function modelFromConfigCandidate(candidate, option, fallbackProviderID) {
   if (typeof candidate?.value !== "string" || !candidate.value || candidate.disabled === true) return undefined
-  const { providerID, modelID } = splitModelValue(candidate.value, fallbackProviderID)
+  const selectableValue = selectableAcpModelValue(candidate.value, option, fallbackProviderID)
+  const { providerID, modelID } = splitModelValue(selectableValue, fallbackProviderID)
   if (!providerID || !modelID) return undefined
   return {
     providerID,
@@ -81,7 +95,7 @@ function modelFromConfigCandidate(candidate, option, fallbackProviderID) {
     description: candidate.description || undefined,
     status: typeof candidate.status === "string" ? candidate.status : undefined,
     isFree: typeof candidate.free === "boolean" ? candidate.free : typeof candidate.isFree === "boolean" ? candidate.isFree : undefined,
-    isDefault: candidate.value === option.currentValue
+    isDefault: selectableValue === selectableAcpModelValue(option.currentValue, option, fallbackProviderID)
   }
 }
 

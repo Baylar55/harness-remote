@@ -7,6 +7,7 @@ const standalone = read('./components/standalone-universal-workspace.tsx')
 const home = read('./components/native-session-home.tsx')
 const observer = read('./components/native-session-observer.tsx')
 const machineClient = read('./machineClient.ts')
+const taskClient = read('./taskClient.ts')
 const preferences = read('./appPreferences.ts')
 const serverConfig = read('./serverConfig.ts')
 const desktopRequestTransport = read('../electron/request-transport.ts')
@@ -57,6 +58,7 @@ assert.match(home, /createNativeSessionTarget/)
 assert.doesNotMatch(home, /taskClient\.createTask/)
 assert.match(observer, /const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = \{\}/)
 assert.match(observer, /deferModelFallback/)
+assert.match(taskClient, /export function modelCatalogConfig\(/)
 
 // Routing remains agent-scoped below the machine endpoint. Browser and desktop transports share the
 // same validated routing hint and desktop SSE authorization still comes from the approved config.

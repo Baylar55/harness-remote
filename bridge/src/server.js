@@ -1,6 +1,7 @@
 import http from "node:http"
 import { readdir, realpath } from "node:fs/promises"
 import path from "node:path"
+import { selectableAcpModelValue } from "./agent-model-catalog.js"
 import { AcpPromptEchoFilter } from "./acp-prompt-echo-filter.js"
 import { AcpService } from "./acp-service.js"
 import { harnessProfile } from "./harness-profiles.js"
@@ -154,11 +155,13 @@ function messageLimit(url) {
 function providersResponse(models, fallbackProviderID) {
   const providers = new Map()
   const defaults = {}
+  const modelOption = { options: models }
   for (const option of models) {
-    const separator = option.value.indexOf("/")
+    const value = selectableAcpModelValue(option.value, modelOption, fallbackProviderID)
+    const separator = value.indexOf("/")
     const flat = separator <= 0
-    const providerID = flat ? fallbackProviderID : option.value.slice(0, separator)
-    const modelID = flat ? option.value : option.value.slice(separator + 1)
+    const providerID = flat ? fallbackProviderID : value.slice(0, separator)
+    const modelID = flat ? value : value.slice(separator + 1)
     if (!providerID || !modelID) continue
     const provider = providers.get(providerID) ?? { id: providerID, name: providerID, models: {} }
     provider.models[modelID] = {

@@ -100,7 +100,10 @@ export const HARNESS_PROFILES = {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
     // explicitly and invoke its published binary instead of relying on npx package-spec inference.
-    args: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.63.0", "claude-agent-acp"],
+    // 0.63.0 embeds Claude Agent SDK 0.3.220, whose Claude Code core rejects newer advertised
+    // models such as Fable 5.1 at prompt time. 0.75.1 embeds 0.3.257 and retains the adapter's
+    // session-load fixes while keeping the same ACP executable contract.
+    args: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.75.1", "claude-agent-acp"],
     adapterCommand: "claude-agent-acp",
     permissionMode: "allow",
     preserveListedTimestamps: true,

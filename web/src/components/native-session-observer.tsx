@@ -45,10 +45,8 @@ function visualState(conversation: ConversationRuntime, attention = false): Nati
 export { nativeSessionIsWorking }
 
 /**
- * The daemon owns one model catalog per machine + harness, which is what its capability contract
- * reports as `cacheScope: "machine"`. A native Session therefore asks for exactly that catalog and
- * must not invent a Work Thread identity the daemon has never heard of. Keeping this constant module
- * scoped also keeps the object identity stable across renders.
+ * The daemon owns one current model catalog per machine + harness. A historical native Session may
+ * contribute its current/per-turn model to the timeline, but never widens selectable membership.
  */
 const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
 

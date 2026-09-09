@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
+import { selectableAcpModelValue } from "./agent-model-catalog.js"
 import { TranscriptCache } from "./transcript-cache.js"
 import {
   listExtensionActions,
@@ -1137,9 +1138,12 @@ export class AcpService {
     // harness whose ids carry no provider — Claude Code's `sonnet`, `opus[1m]` — is shown under the
     // backend's name to keep it consistent. Resolve against what the agent actually offered rather
     // than trusting either spelling: exact first, then the part after the synthesised provider.
-    const value = option?.options?.some((candidate) => candidate.value === model)
-      ? model
-      : option?.options?.find((candidate) => candidate.value === model.slice(model.indexOf("/") + 1))?.value
+    const separator = model.indexOf("/")
+    const providerID = separator > 0 ? model.slice(0, separator) : ""
+    const modelID = separator > 0 ? model.slice(separator + 1) : model
+    const value = option?.options?.find((candidate) => candidate.value === model)?.value
+      ?? option?.options?.find((candidate) => candidate.value === modelID)?.value
+      ?? option?.options?.find((candidate) => selectableAcpModelValue(candidate.value, option, providerID) === modelID)?.value
     if (!value) throw new Error(`Harness model is not available: ${model}`)
     // Continuing on the model the Session already holds is not a model change. Sending it anyway
     // made every prompt mutate the Session's configuration, which a harness is entitled to journal
