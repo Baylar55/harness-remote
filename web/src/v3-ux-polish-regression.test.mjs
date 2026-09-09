@@ -77,7 +77,7 @@ assert.match(machineClient, /allowCachedOnTransportFailure/)
 assert.match(standalone, /allowCachedOnTransportFailure: false/)
 assert.match(standalone, /selectedInteractionEnabled/)
 assert.match(standalone, /selectedInteractionEnabled[\s\S]*!selectedRuntime\.error/)
-assert.match(standalone, /startupPhase === "sessions"[\s\S]*sf\.loadingSessions/)
+assert.match(standalone, /startupPhase !== "ready"[\s\S]*sf\.loadingSessions/)
 
 // A successful mobile delete remains visibly transitional until the native Session index confirms it.
 assert.match(standalone, /deletingSessionKeys/)
