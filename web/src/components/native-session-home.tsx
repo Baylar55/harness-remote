@@ -881,15 +881,13 @@ export function NativeSessionHome({
   }
 
   return (
-    <section className="hr-native-home" aria-label="Sessions">
+    <section className="hr-native-home" aria-label="Sessions" aria-busy={!loaded || undefined}>
       <div className="hr-native-home-heading">
         <div>
           <h2>{t("nav.sessions")}</h2>
-          <span>{!loaded
-            ? t("sf.findingSessions")
-            : activeCount
+          {loaded ? <span>{activeCount
               ? t("sf.workingShown", { working: activeCount, shown: scopedRecords.length })
-              : t("sf.recentCount", { count: scopedRecords.length })}</span>
+              : t("sf.recentCount", { count: scopedRecords.length })}</span> : null}
         </div>
         {/* Rename and Delete live in the chat header of the open Session, and refreshing is owned by
             the workspace top bar plus the automatic discovery cycle. The Session list keeps exactly
@@ -901,9 +899,8 @@ export function NativeSessionHome({
             onClick={openCreatePanel}
             aria-label={t("sf.newSession")}
             disabled={!loaded || createMachines.length === 0}
-            aria-busy={!loaded}
           >
-            {!loaded ? <LoadingIcon size={15} /> : <PlusIcon size={15} />} <span>{t("sf.newSession")}</span>
+            <PlusIcon size={15} /> <span>{t("sf.newSession")}</span>
           </button>
         </div>
       </div>
@@ -1006,7 +1003,6 @@ export function NativeSessionHome({
         </div>
       ) : null}
 
-      {!loaded && loading ? <div className="hr-native-home-empty"><LoadingIcon size={18} /><span>{t("sf.findingSessions")}</span></div> : null}
       {discoveryError ? (
         <div className="hr-native-home-notice" role="alert">
           <span><strong>{t("sf.refreshFailed")}</strong> {t("sf.refreshFailedDetail")}</span>
@@ -1037,24 +1033,22 @@ export function NativeSessionHome({
                   <i data-state={state} aria-hidden="true" />
                   <span>
                     <strong>{label}</strong>
-                    <small title={error || machine.config.host}>{state === "loading" || reconnecting ? t("sf.machineConnecting") : state === "offline" ? error || t("sf.machineOffline") : machine.config.host}</small>
+                    <small title={state === "offline" ? error || t("sf.machineOffline") : machine.config.host}>{state === "offline" ? error || t("sf.machineOffline") : machine.config.host}</small>
                   </span>
                 </span>
                 <span className="hr-native-machine-metrics">
                   {machineAttentionCount ? <b>{t("sf.attentionCount", { count: machineAttentionCount })}</b> : null}
                   {workingCount ? <em>{t("sf.liveCount", { count: workingCount })}</em> : null}
-                  <small>{state === "online" ? (loaded && !reconnecting ? sessionCount : "…") : state === "loading" ? "…" : t("sf.offline")}</small>
+                  <small>{state === "online" && loaded && !reconnecting ? sessionCount : state === "offline" ? t("sf.offline") : ""}</small>
                   <i className="hr-native-machine-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i>
                 </span>
               </button>
               {machineCollapsed ? null : (
                 <>
-                  {projects.length === 0 ? (
+                  {projects.length === 0 && state !== "loading" && !(state === "online" && (!loaded || reconnecting)) ? (
                     <div className="hr-native-machine-empty">
-                      {state === "loading" || (state === "online" && (!loaded || reconnecting)) ? <LoadingIcon size={15} /> : <ServerIcon size={15} />}
-                      <span>{state === "loading" || (state === "online" && (!loaded || reconnecting))
-                        ? t("sf.loadingSessions")
-                        : state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
+                      <ServerIcon size={15} />
+                      <span>{state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>
                     </div>
                   ) : null}
 

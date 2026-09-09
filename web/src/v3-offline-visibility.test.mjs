@@ -16,8 +16,19 @@ test("an offline machine remains visible in the Session-first workspace", () => 
   assert.match(workspace, /t\("sf\.couldNotConnect"\)/)
   assert.match(workspace, /t\("sf\.offlineBody", \{ count: offlineCount \}\)/)
   assert.match(workspace, /onClick=\{onManageMachines\}/)
-  assert.match(workspace, /onClick=\{requestRefresh\} disabled=\{workspaceRefreshing\}/)
-  assert.match(workspace, /workspaceRefreshing \? <>\<LoadingIcon size=\{15\} \/> \{t\("sf\.refreshingMachines"\)\}<\/> : t\("sf\.retry"\)/)
+  assert.ok(workspace.includes('onClick={() => requestRefresh("offline")} disabled={workspaceRefreshing}'))
+  assert.ok(workspace.includes('offlineRefreshing ? <><LoadingIcon size={15} /> {t("sf.refreshingMachines")}</> : t("sf.retry")'))
+})
+
+test("loading feedback has one visible owner", () => {
+  assert.ok(workspace.includes('const toolbarRefreshing = workspaceRefreshing && refreshOrigin !== "offline"'))
+  assert.ok(workspace.includes('const offlineRefreshing = workspaceRefreshing && refreshOrigin === "offline"'))
+  assert.ok(workspace.includes("setMachineRefreshPending(true)"))
+  assert.equal(workspace.includes('startupPhase === "machines"\n              ? t("sf.connecting")'), false)
+  assert.equal(workspace.includes('startupPhase === "sessions"\n                ? t("sf.loadingSessions")'), false)
+  assert.equal(home.includes('t("sf.findingSessions")'), false)
+  assert.equal(home.includes('t("sf.loadingSessions")'), false)
+  assert.equal(home.includes('!loaded ? <LoadingIcon size={15} />'), false)
 })
 
 test("the Session rail preserves each machine state and its real error", () => {

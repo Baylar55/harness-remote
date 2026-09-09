@@ -90,13 +90,6 @@
   background: var(--td3-raise-1);
   font-size: 11px;
 }
-.hr-native-workspace .tdw-machine-health i.loading {
-  background: var(--td3-blue-text);
-  box-shadow: 0 0 0 3px var(--td3-blue-soft);
-  animation: tdw-connect-dot 1.35s ease-in-out infinite;
-}
-
-
 .hr-native-workspace-body {
   /* Three tracks, not two: the rail, a zero-width track for the divider (it hangs into both sides
      on its own negative margin) and the detail pane. A two-track grid gave the divider the pane's

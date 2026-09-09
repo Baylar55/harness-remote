@@ -326,8 +326,11 @@ function NativeSessionsWorkspace({
   const runtimesRef = useRef(runtimes)
   runtimesRef.current = runtimes
   const [loaded, setLoaded] = useState(machines.length === 0)
-  const [refreshing, setRefreshing] = useState(false)
+  // Automatic probes keep the machine data current, but they are not a user-visible refresh. Only
+  // an explicit refresh owns a progress indicator in the toolbar (or on the offline retry action).
+  const [machineRefreshPending, setMachineRefreshPending] = useState(false)
   const [sessionRefreshPending, setSessionRefreshPending] = useState(false)
+  const [refreshOrigin, setRefreshOrigin] = useState<"toolbar" | "offline" | null>(null)
   const [revision, setRevision] = useState(0)
   // Which machines currently hold a live event stream. A streaming machine reports its own changes,
   // so it does not need the discovery timer; one that does not stream still does.
@@ -356,11 +359,12 @@ function NativeSessionsWorkspace({
   const refreshGeneration = useRef(0)
   const pendingSessionRefreshToken = useRef<number | null>(null)
 
-  const requestRefresh = useCallback(() => {
+  const requestRefresh = useCallback((origin: "toolbar" | "offline" = "toolbar") => {
     // Machine discovery and the Session index are separate refresh loops. Refreshing only the
     // machine snapshot can preserve an identical runtime and previously left the visible list
     // unchanged, making the command appear to do nothing.
-    setRefreshing(true)
+    setRefreshOrigin(origin)
+    setMachineRefreshPending(true)
     setRevision((value) => value + 1)
     setListRevision((value) => {
       const next = value + 1
@@ -420,11 +424,10 @@ function NativeSessionsWorkspace({
     if (machines.length === 0) {
       setRuntimes([])
       setLoaded(true)
-      setRefreshing(false)
+      setMachineRefreshPending(false)
       return
     }
 
-    setRefreshing(true)
     // Keep the configuration from before this discovery pass. The state updater below immediately
     // installs the new machine object, so consulting runtimesRef from the failed request would make
     // every attempt look like the same endpoint and could retain a stale, successful snapshot.
@@ -472,7 +475,7 @@ function NativeSessionsWorkspace({
     }).finally(() => {
       if (!cancelled && refreshGeneration.current === generation) {
         setLoaded(true)
-        setRefreshing(false)
+        setMachineRefreshPending(false)
       }
     })
     return () => { cancelled = true }
@@ -683,7 +686,15 @@ function NativeSessionsWorkspace({
 
   const startupPhase: "machines" | "sessions" | "ready" =
     !loaded || loadingCount > 0 ? "machines" : !sessionsDiscovered ? "sessions" : "ready"
-  const workspaceRefreshing = refreshing || sessionRefreshPending
+  const workspaceRefreshing = machineRefreshPending || sessionRefreshPending
+  // Keep one feedback point near the action that began the explicit refresh. Background probes do
+  // not set either flag, so an unreachable saved machine cannot leave a permanent global spinner.
+  const toolbarRefreshing = workspaceRefreshing && refreshOrigin !== "offline"
+  const offlineRefreshing = workspaceRefreshing && refreshOrigin === "offline"
+
+  useEffect(() => {
+    if (!workspaceRefreshing) setRefreshOrigin(null)
+  }, [workspaceRefreshing])
 
   function openSession(target: NativeSessionSurfaceTarget) {
     setSelectedState(undefined)
@@ -789,25 +800,15 @@ function NativeSessionsWorkspace({
           {selected ? <><b>/</b><em>{selected.title}</em></> : null}
         </div>
         <div className="tdw-top-actions">
-          <span className="tdw-machine-health" role="status" aria-live="polite">
-            <i className={startupPhase !== "ready" || workspaceRefreshing || reconnectingCount > 0 ? "loading" : onlineCount > 0 ? "online" : "offline"} />
-            {startupPhase === "machines"
-              ? t("sf.connecting")
-              : startupPhase === "sessions"
-                ? t("sf.loadingSessions")
-                : refreshing
-                  ? t("sf.refreshingMachines")
-                  : sessionRefreshPending
-                    ? t("sf.refreshingSessions")
-                : reconnectingCount > 0
-                  ? t("sf.connecting")
-                  : t("sf.machineCount", { online: onlineCount, total: machines.length })}
+          <span className="tdw-machine-health" aria-label={t("sf.machineCount", { online: onlineCount, total: machines.length })}>
+            <i className={startupPhase === "ready" ? onlineCount > 0 ? "online" : "offline" : "pending"} aria-hidden="true" />
+            {t("sf.machineCount", { online: onlineCount, total: machines.length })}
           </span>
           <button type="button" className="tdw-button secondary tdw-machines-button" onClick={onManageMachines}><ServerIcon size={15} /> {t("sf.machines")}</button>
           <button type="button" className="palette-hint" onClick={() => setPaletteOpen(true)} title="Command palette"><span>⌘K</span></button>
           <button type="button" className="tdw-icon-button" onClick={onManageSettings} title={t("nav.settings")} aria-label={t("nav.settings")}><SettingsIcon size={16} /></button>
-          <button type="button" className="tdw-icon-button hr-refresh-button" onClick={requestRefresh} title={t("sf.refresh")} aria-label={workspaceRefreshing ? t("sf.refreshingSessions") : t("sf.refresh")} aria-busy={workspaceRefreshing} disabled={workspaceRefreshing}>
-            {workspaceRefreshing ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
+          <button type="button" className="tdw-icon-button hr-refresh-button" onClick={() => requestRefresh("toolbar")} title={toolbarRefreshing ? t("sf.refreshingMachines") : t("sf.refresh")} aria-label={toolbarRefreshing ? t("sf.refreshingMachines") : t("sf.refresh")} aria-busy={toolbarRefreshing || undefined} disabled={workspaceRefreshing}>
+            {toolbarRefreshing ? <LoadingIcon size={16} /> : <RefreshIcon size={16} />}
           </button>
         </div>
       </header>
@@ -974,8 +975,8 @@ function NativeSessionsWorkspace({
               <p>{t("sf.offlineBody", { count: offlineCount })}</p>
               <div>
                 <button type="button" className="tdw-button secondary" onClick={onManageMachines}>{t("sf.manageMachines")}</button>
-                <button type="button" className="tdw-button primary" onClick={requestRefresh} disabled={workspaceRefreshing} aria-busy={workspaceRefreshing}>
-                  {workspaceRefreshing ? <><LoadingIcon size={15} /> {t("sf.refreshingMachines")}</> : t("sf.retry")}
+                <button type="button" className="tdw-button primary" onClick={() => requestRefresh("offline")} disabled={workspaceRefreshing} aria-busy={offlineRefreshing || undefined}>
+                  {offlineRefreshing ? <><LoadingIcon size={15} /> {t("sf.refreshingMachines")}</> : t("sf.retry")}
                 </button>
               </div>
             </div>
