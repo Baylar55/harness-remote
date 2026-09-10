@@ -103,12 +103,11 @@ type NativeMachineRuntime = {
 
 type MachineEditorProps = {
   machine: WorkspaceMachine
-  isNew: boolean
   onCancel: () => void
   onSave: (machine: WorkspaceMachine) => void
 }
 
-function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps) {
+function MachineEditor({ machine, onCancel, onSave }: MachineEditorProps) {
   const t = useTranslator()
   const [name, setName] = useState(machine.name)
   const [host, setHost] = useState(machine.config.host)
@@ -167,7 +166,7 @@ function MachineEditor({ machine, isNew, onCancel, onSave }: MachineEditorProps)
       <div className="uw-machine-editor-actions">
         <button type="button" className="uw-manager-button" onClick={onCancel}>{t("sf.cancel")}</button>
         <button type="button" className="uw-manager-button" disabled={!valid || testing} onClick={() => void testConnection()}>{testing ? t("sf.testing") : t("sf.testConnection")}</button>
-        <button type="button" className="uw-manager-button primary" disabled={!valid} onClick={() => valid && onSave(nextMachine())}>{isNew ? t("sf.addMachineAction") : t("sf.saveMachine")}</button>
+        <button type="button" className="uw-manager-button primary" disabled={!valid} onClick={() => valid && onSave(nextMachine())}>{t("sf.saveMachine")}</button>
       </div>
     </div>
   )
@@ -247,7 +246,7 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
               </div>
             )
           })}
-          {draft ? <MachineEditor key={draft.id} machine={draft} isNew={editingID === "new"} onCancel={() => setEditingID(null)} onSave={save} /> : null}
+          {draft ? <MachineEditor key={draft.id} machine={draft} onCancel={() => setEditingID(null)} onSave={save} /> : null}
         </div>
         <footer className="uw-machine-manager-footer"><span>{t("sf.managerFooter", { machines: machines.length, agents: availableCount })}</span><button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ {t("sf.addMachineAction")}</button></footer>
       </section>
