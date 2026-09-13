@@ -429,7 +429,7 @@ try {
   await modelButton.waitFor({ state: "visible", timeout: 12_000 })
   await waitForDisabledState(modelButton, false, "target model catalog did not settle after initial route load")
   await modelButton.click()
-  await panel.locator('.tdw-model-picker').getByText("Claude Target", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
+  await panel.locator('.tdw-model-name code').getByText("claude-cross-target", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   assert.match(await panel.locator('.tdw-model-picker').innerText(), /Claude Target/, "target route did not load the target harness model catalog")
   await page.keyboard.press("Escape")
   assert.match(await modelButton.innerText(), /Claude Target/, "target default model was not selected after catalog discovery")
