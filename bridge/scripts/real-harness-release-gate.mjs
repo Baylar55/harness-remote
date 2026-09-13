@@ -31,6 +31,16 @@ export function parseHarnessList(value = SUPPORTED_HARNESSES.join(",")) {
   return harnesses
 }
 
+export function parseInferenceUnavailable(value = "", harnesses = SUPPORTED_HARNESSES) {
+  const requested = value.split(",").map((entry) => entry.trim().toLowerCase()).filter(Boolean)
+  const unavailable = [...new Set(requested)]
+  const outsideGate = unavailable.filter((harness) => !harnesses.includes(harness))
+  if (outsideGate.length) {
+    throw new Error(`Inference-unavailable harness(es) must also be selected by --harnesses: ${outsideGate.join(", ")}.`)
+  }
+  return unavailable
+}
+
 export function buildHarnessPlan(harnesses) {
   if (!Array.isArray(harnesses) || harnesses.length < 2) throw new Error("At least two harnesses are required.")
   return harnesses.map((primary, index) => ({
@@ -213,7 +223,7 @@ export function parseSoakEvidence(output = "") {
 }
 
 export function gateUsage() {
-  return `Usage: npm run gate:real-harness -- [options]\n\nOptions:\n  --harnesses <list>  Comma-separated harnesses to verify (default: ${SUPPORTED_HARNESSES.join(",")})\n  --mode <mode>       release (default) or control-plane\n  --report <path>     JSON evidence report path (default: artifacts/real-harness-gate-<timestamp>.json)\n  --help              Show this help\n\nThe gate first checks /v1/diagnostics and stops early if the daemon is unreachable, credentials are rejected, a requested harness is not registered, or model discovery is not configured. It then health-checks every requested installed harness through its agent-scoped /global/health route and requires a concrete reported version so the release evidence identifies the actual harness build under test. Only then does it create one harmless probe Session per harness and require that exact native id to be rediscovered through the bounded Session index before inference-heavy soak legs begin. Each real-harness leg must also emit the complete scenario evidence contract (Session creation, multi-turn streaming, model selection, cross-harness isolation, transcript fidelity, Stop/recovery and bounded resources); a zero exit code without that evidence fails closed. Shared soak settings use HR_URL, HR_USER, HR_PASS, HR_DIR_A, HR_DIR_B, HR_CYCLES, HR_TURN_BUDGET_MS and HR_ECHO_MARKERS. Release mode always disables HR_ALLOW_TURN_ERRORS. Use --mode control-plane when inference is unavailable; that mode is recorded as not release-eligible.`
+  return `Usage: npm run gate:real-harness -- [options]\n\nOptions:\n  --harnesses <list>             Comma-separated harnesses to verify (default: ${SUPPORTED_HARNESSES.join(",")})\n  --inference-unavailable <list> Selected harnesses with no usable inference on this machine\n  --mode <mode>                  release (default) or control-plane\n  --report <path>                JSON evidence report path (default: artifacts/real-harness-gate-<timestamp>.json)\n  --help                         Show this help\n\nThe gate first checks /v1/diagnostics and stops early if the daemon is unreachable, credentials are rejected, a requested harness is not registered, or model discovery is not configured. It then health-checks every requested installed harness through its agent-scoped /global/health route and requires a concrete reported version so the release evidence identifies the actual harness build under test. Only then does it create one harmless probe Session per harness and require that exact native id to be rediscovered through the bounded Session index before inference-heavy soak legs begin. Harnesses declared with --inference-unavailable still must pass preflight and native Session rediscovery, but their inference-heavy primary soak is skipped and the overall run is recorded as inference-unverified, never verified. Each attempted real-harness leg must emit the complete scenario evidence contract (Session creation, multi-turn streaming, model selection, cross-harness isolation, transcript fidelity, Stop/recovery and bounded resources); a zero exit code without that evidence fails closed. Shared soak settings use HR_URL, HR_USER, HR_PASS, HR_DIR_A, HR_DIR_B, HR_CYCLES, HR_TURN_BUDGET_MS and HR_ECHO_MARKERS. Release mode always disables HR_ALLOW_TURN_ERRORS. Use --mode control-plane when inference is unavailable for the whole selected surface; that mode is recorded as not release-eligible.`
 }
 
 async function runSoak({ primary, secondary, mode, soakPath }) {
@@ -276,17 +286,25 @@ export async function runGate({
   harnesses,
   mode,
   reportPath,
+  inferenceUnavailable = [],
   soakPath = fileURLToPath(new URL("./session-first-soak.mjs", import.meta.url)),
   preflight = preflightDaemon,
   sessionDiscovery = verifyRealHarnessSessionDiscovery
 }) {
+  const unknownUnavailable = inferenceUnavailable.filter((harness) => !harnesses.includes(harness))
+  if (unknownUnavailable.length) {
+    throw new Error(`Inference-unavailable harness(es) must also be selected by the gate: ${unknownUnavailable.join(", ")}.`)
+  }
+  const unavailable = new Set(inferenceUnavailable)
   const echoMarkers = process.env.HR_ECHO_MARKERS !== "0"
   const eligibility = releaseEligibility({ mode, echoMarkers })
   const plan = buildHarnessPlan(harnesses)
+  const attemptedPlan = plan.filter(({ primary }) => !unavailable.has(primary))
   const runs = []
 
   console.log(`Harness Remote real-harness gate: mode=${mode}`)
   console.log(`Harnesses: ${harnesses.join(", ")}`)
+  if (unavailable.size) console.log(`Inference unavailable/unverified: ${[...unavailable].join(", ")}`)
   console.log(`Evidence: ${eligibility.evidence}`)
   console.log(eligibility.note)
 
@@ -325,6 +343,10 @@ export async function runGate({
       console.log(`\n========================================`)
       console.log(`Primary ${pair.primary} / secondary ${pair.secondary}`)
       console.log(`========================================`)
+      if (unavailable.has(pair.primary)) {
+        console.log(`  skip inference for ${pair.primary}: declared unavailable on this machine; preflight and Session rediscovery remain required`)
+        continue
+      }
       const result = await runSoak({ ...pair, mode, soakPath })
       runs.push(result)
       if (!result.passed) {
@@ -334,17 +356,30 @@ export async function runGate({
     }
   }
 
-  const allPassed = preflightResult.passed
+  const attemptedPassed = preflightResult.passed
     && discoveryResult.passed
-    && runs.length === plan.length
+    && runs.length === attemptedPlan.length
     && runs.every((run) => run.passed)
-  const verdict = !allPassed ? "failed" : eligibility.releaseEligible ? "verified" : "control-plane-only"
+  const hasUnverifiedInference = unavailable.size > 0
+  const verdict = !attemptedPassed
+    ? "failed"
+    : mode === "control-plane"
+      ? "control-plane-only"
+      : hasUnverifiedInference
+        ? "inference-unverified"
+        : "verified"
+  const releaseEligible = verdict === "verified"
   const runByPrimary = new Map(runs.map((run) => [run.primary, run]))
   const discoveryByHarness = new Map((discoveryResult.results ?? []).map((result) => [result.agentID, result]))
   const coverageMatrix = Object.fromEntries(plan.map(({ primary, secondary }) => {
     const run = runByPrimary.get(primary)
     const discovery = discoveryByHarness.get(primary)
     const sessionDiscovery = discovery?.passed ?? false
+    const inferenceStatus = unavailable.has(primary)
+      ? "unverified"
+      : run?.passed
+        ? mode === "control-plane" ? "control-plane-only" : "verified"
+        : "failed"
     const coverage = {
       sessionDiscovery,
       ...(run?.evidence?.coverage ?? {})
@@ -355,6 +390,7 @@ export async function runGate({
     ]
     return [primary, {
       secondary,
+      inferenceStatus,
       complete: sessionDiscovery && (run?.evidence?.complete ?? false),
       coverage,
       missingCoverage,
@@ -365,21 +401,22 @@ export async function runGate({
     }]
   }))
   const report = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     kind: "harness-remote-real-harness-gate",
     generatedAt: new Date().toISOString(),
     source: { commit: gitCommit() },
     runtime: { platform: process.platform, arch: process.arch, node: process.version },
     endpoint: safeURL(process.env.HR_URL ?? "http://127.0.0.1:4097"),
     mode,
-    releaseEligible: eligibility.releaseEligible,
+    releaseEligible,
     routingEvidence: eligibility.evidence,
     harnesses,
     settings: {
       cycles: Number(process.env.HR_CYCLES ?? "5"),
       turnBudgetMs: Number(process.env.HR_TURN_BUDGET_MS ?? "120000"),
       echoMarkers,
-      allowTurnErrors: mode === "control-plane"
+      allowTurnErrors: mode === "control-plane",
+      inferenceUnavailable: [...unavailable]
     },
     preflight: preflightResult,
     sessionDiscovery: discoveryResult,
@@ -398,7 +435,7 @@ async function main() {
     console.log(gateUsage())
     return
   }
-  const known = new Set(["--harnesses", "--mode", "--report"])
+  const known = new Set(["--harnesses", "--inference-unavailable", "--mode", "--report"])
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
     if (!known.has(arg)) throw new Error(`Unknown option '${arg}'. Use --help for usage.`)
@@ -407,11 +444,15 @@ async function main() {
   }
 
   const harnesses = parseHarnessList(optionValue(args, "--harnesses") ?? process.env.HR_GATE_HARNESSES)
+  const inferenceUnavailable = parseInferenceUnavailable(
+    optionValue(args, "--inference-unavailable") ?? process.env.HR_GATE_INFERENCE_UNAVAILABLE ?? "",
+    harnesses
+  )
   const mode = resolveGateMode(optionValue(args, "--mode") ?? process.env.HR_GATE_MODE ?? "release")
   const reportPath = path.resolve(optionValue(args, "--report") ?? process.env.HR_GATE_REPORT ?? defaultReportPath())
-  const report = await runGate({ harnesses, mode, reportPath })
+  const report = await runGate({ harnesses, mode, reportPath, inferenceUnavailable })
   if (report.verdict === "failed") process.exitCode = 1
-  else if (report.verdict === "control-plane-only") process.exitCode = 2
+  else if (report.verdict === "control-plane-only" || report.verdict === "inference-unverified") process.exitCode = 2
 }
 
 const direct = Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
