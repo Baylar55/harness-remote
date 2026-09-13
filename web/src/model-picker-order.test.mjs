@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { groupModels, modelOptionKey } from './components/model-picker.tsx'
+import { filterModelGroups, groupModels, modelOptionKey } from './components/model-picker.tsx'
 
 // The catalog owns variant ordering. These labels are intentionally non-alphabetical and are
 // treated as opaque values: the UI must preserve the order supplied by the harness rather than
@@ -11,27 +11,32 @@ const catalog = [
     providerName: 'OpenAI',
     modelID: 'gpt-5.6',
     modelName: 'GPT-5.6',
-    isDefault: true
+    isDefault: true,
+    isFree: true
   },
   ...catalogVariantOrder.map((variant) => ({
     providerID: 'openai',
     providerName: 'OpenAI',
     modelID: 'gpt-5.6',
     modelName: 'GPT-5.6',
-    variant
+    variant,
+    isFree: true
   })),
   {
     providerID: 'anthropic',
     providerName: 'Anthropic',
     modelID: 'claude-sonnet',
-    modelName: 'Claude Sonnet'
+    modelName: 'Claude Sonnet',
+    description: 'Strong code review model',
+    isFree: false
   },
   {
     providerID: 'anthropic',
     providerName: 'Anthropic',
     modelID: 'claude-sonnet',
     modelName: 'Claude Sonnet',
-    variant: 'thinking'
+    variant: 'thinking',
+    isFree: false
   }
 ]
 
@@ -49,4 +54,30 @@ assert.deepEqual(
 )
 assert.deepEqual(anthropic.variants.map((variant) => variant.variant), ['thinking'])
 
-console.log('model picker variant ordering behavioral tests passed')
+assert.deepEqual(
+  filterModelGroups(groups, 'anthropic').map((group) => group.modelID),
+  ['claude-sonnet'],
+  'model search must match provider identity'
+)
+assert.deepEqual(
+  filterModelGroups(groups, 'code review').map((group) => group.modelID),
+  ['claude-sonnet'],
+  'model search must match catalog descriptions'
+)
+assert.deepEqual(
+  filterModelGroups(groups, 'thinking').map((group) => group.modelID),
+  ['claude-sonnet'],
+  'model search must match harness-provided variant labels'
+)
+assert.deepEqual(
+  filterModelGroups(groups, 'GPT-5.6').map((group) => group.modelID),
+  ['gpt-5.6'],
+  'model search must be case-insensitive across model ids/names'
+)
+assert.deepEqual(
+  filterModelGroups(groups, '', true).map((group) => group.modelID),
+  ['gpt-5.6'],
+  'free-only filtering must use catalog-confirmed free metadata'
+)
+
+console.log('model picker grouping, ordering and filtering behavioral tests passed')
