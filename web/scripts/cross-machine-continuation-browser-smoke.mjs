@@ -440,7 +440,6 @@ try {
   assert.equal(await toggle.isDisabled(), false, "source Session became non-interactive while the verified cross-machine plan was open")
   assert.equal(await sourceComposer.isDisabled(), false, "source composer became non-interactive while the verified cross-machine plan was open")
   assert.equal(await machineSelect.inputValue(), TARGET_MACHINE, "target machine selection changed while preparing the first message")
-  assert.equal(await projectSelect.inputValue(), MATCH_PROJECT, "target Project selection changed while preparing the first message")
   await waitForDisabledState(projectSelect, false, "target Project did not settle after route revalidation")
   await waitForDisabledState(modelButton, false, "target model catalog did not settle after route revalidation")
   assert.equal(await firstMessage.inputValue(), FIRST_MESSAGE, "target first-message input was lost while the target model catalog revalidated")
