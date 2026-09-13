@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #484: `da2602e73ce74962768807297cffd6e2d26576b1`.
+- Integration head after PR #485: `da45d84fe340aafae8a692b94d3ef18dd2ecb411`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -30,13 +30,14 @@
 - PR #482 added explicit known-working model selectors for real-harness validation, with fail-closed missing/ambiguous model resolution and selected-model-scoped variant coverage. Full Chromium, desktop and signed Debug APK gates passed before integration.
 - PR #483 retired redundant `native-session-model.ts` source guards from the observer/controller regression after #479 supplied executable coverage. Its CI-contract wiring was corrected before merge and the full Chromium, desktop and signed Debug APK gates passed.
 - PR #484 strengthened the executable native-create capability contract with fail-closed coverage for unsupported transports plus explicit `sessions=false` and `prompt=false`; it adds no runtime behavior and passed the full Chromium, desktop and signed Debug APK gates.
-- #474-#480 and #483-#484 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #485 retired two redundant model-bootstrap source guards from `model-regression.test.mjs` in favor of the blocking Chromium model-switch smoke, which holds `/models` unresolved and proves the composer and Send stay gated until a verified catalog arrives. Full Chromium, desktop and signed Debug APK gates passed before integration.
+- #474-#480 and #483-#485 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/retire-model-bootstrap-source-guards`.
+Active WIP branch: `codex/retire-model-bootstrap-duplicate-guards`.
 
-The current #330 slice removes two `model-regression.test.mjs` source-text assertions for model-catalog bootstrap gating. The blocking Chromium `native-session-model-switch-smoke.mjs` already exercises the behavior directly: it deliberately holds the PI `/models` request open, waits for the mounted composer, proves the composer remains disabled while model discovery is unresolved, then releases the catalog and continues the full multi-Session/model-switch flow. The source-string checks for `modelCatalogReady` and `modelBootstrapBlocked` are therefore redundant. No new duplicate test is added and no ACP, Native Session runtime, harness adapter or UI production code is changed.
+The current #330 slice removes the remaining duplicate model-bootstrap source guards whose behavior is already exercised by the blocking Chromium `native-session-model-switch-smoke.mjs`: the final observer/controller `modelBootstrapBlocked` assertion and the dedicated source-only component test for catalog bootstrap gating. The distinct reconnect test remains intact because it covers combined connectivity/mutation semantics, and the explicit catalog-failure test remains intact because the Chromium smoke exercises an unresolved catalog rather than a failed catalog. No new duplicate test is added and no ACP, Native Session runtime, harness adapter or UI production code is changed.
 
 ### P0 — issue #368
 
