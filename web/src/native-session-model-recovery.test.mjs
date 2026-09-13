@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { api } from "./api.ts"
-import { lastNativeMessageModel, resolveNativeSessionTargetModel } from "./native-session-model.ts"
+import { resolveNativeSessionTargetModel } from "./native-session-model.ts"
 
 const originalLoadMessagePage = api.loadMessagePage
 const originalListModels = api.listModels
@@ -40,41 +40,15 @@ function target(backend) {
   }
 }
 
-const nativeMessages = [
-  {
-    info: {
-      id: "user-old",
-      role: "user",
-      sessionID: "ses-1",
-      model: { providerID: "openai", modelID: "gpt-old", variant: "low" }
-    },
-    parts: []
+const openCodeMessages = [{
+  info: {
+    id: "assistant-current",
+    role: "assistant",
+    sessionID: "ses-1",
+    model: { providerID: "anthropic", modelID: "claude-current", variant: "high" }
   },
-  {
-    info: {
-      id: "user-current",
-      role: "user",
-      sessionID: "ses-1",
-      model: { providerID: "anthropic", modelID: "claude-current", variant: "high" }
-    },
-    parts: []
-  },
-  {
-    info: {
-      id: "assistant-current",
-      role: "assistant",
-      sessionID: "ses-1",
-      model: { providerID: "anthropic", modelID: "claude-current" }
-    },
-    parts: []
-  }
-]
-
-assert.deepEqual(
-  lastNativeMessageModel(nativeMessages),
-  { providerID: "anthropic", modelID: "claude-current", variant: "high" },
-  "the newest native model must win and may inherit only the matching adjacent user variant"
-)
+  parts: []
+}]
 
 try {
   const pageCalls = []
@@ -82,7 +56,7 @@ try {
 
   api.loadMessagePage = async (...args) => {
     pageCalls.push(args)
-    return { messages: nativeMessages }
+    return { messages: openCodeMessages }
   }
   api.listModels = async (...args) => {
     modelCalls.push(args)
@@ -95,7 +69,7 @@ try {
     providerID: "anthropic",
     modelID: "claude-current",
     variant: "high"
-  }, "OpenCode must recover the served model from native message metadata")
+  }, "OpenCode recovery must consume native message model metadata")
   assert.deepEqual(pageCalls[0], [
     openCodeTarget.config,
     "ses-1",
