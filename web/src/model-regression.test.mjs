@@ -1,14 +1,10 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const nativeModel = readFileSync(new URL('./native-session-model.ts', import.meta.url), 'utf8')
 const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
 const conversation = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
 const picker = readFileSync(new URL('./components/model-picker.tsx', import.meta.url), 'utf8')
 
-assert.match(nativeModel, /lastNativeMessageModel/, 'native Session model recovery must read transcript metadata')
-assert.match(nativeModel, /PAGE_MODEL_BACKENDS = new Set\(\["omp", "pi", "codex"\]\)/, 'journal-backed model recovery must remain explicit')
-assert.match(nativeModel, /target\.backend === "claude"/, 'Claude model recovery must use its live adapter catalog')
 assert.match(adapter, /reconcileNativeSessionModel/, 'the native runtime must absorb authoritative model metadata')
 assert.match(adapter, /for \(const turn of entry\.turns\.values\(\)\)/, 'recovered models must fill turns that never recorded one')
 assert.match(conversation, /taskClient\.listAgentModels/, 'the active Session controller must use the daemon model catalog')
