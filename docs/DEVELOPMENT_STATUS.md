@@ -13,18 +13,21 @@
 
 ## Current integration baseline
 
-- Integration head after PR #472: `3e5f65bbe11b99eccfc4536f432e9db7033540b6`.
+- Integration head after PR #475: `ce01e3f8b5a74584ea425f224c58069ca00a6faf`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
 - PR #471 made cross-machine continuation planning/safety a blocking Chromium regression.
 - PR #472 extended that blocking smoke through real execution: exact-workspace recovery after a blocked Project choice, exactly-once target Native Session creation, source+target lineage persistence, authority reset, exactly-once first prompt and opening the target Session after live model-catalog bootstrap.
-- #472 also fixed the same-machine Project-catalog refresh race by preserving a still-valid explicit Project choice without carrying a machine-local Project id across machine changes.
-- The final #472 head passed the complete PR gate before integration: type/regressions, bridge macOS/Windows, full Chromium product/native-Session suite and signed Debug APK artifact.
+- PR #474 replaced Machine discovery source-text assertions with an executable contract against the real `discoverMachine()` path.
+- PR #475 replaced the attachment forwarding source-text assertion with an executable `api.sendPrompt()` transport contract covering directory, model, variant, agent and attachment payloads.
+- #474 and #475 were test-only/contract hardening slices under issue #330; both passed the complete PR gate before integration, including Chromium and signed Debug APK.
 
 ## Current roadmap boundary
 
-There is no active implementation PR after #472.
+Active WIP branch: `codex/behavioral-model-variant-order-contract`.
+
+The current #330 slice replaces the model-picker source-text guards for reasoning/variant ordering with an executable contract. The contract treats variant labels as opaque and requires the UI grouping logic to preserve the catalog order advertised by the harness. No harness/ACP/session semantics are being changed.
 
 ### P0 — issue #368
 

@@ -48,7 +48,7 @@ function formatPrice(value?: number): string {
   return `$${Math.round(value! * 100) / 100}`
 }
 
-function groupModels(models: ModelOption[]): ModelGroup[] {
+export function groupModels(models: ModelOption[]): ModelGroup[] {
   const groups = new Map<string, ModelOption[]>()
   for (const model of models) {
     const key = `${model.providerID}|${model.modelID}`

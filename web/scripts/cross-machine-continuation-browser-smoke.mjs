@@ -440,8 +440,10 @@ try {
   assert.equal(await machineSelect.inputValue(), TARGET_MACHINE, "target machine selection changed while preparing the first message")
   assert.equal(await projectSelect.inputValue(), MATCH_PROJECT, "target Project selection changed while preparing the first message")
   assert.equal(await projectSelect.isDisabled(), false, "target Project unexpectedly returned to a loading state")
-  assert.equal(await modelButton.isDisabled(), false, "target model unexpectedly returned to a loading/unavailable state")
-  assert.match(await modelButton.innerText(), /Claude Target/, "target model selection changed while preparing the first message")
+  await waitForDisabledState(modelButton, false, "target model catalog did not settle after route revalidation")
+  assert.equal(await firstMessage.inputValue(), FIRST_MESSAGE, "target first-message input was lost while the target model catalog revalidated")
+  assert.equal(await projectSelect.inputValue(), MATCH_PROJECT, "target Project selection changed while the target model catalog revalidated")
+  assert.match(await modelButton.innerText(), /Claude Target/, "target model selection did not recover after catalog revalidation")
   await readySummary.waitFor({ state: "visible", timeout: 12_000 })
 
   const continueButton = panel.getByRole("button", { name: "Continue on target machine" })
