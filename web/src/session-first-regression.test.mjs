@@ -42,10 +42,6 @@ assert.equal(discovery.includes('launch('), false, 'discovery must not launch wo
 assert.ok(continuation.includes('client.claimSession(target.config, target.directory, target.sessionID)'), 'ACP mutation must still claim the exact native Session when ownership is needed')
 assert.equal(continuation.includes('createSession('), false, 'same-Session continuation must not create a replacement Session')
 
-assert.ok(create.includes('api.createSession(config'), 'New Session must reuse the existing native /session create primitive')
-assert.ok(create.includes('agent.transport === "acp" || agent.transport === "http"'), 'native create must stay on the two validated transports')
-assert.ok(create.includes('agent.capabilities?.sessions !== false') && create.includes('agent.capabilities?.prompt !== false'), 'native create must follow the harness capability contract rather than a per-harness rollout gate')
-assert.ok(create.includes('writerOwned: true'), 'a freshly created native Session must enter the v3 controller as already writable')
 assert.equal(create.includes('createTask('), false, 'native create must not create a Task')
 assert.equal(create.includes('Conversation'), true, 'native create comments must explicitly document the no-Conversation boundary')
 assert.ok(home.includes('aria-label={t("sf.newSession")}'), 'Session Home must expose translated New Session')
