@@ -129,6 +129,34 @@ const missingOwnershipMetadata = nativeSessionSurfaceTarget('machine-1', base, {
 assert.equal(missingOwnershipMetadata.external, false)
 assert.equal(missingOwnershipMetadata.requiresExplicitClaim, true)
 
+const metadataAgent = {
+  ...codex,
+  id: 'metadata-actions',
+  label: 'Metadata Actions',
+  capabilities: {
+    ...codex.capabilities,
+    sessionRename: true,
+    sessionDelete: true
+  }
+}
+const metadataSessions = await discoverAgentNativeSessions(base, metadataAgent, {
+  async listGlobalSessions() {
+    return [{ id: 'metadata-1', title: 'Metadata Session', directory: '/repo', time: { created: 1, updated: 2 } }]
+  },
+  async listSessions() {
+    throw new Error('a successful global discovery must not use the stable fallback')
+  },
+  async listStatuses() {
+    return {}
+  }
+})
+assert.equal(metadataSessions.length, 1)
+assert.equal(metadataSessions[0].renameSupported, true)
+assert.equal(metadataSessions[0].deleteSupported, true)
+const metadataTarget = nativeSessionSurfaceTarget('machine-1', base, metadataSessions[0])
+assert.equal(metadataTarget.renameSupported, true)
+assert.equal(metadataTarget.deleteSupported, true)
+
 const fallbackCalls = []
 const fallbackClient = {
   async listGlobalSessions(config) {
