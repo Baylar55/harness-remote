@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #488: `c03f4fcaf53f42b73c215a0c1808d355f0799903`.
+- Integration head after PR #489: `982e8eb5945fe2dfa57d4f196c5202bed6db72d8`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -34,13 +34,14 @@
 - PR #486 retired the remaining duplicate model-bootstrap source guards from the observer/component regressions while preserving distinct reconnect and catalog-failure contracts. The full Chromium behavior smoke, desktop matrix and signed Debug APK gates passed before integration.
 - PR #487 retired four redundant native-create source guards while preserving the architectural no-Task/no-Conversation boundary. Its first two Chromium attempts exposed one remaining premature Project-value read during legitimate same-target route revalidation; the smoke was aligned with #480 by waiting for settled Project/model state, then the complete Chromium, desktop and signed Debug APK gates passed.
 - PR #488 strengthened the executable Native Session discovery contract with positive rename/delete capability propagation and retired the redundant source guards for global-list fallback and capability mapping. The complete Chromium, desktop and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#488 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #489 retired the last three `native-session-model.ts` source guards from the Session-first architecture monolith after confirming the existing lifecycle contract already proves nested `info.model.id`, newest cross-role model precedence and matching prior-user variant inheritance. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
+- #474-#480 and #483-#489 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/model-recovery-behavior-contract`.
+Active WIP branch: `codex/model-catalog-routing-behavior-contract`.
 
-The current #330 slice re-audits the three remaining `native-session-model.ts` source-text guards in `session-first-regression.test.mjs`. No duplicate behavioral tests are being added: `native-session-model-lifecycle.test.mjs` already explicitly proves OpenCode compatibility with nested `info.model.id`, newest model-bearing message precedence across roles, and matching prior-user variant inheritance; `native-session-model-recovery.test.mjs` already proves OMP/PI/Codex page-model authority. This slice therefore removes only those redundant source-text guards plus the now-unused source-file read, with no production/runtime change. Keep the architectural/session/harness guards that protect distinct boundaries.
+The current #330 slice retires only four remaining model-catalog implementation guards that are already exercised by the blocking production-browser `native-session-model-switch-smoke.mjs`: the real picker becomes usable, shows the owning harness catalog without cross-harness leakage, routing to another harness switches to that harness catalog, model/variant selection reaches exactly the intended harness prompt, and the picker remains usable across Session/harness switches. The distinct source guards for explicit-choice protection, empty-vs-existing Session fallback, first-prompt catalog-read stability, searchable picker UI and unavailable-catalog `Harness default` remain until equivalent behavioral evidence exists. No production/runtime code is changed.
 
 ### P0 — issue #368
 
