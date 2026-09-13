@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #489: `982e8eb5945fe2dfa57d4f196c5202bed6db72d8`.
+- Integration head after PR #490: `08339a62c7bd66a08c42a060dc64aa5dbd75192f`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -35,13 +35,14 @@
 - PR #487 retired four redundant native-create source guards while preserving the architectural no-Task/no-Conversation boundary. Its first two Chromium attempts exposed one remaining premature Project-value read during legitimate same-target route revalidation; the smoke was aligned with #480 by waiting for settled Project/model state, then the complete Chromium, desktop and signed Debug APK gates passed.
 - PR #488 strengthened the executable Native Session discovery contract with positive rename/delete capability propagation and retired the redundant source guards for global-list fallback and capability mapping. The complete Chromium, desktop and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #489 retired the last three `native-session-model.ts` source guards from the Session-first architecture monolith after confirming the existing lifecycle contract already proves nested `info.model.id`, newest cross-role model precedence and matching prior-user variant inheritance. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
-- #474-#480 and #483-#489 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #490 retired four model-catalog/routing implementation guards after the blocking Chromium model-switch contract proved real picker availability, per-harness catalog isolation, routed target-catalog selection and exact selected model/variant prompt delivery. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
+- #474-#480 and #483-#490 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/model-catalog-routing-behavior-contract`.
+Active WIP branch: `codex/model-picker-search-behavior-contract`.
 
-The current #330 slice retires only four remaining model-catalog implementation guards that are already exercised by the blocking production-browser `native-session-model-switch-smoke.mjs`: the real picker becomes usable, shows the owning harness catalog without cross-harness leakage, routing to another harness switches to that harness catalog, model/variant selection reaches exactly the intended harness prompt, and the picker remains usable across Session/harness switches. The distinct source guards for explicit-choice protection, empty-vs-existing Session fallback, first-prompt catalog-read stability, searchable picker UI and unavailable-catalog `Harness default` remain until equivalent behavioral evidence exists. No production/runtime code is changed.
+The current #330 slice extends the existing executable `model-picker-order.test.mjs` contract rather than adding another test surface. The model-picker catalog filter is extracted unchanged as a pure helper and is exercised for provider/model/description/variant search plus catalog-confirmed free filtering. Only after that behavioral coverage is in place are the two duplicate source-text guards that merely search for the `Search model, provider, variant` placeholder removed from `model-regression.test.mjs` and `taskdesk-home.test.mjs`. The unavailable-catalog `Harness default` guard and the model fallback/explicit-choice guards remain distinct. No model selection, routing, ACP or harness semantics are intentionally changed.
 
 ### P0 — issue #368
 
