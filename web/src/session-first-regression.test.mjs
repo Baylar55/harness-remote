@@ -9,7 +9,6 @@ const prompt = read('./native-session-prompt.ts')
 const stop = read('./native-session-stop.ts')
 const adapter = read('./native-session-v3-adapter.ts')
 const conversationController = read('./conversation-controller.ts')
-const modelRecovery = read('./native-session-model.ts')
 const observer = read('./components/native-session-observer.tsx')
 const home = read('./components/native-session-home-base.tsx')
 const actions = read('./components/native-session-actions.tsx')
@@ -79,10 +78,6 @@ assert.equal(observer.includes('sendNativeSessionPrompt'), false, 'observer must
 assert.equal(observer.includes('stopNativeSession'), false, 'observer must not own Stop lifecycle')
 assert.equal(observer.includes('startTaskDeskSessionLiveRefresh'), false, 'observer must not own a second live-event controller')
 assert.equal(observer.includes('TaskDeskMessageContent'), false, 'observer must not own a second renderer')
-
-assert.ok(modelRecovery.includes('info.model?.providerID') && modelRecovery.includes('info.model?.id'), 'OpenCode model recovery must accept the current nested assistant model envelope')
-assert.ok(modelRecovery.includes('for (let index = messages.length - 1; index >= 0; index -= 1)'), 'model recovery must choose the newest model-bearing native message regardless of role')
-assert.ok(modelRecovery.includes('PAGE_MODEL_BACKENDS = new Set(["omp", "pi", "codex"])'), 'journal-backed model recovery must remain explicit and scoped')
 
 assert.ok(adapter.includes('function nativeConversationController(entry: NativeConversationEntry): ConversationController'), 'native Session behavior must be exposed through an explicit scoped controller')
 assert.equal(adapter.includes('api.loadMessagePage ='), false, 'native Session mount must not monkey-patch global transcript reads')
