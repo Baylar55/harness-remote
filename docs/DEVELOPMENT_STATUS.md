@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #479: `4309e9c89cfdbb60b9c1d8a03187f64380bf2d77`.
+- Integration head after PR #480: `d044bb7499599b5b728f441c39622a98ffd8ad8d`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -25,19 +25,24 @@
 - PR #477 replaced the remaining `api.listModels()` source-text guards with an executable transport/catalog contract covering directory + Session scope, harness defaults, capabilities/limits and exact harness variant order.
 - PR #478 replaced the stale-model source guard around new Native Session creation with a real `createNativeSessionTarget()` contract covering selected-harness scope, Project/title forwarding, writer ownership, surfaced capabilities and fail-closed identity.
 - PR #479 replaced Native Session model-recovery source guards with an executable `resolveNativeSessionTargetModel()` contract while reusing existing lifecycle coverage instead of duplicating it.
-- #474-#479 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
+- PR #480 retired the remaining redundant model-reconciliation source guards and stabilized the cross-machine Chromium smoke by waiting for the settled Project/model catalog state already supported by production. No runtime behavior changed; the complete Chromium, desktop and signed Debug APK gates passed before integration.
+- #474-#480 are behavior-preserving contract/CI-hardening slices under issue #330; production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/retire-redundant-model-recovery-guards`.
+Active WIP branch: `codex/real-harness-inference-evidence`.
 
-The current #330 slice removes two remaining `model-regression.test.mjs` source-text assertions for model reconciliation that are already covered behaviorally by the existing OMP model-projection tests. No new duplicate test is added. CI also exposed timing-sensitive assertions in the blocking cross-machine smoke during the already-supported same-machine target-catalog refresh; the smoke now waits for the settled Project/model state while preserving #472's selection, safety, lineage and exactly-once mutation assertions. Production ACP, Native Session, harness-runtime and UI code is unchanged.
+The current #368 slice hardens real-machine evidence after a Zorin release-gate run against installed OpenCode 1.18.19, Codex 1.1.14, OMP 18.0.6 and PI 0.5.0. Claude was intentionally omitted because it is not installed on that machine. Codex completed the strict inference/model/variant/Stop/transcript gate. OpenCode completed the functional routing/transcript/Stop checks with one >120 s provider/model latency outlier. OMP and PI registered, exposed catalogs, created/rediscovered Native Sessions and accepted prompts, but their selected provider models never produced inference replies within the turn budget; that machine may have no usable provider/model configured for those harnesses.
+
+The gate therefore gains an explicit per-harness `--inference-unavailable` declaration. Such harnesses still must pass daemon preflight, installed-build health and Native Session rediscovery, but their inference-heavy primary leg is not run. The report uses `verdict: "inference-unverified"`, exit code 2 and per-harness `inferenceStatus: "unverified"`; it can never become release-eligible through this declaration. No ACP, Native Session runtime, harness adapter or UI code is changed.
+
+Parked #330 branch: `codex/retire-native-model-source-guards`, first commit `dd13026c976b2fcd8ddef1a0e6fe77e6b2611243`. It removes three redundant `native-session-model.ts` source-text guards already covered by #479's executable recovery contract. Resume/rebase this branch only after the current #368 gate slice is settled.
 
 ### P0 — issue #368
 
 Repository/fixture-side automation is effectively exhausted. Do not add synthetic coverage for the remaining true boundaries. #368 stays open for:
 
-- strict `gate:real-harness` execution against actually installed, concretely versioned OpenCode/Codex/Claude/OMP/PI builds on a traceable machine;
+- strict `gate:real-harness` execution against actually installed, concretely versioned OpenCode/Codex/Claude/OMP/PI builds on a traceable machine, distinguishing unavailable inference from Harness Remote regressions without weakening fail-closed release evidence;
 - real daemon/adapter restart plus persisted-Session resume/claim evidence against those installed harnesses;
 - physical Android foreground/background/network-interruption checks;
 - repository-admin enforcement of `main` pull-request/required-check rules.
