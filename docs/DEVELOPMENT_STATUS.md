@@ -31,7 +31,7 @@
 
 Active WIP branch: `codex/retire-redundant-model-recovery-guards`.
 
-The current #330 slice removes two remaining `model-regression.test.mjs` source-text assertions for model reconciliation that are already covered behaviorally by the existing OMP model-projection tests. No new duplicate test is added, and production ACP, Native Session, harness-runtime and UI code is unchanged.
+The current #330 slice removes two remaining `model-regression.test.mjs` source-text assertions for model reconciliation that are already covered behaviorally by the existing OMP model-projection tests. No new duplicate test is added. CI also exposed timing-sensitive assertions in the blocking cross-machine smoke during the already-supported same-machine target-catalog refresh; the smoke now waits for the settled Project/model state while preserving #472's selection, safety, lineage and exactly-once mutation assertions. Production ACP, Native Session, harness-runtime and UI code is unchanged.
 
 ### P0 — issue #368
 
