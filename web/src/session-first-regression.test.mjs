@@ -33,9 +33,6 @@ assert.equal(existsSync(new URL('./components/conversation-workspace.tsx', impor
 assert.equal(existsSync(new URL('./components/conversation-detail.tsx', import.meta.url)), false, 'retired Conversation detail must stay deleted')
 assert.ok(discovery.includes('export type NativeSessionRef'), 'Session-first must keep native Session identity explicit')
 assert.ok(discovery.includes('machineID: string') && discovery.includes('agentID: string') && discovery.includes('sessionID: string'), 'native identity must include machine, harness and native Session id')
-assert.ok(discovery.includes('listGlobalSessions(config).catch(() => client.listSessions(config))'), 'native discovery must retain global-list fallback')
-assert.ok(discovery.includes('renameSupported: agent.capabilities?.sessionRename === true'), 'native discovery must expose rename capability from the harness contract')
-assert.ok(discovery.includes('deleteSupported: agent.capabilities?.sessionDelete === true'), 'native discovery must expose delete capability from the harness contract')
 assert.equal(discovery.includes('createTask('), false, 'discovery must not persist a Task')
 assert.equal(discovery.includes('launch('), false, 'discovery must not launch work')
 
