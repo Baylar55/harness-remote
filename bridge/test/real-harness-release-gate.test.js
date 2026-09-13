@@ -9,6 +9,7 @@ import {
   defaultReportPath,
   parseHarnessList,
   parseInferenceUnavailable,
+  parseModelOverrides,
   parseSoakEvidence,
   preflightDaemon,
   releaseEligibility,
@@ -48,6 +49,18 @@ function passingSessionDiscovery(harnesses) {
   }
 }
 
+function passingPreflight(harnesses) {
+  return {
+    passed: true,
+    status: 200,
+    error: null,
+    machineID: "machine-1",
+    agents: harnesses.map((id) => ({ id, registered: true, modelCatalog: { configured: true, source: "test", cachedModels: 2, phase: "ready" } })),
+    missingHarnesses: [],
+    missingModelCatalogs: []
+  }
+}
+
 test("defaults the release gate to every supported harness", () => {
   assert.deepEqual(parseHarnessList(), SUPPORTED_HARNESSES)
 })
@@ -66,6 +79,28 @@ test("normalizes inference-unavailable harnesses and keeps them inside the selec
   assert.deepEqual(parseInferenceUnavailable(" OMP,pi,omp ", harnesses), ["omp", "pi"])
   assert.deepEqual(parseInferenceUnavailable("", harnesses), [])
   assert.throws(() => parseInferenceUnavailable("claude", harnesses), /must also be selected/i)
+})
+
+test("parses repeatable per-harness model overrides in requested order and deduplicates them", () => {
+  const harnesses = ["opencode", "codex"]
+  assert.deepEqual(parseModelOverrides([
+    "opencode=muse-a",
+    "codex=openai/gpt-a",
+    "opencode=muse-b",
+    "codex=openai/gpt-b",
+    "opencode=muse-a"
+  ], harnesses), {
+    opencode: ["muse-a", "muse-b"],
+    codex: ["openai/gpt-a", "openai/gpt-b"]
+  })
+})
+
+test("model overrides fail closed on malformed, out-of-scope or one-model selections", () => {
+  const harnesses = ["opencode", "codex"]
+  assert.throws(() => parseModelOverrides(["opencode"], harnesses), /must use/i)
+  assert.throws(() => parseModelOverrides(["pi=model-a", "pi=model-b"], harnesses), /must also be selected/i)
+  assert.throws(() => parseModelOverrides(["opencode=model-a"], harnesses), /at least two distinct/i)
+  assert.throws(() => parseModelOverrides(["opencode=model-a", "opencode=model-a"], harnesses), /at least two distinct/i)
 })
 
 test("rotates each harness through primary responsibility", () => {
@@ -197,25 +232,18 @@ test("orchestrates every primary and persists credential-free scenario evidence"
       mode: "release",
       reportPath,
       soakPath,
-      preflight: async ({ harnesses }) => ({
-        passed: true,
-        status: 200,
-        error: null,
-        machineID: "machine-1",
-        agents: harnesses.map((id) => ({ id, registered: true, modelCatalog: { configured: true, source: "test", cachedModels: 2, phase: "ready" } })),
-        missingHarnesses: [],
-        missingModelCatalogs: []
-      }),
+      preflight: async ({ harnesses }) => passingPreflight(harnesses),
       sessionDiscovery: async ({ harnesses }) => passingSessionDiscovery(harnesses)
     })
     assert.equal(report.verdict, "verified")
     assert.equal(report.releaseEligible, true)
-    assert.equal(report.schemaVersion, 5)
+    assert.equal(report.schemaVersion, 6)
     assert.equal(report.preflight.passed, true)
     assert.equal(report.sessionDiscovery.passed, true)
-    assert.deepEqual(report.runs.map(({ primary, secondary, passed }) => ({ primary, secondary, passed })), [
-      { primary: "codex", secondary: "claude", passed: true },
-      { primary: "claude", secondary: "codex", passed: true }
+    assert.deepEqual(report.settings.modelOverrides, {})
+    assert.deepEqual(report.runs.map(({ primary, secondary, modelSelectors, passed }) => ({ primary, secondary, modelSelectors, passed })), [
+      { primary: "codex", secondary: "claude", modelSelectors: [], passed: true },
+      { primary: "claude", secondary: "codex", modelSelectors: [], passed: true }
     ])
     assert.equal(report.runs[0].evidence.complete, true)
     assert.equal(report.runs[0].evidence.coverage.stopAndResume, true)
@@ -236,6 +264,61 @@ test("orchestrates every primary and persists credential-free scenario evidence"
   }
 })
 
+test("routes explicit model selectors only to their primary soak and records them", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hr-real-gate-models-"))
+  const soakPath = path.join(root, "fake-model-soak.mjs")
+  const reportPath = path.join(root, "report.json")
+  fs.writeFileSync(soakPath, `
+const expected = process.env.HR_PRIMARY === "codex" ? ["gpt-a", "openai/gpt-b"] : []
+const actual = JSON.parse(process.env.HR_PRIMARY_MODELS ?? "[]")
+if (JSON.stringify(actual) !== JSON.stringify(expected)) process.exit(9)
+console.log(${JSON.stringify(COMPLETE_SOAK_OUTPUT)})
+`, "utf8")
+
+  try {
+    const report = await runGate({
+      harnesses: ["codex", "claude"],
+      modelOverrides: { codex: ["gpt-a", "openai/gpt-b"] },
+      mode: "release",
+      reportPath,
+      soakPath,
+      preflight: async ({ harnesses }) => passingPreflight(harnesses),
+      sessionDiscovery: async ({ harnesses }) => passingSessionDiscovery(harnesses)
+    })
+
+    assert.equal(report.verdict, "verified")
+    assert.deepEqual(report.settings.modelOverrides, { codex: ["gpt-a", "openai/gpt-b"] })
+    assert.deepEqual(report.runs[0].modelSelectors, ["gpt-a", "openai/gpt-b"])
+    assert.deepEqual(report.runs[1].modelSelectors, [])
+    assert.equal(report.runs.every((run) => run.passed), true)
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("explicit models cannot conflict with inference-unavailable or collapse to one model", async () => {
+  await assert.rejects(
+    () => runGate({
+      harnesses: ["codex", "omp"],
+      inferenceUnavailable: ["omp"],
+      modelOverrides: { omp: ["model-a", "model-b"] },
+      mode: "release",
+      reportPath: path.join(os.tmpdir(), "unused-real-gate-report.json")
+    }),
+    /both inference-unavailable and given explicit models/i
+  )
+
+  await assert.rejects(
+    () => runGate({
+      harnesses: ["codex", "omp"],
+      modelOverrides: { codex: ["model-a", "model-a"] },
+      mode: "release",
+      reportPath: path.join(os.tmpdir(), "unused-real-gate-report.json")
+    }),
+    /at least two distinct models/i
+  )
+})
+
 test("declared unavailable inference stays unverified without running that primary soak", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "hr-real-gate-unverified-"))
   const soakPath = path.join(root, "fake-soak.mjs")
@@ -249,15 +332,7 @@ test("declared unavailable inference stays unverified without running that prima
       mode: "release",
       reportPath,
       soakPath,
-      preflight: async ({ harnesses }) => ({
-        passed: true,
-        status: 200,
-        error: null,
-        machineID: "machine-1",
-        agents: harnesses.map((id) => ({ id, registered: true, modelCatalog: { configured: true, source: "test", cachedModels: 2, phase: "ready" } })),
-        missingHarnesses: [],
-        missingModelCatalogs: []
-      }),
+      preflight: async ({ harnesses }) => passingPreflight(harnesses),
       sessionDiscovery: async ({ harnesses }) => passingSessionDiscovery(harnesses)
     })
 
@@ -317,15 +392,7 @@ test("a zero-exit soak without required scenario evidence fails the release gate
       mode: "release",
       reportPath,
       soakPath,
-      preflight: async ({ harnesses }) => ({
-        passed: true,
-        status: 200,
-        error: null,
-        machineID: "machine-1",
-        agents: harnesses.map((id) => ({ id, registered: true, modelCatalog: { configured: true, source: "test", cachedModels: 2, phase: "ready" } })),
-        missingHarnesses: [],
-        missingModelCatalogs: []
-      }),
+      preflight: async ({ harnesses }) => passingPreflight(harnesses),
       sessionDiscovery: async ({ harnesses }) => passingSessionDiscovery(harnesses)
     })
     assert.equal(report.verdict, "failed")
@@ -351,15 +418,7 @@ test("does not launch soak legs when native Session rediscovery fails", async ()
       mode: "release",
       reportPath,
       soakPath,
-      preflight: async ({ harnesses }) => ({
-        passed: true,
-        status: 200,
-        error: null,
-        machineID: "machine-1",
-        agents: harnesses.map((id) => ({ id, registered: true, modelCatalog: { configured: true, source: "test", cachedModels: 2, phase: "ready" } })),
-        missingHarnesses: [],
-        missingModelCatalogs: []
-      }),
+      preflight: async ({ harnesses }) => passingPreflight(harnesses),
       sessionDiscovery: async () => ({
         schemaVersion: 1,
         passed: false,
