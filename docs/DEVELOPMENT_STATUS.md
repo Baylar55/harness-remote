@@ -40,6 +40,8 @@ Active WIP branch: `codex/retire-native-create-source-guards-final`.
 
 The current #330 slice removes four remaining create-path source-text guards from the large Session-first architecture regression. #478 already executes the real `createNativeSessionTarget()` path and proves the native create call, selected-harness/Project scope and writer ownership; #484 adds fail-closed behavioral coverage for unsupported transports plus explicit `sessions=false` and `prompt=false`. The architectural no-Task/no-Conversation guards remain because they protect the product boundary rather than duplicate runtime behavior. No production code is changed.
 
+CI on the first #487 head exposed one remaining premature Project-value assertion in `cross-machine-continuation-browser-smoke.mjs`: during the already-supported same-target route revalidation the Project select may temporarily clear while disabled, then restore the chosen Project when settled. The same failure repeated on one clean rerun. Consistent with #480, the smoke now waits for the settled enabled state before checking Project preservation; the post-settle Project assertion, mismatch blocking, zero-mutation boundary and exactly-once continuation checks remain intact. This is test-only stabilization, not a product behavior change.
+
 ### P0 — issue #368
 
 Repository/fixture-side automation is effectively exhausted. Do not add synthetic coverage for the remaining true boundaries. #368 stays open for:
