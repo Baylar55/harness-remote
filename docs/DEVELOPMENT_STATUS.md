@@ -30,7 +30,7 @@
 
 Active WIP branch: `codex/behavioral-native-model-recovery-contract`.
 
-The current #330 slice replaces source-text guards around Native Session model recovery with executable behavior. It verifies newest OpenCode transcript metadata + adjacent variant inheritance, native page-model authority for OMP/PI/Codex, Claude's Session-scoped advertised default fallback, unsupported-backend isolation and fail-safe recovery errors. Production ACP, Native Session and harness-runtime code is unchanged.
+The current #330 slice replaces source-text guards around Native Session model recovery with executable behavior. Existing lifecycle tests already own direct OpenCode model/variant ordering semantics; this slice adds the missing `resolveNativeSessionTargetModel()` contract for OpenCode transcript authority, native page-model authority for OMP/PI/Codex, Claude's Session-scoped advertised default fallback, unsupported-backend isolation and fail-safe recovery errors. Production ACP, Native Session and harness-runtime code is unchanged.
 
 ### P0 — issue #368
 
