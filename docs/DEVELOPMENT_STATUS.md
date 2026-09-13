@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #490: `08339a62c7bd66a08c42a060dc64aa5dbd75192f`.
+- Integration head after PR #491: `c32b3bf8967adadd70692c909644acb03e2a4faf`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -36,13 +36,14 @@
 - PR #488 strengthened the executable Native Session discovery contract with positive rename/delete capability propagation and retired the redundant source guards for global-list fallback and capability mapping. The complete Chromium, desktop and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #489 retired the last three `native-session-model.ts` source guards from the Session-first architecture monolith after confirming the existing lifecycle contract already proves nested `info.model.id`, newest cross-role model precedence and matching prior-user variant inheritance. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
 - PR #490 retired four model-catalog/routing implementation guards after the blocking Chromium model-switch contract proved real picker availability, per-harness catalog isolation, routed target-catalog selection and exact selected model/variant prompt delivery. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
-- #474-#480 and #483-#490 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #491 replaced the Model Picker search placeholder guards with the executable existing picker contract, covering model/provider/description/variant search and catalog-confirmed free filtering. Full Chromium, desktop and signed Debug APK gates passed before integration; filtering semantics were unchanged.
+- #474-#480 and #483-#491 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/model-picker-search-behavior-contract`.
+Active WIP branch: `codex/adapter-model-reconciliation-behavior-contract`.
 
-The current #330 slice extends the existing executable `model-picker-order.test.mjs` contract rather than adding another test surface. The model-picker catalog filter is extracted unchanged as a pure helper and is exercised for provider/model/description/variant search plus catalog-confirmed free filtering. Only after that behavioral coverage is in place are the two duplicate source-text guards that merely search for the `Search model, provider, variant` placeholder removed from `model-regression.test.mjs` and `taskdesk-home.test.mjs`. The unavailable-catalog `Harness default` guard and the model fallback/explicit-choice guards remain distinct. No model selection, routing, ACP or harness semantics are intentionally changed.
+The current #330 slice extends the existing adapter-level model projection contract instead of adding another test surface. `omp-session-model-projection.test.mjs` already executes `registerNativeSessionV3Adapter()` through real `controller.loadMessagePage()` calls for journal/page model recovery; it now also exercises OpenCode native message metadata with an older user model and a newer assistant `info.model.id` envelope, proving that the newest verified OpenCode model reaches the open runtime. Only the two observer source-text guards for the internal `reconcileNativeSessionModel()`/`lastNativeMessageModel()` call chain are retired. WorkThread fallback, explicit user-choice protection, first-prompt catalog-read stability and other distinct architectural guards remain untouched. No production/runtime code changes in this slice.
 
 ### P0 — issue #368
 

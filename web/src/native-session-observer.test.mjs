@@ -73,8 +73,6 @@ assert.ok(adapter.includes('entry && entry.listeners.size === 0'), 'the final li
 assert.ok(adapter.includes('conversations.delete(id)'), 'leaving the final listener must dispose the transient projection so another Session starts cleanly')
 assert.equal(adapter.includes('MAX_CACHED_PROJECTIONS'), false, 'Session runtimes must not survive navigation in a global cache')
 assert.equal(adapter.includes('pruneInactiveProjections'), false, 'Session navigation must not retain inactive runtime state')
-assert.ok(adapter.includes('reconcileNativeSessionModel(entry, page, before)'), 'every current tail page must refresh delayed OpenCode and Codex model metadata')
-assert.ok(adapter.includes('lastNativeMessageModel(page.messages)'), 'OpenCode tail reconciliation must recover the newest native turn model')
 assert.equal(adapter.includes('TaskDeskConversation'), false, 'adapter must not contain rendering')
 assert.equal(adapter.includes('groupConversationParts'), false, 'adapter must not contain reasoning/activity semantics')
 
