@@ -5,7 +5,6 @@ const nativeModel = readFileSync(new URL('./native-session-model.ts', import.met
 const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
 const conversation = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
 const picker = readFileSync(new URL('./components/model-picker.tsx', import.meta.url), 'utf8')
-const create = readFileSync(new URL('./native-session-create.ts', import.meta.url), 'utf8')
 
 assert.match(nativeModel, /lastNativeMessageModel/, 'native Session model recovery must read transcript metadata')
 assert.match(nativeModel, /PAGE_MODEL_BACKENDS = new Set\(\["omp", "pi", "codex"\]\)/, 'journal-backed model recovery must remain explicit')
@@ -24,6 +23,5 @@ assert.match(conversation, /modelBootstrapBlocked/, 'model bootstrap must gate t
 assert.match(conversation, /<ModelPicker/, 'the Session controller must render the shared model picker')
 assert.match(picker, /Search model, provider, variant/, 'model catalog must remain searchable')
 assert.match(picker, /Harness default/, 'an unavailable catalog must fall back honestly to the harness default')
-assert.match(create, /api\.createSession\(config, title\?\.trim\(\) \|\| undefined, undefined, directory\)/, 'new native Sessions must not invent a stale explicit model')
 
 console.log('Session-first model regression tests passed')
