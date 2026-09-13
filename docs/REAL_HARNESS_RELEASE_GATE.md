@@ -60,7 +60,7 @@ Each harness becomes primary once. The secondary rotates so that switching/isola
 
 A successful strict run writes a report under `artifacts/real-harness-gate-<timestamp>.json` with verdict `verified`.
 
-The report deliberately contains no username, password, prompt body or model catalog. It records the commit when available, platform/architecture/Node version, endpoint without URL credentials, harness pairs, durations, exit status, evidence strength and final verdict.
+The report deliberately contains no username, password, prompt body or model catalog. It records the commit when available, platform/architecture/Node version, endpoint without URL credentials, harness pairs, durations, exit status, evidence strength, explicit model selectors and final verdict.
 
 ## Preflight
 
@@ -75,6 +75,33 @@ It then health-checks the concrete installed build and requires a created Native
 If any of those checks fail, no inference soak process is launched. The JSON report still gets written with `verdict: "failed"` and a concise section showing the missing harness, model-discovery or Session-discovery evidence. This keeps startup/configuration failures distinct from inference failures and avoids spending several minutes on legs that cannot succeed.
 
 The preflight report contains only non-sensitive harness metadata such as id, backend, transport, state, model-catalog source and cached-model count. It does not persist credentials or full model inventories.
+
+## Select known-working models
+
+A harness catalog can contain thousands of models from providers that are not all configured on the machine running the release gate. When you know which models actually work, constrain that harness to them instead of letting the soak use the first distinct models in the catalog:
+
+```bash
+npm run gate:real-harness -- \
+  --harnesses opencode,codex,omp,pi \
+  --model opencode=muse-spark-1.3-contributor-free \
+  --model opencode=muse-spark-1.2-contributor-free \
+  --model codex=gpt-5.6-sol \
+  --model codex=gpt-5.6-luna \
+  --inference-unavailable omp,pi
+```
+
+`--model` is repeatable. For each harness configured this way, provide at least two distinct selectors because the release gate must still prove model switching. A selector can be:
+
+- a `modelID`, when that id is unique in the harness-advertised catalog;
+- an exact `providerID/modelID`, when the same model id appears under multiple providers.
+
+The soak resolves every selector against the live catalog before creating the test Sessions. A missing or ambiguous selector fails closed rather than silently choosing another model. The ordinary repeated model changes, Stop recovery and cross-harness cycles then use only the selected model identities.
+
+Variant coverage is also constrained to those selected model identities. If none of the known-working selected models advertises a variant, that optional variant leg is skipped rather than testing a different provider/model whose inference has not been established on that machine.
+
+Harnesses without `--model` keep the existing automatic selection of the first three distinct advertised model identities. Explicit selection only changes release-test evidence; it does not change Harness Remote runtime model discovery or user-facing model behavior.
+
+A harness cannot be both listed in `--inference-unavailable` and given explicit models in the same run.
 
 ## A selected harness has no usable inference
 
@@ -170,7 +197,9 @@ HR_PASS='local-test-password' \
 npm run soak:session
 ```
 
-Useful environment controls include `HR_CYCLES`, `HR_TURN_BUDGET_MS`, `HR_DIR_A`, `HR_DIR_B`, `HR_ECHO_MARKERS` and `HR_ALLOW_TURN_ERRORS`.
+For direct soak diagnosis, `HR_PRIMARY_MODELS` can contain a JSON array of model selectors, for example `HR_PRIMARY_MODELS='["gpt-5.6-sol","gpt-5.6-luna"]'`.
+
+Useful environment controls include `HR_CYCLES`, `HR_TURN_BUDGET_MS`, `HR_DIR_A`, `HR_DIR_B`, `HR_ECHO_MARKERS`, `HR_PRIMARY_MODELS` and `HR_ALLOW_TURN_ERRORS`.
 
 ## Interpreting catalog checks
 
