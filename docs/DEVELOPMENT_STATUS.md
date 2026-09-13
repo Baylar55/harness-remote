@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #480: `d044bb7499599b5b728f441c39622a98ffd8ad8d`.
+- Integration head after PR #481: `b9c0ef869b7ab59ca5b76b93f153c42106f9fd43`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -26,15 +26,16 @@
 - PR #478 replaced the stale-model source guard around new Native Session creation with a real `createNativeSessionTarget()` contract covering selected-harness scope, Project/title forwarding, writer ownership, surfaced capabilities and fail-closed identity.
 - PR #479 replaced Native Session model-recovery source guards with an executable `resolveNativeSessionTargetModel()` contract while reusing existing lifecycle coverage instead of duplicating it.
 - PR #480 retired the remaining redundant model-reconciliation source guards and stabilized the cross-machine Chromium smoke by waiting for the settled Project/model catalog state already supported by production. No runtime behavior changed; the complete Chromium, desktop and signed Debug APK gates passed before integration.
-- #474-#480 are behavior-preserving contract/CI-hardening slices under issue #330; production ACP/harness behavior was not changed by these slices.
+- PR #481 added explicit per-harness `--inference-unavailable` evidence: unavailable inference stays unverified while daemon registration, installed-build health and Native Session rediscovery remain mandatory. It also made desktop Linux/macOS/Windows coverage automatic for every PR targeting `main` or the persistent integration branch. Full Chromium, desktop and signed Debug APK gates passed before integration.
+- #474-#480 are behavior-preserving contract/CI-hardening slices under issue #330; #481 and the current work are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/real-harness-inference-evidence`.
+Active WIP branch: `codex/real-harness-model-selection`.
 
-The current #368 slice hardens real-machine evidence after a Zorin release-gate run against installed OpenCode 1.18.19, Codex 1.1.14, OMP 18.0.6 and PI 0.5.0. Claude was intentionally omitted because it is not installed on that machine. Codex completed the strict inference/model/variant/Stop/transcript gate. OpenCode completed the functional routing/transcript/Stop checks with one >120 s provider/model latency outlier. OMP and PI registered, exposed catalogs, created/rediscovered Native Sessions and accepted prompts, but their selected provider models never produced inference replies within the turn budget; that machine may have no usable provider/model configured for those harnesses.
+The Zorin release-gate evidence used installed OpenCode 1.18.19, Codex 1.1.14, OMP 18.0.6 and PI 0.5.0; Claude was intentionally omitted because it is not installed on that machine. Codex completed the strict inference/model/variant/Stop/transcript gate. OpenCode completed the functional routing/transcript/Stop checks with one >120 s provider/model latency outlier. OMP and PI registered, exposed catalogs, created/rediscovered Native Sessions and accepted prompts, but their automatically selected provider models never produced inference replies within the turn budget; that machine may have no usable provider/model configured for those harnesses.
 
-The gate therefore gains an explicit per-harness `--inference-unavailable` declaration. Such harnesses still must pass daemon preflight, installed-build health and Native Session rediscovery, but their inference-heavy primary leg is not run. The report uses `verdict: "inference-unverified"`, exit code 2 and per-harness `inferenceStatus: "unverified"`; it can never become release-eligible through this declaration. No ACP, Native Session runtime, harness adapter or UI code is changed.
+PR #481 now lets those latter harnesses be recorded explicitly as inference-unverified without weakening the integration checks. The current #368 slice addresses the other side of the evidence problem: for an inference-capable harness, the gate can be given repeated `--model <harness>=<modelID-or-provider/model>` selectors so the soak uses known-working advertised models instead of arbitrary first catalog entries. At least two distinct explicit models remain mandatory so model switching is still tested; missing/ambiguous selectors fail closed; optional variant coverage is restricted to the selected model identities. This changes only release-test evidence, not application model discovery or runtime behavior.
 
 Parked #330 branch: `codex/retire-native-model-source-guards`, first commit `dd13026c976b2fcd8ddef1a0e6fe77e6b2611243`. It removes three redundant `native-session-model.ts` source-text guards already covered by #479's executable recovery contract. Resume/rebase this branch only after the current #368 gate slice is settled.
 
@@ -42,7 +43,7 @@ Parked #330 branch: `codex/retire-native-model-source-guards`, first commit `dd1
 
 Repository/fixture-side automation is effectively exhausted. Do not add synthetic coverage for the remaining true boundaries. #368 stays open for:
 
-- strict `gate:real-harness` execution against actually installed, concretely versioned OpenCode/Codex/Claude/OMP/PI builds on a traceable machine, distinguishing unavailable inference from Harness Remote regressions without weakening fail-closed release evidence;
+- strict `gate:real-harness` execution against actually installed, concretely versioned OpenCode/Codex/Claude/OMP/PI builds on a traceable machine, using known-working models where available and explicitly recording unavailable inference without weakening fail-closed release evidence;
 - real daemon/adapter restart plus persisted-Session resume/claim evidence against those installed harnesses;
 - physical Android foreground/background/network-interruption checks;
 - repository-admin enforcement of `main` pull-request/required-check rules.
