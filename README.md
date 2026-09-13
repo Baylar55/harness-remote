@@ -149,6 +149,8 @@ Harness Remote 3 currently integrates with:
 
 Harness Remote discovers model and control capabilities from the running harness instead of assuming every provider supports the same options.
 
+Model defaults, capability flags, context/output limits and variant order come from the harness catalog; Harness Remote does not reinterpret variant labels.
+
 If a harness advertises a control, Harness Remote can surface it. If it does not, Harness Remote does not invent one.
 
 See the [Harness capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md) for the detailed runtime contract.

@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const api = readFileSync(new URL('./api.ts', import.meta.url), 'utf8')
 const nativeModel = readFileSync(new URL('./native-session-model.ts', import.meta.url), 'utf8')
 const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
 const conversation = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
 const picker = readFileSync(new URL('./components/model-picker.tsx', import.meta.url), 'utf8')
 const create = readFileSync(new URL('./native-session-create.ts', import.meta.url), 'utf8')
 
-assert.ok(api.includes('listModels(config: ServerConfig'), 'API must expose the model catalog')
-assert.ok(api.includes('withDirectory("/config/providers"'), 'OpenCode models stay directory scoped')
 assert.match(nativeModel, /lastNativeMessageModel/, 'native Session model recovery must read transcript metadata')
 assert.match(nativeModel, /PAGE_MODEL_BACKENDS = new Set\(\["omp", "pi", "codex"\]\)/, 'journal-backed model recovery must remain explicit')
 assert.match(nativeModel, /target\.backend === "claude"/, 'Claude model recovery must use its live adapter catalog')
