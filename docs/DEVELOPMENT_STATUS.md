@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #486: `8bd7b792a3647e34c439c672f8bfdae312f81d5d`.
+- Integration head after PR #487: `525c64a7f30be551dd4d5ce060be27e3e5c2d0f8`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -32,15 +32,14 @@
 - PR #484 strengthened the executable native-create capability contract with fail-closed coverage for unsupported transports plus explicit `sessions=false` and `prompt=false`; it adds no runtime behavior and passed the full Chromium, desktop and signed Debug APK gates.
 - PR #485 retired two redundant model-bootstrap source guards from `model-regression.test.mjs` in favor of the blocking Chromium model-switch smoke, which holds `/models` unresolved and proves the composer and Send stay gated until a verified catalog arrives. Full Chromium, desktop and signed Debug APK gates passed before integration.
 - PR #486 retired the remaining duplicate model-bootstrap source guards from the observer/component regressions while preserving distinct reconnect and catalog-failure contracts. The full Chromium behavior smoke, desktop matrix and signed Debug APK gates passed before integration.
-- #474-#480 and #483-#486 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #487 retired four redundant native-create source guards while preserving the architectural no-Task/no-Conversation boundary. Its first two Chromium attempts exposed one remaining premature Project-value read during legitimate same-target route revalidation; the smoke was aligned with #480 by waiting for settled Project/model state, then the complete Chromium, desktop and signed Debug APK gates passed.
+- #474-#480 and #483-#487 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/retire-native-create-source-guards-final`.
+Active WIP branch: `codex/discovery-behavior-contract`.
 
-The current #330 slice removes four remaining create-path source-text guards from the large Session-first architecture regression. #478 already executes the real `createNativeSessionTarget()` path and proves the native create call, selected-harness/Project scope and writer ownership; #484 adds fail-closed behavioral coverage for unsupported transports plus explicit `sessions=false` and `prompt=false`. The architectural no-Task/no-Conversation guards remain because they protect the product boundary rather than duplicate runtime behavior. No production code is changed.
-
-CI on the first #487 head exposed one remaining premature Project-value assertion in `cross-machine-continuation-browser-smoke.mjs`: during the already-supported same-target route revalidation the Project select may temporarily clear while disabled, then restore the chosen Project when settled. The same failure repeated on one clean rerun. Consistent with #480, the smoke now waits for the settled enabled state before checking Project preservation; the post-settle Project assertion, mismatch blocking, zero-mutation boundary and exactly-once continuation checks remain intact. This is test-only stabilization, not a product behavior change.
+The current #330 slice moves Native Session discovery guarantees from source-text inspection into the existing executable discovery contract. `native-session-discovery.test.mjs` already proves global-list fallback, paging, status behavior, `sessions=false`, multi-agent discovery and surface mapping; this slice adds positive `sessionRename/sessionDelete` capability propagation through discovery and the surface target, then retires the now-redundant source guards for global→stable fallback and rename/delete capability mapping. Native identity type guards plus the architectural no-Task/no-launch guards remain. No production code is changed.
 
 ### P0 — issue #368
 
