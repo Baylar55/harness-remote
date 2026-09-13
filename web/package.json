@@ -35,7 +35,7 @@
     "test:profiles": "node --experimental-strip-types src/server-profiles.test.mjs",
     "test:config": "node --experimental-strip-types src/server-config.test.mjs",
     "test:attachments": "node --experimental-strip-types src/attachments.test.mjs",
-    "test:machine-payload": "node --experimental-strip-types src/machine-payload.test.mjs",
+    "test:machine-payload": "node --experimental-strip-types src/machine-payload.test.mjs && node scripts/run-vite-test.mjs src/machine-client-discovery.test.mjs",
     "test:platform": "node src/platform-regression.test.mjs",
     "test:completion-audio": "node src/completion-audio-regression.test.mjs",
     "test:completion-timing": "node --experimental-strip-types src/completion-audio-timing.test.mjs",
