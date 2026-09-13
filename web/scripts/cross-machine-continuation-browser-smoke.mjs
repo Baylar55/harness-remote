@@ -427,7 +427,9 @@ try {
 
   const modelButton = panel.locator('.tdw-model-trigger')
   await modelButton.waitFor({ state: "visible", timeout: 12_000 })
+  await waitForDisabledState(modelButton, false, "target model catalog did not settle after initial route load")
   await modelButton.click()
+  await panel.locator('.tdw-model-picker').getByText("Claude Target", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   assert.match(await panel.locator('.tdw-model-picker').innerText(), /Claude Target/, "target route did not load the target harness model catalog")
   await page.keyboard.press("Escape")
   assert.match(await modelButton.innerText(), /Claude Target/, "target default model was not selected after catalog discovery")
@@ -439,7 +441,7 @@ try {
   assert.equal(await sourceComposer.isDisabled(), false, "source composer became non-interactive while the verified cross-machine plan was open")
   assert.equal(await machineSelect.inputValue(), TARGET_MACHINE, "target machine selection changed while preparing the first message")
   assert.equal(await projectSelect.inputValue(), MATCH_PROJECT, "target Project selection changed while preparing the first message")
-  assert.equal(await projectSelect.isDisabled(), false, "target Project unexpectedly returned to a loading state")
+  await waitForDisabledState(projectSelect, false, "target Project did not settle after route revalidation")
   await waitForDisabledState(modelButton, false, "target model catalog did not settle after route revalidation")
   assert.equal(await firstMessage.inputValue(), FIRST_MESSAGE, "target first-message input was lost while the target model catalog revalidated")
   assert.equal(await projectSelect.inputValue(), MATCH_PROJECT, "target Project selection changed while the target model catalog revalidated")
