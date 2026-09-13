@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #482: `d609e5cd2564dc242dc3d27e04036bcecb8a7c1a`.
+- Integration head after PR #483: `f58f73530038a84c9e072eba601a05a0c9f6a57e`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -28,13 +28,14 @@
 - PR #480 retired the remaining redundant model-reconciliation source guards and stabilized the cross-machine Chromium smoke by waiting for the settled Project/model catalog state already supported by production. No runtime behavior changed; the complete Chromium, desktop and signed Debug APK gates passed before integration.
 - PR #481 added explicit per-harness `--inference-unavailable` evidence and made desktop Linux/macOS/Windows coverage automatic for every PR targeting `main` or the persistent integration branch.
 - PR #482 added explicit known-working model selectors for real-harness validation, with fail-closed missing/ambiguous model resolution and selected-model-scoped variant coverage. Full Chromium, desktop and signed Debug APK gates passed before integration.
-- #474-#480 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #483 retired redundant `native-session-model.ts` source guards from the observer/controller regression after #479 supplied executable coverage. Its CI-contract wiring was corrected before merge and the full Chromium, desktop and signed Debug APK gates passed.
+- #474-#480 and #483 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/retire-native-model-source-guards`.
+Active WIP branch: `codex/retire-native-create-source-guards`.
 
-The current #330 slice removes three remaining source-text assertions against `native-session-model.ts` from `native-session-observer.test.mjs`. Those behaviors are already covered by #479's executable `resolveNativeSessionTargetModel()` recovery contract, including page-model authority, harness scoping and unsupported-backend fail-closed behavior. The existing observer/controller test is exposed as `npm run test:native-session-controller` and remains included exactly once in `test:ci:full`. No duplicate behavioral test is added and no ACP, Native Session runtime, harness adapter or UI production code is changed.
+The current #330 preparatory slice strengthens the executable `canCreateNativeSession()` contract before removing the remaining create-path source guards from the large Session-first regression. The existing `native-session-create.test.mjs` now proves fail-closed behavior for unsupported transports plus explicit `sessions=false` and `prompt=false` capabilities. #478 already covers the positive create call, selected-harness scope, writer ownership and fail-closed missing identity. No duplicate test file is added and no ACP, Native Session runtime, harness adapter or UI production code is changed.
 
 ### P0 — issue #368
 
