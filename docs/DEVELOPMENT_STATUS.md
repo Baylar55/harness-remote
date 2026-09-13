@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #481: `b9c0ef869b7ab59ca5b76b93f153c42106f9fd43`.
+- Integration head after PR #482: `d609e5cd2564dc242dc3d27e04036bcecb8a7c1a`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -26,18 +26,15 @@
 - PR #478 replaced the stale-model source guard around new Native Session creation with a real `createNativeSessionTarget()` contract covering selected-harness scope, Project/title forwarding, writer ownership, surfaced capabilities and fail-closed identity.
 - PR #479 replaced Native Session model-recovery source guards with an executable `resolveNativeSessionTargetModel()` contract while reusing existing lifecycle coverage instead of duplicating it.
 - PR #480 retired the remaining redundant model-reconciliation source guards and stabilized the cross-machine Chromium smoke by waiting for the settled Project/model catalog state already supported by production. No runtime behavior changed; the complete Chromium, desktop and signed Debug APK gates passed before integration.
-- PR #481 added explicit per-harness `--inference-unavailable` evidence: unavailable inference stays unverified while daemon registration, installed-build health and Native Session rediscovery remain mandatory. It also made desktop Linux/macOS/Windows coverage automatic for every PR targeting `main` or the persistent integration branch. Full Chromium, desktop and signed Debug APK gates passed before integration.
-- #474-#480 are behavior-preserving contract/CI-hardening slices under issue #330; #481 and the current work are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #481 added explicit per-harness `--inference-unavailable` evidence and made desktop Linux/macOS/Windows coverage automatic for every PR targeting `main` or the persistent integration branch.
+- PR #482 added explicit known-working model selectors for real-harness validation, with fail-closed missing/ambiguous model resolution and selected-model-scoped variant coverage. Full Chromium, desktop and signed Debug APK gates passed before integration.
+- #474-#480 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/real-harness-model-selection`.
+Active WIP branch: `codex/retire-native-model-source-guards`.
 
-The Zorin release-gate evidence used installed OpenCode 1.18.19, Codex 1.1.14, OMP 18.0.6 and PI 0.5.0; Claude was intentionally omitted because it is not installed on that machine. Codex completed the strict inference/model/variant/Stop/transcript gate. OpenCode completed the functional routing/transcript/Stop checks with one >120 s provider/model latency outlier. OMP and PI registered, exposed catalogs, created/rediscovered Native Sessions and accepted prompts, but their automatically selected provider models never produced inference replies within the turn budget; that machine may have no usable provider/model configured for those harnesses.
-
-PR #481 now lets those latter harnesses be recorded explicitly as inference-unverified without weakening the integration checks. The current #368 slice addresses the other side of the evidence problem: for an inference-capable harness, the gate can be given repeated `--model <harness>=<modelID-or-provider/model>` selectors so the soak uses known-working advertised models instead of arbitrary first catalog entries. At least two distinct explicit models remain mandatory so model switching is still tested; missing/ambiguous selectors fail closed; optional variant coverage is restricted to the selected model identities. This changes only release-test evidence, not application model discovery or runtime behavior.
-
-Parked #330 branch: `codex/retire-native-model-source-guards`, first commit `dd13026c976b2fcd8ddef1a0e6fe77e6b2611243`. It removes three redundant `native-session-model.ts` source-text guards already covered by #479's executable recovery contract. Resume/rebase this branch only after the current #368 gate slice is settled.
+The current #330 slice removes three remaining source-text assertions against `native-session-model.ts` from `native-session-observer.test.mjs`. Those behaviors are already covered by #479's executable `resolveNativeSessionTargetModel()` recovery contract, including page-model authority, harness scoping and unsupported-backend fail-closed behavior. The existing observer/controller test is exposed as `npm run test:native-session-controller` and remains included exactly once in `test:ci:full`. No duplicate behavioral test is added and no ACP, Native Session runtime, harness adapter or UI production code is changed.
 
 ### P0 — issue #368
 

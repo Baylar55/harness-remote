@@ -6,7 +6,6 @@ const crossMachinePanel = readFileSync(new URL('./components/cross-machine-conti
 const lineagePanel = readFileSync(new URL('./components/native-session-lineage-panel.tsx', import.meta.url), 'utf8')
 const adapter = readFileSync(new URL('./native-session-v3-adapter.ts', import.meta.url), 'utf8')
 const workThread = readFileSync(new URL('./components/work-thread-conversation.tsx', import.meta.url), 'utf8')
-const nativeModel = readFileSync(new URL('./native-session-model.ts', import.meta.url), 'utf8')
 
 assert.ok(observer.includes('import { WorkThreadConversation } from "./work-thread-conversation"'), 'native Session must mount the mature v3 conversation controller')
 assert.ok(observer.includes('<WorkThreadConversation'), 'native Session must render the v3 controller directly')
@@ -88,12 +87,6 @@ assert.ok(observer.includes('transcriptRefreshToken') && observer.includes('hand
 assert.ok(workThread.includes('transcriptRefreshToken') && workThread.includes('void refreshCurrentTail()'), 'background transcript recovery must rehydrate the selected WorkThread feed')
 assert.ok(workThread.includes('const tailRefresh = refreshCurrentTail(prior)') && workThread.includes('Promise.allSettled([tailRefresh, attentionRefresh])'), 'status reconciliation must not block the selected transcript tail')
 
-assert.ok(nativeModel.includes('page.model ??'), 'native Session enrichment must consume a model supplied by a native journal page')
-// Assert the invariant, not one spelling of it. Freezing the literal guard meant every legitimate
-// change to which harnesses expose native model metadata - adding PI, Codex, Claude - broke this
-// check while the behaviour it protects was still intact.
-assert.ok(nativeModel.includes('PAGE_MODEL_BACKENDS'), 'model enrichment must scope itself with an explicit set of harnesses that expose native model metadata')
-assert.match(nativeModel, /if \(target\.backend !== "opencode"[\s\S]{0,200}?\) return target/, 'read-only model enrichment must stay scoped to harnesses with verified native model metadata')
 assert.ok(workThread.includes('observedConversationModelKeyRef'), 'the v3 picker must observe a model that arrives after the controller mounted')
 assert.ok(workThread.includes('modelSelectionTouchedRef'), 'late native enrichment must not overwrite a model the user explicitly picked')
 assert.ok(workThread.includes('currentConversationModelKey === previous'), 'the late-model sync must be edge-triggered rather than resetting the picker on every render')
