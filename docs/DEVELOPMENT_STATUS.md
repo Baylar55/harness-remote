@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #476: `d360f82a8f4119dd952d63323dd7d32efca951a7`.
+- Integration head after PR #477: `b6bae9535690d50b02c09f42e1fd47165099e235`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -22,13 +22,14 @@
 - PR #474 replaced Machine discovery source-text assertions with an executable contract against the real `discoverMachine()` path.
 - PR #475 replaced the attachment forwarding source-text assertion with an executable `api.sendPrompt()` transport contract covering directory, model, variant, agent and attachment payloads.
 - PR #476 replaced model-picker source-text ordering guards with an executable `groupModels()` contract that treats variant labels as opaque and preserves the harness-advertised order.
-- #474-#476 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
+- PR #477 replaced the remaining `api.listModels()` source-text guards with an executable transport/catalog contract covering directory + Session scope, harness defaults, capabilities/limits and exact harness variant order.
+- #474-#477 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/behavioral-api-list-models-contract`.
+Active WIP branch: `codex/behavioral-native-session-create-contract`.
 
-The current #330 slice replaces the remaining source-text guards around `api.listModels()` with a real transport/catalog contract. It verifies directory + Session scope, harness defaults, capability/limit projection and exact variant order as received from the harness. No ACP, Native Session or harness-runtime behavior is being changed.
+The current #330 slice replaces the source-text guard around new Native Session creation with a real `createNativeSessionTarget()` contract. It verifies selected-harness scoping, title/Project forwarding, absence of a stale explicit model, writer ownership, surfaced capabilities and fail-closed native identity. Production ACP, Native Session and harness-runtime code is unchanged.
 
 ### P0 — issue #368
 
