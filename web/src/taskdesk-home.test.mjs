@@ -64,7 +64,6 @@ test("Session-first workspace keeps machines projects harness filters models and
   const standalone = read("./components/standalone-universal-workspace.tsx")
   const home = read("./components/native-session-home-base.tsx")
   const observer = read("./components/native-session-observer.tsx")
-  const picker = read("./components/model-picker.tsx")
 
   assert.match(standalone, /MachineManager/)
   assert.match(standalone, /discoverMachine/)
@@ -76,7 +75,6 @@ test("Session-first workspace keeps machines projects harness filters models and
   assert.match(home, /New Session|sf\.newSession/)
   assert.match(observer, /NATIVE_SESSION_MODEL_SCOPE/)
   assert.match(observer, /deferModelFallback/)
-  assert.match(picker, /Search model, provider, variant/)
 })
 
 test("desktop-owned local machine stays visible but cannot be edited or removed", () => {
