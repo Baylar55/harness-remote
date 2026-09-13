@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #478: `07f00a7b1e7369c3b99d2b0596cd0592874b1663`.
+- Integration head after PR #479: `4309e9c89cfdbb60b9c1d8a03187f64380bf2d77`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -24,13 +24,14 @@
 - PR #476 replaced model-picker source-text ordering guards with an executable `groupModels()` contract that treats variant labels as opaque and preserves the harness-advertised order.
 - PR #477 replaced the remaining `api.listModels()` source-text guards with an executable transport/catalog contract covering directory + Session scope, harness defaults, capabilities/limits and exact harness variant order.
 - PR #478 replaced the stale-model source guard around new Native Session creation with a real `createNativeSessionTarget()` contract covering selected-harness scope, Project/title forwarding, writer ownership, surfaced capabilities and fail-closed identity.
-- #474-#478 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
+- PR #479 replaced Native Session model-recovery source guards with an executable `resolveNativeSessionTargetModel()` contract while reusing existing lifecycle coverage instead of duplicating it.
+- #474-#479 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/behavioral-native-model-recovery-contract`.
+Active WIP branch: `codex/retire-redundant-model-recovery-guards`.
 
-The current #330 slice replaces source-text guards around Native Session model recovery with executable behavior. Existing lifecycle tests already own direct OpenCode model/variant ordering semantics; this slice adds the missing `resolveNativeSessionTargetModel()` contract for OpenCode transcript authority, native page-model authority for OMP/PI/Codex, Claude's Session-scoped advertised default fallback, unsupported-backend isolation and fail-safe recovery errors. Production ACP, Native Session and harness-runtime code is unchanged.
+The current #330 slice removes two remaining `model-regression.test.mjs` source-text assertions for model reconciliation that are already covered behaviorally by the existing OMP model-projection tests. No new duplicate test is added, and production ACP, Native Session, harness-runtime and UI code is unchanged.
 
 ### P0 — issue #368
 
