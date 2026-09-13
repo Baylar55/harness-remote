@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { api } from "./api.ts"
-import { createNativeSessionTarget } from "./native-session-create.ts"
+import { canCreateNativeSession, createNativeSessionTarget } from "./native-session-create.ts"
 
 const originalCreateSession = api.createSession
 
@@ -33,6 +33,10 @@ const agent = {
     }
   }
 }
+
+assert.equal(canCreateNativeSession({ ...agent, transport: "stdio" }), false, "native create must reject transports outside the validated ACP/HTTP surface")
+assert.equal(canCreateNativeSession({ ...agent, capabilities: { ...agent.capabilities, sessions: false } }), false, "native create must honor an explicit sessions=false capability")
+assert.equal(canCreateNativeSession({ ...agent, capabilities: { ...agent.capabilities, prompt: false } }), false, "native create must honor an explicit prompt=false capability")
 
 try {
   const calls = []
