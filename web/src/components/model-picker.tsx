@@ -15,7 +15,7 @@ type Props = {
   unavailableHint?: string
 }
 
-type ModelGroup = {
+export type ModelGroup = {
   id: string
   providerID: string
   providerName: string
@@ -81,6 +81,15 @@ export function groupModels(models: ModelOption[]): ModelGroup[] {
   })
 }
 
+export function filterModelGroups(groups: ModelGroup[], query: string, freeOnly = false): ModelGroup[] {
+  const needle = query.trim().toLowerCase()
+  const candidates = freeOnly
+    ? groups.filter((group) => group.options.some((option) => option.isFree === true))
+    : groups
+  if (!needle) return candidates
+  return candidates.filter((group) => `${group.providerName} ${group.providerID} ${group.modelName} ${group.modelID} ${group.description || ""} ${group.variants.map((variant) => variant.variant).join(" ")}`.toLowerCase().includes(needle))
+}
+
 function ModelBadges({ group }: { group: ModelGroup }) {
   const metadata = group.options.find((option) => option.isDefault) || group.base
   const context = formatLimit(metadata.contextLimit)
@@ -112,14 +121,7 @@ export function ModelPicker({ models, value, onChange, disabled = false, loading
   )
   const selected = models.find((model) => modelOptionKey(model) === value)
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    const candidates = freeOnly
-      ? groups.filter((group) => group.options.some((option) => option.isFree === true))
-      : groups
-    if (!needle) return candidates
-    return candidates.filter((group) => `${group.providerName} ${group.providerID} ${group.modelName} ${group.modelID} ${group.description || ""} ${group.variants.map((variant) => variant.variant).join(" ")}`.toLowerCase().includes(needle))
-  }, [freeOnly, groups, query])
+  const filtered = useMemo(() => filterModelGroups(groups, query, freeOnly), [freeOnly, groups, query])
   const visibleGroups = useMemo(() => filtered.slice(0, MAX_VISIBLE_MODEL_GROUPS), [filtered])
 
   const providers = useMemo(() => {
