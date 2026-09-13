@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #487: `525c64a7f30be551dd4d5ce060be27e3e5c2d0f8`.
+- Integration head after PR #488: `c03f4fcaf53f42b73c215a0c1808d355f0799903`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -33,13 +33,14 @@
 - PR #485 retired two redundant model-bootstrap source guards from `model-regression.test.mjs` in favor of the blocking Chromium model-switch smoke, which holds `/models` unresolved and proves the composer and Send stay gated until a verified catalog arrives. Full Chromium, desktop and signed Debug APK gates passed before integration.
 - PR #486 retired the remaining duplicate model-bootstrap source guards from the observer/component regressions while preserving distinct reconnect and catalog-failure contracts. The full Chromium behavior smoke, desktop matrix and signed Debug APK gates passed before integration.
 - PR #487 retired four redundant native-create source guards while preserving the architectural no-Task/no-Conversation boundary. Its first two Chromium attempts exposed one remaining premature Project-value read during legitimate same-target route revalidation; the smoke was aligned with #480 by waiting for settled Project/model state, then the complete Chromium, desktop and signed Debug APK gates passed.
-- #474-#480 and #483-#487 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #488 strengthened the executable Native Session discovery contract with positive rename/delete capability propagation and retired the redundant source guards for global-list fallback and capability mapping. The complete Chromium, desktop and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#488 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/discovery-behavior-contract`.
+Active WIP branch: `codex/model-recovery-behavior-contract`.
 
-The current #330 slice moves Native Session discovery guarantees from source-text inspection into the existing executable discovery contract. `native-session-discovery.test.mjs` already proves global-list fallback, paging, status behavior, `sessions=false`, multi-agent discovery and surface mapping; this slice adds positive `sessionRename/sessionDelete` capability propagation through discovery and the surface target, then retires the now-redundant source guards for global→stable fallback and rename/delete capability mapping. Native identity type guards plus the architectural no-Task/no-launch guards remain. No production code is changed.
+The current #330 slice re-audits the three remaining `native-session-model.ts` source-text guards in `session-first-regression.test.mjs`. No duplicate behavioral tests are being added: `native-session-model-lifecycle.test.mjs` already explicitly proves OpenCode compatibility with nested `info.model.id`, newest model-bearing message precedence across roles, and matching prior-user variant inheritance; `native-session-model-recovery.test.mjs` already proves OMP/PI/Codex page-model authority. This slice therefore removes only those redundant source-text guards plus the now-unused source-file read, with no production/runtime change. Keep the architectural/session/harness guards that protect distinct boundaries.
 
 ### P0 — issue #368
 
