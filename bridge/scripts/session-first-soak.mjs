@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { catalogFingerprint, catalogOwnershipEvidence } from "./session-first-soak-evidence.mjs"
+import { catalogFingerprint, catalogOwnershipEvidence, modelCatalogKey, selectSoakModels } from "./session-first-soak-evidence.mjs"
 
 /*
  * Session-first model-lifecycle soak probe.
@@ -21,6 +21,7 @@ import { catalogFingerprint, catalogOwnershipEvidence } from "./session-first-so
  *
  * HR_PRIMARY is the harness that must complete real turns. HR_SECONDARY is only switched to, so a
  * harness whose inference is unavailable can still prove catalog and Session isolation.
+ * HR_PRIMARY_MODELS may be a JSON array of known-working modelID or providerID/modelID selectors.
  * Nothing here prints credentials, prompt bodies beyond the markers it sends, or catalog contents.
  */
 
@@ -32,6 +33,16 @@ const DIR_A = process.env.HR_DIR_A ?? process.cwd()
 const DIR_B = process.env.HR_DIR_B ?? DIR_A
 const CYCLES = Number(process.env.HR_CYCLES ?? "5")
 const TURN_BUDGET_MS = Number(process.env.HR_TURN_BUDGET_MS ?? "120000")
+let REQUESTED_MODEL_SELECTORS
+try {
+  REQUESTED_MODEL_SELECTORS = JSON.parse(process.env.HR_PRIMARY_MODELS ?? "[]")
+  if (!Array.isArray(REQUESTED_MODEL_SELECTORS) || REQUESTED_MODEL_SELECTORS.some((value) => typeof value !== "string")) {
+    throw new Error("expected a JSON array of strings")
+  }
+} catch (error) {
+  console.error(`Invalid HR_PRIMARY_MODELS: ${error instanceof Error ? error.message : String(error)}`)
+  process.exit(1)
+}
 /*
  * Whether the primary harness can be trusted to echo a marker back verbatim.
  *
@@ -183,19 +194,6 @@ async function waitForTurn(agentID, sessionID, directory, marker, expectedAssist
   return { found: false, list, ms: Date.now() - started }
 }
 
-function distinctModels(models, count) {
-  const seen = new Set()
-  const picked = []
-  for (const model of models) {
-    const key = `${model.providerID}/${model.modelID}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    picked.push(model)
-    if (picked.length === count) break
-  }
-  return picked
-}
-
 log(`Session-first soak against ${URL_ROOT}`)
 log(`primary=${PRIMARY} secondary=${SECONDARY} cycles=${CYCLES}`)
 
@@ -219,10 +217,18 @@ if (ownership.catalogsIdentical) {
   log("  note identical normalized catalogs are valid; isolation is proven by agent-scoped diagnostics and Session routing")
 }
 
-const models = distinctModels(primaryCatalog.models, 3)
-check(models.length >= 2, `${PRIMARY} offers at least two distinct models to switch between (${models.length})`)
-if (models.length < 2) {
-  log("\nCannot exercise model switching without two models. Stopping.")
+const selection = selectSoakModels(primaryCatalog.models, REQUESTED_MODEL_SELECTORS, 3)
+const models = selection.models
+if (selection.explicit) {
+  log(`  explicit model selection: ${REQUESTED_MODEL_SELECTORS.join(", ")}`)
+  const unresolvedSummary = selection.unresolved.map(({ selector, reason }) => `${selector} (${reason})`).join(", ")
+  check(selection.unresolved.length === 0, `${PRIMARY} resolves every explicitly requested model${unresolvedSummary ? `: ${unresolvedSummary}` : ""}`)
+  check(models.length >= 2, `${PRIMARY} has at least two explicitly selected models to switch between (${models.length})`)
+} else {
+  check(models.length >= 2, `${PRIMARY} offers at least two distinct models to switch between (${models.length})`)
+}
+if (selection.unresolved.length || models.length < 2) {
+  log("\nCannot exercise model switching with the requested model selection. Stopping.")
   process.exit(1)
 }
 
@@ -311,20 +317,22 @@ await assertTranscriptFidelity("after cross-harness cycles")
 
 log("\n== harness-advertised variant, when this harness offers one ==")
 // Pick from the model with the most advertised variants, and take its last one: the first is usually
-// the harness default ("off", "default"), which would not change anything. A harness whose variant
-// range differs per model - PI advertises a different thinkingLevel set for each - makes picking any
-// arbitrary pair unsafe, so keep the variant with the model that actually offers it.
+// the harness default ("off", "default"), which would not change anything. When explicit known-good
+// models are supplied, variant coverage is constrained to those identities instead of wandering into
+// another advertised provider that may not be configured on this machine.
+const selectedModelKeys = new Set(models.map((model) => modelCatalogKey(model)))
 const variantsByModel = new Map()
 for (const model of primaryCatalog.models) {
+  if (selection.explicit && !selectedModelKeys.has(modelCatalogKey(model))) continue
   if (!model.variant || !model.variantConfigId) continue
-  const key = `${model.providerID}/${model.modelID}`
+  const key = modelCatalogKey(model)
   if (!variantsByModel.has(key)) variantsByModel.set(key, [])
   variantsByModel.get(key).push(model)
 }
 const richest = [...variantsByModel.values()].sort((left, right) => right.length - left.length)[0] ?? []
 const variantModel = richest[richest.length - 1]
 if (!variantModel) {
-  log(`  skipped: ${PRIMARY} advertises no model variant, so none is invented`)
+  log(`  skipped: ${PRIMARY} advertises no model variant${selection.explicit ? " for the explicitly selected models" : ""}, so none is invented`)
 } else {
   // The HTTP surface does not report back which variant served a turn, so this leg proves the
   // variant is accepted and does not wedge the Session. That the variant is applied after the model
