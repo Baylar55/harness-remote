@@ -8,6 +8,7 @@ import {
   buildHarnessPlan,
   defaultReportPath,
   parseHarnessList,
+  parseInferenceUnavailable,
   parseSoakEvidence,
   preflightDaemon,
   releaseEligibility,
@@ -58,6 +59,13 @@ test("normalizes and deduplicates an explicit harness list", () => {
 test("rejects unknown harnesses and one-harness pseudo gates", () => {
   assert.throws(() => parseHarnessList("codex,cursor"), /Unsupported harness/)
   assert.throws(() => parseHarnessList("codex"), /at least two harnesses/i)
+})
+
+test("normalizes inference-unavailable harnesses and keeps them inside the selected gate surface", () => {
+  const harnesses = ["opencode", "codex", "omp", "pi"]
+  assert.deepEqual(parseInferenceUnavailable(" OMP,pi,omp ", harnesses), ["omp", "pi"])
+  assert.deepEqual(parseInferenceUnavailable("", harnesses), [])
+  assert.throws(() => parseInferenceUnavailable("claude", harnesses), /must also be selected/i)
 })
 
 test("rotates each harness through primary responsibility", () => {
@@ -202,7 +210,7 @@ test("orchestrates every primary and persists credential-free scenario evidence"
     })
     assert.equal(report.verdict, "verified")
     assert.equal(report.releaseEligible, true)
-    assert.equal(report.schemaVersion, 4)
+    assert.equal(report.schemaVersion, 5)
     assert.equal(report.preflight.passed, true)
     assert.equal(report.sessionDiscovery.passed, true)
     assert.deepEqual(report.runs.map(({ primary, secondary, passed }) => ({ primary, secondary, passed })), [
@@ -212,6 +220,7 @@ test("orchestrates every primary and persists credential-free scenario evidence"
     assert.equal(report.runs[0].evidence.complete, true)
     assert.equal(report.runs[0].evidence.coverage.stopAndResume, true)
     assert.equal(report.coverageMatrix.codex.coverage.sessionDiscovery, true)
+    assert.equal(report.coverageMatrix.codex.inferenceStatus, "verified")
     assert.equal(report.coverageMatrix.codex.coverage.resourceBounds, true)
     assert.equal(report.coverageMatrix.claude.coverage.crossHarnessIsolation, true)
 
@@ -223,6 +232,75 @@ test("orchestrates every primary and persists credential-free scenario evidence"
   } finally {
     if (previousURL === undefined) delete process.env.HR_URL
     else process.env.HR_URL = previousURL
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("declared unavailable inference stays unverified without running that primary soak", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hr-real-gate-unverified-"))
+  const soakPath = path.join(root, "fake-soak.mjs")
+  const reportPath = path.join(root, "report.json")
+  fs.writeFileSync(soakPath, `console.log(${JSON.stringify(COMPLETE_SOAK_OUTPUT)})\n`, "utf8")
+
+  try {
+    const report = await runGate({
+      harnesses: ["codex", "omp"],
+      inferenceUnavailable: ["omp"],
+      mode: "release",
+      reportPath,
+      soakPath,
+      preflight: async ({ harnesses }) => ({
+        passed: true,
+        status: 200,
+        error: null,
+        machineID: "machine-1",
+        agents: harnesses.map((id) => ({ id, registered: true, modelCatalog: { configured: true, source: "test", cachedModels: 2, phase: "ready" } })),
+        missingHarnesses: [],
+        missingModelCatalogs: []
+      }),
+      sessionDiscovery: async ({ harnesses }) => passingSessionDiscovery(harnesses)
+    })
+
+    assert.equal(report.verdict, "inference-unverified")
+    assert.equal(report.releaseEligible, false)
+    assert.deepEqual(report.settings.inferenceUnavailable, ["omp"])
+    assert.deepEqual(report.runs.map((run) => run.primary), ["codex"])
+    assert.equal(report.coverageMatrix.codex.inferenceStatus, "verified")
+    assert.equal(report.coverageMatrix.codex.complete, true)
+    assert.equal(report.coverageMatrix.omp.inferenceStatus, "unverified")
+    assert.equal(report.coverageMatrix.omp.coverage.sessionDiscovery, true)
+    assert.equal(report.coverageMatrix.omp.complete, false)
+    assert.ok(report.coverageMatrix.omp.missingCoverage.includes("multiTurnStreaming"))
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("inference-unavailable cannot hide a missing harness or Session discovery failure", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hr-real-gate-unavailable-preflight-"))
+  const reportPath = path.join(root, "report.json")
+
+  try {
+    const report = await runGate({
+      harnesses: ["codex", "omp"],
+      inferenceUnavailable: ["omp"],
+      mode: "release",
+      reportPath,
+      preflight: async () => ({
+        passed: false,
+        status: 200,
+        error: null,
+        machineID: "machine-1",
+        agents: [],
+        missingHarnesses: ["omp"],
+        missingModelCatalogs: []
+      })
+    })
+    assert.equal(report.verdict, "failed")
+    assert.equal(report.releaseEligible, false)
+    assert.deepEqual(report.runs, [])
+    assert.equal(report.sessionDiscovery.skipped, true)
+  } finally {
     fs.rmSync(root, { recursive: true, force: true })
   }
 })

@@ -6,7 +6,7 @@ This gate turns the existing Session-first soak into a repeatable release check 
 
 ## What it verifies
 
-For every selected harness, the gate makes that harness the **primary** once and runs the existing Session-first soak against a second harness. A strict release run therefore exercises, for each primary:
+For every selected harness with usable inference, the gate makes that harness the **primary** once and runs the existing Session-first soak against a second harness. A strict release run therefore exercises, for each inference-capable primary:
 
 - live model-catalog discovery;
 - two real Native Sessions;
@@ -17,6 +17,8 @@ For every selected harness, the gate makes that harness the **primary** once and
 - native Stop followed by a usable Session;
 - exactly-once user-turn checks;
 - bounded listeners/subscribers and no leftover ACP requests, queued prompts or unresolved mutations.
+
+Every selected harness, including one explicitly marked inference-unavailable, must still pass daemon preflight, installed-harness health/build identity and exact Native Session rediscovery. Declaring inference unavailable never turns missing integration plumbing into a pass.
 
 The gate does not replace Android background/foreground or physical network-interruption testing. Those remain separate release checks because they require a real client/device boundary.
 
@@ -68,9 +70,41 @@ Before any long-running soak starts, the gate calls the daemon diagnostics endpo
 - every selected harness is registered on that daemon;
 - every selected harness has model discovery configured.
 
-If any of those checks fail, no soak process is launched. The JSON report still gets written with `verdict: "failed"` and a concise `preflight` section showing the missing harnesses or model-discovery configuration. This makes startup/configuration failures distinct from Session/inference failures and avoids spending several minutes on legs that cannot succeed.
+It then health-checks the concrete installed build and requires a created Native Session to be rediscovered through the bounded Session index for every selected harness.
+
+If any of those checks fail, no inference soak process is launched. The JSON report still gets written with `verdict: "failed"` and a concise section showing the missing harness, model-discovery or Session-discovery evidence. This keeps startup/configuration failures distinct from inference failures and avoids spending several minutes on legs that cannot succeed.
 
 The preflight report contains only non-sensitive harness metadata such as id, backend, transport, state, model-catalog source and cached-model count. It does not persist credentials or full model inventories.
+
+## A selected harness has no usable inference
+
+A harness can be installed and integrated correctly while none of its advertised provider models is usable on the machine under test. For example, a catalog can advertise models whose provider credential or subscription is not configured locally.
+
+Do not let repeated inference timeouts masquerade as a Harness Remote regression. Declare only the affected selected harnesses explicitly:
+
+```bash
+npm run gate:real-harness -- \
+  --harnesses opencode,codex,omp,pi \
+  --inference-unavailable omp,pi
+```
+
+The gate still requires `omp` and `pi` to pass daemon registration, model-discovery configuration, installed-build health and Native Session rediscovery. Their inference-heavy **primary** legs are skipped instead of sending prompts to models known to be unusable on that machine.
+
+If every attempted inference leg passes, the report is intentionally still not release-verified:
+
+```json
+{
+  "releaseEligible": false,
+  "settings": {
+    "inferenceUnavailable": ["omp", "pi"]
+  },
+  "verdict": "inference-unverified"
+}
+```
+
+The command exits with code `2`. The coverage matrix marks those harnesses with `inferenceStatus: "unverified"` and leaves the inference-heavy coverage items missing. This is evidence of what was actually tested, not a waiver.
+
+`--inference-unavailable` can only name harnesses already selected by `--harnesses`. The same value can be supplied through `HR_GATE_INFERENCE_UNAVAILABLE`.
 
 ## Run a subset while developing
 
@@ -96,7 +130,7 @@ The run can still pass, but the JSON report records `routingEvidence: "turn-arri
 
 ## Control-plane-only mode
 
-If a provider cannot serve inference but you still want to exercise routing, catalogs, Session creation and lifecycle plumbing:
+If providers cannot serve inference for the whole selected surface but you still want to exercise routing, catalogs, Session creation and lifecycle plumbing:
 
 ```bash
 npm run gate:real-harness -- --mode control-plane
@@ -112,6 +146,8 @@ This mode sets the soak to allow native turn errors and records:
 ```
 
 It exits with code `2` even when every control-plane leg passes. This is intentional: a provider outage, missing subscription or invalid inference credential must never be silently promoted to a fully verified release.
+
+Use `--inference-unavailable` instead when only specific selected harnesses lack usable inference and the remaining harnesses should still undergo the strict real-inference soak.
 
 ## Custom report location
 
@@ -140,7 +176,9 @@ Useful environment controls include `HR_CYCLES`, `HR_TURN_BUDGET_MS`, `HR_DIR_A`
 
 Two different harnesses can legitimately advertise overlapping, or even identical, provider/model inventories. Catalog equality by itself is therefore not proof of cross-harness leakage and is no longer treated as a failure.
 
-The soak now proves the relevant ownership invariants instead:
+A populated catalog also does not prove that the local machine has credentials/subscriptions for every advertised provider. That distinction is why unavailable inference is recorded explicitly rather than inferred from a timeout.
+
+The soak proves the relevant ownership invariants instead:
 
 - both agent-scoped model endpoints return usable catalogs;
 - diagnostics expose separate registered entries for the primary and secondary harness;
