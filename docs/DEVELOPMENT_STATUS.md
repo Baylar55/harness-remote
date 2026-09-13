@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #477: `b6bae9535690d50b02c09f42e1fd47165099e235`.
+- Integration head after PR #478: `07f00a7b1e7369c3b99d2b0596cd0592874b1663`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -23,13 +23,14 @@
 - PR #475 replaced the attachment forwarding source-text assertion with an executable `api.sendPrompt()` transport contract covering directory, model, variant, agent and attachment payloads.
 - PR #476 replaced model-picker source-text ordering guards with an executable `groupModels()` contract that treats variant labels as opaque and preserves the harness-advertised order.
 - PR #477 replaced the remaining `api.listModels()` source-text guards with an executable transport/catalog contract covering directory + Session scope, harness defaults, capabilities/limits and exact harness variant order.
-- #474-#477 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
+- PR #478 replaced the stale-model source guard around new Native Session creation with a real `createNativeSessionTarget()` contract covering selected-harness scope, Project/title forwarding, writer ownership, surfaced capabilities and fail-closed identity.
+- #474-#478 were behavior-preserving contract-hardening slices under issue #330; all passed the complete PR gate before integration, including Chromium, desktop and signed Debug APK.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/behavioral-native-session-create-contract`.
+Active WIP branch: `codex/behavioral-native-model-recovery-contract`.
 
-The current #330 slice replaces the source-text guard around new Native Session creation with a real `createNativeSessionTarget()` contract. It verifies selected-harness scoping, title/Project forwarding, absence of a stale explicit model, writer ownership, surfaced capabilities and fail-closed native identity. Production ACP, Native Session and harness-runtime code is unchanged.
+The current #330 slice replaces source-text guards around Native Session model recovery with executable behavior. It verifies newest OpenCode transcript metadata + adjacent variant inheritance, native page-model authority for OMP/PI/Codex, Claude's Session-scoped advertised default fallback, unsupported-backend isolation and fail-safe recovery errors. Production ACP, Native Session and harness-runtime code is unchanged.
 
 ### P0 — issue #368
 
