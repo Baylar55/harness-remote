@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #499: `407c7a262a0c0e91d21ad01a47597205261a226e`.
+- Integration head after PR #498: `77914d545e194f2e6ff75fd661b0dee14534a89b`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -42,15 +42,16 @@
 - PR #496 replaced the focused observer regression's `retry`/`waiting` working-state source assertion with executable coverage of `nativeSessionIsWorking()`, including all accepted aliases, normalization and representative terminal states. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #497 retired the redundant cross-machine model-catalog implementation guard after the blocking Chromium execution smoke proved target-machine catalog isolation, target model selection/revalidation and exact model delivery into target Session creation + first prompt. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #499 refreshed this handoff after #497 and recorded the current #494 review blockers; docs only, with no runtime/test behavior change.
-- #474-#480 and #483-#497 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #498 retired the duplicate `retry`/`waiting` working-state assertion from the Session-first architecture monolith after #496 supplied executable coverage. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#498 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/session-first-working-status-behavior-contract`.
+Active WIP branch: `codex/prompt-idempotency-behavior-contract`.
 
-The current #330 slice retires the duplicate `retry`/`waiting` working-state source assertion that remained in `session-first-regression.test.mjs`. PR #496 already added executable coverage of the exported `nativeSessionIsWorking()` behavior for every accepted working alias, trim/case normalization and representative terminal/empty states. Only that duplicate implementation-text guard is removed; the adapter/runtime and all distinct architectural guards remain untouched.
+The current #330 slice retires only two duplicate source-text assertions from `session-first-regression.test.mjs`: the presence of `clientRequestId` in native prompt code and the presence of `loadPendingNativeSessionPrompt`. Existing executable coverage in `native-session-model-lifecycle.test.mjs` already proves the real contract: ambiguous delivery is persisted, a different prompt/model is blocked while unresolved, retry of the same prompt/model reuses the exact request id, definite refusal clears pending state, stale ambiguity expires, pending state is Session-scoped, and transcript-proven acceptance retires the pending request. The distinct prompt/command endpoint, Stop idempotency, writer-ownership and OpenCode recovery guards remain untouched.
 
-External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. GitHub reports `mergeable_state: dirty`, so the contributor must first rebase/update onto the integration head. Review also found two behavior regressions that must be fixed before re-review:
+External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. GitHub reports it as non-mergeable against the moving integration baseline, so the contributor must first rebase/update onto the integration head. Review also found two behavior regressions that must be fixed before re-review:
 
 - preserve explicit `--opencode-command`: `parseDaemonOptions()` still captures it, but the current PR head discards that parsed value and recomputes the managed command from environment/PATH;
 - preserve the OpenCode lifecycle invariant from PR #351: ordinary internal idle/pre-Send Sessions must not query `/session/status`. External busy adoption is useful, but should be scoped to genuinely external Sessions (or equivalent explicit state) while the existing running/recovery-watch path remains unchanged. Coverage should prove external status reads include the Session directory and internal idle/pre-Send OpenCode performs no status read.

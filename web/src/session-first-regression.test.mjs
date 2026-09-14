@@ -56,8 +56,6 @@ assert.ok(rename.includes('target.renameSupported') && actions.includes('target.
 assert.ok(actions.includes('t("sf.keepSession")') && actions.includes('t("sf.deleteSession")'), 'native deletion must use an inline translated confirmation')
 assert.equal(actions.includes('window.confirm'), false, 'native deletion must not use a blocking browser dialog')
 
-assert.ok(prompt.includes('clientRequestId'), 'native prompts must retain durable mutation identity')
-assert.ok(prompt.includes('loadPendingNativeSessionPrompt'), 'lost-response retries must reuse the unresolved request id')
 assert.ok(prompt.includes('sendNativeSessionCommand'), 'native slash commands must use a durable Session-first mutation transport')
 assert.ok(prompt.includes('`/session/${encodeURIComponent(target.sessionID)}/command`'), 'native slash commands must use the idempotent daemon command endpoint')
 assert.ok(prompt.includes('`/session/${encodeURIComponent(target.sessionID)}/prompt`'), 'native prompt must use the idempotent daemon endpoint')
