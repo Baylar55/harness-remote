@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #509: `ad045260a6f5a170d1d5e12ef3a6b38c2824c99c`.
+- Integration head after PR #510: `6932ac975a50350c2d6a54685e7fee6671bf45b5`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -51,41 +51,42 @@
 - PR #507 retired one duplicate daemon ACP writer-recovery source assertion after required bridge coverage proved lazy claim on the first PI mutation and ownership reuse across later prompt, slash-command and Stop mutations. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #508 retired two duplicate ACP handoff-creation source assertions after required bridge coverage proved the target native Session is created bare with only its directory and model/variant configuration is deferred out of resource creation. Checkpoint/reconciliation guards remain. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #509 retired three duplicate Native Session delete UI source guards after the required Chromium product smoke proved the real DOM confirmation, native DELETE transport and optimistic deletion/refresh lifecycle. Capability gating, rename behavior and production code stayed untouched. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration.
-- #474-#480 and #483-#509 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #510 retired two duplicate New Session UI source guards after the required Chromium product smoke proved the translated accessible control, real native create surface, exactly-once native Session creation and opening of the resulting Session. The `canCreateNativeSession` fail-closed capability gate and production code stayed untouched. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration.
+- #474-#480 and #483-#510 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/native-create-ui-behavior-contract`.
+Active WIP branch: `codex/release-readiness-3.1.0`.
 
-The current #330 slice retires only two duplicate New Session UI source assertions. The required Chromium product smoke already finds the translated **New Session** control by accessible role/name, opens the real create surface, submits it, verifies exactly one native Session resource is created and opens that real target Session. The executable `createNativeSessionTarget()` and capability contracts remain in place; the `canCreateNativeSession` fail-closed UI gate and all production/runtime code remain untouched.
+The integration branch is now in release-candidate stabilization. Do not start another source-guard cleanup, P3 provider expansion or opportunistic runtime refactor before the next release. The automated gate at #510 is fully green: regressions/type-check, bridge macOS/Windows, Chromium product smoke including transcript/composer and cross-machine continuation, desktop Ubuntu/macOS/Windows, Debug APK build, signature and artifact.
 
-External PR #504 (`daemon: support custom ACP primaries with multiple detected CLIs`) has been retargeted from `main` to `codex/development-2026-09-11` and is blocked with `REQUEST_CHANGES`. Its new `resolveDaemonPlan()` unit test bypasses the real configuration boundary: `parseConfig()` still resolves `--backend` through `harnessProfile()` and rejects an unknown backend before the helper can run, while daemon startup later calls `harnessProfile(config.backend)` again. Re-review only after the intended contract is made coherent end-to-end and executable coverage exercises the real parse/startup path rather than only the helper.
+The intended next release is **Harness Remote 3.1.0**, not 3.0.3: compared with 3.0.2, the integration line contains substantial user-facing P1/P2 work including pairing/onboarding, Attention semantics, desktop-owned local runtime/recovery, Project/outcome evidence and cross-machine Native Session continuity. Freeze a release-candidate ref only after this docs-only readiness slice is integrated, then run the true-boundary evidence against that exact frozen commit.
+
+Release publication remains blocked only by true-boundary evidence and repository administration, not by another synthetic code slice:
+
+- strict `gate:real-harness` against the actually installed OpenCode/Codex/Claude/OMP/PI builds, using known-working models where available and recording unavailable inference explicitly;
+- real daemon/adapter restart plus persisted-Session resume/claim on the same candidate build;
+- physical Android foreground/background plus a real network interruption/reconnect check;
+- `main` ruleset/branch protection requiring pull requests and the always-present release checks. The connected GitHub App cannot perform this administration write.
+
+External PR #504 (`daemon: support custom ACP primaries with multiple detected CLIs`) has been retargeted from `main` to `codex/development-2026-09-11` and is blocked with `REQUEST_CHANGES`. Its new `resolveDaemonPlan()` unit test bypasses the real configuration boundary: `parseConfig()` still resolves `--backend` through `harnessProfile()` and rejects an unknown backend before the helper can run, while daemon startup later calls `harnessProfile(config.backend)` again. It is not part of the 3.1.0 candidate. Re-review only after the intended contract is made coherent end-to-end and executable coverage exercises the real parse/startup path rather than only the helper.
 
 The post-#501 audit found that `opencode-recovery.test.mjs` directly proves how an already-selected OpenCode assistant envelope is classified, but it does **not** independently prove the adapter's current-turn occurrence matching for repeated prompts or its newest-assistant selection. Therefore the remaining architecture guard tying `latestAssistant` to `openCodeAssistantProvesTurnCompleted` must stay until equivalent executable adapter/controller coverage exists. Do not create production seams merely to delete that guard.
 
-The remaining source-guard families around model fallback, adapter writer acquisition, projection disposal, OpenCode silent recovery, pending-prompt reconciliation and reply settle continue to protect critical semantics. Replace one only when equivalent executable behavior already exists or a real defect/required refactor naturally creates a safe executable boundary.
+The remaining source-guard families around model fallback, adapter writer acquisition, projection disposal, OpenCode silent recovery, pending-prompt reconciliation and reply settle continue to protect critical semantics. Do not touch them during release-candidate stabilization.
 
-External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. It must first be updated onto the moving integration head. Re-review must still verify both previously identified behavior blockers:
+External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. It is not part of the 3.1.0 candidate. Re-review after the release line is settled and only after both previously identified behavior blockers are resolved:
 
 - preserve explicit `--opencode-command`: `parseDaemonOptions()` captures it and the managed runtime must not discard it in favor of a fresh environment/PATH resolution;
 - preserve the OpenCode lifecycle invariant from PR #351: ordinary internal idle/pre-Send Sessions must not query `/session/status`. External busy adoption may use status only when scoped to genuinely external Sessions (or equivalent explicit state), while the existing running/recovery-watch path remains unchanged. Coverage should prove external status reads include the Session directory and internal idle/pre-Send OpenCode performs no status read.
 
-The Mimocode backend typing/allowlist direction itself remains reasonable. Re-review #494 only after it is rebased and both blockers are resolved; then require the complete integration CI gate (regressions, bridge macOS/Windows, Chromium including OpenCode lifecycle, desktop Ubuntu/macOS/Windows, Debug APK/signature/artifact).
-
 ### P0 — issue #368
 
-Repository/fixture-side automation is effectively exhausted. Do not add synthetic coverage for the remaining true boundaries. #368 stays open for:
-
-- strict `gate:real-harness` execution against actually installed, concretely versioned OpenCode/Codex/Claude/OMP/PI builds on a traceable machine, using known-working models where available and explicitly recording unavailable inference without weakening fail-closed release evidence;
-- real daemon/adapter restart plus persisted-Session resume/claim evidence against those installed harnesses;
-- physical Android foreground/background/network-interruption checks;
-- repository-admin enforcement of `main` pull-request/required-check rules.
+Repository/fixture-side automation is exhausted for this release line. #368 stays open for the true-boundary release evidence listed above plus the `main` ruleset/admin action. Do not add synthetic coverage to substitute for those checks.
 
 ### P1 — issue #369
 
-Repo-side pairing, Attention semantics, desktop-owned local runtime, packaged-runtime execution, PATH recovery, health/reconnect recovery and Machines simplification are implemented. #468/#470 add the latest recovery/UX evidence.
-
-Do not invent more P1 UI/runtime surface merely because #369 remains open. It is intentionally left open while its declared P0 prerequisite still has real-environment/admin evidence outstanding.
+Repo-side pairing, Attention semantics, desktop-owned local runtime, packaged-runtime execution, PATH recovery, health/reconnect recovery and Machines simplification are implemented. Do not invent more P1 UI/runtime surface before 3.1.0 merely because #369 remains open; its remaining dependency is the P0 real-boundary evidence.
 
 ### P2 — issue #371
 
@@ -99,7 +100,7 @@ Do not restart federation or cross-machine continuity work already integrated:
 
 One deliberate non-claim remains: do not infer `checks run/failed` from transcript/tool prose. There is no provider-neutral structured source yet, so absence is safer than heuristic evidence.
 
-#371 remains open while its declared #368/#369 prerequisites are open at true-boundary evidence, not because another federation implementation is missing.
+#371 remains open at true-boundary evidence, not because another federation implementation is missing.
 
 ## Product direction
 
