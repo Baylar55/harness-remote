@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #493: `5b5161ad21615b42004479d042ec591d4bf84ae7`.
+- Integration head after PR #495: `90a444d37d725724cb33272e17059ed03fba0681`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -38,13 +38,14 @@
 - PR #490 retired four model-catalog/routing implementation guards after the blocking Chromium model-switch contract proved real picker availability, per-harness catalog isolation, routed target-catalog selection and exact selected model/variant prompt delivery. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
 - PR #491 replaced the Model Picker search placeholder guards with the executable existing picker contract, covering model/provider/description/variant search and catalog-confirmed free filtering. Full Chromium, desktop and signed Debug APK gates passed before integration; filtering semantics were unchanged.
 - PR #493 replaced two remaining adapter model-reconciliation source guards with executable adapter behavior: OpenCode tail-page model enrichment now proves newest native-message model projection through the real Session controller. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#493 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #495 replaced five PI live-ACP → journal identity source guards with executable Session-controller and fail-closed identity contracts covering current-tail convergence, ambiguity, terminal errors, older-page isolation and non-PI isolation. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#495 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/pi-tail-identity-behavior-contract`.
+Active WIP branch: `codex/native-working-status-behavior-contract`.
 
-The current #330 slice replaces the five PI tail-identity implementation guards with executable behavior at the actual Native Session controller boundary. `native-session-pi-identity.test.mjs` drives `registerNativeSessionV3Adapter()` through `controller.loadMessagePage()` to prove PI live-ACP → journal identity convergence, current-tail-only scoping and non-PI isolation; focused helper cases retain explicit fail-closed coverage for ambiguous repeated messages and terminal-error reconciliation. The new test is wired into the existing native Session lifecycle suite, and only the five equivalent PI source-text assertions are removed. No production/runtime code changes in this slice.
+The current #330 slice replaces the remaining source-text assertion for `retry`/`waiting` working states with executable coverage of the exported `nativeSessionIsWorking()` contract on the already-wired native Session lifecycle test surface. The behavioral contract covers every accepted working alias, trim/case normalization and representative terminal/empty states. Only the duplicate source guard is retired; no production/runtime code changes in this slice.
 
 ### P0 — issue #368
 
