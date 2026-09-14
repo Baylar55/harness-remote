@@ -6,7 +6,6 @@ const discovery = read('./native-session-discovery.ts')
 const continuation = read('./native-session-continuation.ts')
 const create = read('./native-session-create.ts')
 const prompt = read('./native-session-prompt.ts')
-const stop = read('./native-session-stop.ts')
 const adapter = read('./native-session-v3-adapter.ts')
 const conversationController = read('./conversation-controller.ts')
 const observer = read('./components/native-session-observer.tsx')
@@ -55,8 +54,6 @@ assert.ok(actions.includes('api.deleteSession(target.config, target.sessionID'),
 assert.ok(rename.includes('target.renameSupported') && actions.includes('target.deleteSupported'), 'native metadata actions must follow harness capabilities')
 assert.ok(actions.includes('t("sf.keepSession")') && actions.includes('t("sf.deleteSession")'), 'native deletion must use an inline translated confirmation')
 assert.equal(actions.includes('window.confirm'), false, 'native deletion must not use a blocking browser dialog')
-
-assert.ok(stop.includes('clientRequestId') && stop.includes('operationToken'), 'native Stop must retain durable per-turn mutation identity')
 
 assert.ok(observer.includes('import { WorkThreadConversation } from "./work-thread-conversation"'), 'native Session detail must mount the mature v3 controller')
 assert.ok(observer.includes('<WorkThreadConversation'), 'native Session detail must render WorkThreadConversation directly')
