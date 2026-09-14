@@ -10,6 +10,7 @@ globalThis.localStorage ??= {
 
 const { api } = await import('./api.ts')
 const {
+  nativeSessionIsWorking,
   registerNativeSessionV3Adapter,
   stabilizePiTailMessageIDs
 } = await import('./native-session-v3-adapter.ts')
@@ -56,6 +57,17 @@ function textMessage(id, role, text, { sessionID = 'pi-1', error } = {}) {
 function ids(messages) {
   return messages.map((message) => message.info.id)
 }
+
+test('native Session working-state aliases remain behavioral rather than source-text contracts', () => {
+  for (const status of ['busy', 'running', 'working', 'retry', 'waiting', 'in_progress', 'in-progress']) {
+    assert.equal(nativeSessionIsWorking(status), true, `${status} must keep the Session visibly working`)
+  }
+  assert.equal(nativeSessionIsWorking('  WAITING  '), true, 'working-state matching remains trimmed and case-insensitive')
+
+  for (const status of [undefined, '', 'idle', 'ready', 'completed', 'failed', 'cancelled']) {
+    assert.equal(nativeSessionIsWorking(status), false, `${String(status)} must not be treated as working`)
+  }
+})
 
 test('PI current-tail live ACP ids remain stable when the authoritative journal replaces them', async () => {
   const registration = registerNativeSessionV3Adapter(target(), () => {})

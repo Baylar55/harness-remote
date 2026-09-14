@@ -60,7 +60,6 @@ assert.ok(adapter.includes('if (!mayDiscoverRuns) return'), 'tail replay must no
 assert.ok(adapter.includes(':request:${clientRequestId}'), 'new native prompts must use durable client request identity for the compatibility Run')
 assert.ok(adapter.includes('probeNativeSessionContinuation(entry.target)'), 'ACP writer acquisition must be deferred to the mutation boundary')
 assert.ok(adapter.includes('await ensureWriter(entry)'), 'Send and Stop must acquire writer ownership transparently when needed')
-assert.ok(adapter.includes('value === "retry"') && adapter.includes('value === "waiting"'), 'retry and waiting must remain working states')
 // Assert the disposal invariant rather than one exact formatting of it. Session teardown may need
 // additional cleanup before the transient projection is removed from the map.
 assert.ok(adapter.includes('entry?.listeners.delete(onConversationUpdate)'), 'leaving a Session must remove its projection listener')
