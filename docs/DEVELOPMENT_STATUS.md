@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #506: `625f5e98d68b8a2593705a38b01984364cbe67bf`.
+- Integration head after PR #507: `02c04763217435f8ffd421b15e7b2675a5b6be37`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -48,13 +48,14 @@
 - PR #502 replaced three prompt/command implementation-text guards with executable transport behavior in the existing lifecycle test: exact harness-scoped encoded Session paths, wire request identity, directory, model/variant and slash-command normalization/arguments. It was rebuilt after #501 advanced integration and the full gate passed again on the rebased head before merge; production code stayed untouched.
 - PR #505 replaced the remaining Native Session Stop mutation-identity source assertion with executable lifecycle coverage proving ambiguous-delivery retry reuses the same request id for the same operation token, exact encoded `/stop` transport and fresh identity for a later turn. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #506 retired three redundant managed-OpenCode daemon transport source assertions after required bridge tests proved the real `/prompt_async` and `/command` mutation paths, directory scoping, exact request bodies and absence of an invented internal agent field. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#506 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #507 retired one duplicate daemon ACP writer-recovery source assertion after required bridge coverage proved lazy claim on the first PI mutation and ownership reuse across later prompt, slash-command and Stop mutations. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#507 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/acp-writer-ownership-behavior-contract`.
+Active WIP branch: `codex/acp-handoff-creation-behavior-contract`.
 
-The current #330 slice retires one duplicate daemon source-text assertion around ACP writer recovery. Existing required bridge coverage in `machine-daemon.test.js` executes the real mutation path and proves ownership is acquired lazily on the first PI Stop (`claim -> stop`), then reused by prompt, slash command and a later Stop without another claim. The production daemon, ACP service, adapter writer boundary and ownership behavior remain untouched; only the redundant `await claimSession(agentID, sessionID)` source assertion is removed from the architecture monolith.
+The current #330 slice retires only two duplicate ACP handoff creation source assertions. Existing required bridge coverage in `native-session-model-routing.test.js` executes the real `handoffSession()` path and proves the target Session is created bare with exactly `{ directory }`, while model/variant configuration is not applied during resource creation. The checkpoint-order guard plus `reconcileHandoff`/`beforeSessionIDs` recovery guards remain intentionally in place because the existing behavior test does not prove their exact ordering/reconciliation semantics strongly enough. Production handoff/runtime code is untouched.
 
 The post-#501 audit found that `opencode-recovery.test.mjs` directly proves how an already-selected OpenCode assistant envelope is classified, but it does **not** independently prove the adapter's current-turn occurrence matching for repeated prompts or its newest-assistant selection. Therefore the remaining architecture guard tying `latestAssistant` to `openCodeAssistantProvesTurnCompleted` must stay until equivalent executable adapter/controller coverage exists. Do not create production seams merely to delete that guard.
 
