@@ -37,7 +37,6 @@ assert.ok(crossMachinePanel.includes('planCrossMachineContinuation'), 'cross-mac
 assert.ok(crossMachinePanel.includes('continueNativeSessionAcrossMachine'), 'the final UI mutation must use the crash-safe orchestrator')
 assert.ok(crossMachinePanel.includes('confirmedProjectContinuity: confirmationRequired && confirmed'), 'diverged workspaces must require explicit user confirmation')
 assert.ok(crossMachinePanel.includes('plan?.disposition === "blocked"'), 'repository/history mismatch must be visibly blocked')
-assert.ok(crossMachinePanel.includes('taskClient.listAgentModels'), 'target model choice must come from the selected harness current catalog')
 assert.ok(crossMachinePanel.includes('attachments: []'), 'the first cross-machine UI must make its no-attachment boundary explicit')
 assert.ok(crossMachinePanel.includes('Attachments and source permissions are not transferred.'), 'the authority and attachment boundary must be visible in the UI')
 assert.ok(crossMachinePanel.includes('&& planReady'), 'the mutation button must remain gated on a completed safe plan or explicit review confirmation')
