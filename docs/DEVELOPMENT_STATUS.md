@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #495: `90a444d37d725724cb33272e17059ed03fba0681`.
+- Integration head after PR #496: `37fa2a7f9f231eda6718d09f13ba917727e31299`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -39,13 +39,14 @@
 - PR #491 replaced the Model Picker search placeholder guards with the executable existing picker contract, covering model/provider/description/variant search and catalog-confirmed free filtering. Full Chromium, desktop and signed Debug APK gates passed before integration; filtering semantics were unchanged.
 - PR #493 replaced two remaining adapter model-reconciliation source guards with executable adapter behavior: OpenCode tail-page model enrichment now proves newest native-message model projection through the real Session controller. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #495 replaced five PI live-ACP → journal identity source guards with executable Session-controller and fail-closed identity contracts covering current-tail convergence, ambiguity, terminal errors, older-page isolation and non-PI isolation. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#495 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #496 replaced the remaining `retry`/`waiting` working-state source assertion with executable coverage of `nativeSessionIsWorking()`, including all accepted aliases, normalization and representative terminal states. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#496 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/native-working-status-behavior-contract`.
+Active WIP branch: `codex/cross-machine-model-catalog-behavior-contract`.
 
-The current #330 slice replaces the remaining source-text assertion for `retry`/`waiting` working states with executable coverage of the exported `nativeSessionIsWorking()` contract on the already-wired native Session lifecycle test surface. The behavioral contract covers every accepted working alias, trim/case normalization and representative terminal/empty states. Only the duplicate source guard is retired; no production/runtime code changes in this slice.
+The current #330 slice retires only the source-text assertion that the cross-machine panel must call `taskClient.listAgentModels`. The blocking Chromium cross-machine execution smoke already proves the real behavior end-to-end: the selected target machine exposes a Claude-only catalog, the panel renders and selects `claude-cross-target`, route revalidation preserves that target model, target Session creation receives it, and the exactly-once first target prompt carries the same model. All Project-continuity, mutation-order, attachment/authority and submit-gating source guards remain distinct and untouched. No production/runtime code changes in this slice.
 
 ### P0 — issue #368
 
