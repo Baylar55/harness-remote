@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #508: `53360d869c15c8d130663b501b24cfd02fe9f754`.
+- Integration head after PR #509: `ad045260a6f5a170d1d5e12ef3a6b38c2824c99c`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -50,13 +50,14 @@
 - PR #506 retired three redundant managed-OpenCode daemon transport source assertions after required bridge tests proved the real `/prompt_async` and `/command` mutation paths, directory scoping, exact request bodies and absence of an invented internal agent field. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #507 retired one duplicate daemon ACP writer-recovery source assertion after required bridge coverage proved lazy claim on the first PI mutation and ownership reuse across later prompt, slash-command and Stop mutations. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #508 retired two duplicate ACP handoff-creation source assertions after required bridge coverage proved the target native Session is created bare with only its directory and model/variant configuration is deferred out of resource creation. Checkpoint/reconciliation guards remain. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#508 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #509 retired three duplicate Native Session delete UI source guards after the required Chromium product smoke proved the real DOM confirmation, native DELETE transport and optimistic deletion/refresh lifecycle. Capability gating, rename behavior and production code stayed untouched. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration.
+- #474-#480 and #483-#509 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/native-delete-ui-behavior-contract`.
+Active WIP branch: `codex/native-create-ui-behavior-contract`.
 
-The current #330 slice retires only duplicate Native Session delete UI source assertions that are already exercised by the required Chromium product smoke. That smoke opens a real Session in the product UI, invokes **Delete Session**, reaches the real native `DELETE /v1/agents/pi/session/:id` boundary, proves a DOM confirmation surface rather than a blocking browser confirm, and verifies the local optimistic deletion transition while the DELETE and post-delete Session refresh are independently held. Capability gating, rename behavior, deletion translation guards and all production/runtime code remain untouched.
+The current #330 slice retires only two duplicate New Session UI source assertions. The required Chromium product smoke already finds the translated **New Session** control by accessible role/name, opens the real create surface, submits it, verifies exactly one native Session resource is created and opens that real target Session. The executable `createNativeSessionTarget()` and capability contracts remain in place; the `canCreateNativeSession` fail-closed UI gate and all production/runtime code remain untouched.
 
 External PR #504 (`daemon: support custom ACP primaries with multiple detected CLIs`) has been retargeted from `main` to `codex/development-2026-09-11` and is blocked with `REQUEST_CHANGES`. Its new `resolveDaemonPlan()` unit test bypasses the real configuration boundary: `parseConfig()` still resolves `--backend` through `harnessProfile()` and rejects an unknown backend before the helper can run, while daemon startup later calls `harnessProfile(config.backend)` again. Re-review only after the intended contract is made coherent end-to-end and executable coverage exercises the real parse/startup path rather than only the helper.
 
