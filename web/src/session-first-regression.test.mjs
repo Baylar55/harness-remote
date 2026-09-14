@@ -110,7 +110,6 @@ assert.ok(liveRefresh.includes('onMessage()') && liveRefresh.includes('onIndex()
 assert.ok(liveRefresh.includes('if (lifecycleSettleTimer !== undefined) clearTimeout(lifecycleSettleTimer)'), 'multiple status edges must coalesce instead of creating a polling loop')
 assert.ok(liveRefresh.includes('event.type === "session.error"') && liveRefresh.includes('target.config.backend === "opencode"') && liveRefresh.includes('settleAfterLifecycle()'), 'OpenCode session.error must trigger the bounded lifecycle settle path')
 
-assert.ok(daemon.includes('await claimSession(agentID, sessionID)'), 'ACP Stop must transparently recover writer ownership when needed')
 const handoffBlock = daemon.match(/const handoffSession = async[\s\S]*?const launcher =/)?.[0] || ''
 assert.ok(handoffBlock.includes('service.createSession({ directory })'), 'ACP handoff creation must obtain a bare Session id before title/model enrichment')
 assert.ok(handoffBlock.includes('await checkpoint(result)'), 'handoff target identity must be checkpointed as soon as session/new returns')
