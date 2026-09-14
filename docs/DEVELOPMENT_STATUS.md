@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #491: `c32b3bf8967adadd70692c909644acb03e2a4faf`.
+- Integration head after PR #493: `5b5161ad21615b42004479d042ec591d4bf84ae7`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -37,13 +37,14 @@
 - PR #489 retired the last three `native-session-model.ts` source guards from the Session-first architecture monolith after confirming the existing lifecycle contract already proves nested `info.model.id`, newest cross-role model precedence and matching prior-user variant inheritance. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
 - PR #490 retired four model-catalog/routing implementation guards after the blocking Chromium model-switch contract proved real picker availability, per-harness catalog isolation, routed target-catalog selection and exact selected model/variant prompt delivery. Full Chromium, desktop and signed Debug APK gates passed before integration; no runtime code changed.
 - PR #491 replaced the Model Picker search placeholder guards with the executable existing picker contract, covering model/provider/description/variant search and catalog-confirmed free filtering. Full Chromium, desktop and signed Debug APK gates passed before integration; filtering semantics were unchanged.
-- #474-#480 and #483-#491 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #493 replaced two remaining adapter model-reconciliation source guards with executable adapter behavior: OpenCode tail-page model enrichment now proves newest native-message model projection through the real Session controller. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#493 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/adapter-model-reconciliation-behavior-contract`.
+Active WIP branch: `codex/pi-tail-identity-behavior-contract`.
 
-The current #330 slice extends the existing adapter-level model projection contract instead of adding another test surface. `omp-session-model-projection.test.mjs` already executes `registerNativeSessionV3Adapter()` through real `controller.loadMessagePage()` calls for journal/page model recovery; it now also exercises OpenCode native message metadata with an older user model and a newer assistant `info.model.id` envelope, proving that the newest verified OpenCode model reaches the open runtime. Only the two observer source-text guards for the internal `reconcileNativeSessionModel()`/`lastNativeMessageModel()` call chain are retired. WorkThread fallback, explicit user-choice protection, first-prompt catalog-read stability and other distinct architectural guards remain untouched. No production/runtime code changes in this slice.
+The current #330 slice replaces the five PI tail-identity implementation guards with executable behavior at the actual Native Session controller boundary. `native-session-pi-identity.test.mjs` drives `registerNativeSessionV3Adapter()` through `controller.loadMessagePage()` to prove PI live-ACP → journal identity convergence, current-tail-only scoping and non-PI isolation; focused helper cases retain explicit fail-closed coverage for ambiguous repeated messages and terminal-error reconciliation. The new test is wired into the existing native Session lifecycle suite, and only the five equivalent PI source-text assertions are removed. No production/runtime code changes in this slice.
 
 ### P0 — issue #368
 
