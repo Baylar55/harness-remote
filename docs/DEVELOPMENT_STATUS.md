@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #502: `ff8d16c1aa3b29c31497ec6968b561709b773ac5`.
+- Integration head after PR #505: `e8c8b87b43c1b3ffad5e4536ee024a7ceb7ac35c`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -46,13 +46,14 @@
 - PR #500 retired two duplicate prompt-idempotency source guards after the existing lifecycle contract proved durable ambiguous-delivery identity, exact same-request retry, fail-closed conflicting mutation behavior, stale expiry, Session scoping and transcript-proven acceptance. Full CI passed before integration; production code stayed untouched.
 - PR #501 extracted deterministic OpenCode assistant-envelope classification into `native-session-opencode-reconciliation.ts` and added executable coverage for intermediate tool finishes, provider-error retry ambiguity, completed timestamps, structural tail parts and empty/activity envelopes. The stateful #351 lifecycle remained in the adapter unchanged. The PR was rebased after concurrent #500 integration and the complete gate was rerun successfully: regressions, Chromium including OpenCode lifecycle/cross-machine coverage, desktop Ubuntu/macOS/Windows, signed Debug APK and artifact upload.
 - PR #502 replaced three prompt/command implementation-text guards with executable transport behavior in the existing lifecycle test: exact harness-scoped encoded Session paths, wire request identity, directory, model/variant and slash-command normalization/arguments. It was rebuilt after #501 advanced integration and the full gate passed again on the rebased head before merge; production code stayed untouched.
-- #474-#480 and #483-#502 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #505 replaced the remaining Native Session Stop mutation-identity source assertion with executable lifecycle coverage proving ambiguous-delivery retry reuses the same request id for the same operation token, exact encoded `/stop` transport and fresh identity for a later turn. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#505 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/native-stop-idempotency-behavior-contract`.
+Active WIP branch: `codex/opencode-daemon-transport-behavior-contract`.
 
-The current #330 slice adds executable Stop mutation coverage to the already-wired `native-session-model-lifecycle.test.mjs`, without changing production. It proves an ambiguous Stop delivery retries the same user-turn `operationToken` with the exact same durable `clientRequestId`, verifies the encoded native Session `/stop` transport plus directory/token payload, and proves a later user turn receives a fresh Stop request identity after the earlier Stop is accepted. With that direct behavior contract in place, only the duplicate `clientRequestId`/`operationToken` source assertion and its now-unused source read are retired from `session-first-regression.test.mjs`. Adapter writer acquisition, ACP Stop ownership recovery and all OpenCode recovery semantics remain untouched.
+The current #330 slice retires only three duplicate source-text assertions around managed OpenCode daemon transport. Existing required bridge tests already execute the real `MachineDaemon` mutation paths: `native-session-model-routing.test.js` proves the exact `/session/:id/prompt_async?directory=...` URL and exact prompt body with model/variant and no invented internal `agent`, while `machine-daemon.test.js` proves the real `/session/:id/command?directory=...` request and command/arguments body. Therefore the source guards for `/prompt_async${query}`, `/command${query}` and absence of `agent: agentID` are redundant. ACP writer-claim recovery, handoff checkpoint/reconciliation and all OpenCode lifecycle/recovery guards remain untouched.
 
 The post-#501 audit found that `opencode-recovery.test.mjs` directly proves how an already-selected OpenCode assistant envelope is classified, but it does **not** independently prove the adapter's current-turn occurrence matching for repeated prompts or its newest-assistant selection. Therefore the remaining architecture guard tying `latestAssistant` to `openCodeAssistantProvesTurnCompleted` must stay until equivalent executable adapter/controller coverage exists. Do not create production seams merely to delete that guard.
 
