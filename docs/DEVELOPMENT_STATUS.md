@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #497: `b22db691dd9183a69ee76f04b0f462c16efa21fd`.
+- Integration head after PR #499: `407c7a262a0c0e91d21ad01a47597205261a226e`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -39,13 +39,16 @@
 - PR #491 replaced the Model Picker search placeholder guards with the executable existing picker contract, covering model/provider/description/variant search and catalog-confirmed free filtering. Full Chromium, desktop and signed Debug APK gates passed before integration; filtering semantics were unchanged.
 - PR #493 replaced two remaining adapter model-reconciliation source guards with executable adapter behavior: OpenCode tail-page model enrichment now proves newest native-message model projection through the real Session controller. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #495 replaced five PI live-ACP → journal identity source guards with executable Session-controller and fail-closed identity contracts covering current-tail convergence, ambiguity, terminal errors, older-page isolation and non-PI isolation. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- PR #496 replaced the remaining `retry`/`waiting` working-state source assertion with executable coverage of `nativeSessionIsWorking()`, including all accepted aliases, normalization and representative terminal states. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- PR #496 replaced the focused observer regression's `retry`/`waiting` working-state source assertion with executable coverage of `nativeSessionIsWorking()`, including all accepted aliases, normalization and representative terminal states. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #497 retired the redundant cross-machine model-catalog implementation guard after the blocking Chromium execution smoke proved target-machine catalog isolation, target model selection/revalidation and exact model delivery into target Session creation + first prompt. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- PR #499 refreshed this handoff after #497 and recorded the current #494 review blockers; docs only, with no runtime/test behavior change.
 - #474-#480 and #483-#497 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-No merge-ready feature branch is active after #497.
+Active WIP branch: `codex/session-first-working-status-behavior-contract`.
+
+The current #330 slice retires the duplicate `retry`/`waiting` working-state source assertion that remained in `session-first-regression.test.mjs`. PR #496 already added executable coverage of the exported `nativeSessionIsWorking()` behavior for every accepted working alias, trim/case normalization and representative terminal/empty states. Only that duplicate implementation-text guard is removed; the adapter/runtime and all distinct architectural guards remain untouched.
 
 External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. GitHub reports `mergeable_state: dirty`, so the contributor must first rebase/update onto the integration head. Review also found two behavior regressions that must be fixed before re-review:
 
