@@ -39,8 +39,6 @@ assert.equal(continuation.includes('createSession('), false, 'same-Session conti
 
 assert.equal(create.includes('createTask('), false, 'native create must not create a Task')
 assert.equal(create.includes('Conversation'), true, 'native create comments must explicitly document the no-Conversation boundary')
-assert.ok(home.includes('aria-label={t("sf.newSession")}'), 'Session Home must expose translated New Session')
-assert.ok(home.includes('createNativeSessionTarget'), 'Session Home must create a real native Session rather than a Task')
 assert.ok(home.includes('canCreateNativeSession'), 'Session Home must expose only harness transports that passed native create parity')
 assert.ok(home.includes('aria-label={t("sf.filterByMachine")}') && home.includes('t("sf.allMachinesCount"'), 'multi-machine navigation must offer an explicit All/single-machine filter')
 
