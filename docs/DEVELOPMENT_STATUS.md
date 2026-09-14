@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #496: `37fa2a7f9f231eda6718d09f13ba917727e31299`.
+- Integration head after PR #497: `b22db691dd9183a69ee76f04b0f462c16efa21fd`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -40,13 +40,21 @@
 - PR #493 replaced two remaining adapter model-reconciliation source guards with executable adapter behavior: OpenCode tail-page model enrichment now proves newest native-message model projection through the real Session controller. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #495 replaced five PI live-ACP → journal identity source guards with executable Session-controller and fail-closed identity contracts covering current-tail convergence, ambiguity, terminal errors, older-page isolation and non-PI isolation. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #496 replaced the remaining `retry`/`waiting` working-state source assertion with executable coverage of `nativeSessionIsWorking()`, including all accepted aliases, normalization and representative terminal states. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#496 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #497 retired the redundant cross-machine model-catalog implementation guard after the blocking Chromium execution smoke proved target-machine catalog isolation, target model selection/revalidation and exact model delivery into target Session creation + first prompt. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
+- #474-#480 and #483-#497 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/cross-machine-model-catalog-behavior-contract`.
+No merge-ready feature branch is active after #497.
 
-The current #330 slice retires only the source-text assertion that the cross-machine panel must call `taskClient.listAgentModels`. The blocking Chromium cross-machine execution smoke already proves the real behavior end-to-end: the selected target machine exposes a Claude-only catalog, the panel renders and selects `claude-cross-target`, route revalidation preserves that target model, target Session creation receives it, and the exactly-once first target prompt carries the same model. All Project-continuity, mutation-order, attachment/authority and submit-gating source guards remain distinct and untouched. No production/runtime code changes in this slice.
+External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. GitHub reports `mergeable_state: dirty`, so the contributor must first rebase/update onto the integration head. Review also found two behavior regressions that must be fixed before re-review:
+
+- preserve explicit `--opencode-command`: `parseDaemonOptions()` still captures it, but the current PR head discards that parsed value and recomputes the managed command from environment/PATH;
+- preserve the OpenCode lifecycle invariant from PR #351: ordinary internal idle/pre-Send Sessions must not query `/session/status`. External busy adoption is useful, but should be scoped to genuinely external Sessions (or equivalent explicit state) while the existing running/recovery-watch path remains unchanged. Coverage should prove external status reads include the Session directory and internal idle/pre-Send OpenCode performs no status read.
+
+The Mimocode backend typing/allowlist direction itself is reasonable, and the contributor already addressed earlier Electron allowlist, detection, routing and cancellation findings. Re-review #494 only after it is rebased and the two blockers above are resolved; then require the complete integration CI gate (regressions, bridge macOS/Windows, Chromium including OpenCode lifecycle, desktop Ubuntu/macOS/Windows, Debug APK/signature/artifact).
+
+Do not remove the remaining Native Session/ACP source guards opportunistically. The remaining model-fallback, writer-acquisition, projection-disposal, OpenCode silent-recovery, pending-prompt reconciliation and reply-settle guards protect critical semantics; replace one only when equivalent executable behavior is clearly demonstrated without forcing production refactors merely to delete a guard.
 
 ### P0 — issue #368
 
