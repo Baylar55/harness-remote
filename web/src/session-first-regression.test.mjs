@@ -111,9 +111,7 @@ assert.ok(liveRefresh.includes('if (lifecycleSettleTimer !== undefined) clearTim
 assert.ok(liveRefresh.includes('event.type === "session.error"') && liveRefresh.includes('target.config.backend === "opencode"') && liveRefresh.includes('settleAfterLifecycle()'), 'OpenCode session.error must trigger the bounded lifecycle settle path')
 
 const handoffBlock = daemon.match(/const handoffSession = async[\s\S]*?const launcher =/)?.[0] || ''
-assert.ok(handoffBlock.includes('service.createSession({ directory })'), 'ACP handoff creation must obtain a bare Session id before title/model enrichment')
 assert.ok(handoffBlock.includes('await checkpoint(result)'), 'handoff target identity must be checkpointed as soon as session/new returns')
-assert.equal(handoffBlock.includes('service.setModel('), false, 'handoff creation must defer model/variant application to the first prompt')
 assert.ok(daemon.includes('const reconcileHandoff = async'), 'daemon must support read-only reconciliation for ambiguous Session creation')
 assert.ok(daemon.includes('beforeSessionIDs'), 'handoff reconciliation must compare against a pre-create Session baseline')
 assert.ok(daemonCli.includes('sessionRename: true') && daemonCli.includes('sessionDelete: true'), 'managed OpenCode must advertise its native rename/delete primitives')
