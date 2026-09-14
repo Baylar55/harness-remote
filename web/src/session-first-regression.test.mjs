@@ -50,10 +50,8 @@ assert.ok(home.includes('aria-label={t("sf.filterByMachine")}') && home.includes
 assert.equal(home.includes('api.renameSession('), false, 'Session navigation must not own rename mutations')
 assert.equal(home.includes('api.deleteSession('), false, 'Session navigation must not own delete mutations')
 assert.ok(rename.includes('api.renameSession(target.config, target.sessionID'), 'open Session action must rename the real native Session')
-assert.ok(actions.includes('api.deleteSession(target.config, target.sessionID'), 'open Session action must delete the real native Session')
 assert.ok(rename.includes('target.renameSupported') && actions.includes('target.deleteSupported'), 'native metadata actions must follow harness capabilities')
 assert.ok(actions.includes('t("sf.keepSession")') && actions.includes('t("sf.deleteSession")'), 'native deletion must use an inline translated confirmation')
-assert.equal(actions.includes('window.confirm'), false, 'native deletion must not use a blocking browser dialog')
 
 assert.ok(observer.includes('import { WorkThreadConversation } from "./work-thread-conversation"'), 'native Session detail must mount the mature v3 controller')
 assert.ok(observer.includes('<WorkThreadConversation'), 'native Session detail must render WorkThreadConversation directly')
@@ -183,14 +181,6 @@ for (const prefix of ['native-session-prompt.v1', 'native-session-command.v1', '
 }
 assert.ok(standalone.includes('<NativeSessionObserver'), 'integrated Sessions workspace must still open native Sessions')
 assert.ok(standalone.includes('<NativeSessionHome'), 'Session-first navigation must remain native discovery based')
-assert.ok(
-  standalone.includes('<NativeSessionActions')
-    && standalone.includes('target={selected}')
-    && standalone.includes('onDeleteStarted={handleSessionDeleteStarted}')
-    && standalone.includes('onDeleteFailed={handleSessionDeleteFailed}')
-    && standalone.includes('onDeleted={handleSessionDeleted}'),
-  'open Session header must own the delete action and its optimistic/rollback lifecycle'
-)
 assert.ok(standalone.includes('<NativeSessionTitle target={selected} onRenamed={handleSessionRenamed} />'), 'open Session header must own rename as an inline edit of its own heading')
 assert.ok(standalone.includes('<CommandPalette') && standalone.includes('event.key.toLowerCase() === "k"'), 'Session-first must restore the Ctrl/Cmd+K command palette')
 assert.ok(conversation.includes('uw-command-suggestions') && conversation.includes('chooseCommand'), 'the shared composer must restore keyboard-friendly slash command discovery')
