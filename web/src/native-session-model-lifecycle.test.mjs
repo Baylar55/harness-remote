@@ -31,6 +31,7 @@ const {
   clearPendingNativeSessionPrompt,
   markPendingNativeSessionPromptAccepted
 } = await import('./native-session-prompt.ts')
+const { stopNativeSession } = await import('./native-session-stop.ts')
 const { lastNativeMessageModel } = await import('./native-session-model.ts')
 const { modelCatalogConfig, taskClient } = await import('./taskClient.ts')
 
@@ -276,5 +277,29 @@ assert.equal(sent[1].body.command, 'compact')
 assert.equal(sent[1].body.arguments, 'now')
 assert.deepEqual(sent[1].body.model, { providerID: 'anthropic', modelID: 'claude-opus-4-8' })
 assert.equal(sent[1].body.variant, 'high')
+
+// --- 11. Stop retries keep per-turn mutation identity without swallowing a later turn ------------
+sent.length = 0
+responder = () => { throw new TypeError('network down') }
+await assert.rejects(stopNativeSession(transportTarget, 'turn-1'), /Stop delivery status is unknown/)
+assert.equal(sent.length, 1)
+const ambiguousStopID = sent[0].body.clientRequestId
+assert.ok(ambiguousStopID)
+assert.equal(sent[0].body.operationToken, 'turn-1')
+assert.equal(sent[0].body.directory, '/repo')
+const stopTransportRequest = new URL(sent[0].url)
+assert.equal(stopTransportRequest.pathname, '/v1/agents/pi/session/s1%2Ftransport/stop')
+
+responder = () => new Response(JSON.stringify({ status: 'accepted' }), { status: 200 })
+const retriedStop = await stopNativeSession(transportTarget, 'turn-1')
+assert.equal(sent.length, 2)
+assert.equal(sent[1].body.clientRequestId, ambiguousStopID, 'retrying the same turn must reuse the durable Stop request id')
+assert.equal(retriedStop.clientRequestId, ambiguousStopID)
+
+const nextTurnStop = await stopNativeSession(transportTarget, 'turn-2')
+assert.equal(sent.length, 3)
+assert.equal(sent[2].body.operationToken, 'turn-2')
+assert.equal(sent[2].body.clientRequestId, nextTurnStop.clientRequestId)
+assert.notEqual(nextTurnStop.clientRequestId, ambiguousStopID, 'a later user turn must receive a fresh Stop mutation identity')
 
 console.log('native-session model lifecycle regressions: OK')
