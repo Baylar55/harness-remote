@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #498: `77914d545e194f2e6ff75fd661b0dee14534a89b`.
+- Integration head after PR #500: `6b3ee2f2004de3a91aef840546919d09877e3b87`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -43,13 +43,14 @@
 - PR #497 retired the redundant cross-machine model-catalog implementation guard after the blocking Chromium execution smoke proved target-machine catalog isolation, target model selection/revalidation and exact model delivery into target Session creation + first prompt. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #499 refreshed this handoff after #497 and recorded the current #494 review blockers; docs only, with no runtime/test behavior change.
 - PR #498 retired the duplicate `retry`/`waiting` working-state assertion from the Session-first architecture monolith after #496 supplied executable coverage. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
-- #474-#480 and #483-#498 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #500 retired two duplicate prompt-idempotency source guards after the existing lifecycle contract proved durable ambiguous-delivery identity, exact same-request retry, fail-closed conflicting mutation behavior, stale expiry, Session scoping and transcript-proven acceptance. Full CI passed before integration; production code stayed untouched.
+- #474-#480 and #483-#500 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/prompt-idempotency-behavior-contract`.
+Active WIP branch: `codex/opencode-reconciliation-domain`.
 
-The current #330 slice retires only two duplicate source-text assertions from `session-first-regression.test.mjs`: the presence of `clientRequestId` in native prompt code and the presence of `loadPendingNativeSessionPrompt`. Existing executable coverage in `native-session-model-lifecycle.test.mjs` already proves the real contract: ambiguous delivery is persisted, a different prompt/model is blocked while unresolved, retry of the same prompt/model reuses the exact request id, definite refusal clears pending state, stale ambiguity expires, pending state is Session-scoped, and transcript-proven acceptance retires the pending request. The distinct prompt/command endpoint, Stop idempotency, writer-ownership and OpenCode recovery guards remain untouched.
+The current #330 slice extracts only deterministic OpenCode assistant-envelope classification from `native-session-v3-adapter.ts` into a small harness-specific reconciliation domain. The existing `opencode-recovery.test.mjs` contract now directly proves intermediate tool finishes are non-terminal, provider errors do not prove completion, completed timestamps require terminal text, structural tail parts do not hide final text, and empty assistant envelopes remain in the silent phase while error/content/finish metadata counts as activity. Stateful #351 semantics — idle debounce, recovery watch, transcript/status ordering and silent-turn recovery — remain in the adapter unchanged and their existing guards/browser coverage stay intact.
 
 External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. GitHub reports it as non-mergeable against the moving integration baseline, so the contributor must first rebase/update onto the integration head. Review also found two behavior regressions that must be fixed before re-review:
 
