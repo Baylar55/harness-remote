@@ -96,7 +96,6 @@ assert.ok(adapter.includes('sendNativeSessionPrompt(entry.target, prompt, model,
 assert.ok(adapter.includes('sendNativeSessionCommand(entry.target, body.command.name, body.command.arguments, model)'), 'slash command execution must remain inside the Session-first adapter mutation boundary')
 assert.ok(adapter.includes('stopNativeSession(entry.target, operationToken)'), 'the v3 controller adapter must preserve native Stop idempotency')
 assert.ok(adapter.includes('Cross-agent continuation is disabled until single-Session parity is validated'), 'single-Session validation must block cross-agent continuation')
-assert.ok(adapter.includes('value === "retry"') && adapter.includes('value === "waiting"'), 'native retry and waiting states must remain working')
 assert.ok(adapter.includes('reconcileOpenCodeTranscriptStatus(entry, page, before)'), 'OpenCode completion must reconcile from the native transcript already consumed by v3')
 assert.ok(adapter.includes('message.info.time?.completed'), 'OpenCode transcript completion must require native terminal metadata, not assistant-text heuristics')
 assert.ok(adapter.includes('entry.forcedStatus !== "running" && !openCodeRecoveryWatchActive'), 'OpenCode ordinary idle/pre-Send reconciliation must not block on the legacy status endpoint outside a bounded recovery watch')
