@@ -13,7 +13,7 @@
 
 ## Current integration baseline
 
-- Integration head after PR #500: `6b3ee2f2004de3a91aef840546919d09877e3b87`.
+- Integration head after PR #501: `4f5e8647c7cc357e3a52d9c598b7713b6c6510a4`.
 - PR #468 added bounded recovery of the embedded desktop daemon and was validated on Zorin with a real `SIGSTOP` recovery test.
 - PR #469 added bounded Git aggregate outcome evidence: tracked files, insertions, deletions and binary files, with no raw diff/hunks/source sent to the client.
 - PR #470 fixed the Machines UX race: connection fields now appear only after an explicit **Add machine** action, including when Electron discovers its managed local machine asynchronously.
@@ -44,22 +44,25 @@
 - PR #499 refreshed this handoff after #497 and recorded the current #494 review blockers; docs only, with no runtime/test behavior change.
 - PR #498 retired the duplicate `retry`/`waiting` working-state assertion from the Session-first architecture monolith after #496 supplied executable coverage. Full regressions, Chromium, desktop matrix and signed Debug APK gates passed before integration; production code stayed untouched.
 - PR #500 retired two duplicate prompt-idempotency source guards after the existing lifecycle contract proved durable ambiguous-delivery identity, exact same-request retry, fail-closed conflicting mutation behavior, stale expiry, Session scoping and transcript-proven acceptance. Full CI passed before integration; production code stayed untouched.
-- #474-#480 and #483-#500 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
+- PR #501 extracted deterministic OpenCode assistant-envelope classification into `native-session-opencode-reconciliation.ts` and added executable coverage for intermediate tool finishes, provider-error retry ambiguity, completed timestamps, structural tail parts and empty/activity envelopes. The stateful #351 lifecycle remained in the adapter unchanged. The PR was rebased after concurrent #500 integration and the complete gate was rerun successfully: regressions, Chromium including OpenCode lifecycle/cross-machine coverage, desktop Ubuntu/macOS/Windows, signed Debug APK and artifact upload.
+- #474-#480 and #483-#501 are behavior-preserving contract/CI-hardening slices under issue #330; #481-#482 are release-evidence hardening under #368. Production ACP/harness behavior was not changed by these slices.
 
 ## Current roadmap boundary
 
-Active WIP branch: `codex/opencode-reconciliation-domain`.
+Active WIP branch: `codex/native-prompt-command-transport-contract` (PR #502).
 
-The current #330 slice extracts only deterministic OpenCode assistant-envelope classification from `native-session-v3-adapter.ts` into a small harness-specific reconciliation domain. The existing `opencode-recovery.test.mjs` contract now directly proves intermediate tool finishes are non-terminal, provider errors do not prove completion, completed timestamps require terminal text, structural tail parts do not hide final text, and empty assistant envelopes remain in the silent phase while error/content/finish metadata counts as activity. Stateful #351 semantics — idle debounce, recovery watch, transcript/status ordering and silent-turn recovery — remain in the adapter unchanged and their existing guards/browser coverage stay intact.
+The current #330 slice strengthens the existing `native-session-model-lifecycle.test.mjs` rather than adding a parallel fixture. It executes both `sendNativeSessionPrompt()` and `sendNativeSessionCommand()` against a Session id requiring URL encoding and proves exact harness-scoped prompt/command paths, wire `clientRequestId`, directory, model/variant, command normalization and arguments. With that executable transport contract in place, PR #502 retires only the three equivalent source-text guards from `session-first-regression.test.mjs`. Stop idempotency, adapter writer ownership, daemon OpenCode transport and recovery semantics remain untouched. The pre-rebase head passed the complete CI gate, but the PR has been rebuilt on top of #501 and must pass the complete gate again before integration.
 
-External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. GitHub reports it as non-mergeable against the moving integration baseline, so the contributor must first rebase/update onto the integration head. Review also found two behavior regressions that must be fixed before re-review:
+After #502, no additional #330 source-guard removal is pre-authorized. The post-#501 audit found that `opencode-recovery.test.mjs` directly proves how an already-selected OpenCode assistant envelope is classified, but it does **not** independently prove the adapter's current-turn occurrence matching for repeated prompts or its newest-assistant selection. Therefore the remaining architecture guard tying `latestAssistant` to `openCodeAssistantProvesTurnCompleted` must stay until equivalent executable adapter/controller coverage exists. Do not create production seams merely to delete that guard.
 
-- preserve explicit `--opencode-command`: `parseDaemonOptions()` still captures it, but the current PR head discards that parsed value and recomputes the managed command from environment/PATH;
-- preserve the OpenCode lifecycle invariant from PR #351: ordinary internal idle/pre-Send Sessions must not query `/session/status`. External busy adoption is useful, but should be scoped to genuinely external Sessions (or equivalent explicit state) while the existing running/recovery-watch path remains unchanged. Coverage should prove external status reads include the Session directory and internal idle/pre-Send OpenCode performs no status read.
+The remaining source-guard families around model fallback, writer acquisition, projection disposal, OpenCode silent recovery, pending-prompt reconciliation and reply settle continue to protect critical semantics. Replace one only when equivalent executable behavior already exists or a real defect/required refactor naturally creates a safe executable boundary.
 
-The Mimocode backend typing/allowlist direction itself is reasonable, and the contributor already addressed earlier Electron allowlist, detection, routing and cancellation findings. Re-review #494 only after it is rebased and the two blockers above are resolved; then require the complete integration CI gate (regressions, bridge macOS/Windows, Chromium including OpenCode lifecycle, desktop Ubuntu/macOS/Windows, Debug APK/signature/artifact).
+External PR #494 (`feat(bridge+web): add mimocode backend support + fix external session detection`) has been retargeted from `main` to `codex/development-2026-09-11` and is currently blocked with `REQUEST_CHANGES`. Do not merge it yet. It must first be updated onto the moving integration head. Re-review must still verify both previously identified behavior blockers:
 
-Do not remove the remaining Native Session/ACP source guards opportunistically. The remaining model-fallback, writer-acquisition, projection-disposal, OpenCode silent-recovery, pending-prompt reconciliation and reply-settle guards protect critical semantics; replace one only when equivalent executable behavior is clearly demonstrated without forcing production refactors merely to delete a guard.
+- preserve explicit `--opencode-command`: `parseDaemonOptions()` captures it and the managed runtime must not discard it in favor of a fresh environment/PATH resolution;
+- preserve the OpenCode lifecycle invariant from PR #351: ordinary internal idle/pre-Send Sessions must not query `/session/status`. External busy adoption may use status only when scoped to genuinely external Sessions (or equivalent explicit state), while the existing running/recovery-watch path remains unchanged. Coverage should prove external status reads include the Session directory and internal idle/pre-Send OpenCode performs no status read.
+
+The Mimocode backend typing/allowlist direction itself remains reasonable. Re-review #494 only after it is rebased and both blockers are resolved; then require the complete integration CI gate (regressions, bridge macOS/Windows, Chromium including OpenCode lifecycle, desktop Ubuntu/macOS/Windows, Debug APK/signature/artifact).
 
 ### P0 — issue #368
 
