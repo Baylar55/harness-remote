@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core"
 import { desktopRequestResult, isDesktopPlatform } from "./desktopBridge"
 import { authHeader, hasCredentials, machineBaseUrl } from "./serverConfig"
+import { withSessionIndexLiveRevision } from "./session-index-live-state"
 import type { MachineProject } from "./taskClient"
 import type { MachineSnapshot, ServerConfig } from "./types"
 
@@ -82,8 +83,12 @@ function cacheKey(config: ServerConfig): string {
 }
 
 function remember(config: ServerConfig, snapshot: MachineSnapshot): MachineSnapshot {
-  discoveryCache.set(cacheKey(config), { snapshot, at: Date.now() })
-  return snapshot
+  // `/v1/machine` intentionally contains no per-Session state. Carry the client-side live epoch so
+  // structural runtime reconciliation can still tell that a Session lifecycle edge happened and
+  // let the Session rail perform its own authoritative index read.
+  const current = withSessionIndexLiveRevision(config, snapshot)
+  discoveryCache.set(cacheKey(config), { snapshot: current, at: Date.now() })
+  return current
 }
 
 function recentCachedSnapshot(config: ServerConfig): MachineSnapshot | null {
