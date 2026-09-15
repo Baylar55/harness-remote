@@ -47,7 +47,11 @@ function session(status) {
 
 test("OpenCode lifecycle edges invalidate the Session index while token chunks do not", () => {
   let notifications = 0
-  const unsubscribe = subscribeSessionIndexInvalidation(() => { notifications += 1 })
+  let observedStatus
+  const unsubscribe = subscribeSessionIndexInvalidation(() => {
+    notifications += 1
+    observedStatus = liveSessionIndexStatus(base, "ses_a")
+  })
   const before = sessionIndexInvalidationRevision()
 
   noteSessionIndexLiveEvent(base, { type: "message.part.delta", sessionID: "ses_a" })
@@ -58,6 +62,7 @@ test("OpenCode lifecycle edges invalidate the Session index while token chunks d
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "busy" })
   assert.equal(sessionIndexInvalidationRevision(), before + 1)
   assert.equal(notifications, 1, "a lifecycle edge must invalidate the Session rail directly")
+  assert.deepEqual(observedStatus, { type: "busy" }, "the invalidation subscriber must observe the already-updated live status")
   assert.equal(sessionIndexLifecycleEvent("session.status"), true)
   unsubscribe()
 })
