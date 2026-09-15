@@ -1,9 +1,9 @@
-import type { MachineSnapshot, ServerConfig, SessionStatus } from "./types.js"
+import type { ServerConfig, SessionStatus } from "./types.js"
 
 /**
- * A Session row has two freshness sources: the native Session index and the live event stream.
- * The index is still the durable/read fallback, but a lifecycle edge must be allowed to invalidate
- * it immediately even when `/v1/machine` itself is structurally unchanged.
+ * Session-index invalidations are intentionally coarser than transcript streaming. Lifecycle edges
+ * can change a rail row and therefore require one fresh Session-index read; token chunks must not
+ * fan out into global Session discovery.
  */
 const SESSION_INDEX_LIFECYCLE_EVENTS = new Set([
   "session.status",
@@ -24,7 +24,6 @@ export const LIVE_SESSION_STATUS_GRACE_MS = 15_000
 
 type LiveStatus = { status: SessionStatus; observedAt: number }
 
-const revisions = new Map<string, number>()
 const liveStatuses = new Map<string, Map<string, LiveStatus>>()
 
 function endpointKey(config: Pick<ServerConfig, "host" | "port" | "username" | "backend">): string {
@@ -41,19 +40,8 @@ function pruneLiveStatuses(key: string, now: number): void {
   if (bySession.size === 0) liveStatuses.delete(key)
 }
 
-function bump(config: Pick<ServerConfig, "host" | "port" | "username" | "backend">): number {
-  const key = endpointKey(config)
-  const next = (revisions.get(key) ?? 0) + 1
-  revisions.set(key, next)
-  return next
-}
-
 export function sessionIndexLifecycleEvent(type: string): boolean {
   return SESSION_INDEX_LIFECYCLE_EVENTS.has(type)
-}
-
-export function sessionIndexLiveRevision(config: Pick<ServerConfig, "host" | "port" | "username" | "backend">): number {
-  return revisions.get(endpointKey(config)) ?? 0
 }
 
 export function noteSessionIndexLiveEvent(
@@ -61,7 +49,6 @@ export function noteSessionIndexLiveEvent(
   event: { type: string; sessionID?: string; status?: string },
   now = Date.now()
 ): void {
-  if (sessionIndexLifecycleEvent(event.type)) bump(config)
   if (!event.sessionID) return
 
   const key = endpointKey(config)
@@ -87,7 +74,6 @@ export function noteSessionIndexStreamConnected(
   config: Pick<ServerConfig, "host" | "port" | "username" | "backend">
 ): void {
   liveStatuses.delete(endpointKey(config))
-  bump(config)
 }
 
 export function liveSessionIndexStatus(
@@ -98,19 +84,4 @@ export function liveSessionIndexStatus(
   const key = endpointKey(config)
   pruneLiveStatuses(key, now)
   return liveStatuses.get(key)?.get(sessionID)?.status
-}
-
-/**
- * Client-only decoration used by workspace structural reconciliation. A Session lifecycle event can
- * change no field in `/v1/machine`; carrying this epoch makes that otherwise-identical snapshot a
- * real update, which in turn lets NativeSessionHome perform its authoritative Session-index read.
- */
-export function withSessionIndexLiveRevision(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
-  snapshot: MachineSnapshot
-): MachineSnapshot {
-  return {
-    ...snapshot,
-    __clientSessionIndexRevision: sessionIndexLiveRevision(config)
-  } as MachineSnapshot
 }
