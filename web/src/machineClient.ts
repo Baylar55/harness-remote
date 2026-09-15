@@ -226,7 +226,7 @@ export async function listMachineProjects(config: ServerConfig): Promise<Machine
   const timer = globalThis.setTimeout(() => controller.abort(), BROWSER_DISCOVERY_TIMEOUT_MS)
   let response: Response
   try {
-    response = await fetch(target, { headers: headers(config) })
+    response = await fetch(target, { headers: headers(config), signal: controller.signal })
   } catch (error) {
     const cached = recentCachedProjects(config)
     if (cached) return cached
