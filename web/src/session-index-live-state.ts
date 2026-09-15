@@ -25,6 +25,8 @@ export const LIVE_SESSION_STATUS_GRACE_MS = 15_000
 type LiveStatus = { status: SessionStatus; observedAt: number }
 
 const liveStatuses = new Map<string, Map<string, LiveStatus>>()
+const invalidationListeners = new Set<() => void>()
+let invalidationRevision = 0
 
 function endpointKey(config: Pick<ServerConfig, "host" | "port" | "username" | "backend">): string {
   const host = config.host.trim().replace(/\/+$/, "").toLowerCase()
@@ -40,8 +42,23 @@ function pruneLiveStatuses(key: string, now: number): void {
   if (bySession.size === 0) liveStatuses.delete(key)
 }
 
+function invalidateSessionIndex(): void {
+  invalidationRevision += 1
+  for (const listener of invalidationListeners) listener()
+}
+
 export function sessionIndexLifecycleEvent(type: string): boolean {
   return SESSION_INDEX_LIFECYCLE_EVENTS.has(type)
+}
+
+/** React-facing store: the value changes only when the Session rail should perform a fresh index read. */
+export function sessionIndexInvalidationRevision(): number {
+  return invalidationRevision
+}
+
+export function subscribeSessionIndexInvalidation(listener: () => void): () => void {
+  invalidationListeners.add(listener)
+  return () => invalidationListeners.delete(listener)
 }
 
 export function noteSessionIndexLiveEvent(
@@ -49,6 +66,7 @@ export function noteSessionIndexLiveEvent(
   event: { type: string; sessionID?: string; status?: string },
   now = Date.now()
 ): void {
+  if (sessionIndexLifecycleEvent(event.type)) invalidateSessionIndex()
   if (!event.sessionID) return
 
   const key = endpointKey(config)
@@ -69,11 +87,12 @@ export function noteSessionIndexLiveEvent(
   liveStatuses.set(key, bySession)
 }
 
-/** A reconnect means lifecycle edges may have been missed; discard transient event authority. */
+/** A reconnect means lifecycle edges may have been missed; discard transient authority and re-read. */
 export function noteSessionIndexStreamConnected(
   config: Pick<ServerConfig, "host" | "port" | "username" | "backend">
 ): void {
   liveStatuses.delete(endpointKey(config))
+  invalidateSessionIndex()
 }
 
 export function liveSessionIndexStatus(
