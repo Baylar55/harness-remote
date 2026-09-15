@@ -66,25 +66,33 @@ export function noteSessionIndexLiveEvent(
   event: { type: string; sessionID?: string; status?: string },
   now = Date.now()
 ): void {
-  if (sessionIndexLifecycleEvent(event.type)) invalidateSessionIndex()
-  if (!event.sessionID) return
+  const invalidates = sessionIndexLifecycleEvent(event.type)
+  if (!event.sessionID) {
+    if (invalidates) invalidateSessionIndex()
+    return
+  }
 
   const key = endpointKey(config)
   pruneLiveStatuses(key, now)
   if (event.type === "session.deleted") {
     liveStatuses.get(key)?.delete(event.sessionID)
     if (liveStatuses.get(key)?.size === 0) liveStatuses.delete(key)
+    if (invalidates) invalidateSessionIndex()
     return
   }
 
   let status: SessionStatus | undefined
   if (event.type === "session.idle") status = { type: "idle" }
   else if (event.type === "session.status" && event.status) status = { type: event.status }
-  if (!status) return
 
-  const bySession = liveStatuses.get(key) ?? new Map<string, LiveStatus>()
-  bySession.set(event.sessionID, { status, observedAt: now })
-  liveStatuses.set(key, bySession)
+  if (status) {
+    const bySession = liveStatuses.get(key) ?? new Map<string, LiveStatus>()
+    bySession.set(event.sessionID, { status, observedAt: now })
+    liveStatuses.set(key, bySession)
+  }
+
+  // External-store subscribers must only be notified after the related status cache is coherent.
+  if (invalidates) invalidateSessionIndex()
 }
 
 /** A reconnect means lifecycle edges may have been missed; discard transient authority and re-read. */
