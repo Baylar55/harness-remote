@@ -91,32 +91,37 @@ export function taskDeskLiveEvent(name: string | undefined, data: unknown): Task
  * Use the transport already proven by Classic on each platform. Browser and Electron fetch streams
  * can carry auth headers, Android uses the native SSE plugin, and Electron main owns desktop sockets.
  *
- * `trackSessionIndex` belongs to the long-lived machine subscription only. The selected Session also
- * owns a detail stream so it can refresh transcript/attention quickly, but opening or changing that
- * detail must never reset the shared rail lifecycle cache for every other Session on the endpoint.
+ * Session-index authority requires an agent-routed stream. A machine-level stream may be the daemon's
+ * primary ACP regardless of the saved profile's legacy backend field, so treating an unscoped stream
+ * as OpenCode could project one harness's lifecycle onto another. Callers can override explicitly,
+ * but the safe default tracks the rail only when `agentId` identifies the routed harness.
+ *
+ * The selected Session also owns a detail stream so it can refresh transcript/attention quickly, but
+ * opening or changing that detail must never reset the shared rail lifecycle cache for other Sessions.
  */
 export function subscribeTaskDeskLiveEvents({
   config,
   onEvent,
   onStatus,
-  trackSessionIndex = true
+  trackSessionIndex
 }: {
   config: ServerConfig
   onEvent: (event: TaskDeskLiveEvent) => void
   onStatus?: (status: EventStreamStatus) => void
   trackSessionIndex?: boolean
 }): Subscription {
+  const ownsSessionIndex = trackSessionIndex ?? Boolean(config.agentId?.trim())
   const emit = (name: string | undefined, data: unknown) => {
     const normalized = taskDeskLiveEvent(name, data)
     if (!normalized) return
-    if (trackSessionIndex) noteSessionIndexLiveEvent(config, normalized)
+    if (ownsSessionIndex) noteSessionIndexLiveEvent(config, normalized)
     onEvent(normalized)
   }
   const emitStatus = (status: EventStreamStatus) => {
-    // Only the persistent machine stream owns rail authority. A selected-detail stream reports the
-    // same transport lifecycle but is created/destroyed by navigation; treating its ordinary mount
-    // as a reconnect used to wipe a retry from another Session as soon as the user opened this one.
-    if (trackSessionIndex && status.type === "connected") noteSessionIndexStreamConnected(config)
+    // Only a persistent routed stream owns rail authority. A selected-detail stream reports the same
+    // transport lifecycle but is created/destroyed by navigation; treating its ordinary mount as a
+    // reconnect used to wipe a retry from another Session as soon as the user opened this one.
+    if (ownsSessionIndex && status.type === "connected") noteSessionIndexStreamConnected(config)
     onStatus?.(status)
   }
 
