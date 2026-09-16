@@ -4,6 +4,7 @@ import { discoverAgentNativeSessionPage } from "./native-session-discovery.ts"
 import { taskDeskLiveEvent } from "./taskdesk-live-events.ts"
 import {
   LIVE_SESSION_STATUS_GRACE_MS,
+  liveSessionIndexError,
   liveSessionIndexStatus,
   noteSessionIndexLiveEvent,
   noteSessionIndexStreamConnected,
@@ -75,6 +76,92 @@ test("OpenCode session.status normalization preserves the streamed status type",
   assert.deepEqual(event, { type: "session.status", sessionID: "ses_a", status: "idle" })
 })
 
+test("OpenCode retry normalization preserves provider reason, attempt and next retry", () => {
+  const event = taskDeskLiveEvent(undefined, {
+    type: "session.status",
+    properties: {
+      sessionID: "ses_retry",
+      status: {
+        type: "retry",
+        attempt: 2,
+        message: "No available channel",
+        next: 1_700_000_000_000
+      }
+    }
+  })
+  assert.deepEqual(event, {
+    type: "session.status",
+    sessionID: "ses_retry",
+    status: "retry",
+    statusMessage: "No available channel",
+    statusAttempt: 2,
+    statusNext: 1_700_000_000_000
+  })
+
+  noteSessionIndexLiveEvent(base, event, 1_000)
+  assert.deepEqual(liveSessionIndexStatus(base, "ses_retry", 1_001), {
+    type: "retry",
+    attempt: 2,
+    message: "No available channel",
+    next: 1_700_000_000_000
+  })
+})
+
+test("OpenCode session.error survives navigation until a real retry resumes", () => {
+  const failure = taskDeskLiveEvent(undefined, {
+    type: "session.error",
+    properties: {
+      sessionID: "ses_error",
+      error: {
+        name: "ApiError",
+        data: { message: "No available channel" }
+      }
+    }
+  })
+  assert.deepEqual(failure, {
+    type: "session.error",
+    sessionID: "ses_error",
+    errorMessage: "No available channel"
+  })
+
+  noteSessionIndexLiveEvent(base, failure, 2_000)
+  assert.equal(liveSessionIndexError(base, "ses_error", 2_001), "No available channel")
+  assert.deepEqual(liveSessionIndexStatus(base, "ses_error", 2_001), {
+    type: "error",
+    message: "No available channel"
+  })
+
+  const retry = taskDeskLiveEvent(undefined, {
+    type: "session.status",
+    properties: {
+      sessionID: "ses_error",
+      status: { type: "retry", attempt: 3, message: "Retrying provider route", next: 2_500 }
+    }
+  })
+  noteSessionIndexLiveEvent(base, retry, 2_100)
+  assert.equal(liveSessionIndexError(base, "ses_error", 2_101), undefined)
+  assert.deepEqual(liveSessionIndexStatus(base, "ses_error", 2_101), {
+    type: "retry",
+    attempt: 3,
+    message: "Retrying provider route",
+    next: 2_500
+  })
+})
+
+test("OpenCode nested provider error messages beat generic error names", () => {
+  const event = taskDeskLiveEvent(undefined, {
+    type: "session.error",
+    properties: {
+      sessionID: "ses_nested",
+      error: {
+        name: "UnknownError",
+        data: { error: { message: "Provider routing exhausted" } }
+      }
+    }
+  })
+  assert.equal(event?.errorMessage, "Provider routing exhausted")
+})
+
 test("a fresh streamed idle edge beats a briefly stale busy status read", async () => {
   const now = Date.now()
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "idle" }, now)
@@ -100,12 +187,15 @@ test("a fresh streamed idle edge beats a briefly stale busy status read", async 
   )
 })
 
-test("stream reconnect drops transient status authority and invalidates the Session index", () => {
+test("stream reconnect drops transient status and error authority and invalidates the Session index", () => {
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "idle" })
+  noteSessionIndexLiveEvent(base, { type: "session.error", sessionID: "ses_a", errorMessage: "temporary failure" })
   const before = sessionIndexInvalidationRevision()
-  assert.equal(liveSessionIndexStatus(base, "ses_a")?.type, "idle")
+  assert.equal(liveSessionIndexStatus(base, "ses_a")?.type, "error")
+  assert.equal(liveSessionIndexError(base, "ses_a"), "temporary failure")
 
   noteSessionIndexStreamConnected(base)
   assert.equal(liveSessionIndexStatus(base, "ses_a"), undefined)
+  assert.equal(liveSessionIndexError(base, "ses_a"), undefined)
   assert.equal(sessionIndexInvalidationRevision(), before + 1)
 })
