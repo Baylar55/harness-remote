@@ -155,16 +155,6 @@ export function noteSessionIndexStreamConnected(
   invalidateSessionIndex()
 }
 
-export function liveSessionIndexStatus(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
-  sessionID: string,
-  now = Date.now()
-): SessionStatus | undefined {
-  const key = endpointKey(config)
-  pruneLiveStatuses(key, now)
-  return liveStatuses.get(key)?.get(sessionID)?.status
-}
-
 export function liveSessionIndexError(
   config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
   sessionID: string,
@@ -173,4 +163,20 @@ export function liveSessionIndexError(
   const key = endpointKey(config)
   pruneLiveErrors(key, now)
   return liveErrors.get(key)?.get(sessionID)?.message
+}
+
+export function liveSessionIndexStatus(
+  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  sessionID: string,
+  now = Date.now()
+): SessionStatus | undefined {
+  const key = endpointKey(config)
+  pruneLiveStatuses(key, now)
+  pruneLiveErrors(key, now)
+  const status = liveStatuses.get(key)?.get(sessionID)?.status
+  const error = liveErrors.get(key)?.get(sessionID)?.message
+  // A terminal lifecycle error must beat a trailing idle status in the rail. A later busy/retry
+  // edge clears the cached error above, so automatic provider recovery still wins immediately.
+  if (error && !status?.type?.match(/^(busy|retry)$/)) return { type: "error", message: error }
+  return status
 }
