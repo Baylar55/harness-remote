@@ -124,6 +124,7 @@ jobs:
           node scripts/native-opencode-permission-regression-smoke.mjs
           node scripts/native-opencode-rail-state-smoke.mjs
           node scripts/native-opencode-retry-error-smoke.mjs
+          node scripts/native-opencode-unmounted-durable-smoke.mjs
           node scripts/native-opencode-multiturn-stress-smoke.mjs
           node scripts/native-session-model-switch-smoke.mjs
           node scripts/native-session-outcome-browser-smoke.mjs
