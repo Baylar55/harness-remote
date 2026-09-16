@@ -135,6 +135,10 @@ export function startTaskDeskSessionLiveRefresh({
 
   const subscriptions = targets.map((target) => subscribeTaskDeskLiveEvents({
     config: target.config,
+    // The persistent machine subscription owns the shared rail lifecycle store. This selected-detail
+    // subscription exists only for transcript/detail responsiveness; mounting it while navigating
+    // between Sessions must not reset another Session's live retry/error presentation.
+    trackSessionIndex: false,
     onEvent: (event) => {
       const selected = getSelected()
       const selectedEvent = Boolean(
