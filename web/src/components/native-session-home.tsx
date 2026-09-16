@@ -28,11 +28,13 @@ type Props = ComponentProps<typeof NativeSessionHomeWithAttention>
  * source wrappers preserves the real machine payload while making the existing discovery effect
  * observe the lifecycle revision. Manual refreshToken semantics remain untouched.
  *
- * The rail also owns one persistent global event stream per routed Session-capable agent. A daemon's
- * unscoped global stream belongs to its primary harness and therefore cannot safely identify which
- * agent produced a lifecycle edge. Routing these subscriptions with the same `nativeSessionConfig`
- * used by discovery keeps status/error authority isolated by machine + agent without per-Session
- * observers or polling. The selected detail stream remains presentation/transcript-only.
+ * The rail also owns one persistent routed global event stream for each available OpenCode agent.
+ * A daemon's unscoped browser stream can belong to its primary harness and therefore cannot safely
+ * identify OpenCode lifecycle edges when another ACP is primary. Routing this OpenCode subscription
+ * with the same `nativeSessionConfig` used by discovery keeps status/error authority isolated by
+ * machine + agent without adding ACP streams, per-Session observers, polling, or waking a lazy
+ * configured OpenCode host just because the rail is visible. The selected detail stream remains
+ * presentation/transcript-only.
  */
 export function NativeSessionHome(props: Props) {
   const liveRevision = useSyncExternalStore(
@@ -53,7 +55,7 @@ export function NativeSessionHome(props: Props) {
     machine.config.password,
     snapshot?.machine.id || "",
     snapshot?.agents
-      .filter((agent) => agent.capabilities?.sessions !== false)
+      .filter((agent) => agent.backend === "opencode" && agent.state === "available" && agent.capabilities?.sessions !== false)
       .map((agent) => `${agent.id}:${agent.backend}:${agent.transport}:${agent.state}`)
       .join(",") || ""
   ].join("\u0000")).join("\u0001")
@@ -62,7 +64,7 @@ export function NativeSessionHome(props: Props) {
     const subscriptions = props.sources.flatMap(({ machine, snapshot }) => {
       if (!snapshot) return []
       return snapshot.agents
-        .filter((agent) => agent.capabilities?.sessions !== false)
+        .filter((agent) => agent.backend === "opencode" && agent.state === "available" && agent.capabilities?.sessions !== false)
         .map((agent) => subscribeTaskDeskLiveEvents({
           config: nativeSessionConfig(machine.config, agent),
           trackSessionIndex: true,
@@ -74,8 +76,8 @@ export function NativeSessionHome(props: Props) {
     return () => {
       for (const subscription of subscriptions) subscription.close()
     }
-    // Endpoint + agent semantics, not source array identity: machine refreshes rebuild wrappers even
-    // when routing is unchanged. Reopening all SSE streams on each snapshot render loses event edges.
+    // Endpoint + OpenCode routing semantics, not source array identity: machine refreshes rebuild
+    // wrappers even when routing is unchanged. Reopening the SSE stream on each render loses edges.
   }, [routedStreamSignature])
 
   return <NativeSessionHomeWithAttention {...props} sources={liveSources} />
