@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { api } from "../api"
 import type { ConversationController } from "../conversation-controller"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
@@ -14,7 +14,13 @@ import {
   nativeSessionIsWorking,
   registerNativeSessionV3Adapter
 } from "../native-session-v3-adapter"
-import type { ConversationRuntime } from "../conversation-runtime"
+import type { ConversationRuntime, ConversationTurn } from "../conversation-runtime"
+import {
+  liveSessionIndexError,
+  liveSessionIndexStatus,
+  sessionIndexInvalidationRevision,
+  subscribeSessionIndexInvalidation
+} from "../session-index-live-state"
 import type { AgentModelScope } from "../taskClient"
 import type { CommandInfo, MachineAgentHost } from "../types"
 import { LoadingIcon } from "../Icons"
@@ -45,6 +51,61 @@ function visualState(conversation: ConversationRuntime, attention = false): Nati
 }
 
 export { nativeSessionIsWorking }
+
+function replaceCurrentTurn(
+  conversation: ConversationRuntime,
+  update: (turn: ConversationTurn) => ConversationTurn
+): { currentTurn: ConversationTurn | null; turns: ConversationTurn[] } {
+  const current = conversation.currentTurn
+  if (!current) return { currentTurn: null, turns: conversation.turns }
+  const next = update(current)
+  return {
+    currentTurn: next,
+    turns: conversation.turns.map((turn) => turn.id && current.id && turn.id === current.id ? next : turn)
+  }
+}
+
+/**
+ * Live OpenCode lifecycle is the fastest authority for retry/error presentation. It is intentionally
+ * an overlay rather than controller state: the durable transcript still owns final answer history,
+ * while a later busy/retry edge can retract a terminal-looking provider failure immediately.
+ */
+function withOpenCodeLiveLifecycle(
+  conversation: ConversationRuntime,
+  status: { type: string; message?: string } | undefined,
+  errorMessage: string | undefined
+): ConversationRuntime {
+  if (errorMessage) {
+    const error = { message: errorMessage }
+    const turns = replaceCurrentTurn(conversation, (turn) => ({ ...turn, status: "failed", error }))
+    return {
+      ...conversation,
+      ...turns,
+      status: "failed",
+      activityDetail: null,
+      error
+    }
+  }
+
+  if (status?.type === "busy" || status?.type === "retry") {
+    const turns = replaceCurrentTurn(conversation, (turn) => ({
+      ...turn,
+      status: "running",
+      error: null,
+      finishedAt: undefined
+    }))
+    return {
+      ...conversation,
+      ...turns,
+      status: "running",
+      activityDetail: status.type === "retry" ? status.message?.trim() || "OpenCode is retrying the provider request." : null,
+      error: null,
+      finishedAt: null
+    }
+  }
+
+  return conversation.activityDetail ? { ...conversation, activityDetail: null } : conversation
+}
 
 /**
  * The daemon owns one current model catalog per machine + harness. A historical native Session may
@@ -90,6 +151,26 @@ export function NativeSessionObserver({
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
 
+  const lifecycleRevision = useSyncExternalStore(
+    subscribeSessionIndexInvalidation,
+    sessionIndexInvalidationRevision,
+    sessionIndexInvalidationRevision
+  )
+  const liveStatus = useMemo(
+    () => target.backend === "opencode" ? liveSessionIndexStatus(target.config, target.sessionID) : undefined,
+    [target.backend, target.config, target.sessionID, lifecycleRevision]
+  )
+  const liveError = useMemo(
+    () => target.backend === "opencode" ? liveSessionIndexError(target.config, target.sessionID) : undefined,
+    [target.backend, target.config, target.sessionID, lifecycleRevision]
+  )
+  const presentedConversation = useMemo(
+    () => conversation && target.backend === "opencode"
+      ? withOpenCodeLiveLifecycle(conversation, liveStatus, liveError)
+      : conversation,
+    [conversation, target.backend, liveStatus, liveError]
+  )
+
   const handleConversationUpdate = useCallback((next: ConversationRuntime) => {
     conversationRef.current = next
     setConversation(next)
@@ -105,6 +186,10 @@ export function NativeSessionObserver({
   const handleTranscriptRefresh = useCallback(() => {
     setTranscriptRefreshToken((current) => current + 1)
   }, [])
+
+  useEffect(() => {
+    if (presentedConversation) onStateChangeRef.current?.(visualState(presentedConversation, attentionRef.current))
+  }, [presentedConversation])
 
   useEffect(() => {
     if (!interactionEnabled) return
@@ -231,7 +316,7 @@ export function NativeSessionObserver({
     return () => { disposed = true }
   }, [target.key, interactionEnabled, onConnectionIssue])
 
-  if (!conversation || !controller) {
+  if (!presentedConversation || !controller) {
     return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session into the v3 controller...</div>
   }
 
@@ -246,8 +331,8 @@ export function NativeSessionObserver({
 
       <NativeSessionOutcomePanel
         target={target}
-        conversation={conversation}
-        working={nativeSessionIsWorking(conversation.status)}
+        conversation={presentedConversation}
+        working={nativeSessionIsWorking(presentedConversation.status)}
         interactionEnabled={interactionEnabled}
         onConnectionIssue={onConnectionIssue}
       />
@@ -263,9 +348,15 @@ export function NativeSessionObserver({
         />
       ) : null}
 
+      {presentedConversation.activityDetail ? (
+        <div className="tdw-connection-notice" role="status" aria-live="polite">
+          <strong>OpenCode is retrying.</strong> {presentedConversation.activityDetail}
+        </div>
+      ) : null}
+
       <WorkThreadConversation
         key={target.key}
-        conversation={conversation}
+        conversation={presentedConversation}
         baseConfig={target.config}
         agents={[agent]}
         modelScope={NATIVE_SESSION_MODEL_SCOPE}
