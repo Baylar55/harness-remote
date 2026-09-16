@@ -430,8 +430,9 @@ function startFakeDaemon() {
         json(response, 200, { status: "accepted", clientRequestId: requestId })
         emitLiveEvent(sessionID, "message.updated")
         emitLiveEvent(sessionID, "session.status")
-        // Stay idle long enough for Harness Remote to confirm the interruption, then reproduce a
-        // slower automatic provider retry. The busy edge must retract the banner before final text.
+        // A second stable idle observation after the 750 ms debounce is the actual confirmation;
+        // only after that do we reproduce a slower automatic retry whose busy edge must retract it.
+        setTimeout(() => emitLiveEvent(sessionID, "session.status"), 1_100)
         setTimeout(() => {
           sessionStatuses.set(sessionID, { type: "busy" })
           emitLiveEvent(sessionID, "session.status")
