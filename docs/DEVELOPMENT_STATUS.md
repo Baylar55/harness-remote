@@ -7,59 +7,89 @@
 - Persistent integration branch: `codex/development-2026-09-11`.
 - Never merge development work directly into `main`.
 - Internal feature/fix PRs target `codex/development-2026-09-11` only.
-- Merge into integration only after the relevant CI is completely green.
+- Merge into integration only after the relevant CI is completely green and the repository owner explicitly authorizes the merge.
 - ACP, Native Session, routing, models and harness-runtime changes require regression review against previously fixed failures.
 - Prefer executable behavioral coverage over new source-text guards.
 - Do not publish comments/reviews on external contributor PRs unless explicitly requested by the repository owner.
+- Do not ask the repository owner to manually validate a candidate until code/diff review and all applicable automated gates are already green.
 
 ## Current integration baseline
 
-- Integration head after release-prep PR #515: `a5695af0c874deeb2934f8308bc78f2196b5be1c`.
-- `web/package.json` is now `3.1.0`.
+- Integration head after PR #516: `8976507c5ce4d511719db9d0fc8424430f5c710f`.
+- `web/package.json` is `3.1.0`.
 - PR #511 marked the Harness Remote 3.1.0 release-readiness boundary.
-- PR #513 integrated the OpenCode Session-rail lifecycle fix discovered during real testing: a Session that completed while another Session was selected could remain visually `Working` until reopened.
-- PR #514 refreshed the development handoff after #513.
-- PR #515 prepared 3.1.0 release metadata only; no runtime behavior changed.
+- PR #513 integrated the first OpenCode Session-rail lifecycle fix: a Session that completed while another Session was selected could remain visually `Working` until reopened.
+- PR #515 prepared 3.1.0 release metadata only.
+- PR #516 fixed the RC1 desktop startup loop caused by semantically unchanged embedded-runtime polling repeatedly restarting slower machine discovery.
 
 The integration line is in **3.1.0 release-candidate stabilization**. Do not start opportunistic feature work while release blockers remain.
 
-## RC1 result — failed
+## RC1 result — failed, blocker fixed in integration
 
 Frozen RC1 branch: `codex/release-candidate-3.1.0` at `a5695af0c874deeb2934f8308bc78f2196b5be1c`.
 
-Real desktop testing exposed a release blocker: when the embedded local runtime is healthy and another saved machine endpoint is slow/unreachable, the app can remain on `Connecting to your machines…` indefinitely even though the local machine is already usable.
+Real desktop testing exposed a release blocker: when the embedded local runtime was healthy and another saved machine endpoint was slow/unreachable, the app could remain on `Connecting to your machines…` indefinitely even though the local machine was already usable.
 
 Root cause:
 
-- 3.1 introduced the desktop-owned local runtime and polls its state every 4 seconds after startup;
-- Electron IPC returns a fresh object for every `getLocalRuntimeState()` call even when semantic state is unchanged;
-- `main.tsx` feeds that fresh state into React, rebuilding the composed `machines` array;
-- `NativeSessionsWorkspace` keys machine discovery by that array identity, so every 4-second poll cancels and restarts any slower remote discovery before it can settle offline;
-- the Session rail waits for configured machine discovery to settle, so the UI can remain in the startup phase forever.
+- 3.1 introduced the desktop-owned local runtime and polls its state after startup;
+- Electron IPC returned a fresh object for every `getLocalRuntimeState()` call even when semantic state was unchanged;
+- that rebuilt the composed machine array;
+- Native Session discovery keyed work by that array identity, so repeated local-runtime polling could cancel and restart slower remote discovery before it settled offline.
 
-This explains why the issue did not occur on 3.0.2: that line had no automatic embedded-local-runtime polling. It also explains why the failure is indefinite rather than merely one 30-second Electron request timeout.
+PR #516 fixed this by preserving referential identity for semantically unchanged desktop local-runtime state while still detecting real status/profile/host/port/PID changes. Keep RC1 frozen as failed evidence; do not rewrite its history.
 
-Active fix branch: `codex/fix-startup-offline-machine`.
+## RC2 result — failed OpenCode real validation
 
-Fix direction:
+After the RC1 startup fix, real OpenCode testing exposed a second release blocker cluster:
 
-- preserve referential identity for semantically unchanged `DesktopLocalRuntimeState` values in `desktopBridge.ts`;
-- still return a new state when status, profile id, host, port or PID actually changes;
-- behavioral coverage in `desktop-workspace-bridge.test.mjs` asserts both unchanged-state stability and real restart detection;
-- do not weaken offline-machine visibility or hide saved unreachable machines.
+- prolonged generic `OpenCode is getting started` / unexplained retry presentation;
+- Working/Retrying transitions that lost the provider's actual retry reason;
+- terminal-looking `session.error` becoming visible only after navigation or a later turn;
+- stale live errors surviving after the native transcript had already persisted a successful final answer;
+- Ready/empty or stale rail presentation after leaving and reopening Sessions;
+- lifecycle authority collisions between an unscoped machine stream and the agent-routed OpenCode Session path.
 
-RC1 must remain frozen as failed evidence. Cut RC2 only after this fix passes the complete PR gate and merges into integration.
+Active stabilization:
+
+- branch: `codex/opencode-rc3-stabilization`;
+- PR: **#517** `fix(opencode): stabilize retry, error and remount lifecycle`;
+- target: `codex/development-2026-09-11` only;
+- status: **draft; do not merge and do not request manual RC validation until the exact final SHA has the complete green gate**.
+
+Current #517 design:
+
+- preserves OpenCode `session.status` retry message/attempt/next metadata;
+- bridges `session.error` across short persistence/navigation gaps without making it permanent;
+- later real `busy`/`retry` or durable successful assistant output retires an older live error;
+- selected-detail streams never own shared rail lifecycle state;
+- lifecycle cache identity includes routed `agentId`, so sibling agents cannot contaminate one another;
+- the rail receives lifecycle only from an agent-routed OpenCode stream, never from an ambiguous machine-primary stream;
+- there is exactly one routed lifecycle owner per available OpenCode agent: the existing Attention stream when question/permission capability is present, otherwise the Session-rail fallback stream;
+- ACP semantics remain on their established adapter/transcript paths and do not inherit OpenCode `session.error` presentation;
+- no continuous `/session/status` polling was added, preserving #351 and #421/#422 behavior.
+
+Blocking browser coverage in #517 now includes the historical OpenCode matrix plus:
+
+- `native-opencode-rail-state-smoke.mjs` — background Working → Ready without reopen;
+- `native-opencode-retry-error-smoke.mjs` — retry detail, navigate-away error, recovery and durable settlement;
+- `native-opencode-unmounted-durable-smoke.mjs` — true error survives reopen, but a durable final written while unmounted wins when reopened;
+- `native-opencode-multiturn-stress-smoke.mjs` — six sequential turns covering normal completion, retry, provider error/recovery, remount and background completion with one native dispatch and one final reply per turn.
+
+The last observed failures during stabilization were real and were fixed rather than rerun blindly: first an `agentId` cache/test identity mismatch, then machine-level versus routed lifecycle namespaces, then an overly broad routed subscription that touched ACP harnesses. A later multi-turn smoke failure was identified as a test race: it asserted old replies immediately after remount before asynchronous transcript hydration; the smoke now waits for the newest durable reply before checking accumulated history.
+
+After the final runtime/documentation commits, require a fresh exact-SHA gate: type-check/regressions, OpenCode permission transport, bridge Windows/macOS, full Chromium product smoke, desktop Ubuntu/macOS/Windows and Debug APK. Only then is #517 eligible for owner confirmation and real RC verification.
 
 ## Stable `main` line
 
 - `main` remains on Harness Remote 3.0.2 and has not been modified by the 3.1 work.
 - Stable-line PR #512 contains the OpenCode rail-state fix adapted to the 3.0 shell.
 - #512 is fully green but remains **open and unmerged**. Do not merge it into `main` without explicit authorization.
-- The RC1 startup loop is specific to the 3.1 desktop-owned local-runtime polling path; 3.0.2 does not contain that mechanism.
+- The RC1 desktop startup loop and #517 RC stabilization work belong to the 3.1 line; do not backport them opportunistically.
 
 ## OpenCode reliability guardrails
 
-Do not regress behavior established by #304/#306/#337/#351/#355/#391/#421/#422/#425/#451/#452/#453.
+Read `docs/OPENCODE_RELIABILITY_CONTRACT.md` before changing OpenCode Session projection, lifecycle routing or reconciliation. Do not regress behavior established by #304/#306/#337/#351/#355/#391/#421/#422/#425/#451/#452/#453/#513.
 
 In particular:
 
@@ -67,13 +97,21 @@ In particular:
 - persisted replies must remain recoverable even when event delivery or status lookup is unavailable (#421/#422/#425);
 - permission and mounted-Session convergence must not create false red interruptions (#452);
 - unresolved requests remain Attention rather than being silently treated as completed (#451);
-- PR #501 extracted deterministic OpenCode assistant-envelope classification without changing the stateful #351 lifecycle.
+- OpenCode lifecycle overlays are presentation bridges, not a second durable transcript/state machine;
+- routed OpenCode lifecycle must not leak into ACP backends or sibling agent identities.
 
 ## CI / packaging
 
-- #513/#514/#515 completed the normal release-candidate gate: type-check/regressions, OpenCode permission transport, bridge macOS/Windows, Chromium product smoke including cross-machine scenarios, desktop Ubuntu/macOS/Windows and signed Debug APK.
-- Android CI was previously repaired so `android-actions/setup-android@v4` no longer requests the retired SDK `tools` package; Android 36 packages are installed explicitly.
-- There is no push-triggered workflow on the integration branch, so PR validation is the applicable gate before merge.
+The release-candidate gate is not satisfied by unit/type-check alone. Before integration or RC freeze require, on the exact candidate SHA:
+
+- type-check/build and web regressions;
+- OpenCode permission transport regression;
+- bridge tests on Windows and macOS;
+- Chromium product smoke including the complete OpenCode reliability matrix and cross-machine scenarios;
+- desktop tests on Ubuntu, macOS and Windows, including packaged embedded-daemon execution where applicable;
+- signed Debug APK.
+
+Android CI was previously repaired so `android-actions/setup-android@v4` no longer requests the retired SDK `tools` package; Android 36 packages are installed explicitly. There is no push-triggered workflow on the integration branch, so PR validation is the applicable gate before merge.
 
 ## External PRs
 
@@ -84,7 +122,7 @@ In particular:
 
 The intended next release is **Harness Remote 3.1.0**, not 3.0.3.
 
-After the RC1 startup blocker is fixed and RC2 is frozen, remaining release evidence is true-boundary validation:
+Do not freeze another RC until #517 is fully green and real OpenCode validation confirms the reported RC2 failures are gone. After that, remaining release evidence is true-boundary validation:
 
 - strict real-harness checks against installed OpenCode/Codex/Claude/OMP/PI builds, recording unavailable harness/model combinations rather than inventing substitutes;
 - real daemon/adapter restart plus persisted-Session resume/claim;
@@ -99,7 +137,7 @@ Keep open for the true-boundary release evidence and repository-admin enforcemen
 
 ### P1 — issue #369
 
-Repo-side pairing, Attention semantics, desktop-owned local runtime, packaged-runtime execution, PATH recovery, health/reconnect recovery and Machines simplification are implemented. Its remaining dependency is P0 evidence plus the RC1 startup blocker fix.
+Repo-side pairing, Attention semantics, desktop-owned local runtime, packaged-runtime execution, PATH recovery, health/reconnect recovery and Machines simplification are implemented. Release readiness still depends on the RC stabilization and P0 true-boundary evidence.
 
 ### P2 — issue #371
 
