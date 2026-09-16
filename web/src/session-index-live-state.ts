@@ -167,6 +167,9 @@ export function noteSessionIndexLiveEvent(
   }
 
   if (event.type === "session.error" && event.errorMessage) {
+    // session.error is newer authority than a preceding retry/busy edge. Drop that older status so
+    // the failure is visible immediately; a later real busy/retry edge can still retract it.
+    deleteStatus(key, event.sessionID)
     const bySession = liveErrors.get(key) ?? new Map<string, LiveError>()
     bySession.set(event.sessionID, { message: event.errorMessage, observedAt: now })
     liveErrors.set(key, bySession)
