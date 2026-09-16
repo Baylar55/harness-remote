@@ -12,6 +12,7 @@ import {
   subscribeSessionIndexInvalidation
 } from "../session-index-live-state"
 import { subscribeTaskDeskLiveEvents } from "../taskdesk-live-events"
+import type { MachineAgentHost } from "../types"
 
 export { appendCursorPage, attentionInboxCounts, refreshCursorPage, sessionTreeRows }
 
@@ -22,7 +23,7 @@ export type {
 
 type Props = ComponentProps<typeof NativeSessionHomeWithAttention>
 
-function needsOpenCodeRailStream(agent: Props["sources"][number]["snapshot"] extends infer _ ? any : never): boolean {
+function needsOpenCodeRailStream(agent: MachineAgentHost): boolean {
   return agent.backend === "opencode"
     && agent.state === "available"
     && agent.capabilities?.sessions !== false
