@@ -28,6 +28,7 @@ export const LIVE_SESSION_ERROR_GRACE_MS = 2 * 60_000
 
 type LiveStatus = { status: SessionStatus; observedAt: number }
 type LiveError = { message: string; observedAt: number }
+type SessionIndexConfig = Pick<ServerConfig, "host" | "port" | "username" | "backend" | "agentId">
 
 type LiveEvent = {
   type: string
@@ -44,9 +45,12 @@ const liveErrors = new Map<string, Map<string, LiveError>>()
 const invalidationListeners = new Set<() => void>()
 let invalidationRevision = 0
 
-function endpointKey(config: Pick<ServerConfig, "host" | "port" | "username" | "backend">): string {
+function endpointKey(config: SessionIndexConfig): string {
   const host = config.host.trim().replace(/\/+$/, "").toLowerCase()
-  return `${host}:${config.port}|${config.username.trim()}|${config.backend}`
+  // A Harness machine can expose multiple routed agents of the same backend. The agent id is part of
+  // transport identity just like backend/host/port: retry/error state from one OpenCode agent must
+  // never project onto a different OpenCode agent that happens to share the daemon endpoint.
+  return `${host}:${config.port}|${config.username.trim()}|${config.backend}|${config.agentId?.trim() || ""}`
 }
 
 function pruneLiveStatuses(key: string, now: number): void {
@@ -114,21 +118,21 @@ export function subscribeSessionIndexInvalidation(listener: () => void): () => v
  * explicit retirement helpers let that controller stop an old retry/error from resurfacing later.
  */
 export function clearSessionIndexLiveError(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  config: SessionIndexConfig,
   sessionID: string
 ): void {
   if (deleteError(endpointKey(config), sessionID)) invalidateSessionIndex()
 }
 
 export function clearSessionIndexLiveState(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  config: SessionIndexConfig,
   sessionID: string
 ): void {
   if (deleteSessionState(endpointKey(config), sessionID)) invalidateSessionIndex()
 }
 
 export function noteSessionIndexLiveEvent(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  config: SessionIndexConfig,
   event: LiveEvent,
   now = Date.now()
 ): void {
@@ -189,7 +193,7 @@ export function noteSessionIndexLiveEvent(
  * busy/retry edge retracts the error, and the bounded error grace prevents it from living forever.
  */
 export function noteSessionIndexStreamConnected(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">
+  config: SessionIndexConfig
 ): void {
   const key = endpointKey(config)
   liveStatuses.delete(key)
@@ -198,7 +202,7 @@ export function noteSessionIndexStreamConnected(
 }
 
 export function liveSessionIndexError(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  config: SessionIndexConfig,
   sessionID: string,
   now = Date.now()
 ): string | undefined {
@@ -209,7 +213,7 @@ export function liveSessionIndexError(
 }
 
 export function liveSessionIndexStatus(
-  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  config: SessionIndexConfig,
   sessionID: string,
   now = Date.now()
 ): SessionStatus | undefined {
