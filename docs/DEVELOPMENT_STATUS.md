@@ -55,7 +55,7 @@ Active stabilization:
 - branch: `codex/opencode-rc3-stabilization`;
 - PR: **#517** `fix(opencode): stabilize retry, error and remount lifecycle`;
 - target: `codex/development-2026-09-11` only;
-- status: **draft; do not merge and do not request manual RC validation until the exact final SHA has the complete green gate**.
+- status: **draft; automated OpenCode stabilization is green on the last runtime head, but do not merge and do not create RC3 without repository-owner confirmation and final exact-head validation**.
 
 Current #517 design:
 
@@ -66,19 +66,33 @@ Current #517 design:
 - lifecycle cache identity includes routed `agentId`, so sibling agents cannot contaminate one another;
 - the rail receives lifecycle only from an agent-routed OpenCode stream, never from an ambiguous machine-primary stream;
 - there is exactly one routed lifecycle owner per available OpenCode agent: the existing Attention stream when question/permission capability is present, otherwise the Session-rail fallback stream;
-- ACP semantics remain on their established adapter/transcript paths and do not inherit OpenCode `session.error` presentation;
+- the Session-rail fallback is OpenCode-only and only for `available` agents; configured/unavailable/starting/error OpenCode agents are not awakened by opening the rail;
+- permission/question acknowledgement keeps the pre-existing immediate reconcile for every backend and adds exactly one bounded trailing reconcile only for OpenCode, covering the ACK-before-durable-final race without changing ACP behavior;
+- ACP semantics remain on their established adapter/transcript paths and do not inherit OpenCode `session.error` presentation or delayed attention-settlement behavior;
 - no continuous `/session/status` polling was added, preserving #351 and #421/#422 behavior.
 
-Blocking browser coverage in #517 now includes the historical OpenCode matrix plus:
+Blocking browser coverage in #517 includes the historical OpenCode matrix plus:
 
 - `native-opencode-rail-state-smoke.mjs` — background Working → Ready without reopen;
 - `native-opencode-retry-error-smoke.mjs` — retry detail, navigate-away error, recovery and durable settlement;
 - `native-opencode-unmounted-durable-smoke.mjs` — true error survives reopen, but a durable final written while unmounted wins when reopened;
 - `native-opencode-multiturn-stress-smoke.mjs` — six sequential turns covering normal completion, retry, provider error/recovery, remount and background completion with one native dispatch and one final reply per turn.
 
-The last observed failures during stabilization were real and were fixed rather than rerun blindly: first an `agentId` cache/test identity mismatch, then machine-level versus routed lifecycle namespaces, then an overly broad routed subscription that touched ACP harnesses. A later multi-turn smoke failure was identified as a test race: it asserted old replies immediately after remount before asynchronous transcript hydration; the smoke now waits for the newest durable reply before checking accumulated history.
+The stabilization failures found during this campaign were treated as evidence rather than rerun blindly: an `agentId` cache/test identity mismatch, machine-level versus routed lifecycle namespaces, an overly broad routed subscription that touched ACP harnesses, a remount timing race in the stress smoke, and finally a native permission ACK race where the resumed final could become durable after the immediate refresh while the `permission.replied` edge was lost. The permission case is now closed by one OpenCode-only bounded trailing reconciliation; ACP retains its previous single resolution refresh.
 
-After the final runtime/documentation commits, require a fresh exact-SHA gate: type-check/regressions, OpenCode permission transport, bridge Windows/macOS, full Chromium product smoke, desktop Ubuntu/macOS/Windows and Debug APK. Only then is #517 eligible for owner confirmation and real RC verification.
+### Automated stabilization evidence
+
+Runtime head `4c97c85fd1d22e2c669ac725e7a423506d7e85e6` completed the entire automated campaign green:
+
+- PR checks run **#2075** / Actions run `35123536146`:
+  - type-check/build and full web regressions: green;
+  - OpenCode permission transport regression: green;
+  - bridge tests on macOS and Windows: green;
+  - Chromium product smoke: green, including portrait/landscape/multi-machine, native Session transcript/composer, navigation, OpenCode retry/error/remount, permission regression, rail-state, unmounted durable completion, multi-turn stress, cross-machine continuation and complete controls/screenshot smoke;
+  - Debug APK: green, including Android 36 setup, Capacitor sync, build, signature verification and artifact upload.
+- Desktop runtime/menu run **#1216** / Actions run `35123536131`: Ubuntu, macOS and Windows all green, including packaged embedded-daemon execution on the applicable platform.
+
+The runtime candidate is therefore the first post-RC2 head to satisfy the complete automated OpenCode stabilization gate. Documentation/handoff commits are non-runtime changes but still move the PR head, so the final documentation head must also receive a fresh exact-SHA green gate before #517 is considered ready for repository-owner/manual RC confirmation. Do not merge #517 or create RC3 automatically.
 
 ## Stable `main` line
 
@@ -98,7 +112,8 @@ In particular:
 - permission and mounted-Session convergence must not create false red interruptions (#452);
 - unresolved requests remain Attention rather than being silently treated as completed (#451);
 - OpenCode lifecycle overlays are presentation bridges, not a second durable transcript/state machine;
-- routed OpenCode lifecycle must not leak into ACP backends or sibling agent identities.
+- routed OpenCode lifecycle must not leak into ACP backends or sibling agent identities;
+- the OpenCode permission/question settle fallback may add one bounded trailing read, but ACP keeps its existing immediate-only resolution path.
 
 ## CI / packaging
 
@@ -122,7 +137,7 @@ Android CI was previously repaired so `android-actions/setup-android@v4` no long
 
 The intended next release is **Harness Remote 3.1.0**, not 3.0.3.
 
-Do not freeze another RC until #517 is fully green and real OpenCode validation confirms the reported RC2 failures are gone. After that, remaining release evidence is true-boundary validation:
+The complete automated OpenCode campaign is green on runtime head `4c97c85fd1d22e2c669ac725e7a423506d7e85e6`. Do not freeze RC3 until the final documentation head has the same complete green gate and repository-owner/manual real OpenCode validation confirms the reported RC2 failures are gone. After that, remaining release evidence is true-boundary validation:
 
 - strict real-harness checks against installed OpenCode/Codex/Claude/OMP/PI builds, recording unavailable harness/model combinations rather than inventing substitutes;
 - real daemon/adapter restart plus persisted-Session resume/claim;
