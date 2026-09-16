@@ -145,13 +145,19 @@ export function noteSessionIndexLiveEvent(
   if (invalidates) invalidateSessionIndex()
 }
 
-/** A reconnect means lifecycle edges may have been missed; discard transient authority and re-read. */
+/**
+ * A newly connected stream may have missed status edges, so its short-lived busy/idle authority is
+ * discarded and the index is re-read. Do not discard a terminal session.error here: opening another
+ * Session creates another subscription too, and treating that ordinary remount as a reconnect used
+ * to erase the only copy of a provider failure before the transcript had persisted it. A later real
+ * busy/retry edge retracts the error, and the bounded error grace prevents it from living forever.
+ */
 export function noteSessionIndexStreamConnected(
   config: Pick<ServerConfig, "host" | "port" | "username" | "backend">
 ): void {
   const key = endpointKey(config)
   liveStatuses.delete(key)
-  liveErrors.delete(key)
+  pruneLiveErrors(key, Date.now())
   invalidateSessionIndex()
 }
 
