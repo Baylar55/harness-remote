@@ -402,6 +402,10 @@ try {
     if (index === 2) {
       await bButton.click()
       await aButton.click()
+      // The row click mounts the controller synchronously, but persisted transcript hydration is an
+      // asynchronous read. Wait for the newest already-durable reply before checking the entire
+      // accumulated history; otherwise the test races a legitimate empty first render after remount.
+      await page.getByText(turns[index].reply, { exact: true }).waitFor({ state: "visible", timeout: 5_000 })
       for (let prior = 0; prior <= index; prior += 1) {
         assert.equal(await page.getByText(turns[prior].reply, { exact: true }).count(), 1, `turn ${prior + 1}: reply lost or duplicated after remount`)
       }
