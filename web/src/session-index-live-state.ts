@@ -67,11 +67,22 @@ function pruneLiveErrors(key: string, now: number): void {
   if (bySession.size === 0) liveErrors.delete(key)
 }
 
-function deleteSessionState(key: string, sessionID: string): void {
-  liveStatuses.get(key)?.delete(sessionID)
-  if (liveStatuses.get(key)?.size === 0) liveStatuses.delete(key)
-  liveErrors.get(key)?.delete(sessionID)
-  if (liveErrors.get(key)?.size === 0) liveErrors.delete(key)
+function deleteStatus(key: string, sessionID: string): boolean {
+  const bySession = liveStatuses.get(key)
+  if (!bySession?.delete(sessionID)) return false
+  if (bySession.size === 0) liveStatuses.delete(key)
+  return true
+}
+
+function deleteError(key: string, sessionID: string): boolean {
+  const bySession = liveErrors.get(key)
+  if (!bySession?.delete(sessionID)) return false
+  if (bySession.size === 0) liveErrors.delete(key)
+  return true
+}
+
+function deleteSessionState(key: string, sessionID: string): boolean {
+  return deleteStatus(key, sessionID) || deleteError(key, sessionID)
 }
 
 function invalidateSessionIndex(): void {
@@ -91,6 +102,25 @@ export function sessionIndexInvalidationRevision(): number {
 export function subscribeSessionIndexInvalidation(listener: () => void): () => void {
   invalidationListeners.add(listener)
   return () => invalidationListeners.delete(listener)
+}
+
+/**
+ * The live cache is a bridge across event/index races, not durable Session truth. The selected native
+ * controller is stronger once it has accepted a new turn or reconciled a terminal transcript. These
+ * explicit retirement helpers let that controller stop an old retry/error from resurfacing later.
+ */
+export function clearSessionIndexLiveError(
+  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  sessionID: string
+): void {
+  if (deleteError(endpointKey(config), sessionID)) invalidateSessionIndex()
+}
+
+export function clearSessionIndexLiveState(
+  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  sessionID: string
+): void {
+  if (deleteSessionState(endpointKey(config), sessionID)) invalidateSessionIndex()
 }
 
 export function noteSessionIndexLiveEvent(
@@ -129,10 +159,7 @@ export function noteSessionIndexLiveEvent(
     bySession.set(event.sessionID, { status, observedAt: now })
     liveStatuses.set(key, bySession)
     // A real retry/busy edge proves that an earlier terminal-looking error was not final.
-    if (status.type === "busy" || status.type === "retry") {
-      liveErrors.get(key)?.delete(event.sessionID)
-      if (liveErrors.get(key)?.size === 0) liveErrors.delete(key)
-    }
+    if (status.type === "busy" || status.type === "retry") deleteError(key, event.sessionID)
   }
 
   if (event.type === "session.error" && event.errorMessage) {
