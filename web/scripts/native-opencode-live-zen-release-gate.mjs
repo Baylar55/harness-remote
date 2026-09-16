@@ -252,9 +252,13 @@ async function waitVisibleFinal(targetPage, token, timeout = 30_000) {
 async function verifySelectedModel(targetPage) {
   const trigger = targetPage.locator(".tdw-model-trigger")
   await trigger.waitFor({ state: "visible", timeout: 20_000 })
-  const text = await trigger.innerText()
   const expected = chosenModel.modelName || chosenModel.modelID
-  assert.ok(text.includes(expected) || text.includes(chosenModel.modelID), `expected native model ${expected}, picker shows ${text}`)
+  const text = await waitFor("native model enrichment", async () => {
+    const current = await trigger.innerText()
+    if (current.includes("Loading models…")) return null
+    return current.includes(expected) || current.includes(chosenModel.modelID) ? current : null
+  }, 45_000, 250)
+  assert.ok(text, `expected native model ${expected}`)
 }
 
 async function sendUI(token) {
