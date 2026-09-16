@@ -21,10 +21,26 @@ const SESSION_INDEX_LIFECYCLE_EVENTS = new Set([
 // enough for the Session-index reconciliation triggered by that same edge to win a short endpoint
 // lag, then fall back to the native index again. A later streamed status always supersedes it.
 export const LIVE_SESSION_STATUS_GRACE_MS = 15_000
+// OpenCode session.error is a lifecycle event, not guaranteed to be durable in the message endpoint
+// immediately. Keep the exact provider error across ordinary Session navigation long enough for the
+// durable transcript to catch up. A later busy/retry edge clears it immediately.
+export const LIVE_SESSION_ERROR_GRACE_MS = 2 * 60_000
 
 type LiveStatus = { status: SessionStatus; observedAt: number }
+type LiveError = { message: string; observedAt: number }
+
+type LiveEvent = {
+  type: string
+  sessionID?: string
+  status?: string
+  statusMessage?: string
+  statusAttempt?: number
+  statusNext?: number
+  errorMessage?: string
+}
 
 const liveStatuses = new Map<string, Map<string, LiveStatus>>()
+const liveErrors = new Map<string, Map<string, LiveError>>()
 const invalidationListeners = new Set<() => void>()
 let invalidationRevision = 0
 
@@ -40,6 +56,22 @@ function pruneLiveStatuses(key: string, now: number): void {
     if (now - entry.observedAt > LIVE_SESSION_STATUS_GRACE_MS) bySession.delete(sessionID)
   }
   if (bySession.size === 0) liveStatuses.delete(key)
+}
+
+function pruneLiveErrors(key: string, now: number): void {
+  const bySession = liveErrors.get(key)
+  if (!bySession) return
+  for (const [sessionID, entry] of bySession) {
+    if (now - entry.observedAt > LIVE_SESSION_ERROR_GRACE_MS) bySession.delete(sessionID)
+  }
+  if (bySession.size === 0) liveErrors.delete(key)
+}
+
+function deleteSessionState(key: string, sessionID: string): void {
+  liveStatuses.get(key)?.delete(sessionID)
+  if (liveStatuses.get(key)?.size === 0) liveStatuses.delete(key)
+  liveErrors.get(key)?.delete(sessionID)
+  if (liveErrors.get(key)?.size === 0) liveErrors.delete(key)
 }
 
 function invalidateSessionIndex(): void {
@@ -63,7 +95,7 @@ export function subscribeSessionIndexInvalidation(listener: () => void): () => v
 
 export function noteSessionIndexLiveEvent(
   config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
-  event: { type: string; sessionID?: string; status?: string },
+  event: LiveEvent,
   now = Date.now()
 ): void {
   const invalidates = sessionIndexLifecycleEvent(event.type)
@@ -74,24 +106,42 @@ export function noteSessionIndexLiveEvent(
 
   const key = endpointKey(config)
   pruneLiveStatuses(key, now)
+  pruneLiveErrors(key, now)
   if (event.type === "session.deleted") {
-    liveStatuses.get(key)?.delete(event.sessionID)
-    if (liveStatuses.get(key)?.size === 0) liveStatuses.delete(key)
+    deleteSessionState(key, event.sessionID)
     if (invalidates) invalidateSessionIndex()
     return
   }
 
   let status: SessionStatus | undefined
   if (event.type === "session.idle") status = { type: "idle" }
-  else if (event.type === "session.status" && event.status) status = { type: event.status }
+  else if (event.type === "session.status" && event.status) {
+    status = {
+      type: event.status,
+      ...(event.statusAttempt !== undefined ? { attempt: event.statusAttempt } : {}),
+      ...(event.statusMessage ? { message: event.statusMessage } : {}),
+      ...(event.statusNext !== undefined ? { next: event.statusNext } : {})
+    }
+  }
 
   if (status) {
     const bySession = liveStatuses.get(key) ?? new Map<string, LiveStatus>()
     bySession.set(event.sessionID, { status, observedAt: now })
     liveStatuses.set(key, bySession)
+    // A real retry/busy edge proves that an earlier terminal-looking error was not final.
+    if (status.type === "busy" || status.type === "retry") {
+      liveErrors.get(key)?.delete(event.sessionID)
+      if (liveErrors.get(key)?.size === 0) liveErrors.delete(key)
+    }
   }
 
-  // External-store subscribers must only be notified after the related status cache is coherent.
+  if (event.type === "session.error" && event.errorMessage) {
+    const bySession = liveErrors.get(key) ?? new Map<string, LiveError>()
+    bySession.set(event.sessionID, { message: event.errorMessage, observedAt: now })
+    liveErrors.set(key, bySession)
+  }
+
+  // External-store subscribers must only be notified after the related lifecycle cache is coherent.
   if (invalidates) invalidateSessionIndex()
 }
 
@@ -99,7 +149,9 @@ export function noteSessionIndexLiveEvent(
 export function noteSessionIndexStreamConnected(
   config: Pick<ServerConfig, "host" | "port" | "username" | "backend">
 ): void {
-  liveStatuses.delete(endpointKey(config))
+  const key = endpointKey(config)
+  liveStatuses.delete(key)
+  liveErrors.delete(key)
   invalidateSessionIndex()
 }
 
@@ -111,4 +163,14 @@ export function liveSessionIndexStatus(
   const key = endpointKey(config)
   pruneLiveStatuses(key, now)
   return liveStatuses.get(key)?.get(sessionID)?.status
+}
+
+export function liveSessionIndexError(
+  config: Pick<ServerConfig, "host" | "port" | "username" | "backend">,
+  sessionID: string,
+  now = Date.now()
+): string | undefined {
+  const key = endpointKey(config)
+  pruneLiveErrors(key, now)
+  return liveErrors.get(key)?.get(sessionID)?.message
 }
