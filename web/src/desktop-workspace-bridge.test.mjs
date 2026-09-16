@@ -216,6 +216,26 @@ assert.equal(localResult.ok, true)
 assert.equal(calls.request.at(-1).profileId, "desktop-local-runtime")
 assert.deepEqual(calls.request.at(-1).request.route, { backend: "codex", agentId: "codex" })
 
+// Polling the embedded runtime is a health check, not a reason to rebuild the renderer's machine
+// list. Electron IPC returns a fresh object on every call; an unchanged semantic state must retain
+// the prior object identity so React does not restart an unrelated slow/offline machine discovery.
+runtimeState = {
+  status: "ready",
+  machine: { profileId: "desktop-local-runtime", host: "127.0.0.1", port: 4111, pid: 1234 }
+}
+const sameReady = await bridge.desktopLocalRuntimeState()
+assert.equal(calls.runtimeGet, 2)
+assert.strictEqual(sameReady, ready, "unchanged runtime polls must preserve object identity")
+
+runtimeState = {
+  status: "ready",
+  machine: { profileId: "desktop-local-runtime", host: "127.0.0.1", port: 4111, pid: 4321 }
+}
+const restartedReady = await bridge.desktopLocalRuntimeState()
+assert.equal(calls.runtimeGet, 3)
+assert.notStrictEqual(restartedReady, sameReady, "a real runtime restart must produce a new state object")
+assert.equal(restartedReady.machine.pid, 4321)
+
 // Even if a composed workspace snapshot contains the local projection, renderer synchronization
 // must never attempt to persist/replace the volatile main-process profile.
 await bridge.syncDesktopProfiles([

@@ -82,6 +82,23 @@ function sameSnapshot(left: DesktopProfile[], right: DesktopProfile[]): boolean 
   return left.length === right.length && left.every((profile, index) => sameProfile(profile, right[index]))
 }
 
+function sameLocalRuntimeState(left: DesktopLocalRuntimeState | null, right: DesktopLocalRuntimeState): boolean {
+  if (!left || left.status !== right.status) return false
+  if (left.status === "starting" && right.status === "starting") return true
+  if (left.status === "unavailable" && right.status === "unavailable") return left.error === right.error
+  if (left.status !== "ready" || right.status !== "ready") return false
+  return left.machine.profileId === right.machine.profileId
+    && left.machine.host === right.machine.host
+    && left.machine.port === right.machine.port
+    && left.machine.pid === right.machine.pid
+}
+
+function rememberLocalRuntimeState(next: DesktopLocalRuntimeState): DesktopLocalRuntimeState {
+  if (sameLocalRuntimeState(localRuntime, next)) return localRuntime!
+  localRuntime = next
+  return next
+}
+
 export type DesktopProfileSource = {
   id: string
   config: ServerConfig
@@ -175,15 +192,13 @@ export function isAndroidPlatform(platform: string): boolean {
 export async function desktopLocalRuntimeState(): Promise<DesktopLocalRuntimeState | null> {
   const api = bridge()
   if (!api) return null
-  localRuntime = await api.getLocalRuntimeState()
-  return localRuntime
+  return rememberLocalRuntimeState(await api.getLocalRuntimeState())
 }
 
 export async function retryDesktopLocalRuntime(): Promise<DesktopLocalRuntimeState | null> {
   const api = bridge()
   if (!api) return null
-  localRuntime = await api.retryLocalRuntime()
-  return localRuntime
+  return rememberLocalRuntimeState(await api.retryLocalRuntime())
 }
 
 function desktopMachineIdentity(config: ServerConfig): string | null {
