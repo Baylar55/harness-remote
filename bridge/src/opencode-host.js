@@ -20,6 +20,16 @@ function stopWindowsProcessTree(processID) {
   // process tree, unlike a port-based kill which could terminate an unrelated OpenCode instance.
   spawnSync("taskkill", ["/pid", String(processID), "/t", "/f"], { stdio: "ignore", windowsHide: true })
 }
+
+function stopPosixProcessGroup(processID, signal = "SIGTERM") {
+  // The npm OpenCode launcher can spawn the real Bun server as a child. Killing only the launcher
+  // leaves that server bound to the managed port, so the next Harness Remote daemon cannot start.
+  // Production OpenCode is spawned detached below, making its PID the process-group id; target that
+  // group rather than a port so an unrelated OpenCode instance can never be killed accidentally.
+  process.kill(-processID, signal)
+  return true
+}
+
 const READINESS_RETRY_MS = 100
 const READINESS_ATTEMPT_MS = 1_000
 
@@ -109,6 +119,8 @@ export class ManagedOpenCodeHost extends EventEmitter {
     spawnProcess = spawn,
     platform = process.platform,
     stopProcessTree = stopWindowsProcessTree,
+    stopProcessGroup = stopPosixProcessGroup,
+    usePosixProcessGroup = platform !== "win32" && spawnProcess === spawn,
     readinessHost,
     startTimeoutMs = DEFAULT_START_TIMEOUT_MS,
     waitUntilReady = waitForOpenCodeHealth
@@ -123,11 +135,14 @@ export class ManagedOpenCodeHost extends EventEmitter {
     this.spawnProcess = spawnProcess
     this.platform = platform
     this.stopProcessTree = stopProcessTree
+    this.stopProcessGroup = stopProcessGroup
+    this.usePosixProcessGroup = usePosixProcessGroup
     this.readinessHost = readinessHost ?? (host === "0.0.0.0" ? "127.0.0.1" : host)
     this.startTimeoutMs = startTimeoutMs
     this.waitUntilReady = waitUntilReady
     this.child = undefined
     this.windowsShellChild = false
+    this.posixProcessGroup = false
     this.starting = undefined
   }
 
@@ -170,8 +185,11 @@ export class ManagedOpenCodeHost extends EventEmitter {
     const child = this.spawnProcess(invocation.command, invocation.args, {
       // Keep OpenCode stdout quiet so the daemon owns the startup summary. Pipe stderr instead of
       // inheriting it so every upstream warning can be identified as OpenCode by the parent CLI.
+      // On POSIX, give the managed launcher its own process group: current npm OpenCode can spawn a
+      // Bun server child which otherwise survives a launcher-only SIGTERM and keeps the port bound.
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
+      detached: this.usePosixProcessGroup,
       env: {
         ...this.environment,
         OPENCODE_SERVER_USERNAME: this.username,
@@ -181,6 +199,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
     this.child = child
     forwardStderrLines(child, (line) => this.emit("stderr", line))
     this.windowsShellChild = this.platform === "win32" && this.spawnProcess === spawn && invocation.command !== this.command
+    this.posixProcessGroup = this.usePosixProcessGroup && Number.isInteger(child.pid)
 
     const exited = new Promise((_, reject) => {
       child.once("error", (error) => reject(error))
@@ -225,12 +244,23 @@ export class ManagedOpenCodeHost extends EventEmitter {
       this.stopProcessTree(child.pid)
       return true
     }
+    if (this.posixProcessGroup && Number.isInteger(child.pid)) {
+      try {
+        return this.stopProcessGroup(child.pid, signal) !== false
+      } catch {
+        // A process-group signal should be authoritative in production, but if the launcher exited
+        // between the state check and kill, retain the old child-level best effort.
+        return child.kill(signal)
+      }
+    }
     return child.kill(signal)
   }
 
   #handleExit(error) {
     if (!this.child) return
     this.child = undefined
+    this.windowsShellChild = false
+    this.posixProcessGroup = false
     this.emit("unavailable", error)
   }
 }
