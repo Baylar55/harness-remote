@@ -16,6 +16,8 @@ import {
 } from "../native-session-v3-adapter"
 import type { ConversationRuntime, ConversationTurn } from "../conversation-runtime"
 import {
+  clearSessionIndexLiveError,
+  clearSessionIndexLiveState,
   liveSessionIndexError,
   liveSessionIndexStatus,
   sessionIndexInvalidationRevision,
@@ -147,6 +149,7 @@ export function NativeSessionObserver({
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
   const [commands, setCommands] = useState<CommandInfo[]>([])
   const conversationRef = useRef<ConversationRuntime | null>(null)
+  const durableLifecycleRef = useRef<{ targetKey: string; status: string } | null>(null)
   const attentionRef = useRef(false)
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
@@ -190,6 +193,28 @@ export function NativeSessionObserver({
   useEffect(() => {
     if (presentedConversation) onStateChangeRef.current?.(visualState(presentedConversation, attentionRef.current))
   }, [presentedConversation])
+
+  useEffect(() => {
+    if (!conversation) return
+    const previous = durableLifecycleRef.current
+    durableLifecycleRef.current = { targetKey: target.key, status: conversation.status }
+    if (target.backend !== "opencode" || !previous || previous.targetKey !== target.key) return
+
+    const wasWorking = nativeSessionIsWorking(previous.status)
+    const isWorking = nativeSessionIsWorking(conversation.status)
+    if (!wasWorking && isWorking) {
+      // A newly accepted native turn belongs to the new request. A terminal-looking event cached for
+      // the previous turn must not poison this turn before OpenCode publishes its next busy edge.
+      clearSessionIndexLiveError(target.config, target.sessionID)
+      return
+    }
+    if (wasWorking && !isWorking) {
+      // The Session-scoped controller has now reconciled durable terminal state from transcript/status.
+      // Retire the short-lived event bridge so an earlier busy/retry/error cannot keep the mounted UI
+      // on Working/Attention after the authoritative reply is already visible.
+      clearSessionIndexLiveState(target.config, target.sessionID)
+    }
+  }, [conversation, target.key, target.backend, target.config, target.sessionID])
 
   useEffect(() => {
     if (!interactionEnabled) return
@@ -282,6 +307,7 @@ export function NativeSessionObserver({
     setConversation(null)
     setController(null)
     conversationRef.current = null
+    durableLifecycleRef.current = null
     attentionRef.current = false
 
     // Mount the mature controller on the Session itself, before any model enrichment. Gating the
