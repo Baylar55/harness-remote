@@ -4,7 +4,7 @@ name: OpenCode live Zen gate
   workflow_dispatch: {}
   push:
     branches:
-      - codex/opencode-rc3-stabilization
+      - codex/development-2026-09-11
   pull_request:
     branches:
       - codex/development-2026-09-11
@@ -69,7 +69,7 @@ jobs:
       - name: Run real OpenCode existing-Session release gate
         env:
           OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
-        run: node scripts/native-opencode-live-zen-release-gate.mjs
+        run: node scripts/native-opencode-process-watch.mjs
         working-directory: web
 
       - name: Upload sanitized live-runtime evidence
