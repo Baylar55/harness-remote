@@ -4,6 +4,7 @@ import type { ConversationController } from "../conversation-controller"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { canCreateNativeSession } from "../native-session-create"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
+import { openCodeAssistantProvesTurnCompleted } from "../native-session-opencode-reconciliation"
 import {
   continueNativeSessionOnRoute,
   type NativeSessionRouteContinueInput,
@@ -24,7 +25,7 @@ import {
   subscribeSessionIndexInvalidation
 } from "../session-index-live-state"
 import type { AgentModelScope } from "../taskClient"
-import type { CommandInfo, MachineAgentHost } from "../types"
+import type { CommandInfo, MachineAgentHost, MessageEnvelope } from "../types"
 import { LoadingIcon } from "../Icons"
 import { CrossMachineContinuePanel } from "./cross-machine-continue-panel"
 import { NativeSessionLineagePanel } from "./native-session-lineage-panel"
@@ -107,6 +108,26 @@ function withOpenCodeLiveLifecycle(
   }
 
   return conversation.activityDetail ? { ...conversation, activityDetail: null } : conversation
+}
+
+/** Durable success for the newest native user turn can retire an older live session.error bridge. */
+function latestOpenCodeTurnHasDurableCompletion(messages: MessageEnvelope[]): boolean {
+  let latestUserIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].info.role === "user") {
+      latestUserIndex = index
+      break
+    }
+  }
+  if (latestUserIndex < 0) return false
+
+  let latestAssistant: MessageEnvelope | null = null
+  for (let index = latestUserIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (message.info.role === "user") break
+    if (message.info.role === "assistant") latestAssistant = message
+  }
+  return Boolean(latestAssistant && openCodeAssistantProvesTurnCompleted(latestAssistant))
 }
 
 /**
@@ -215,6 +236,40 @@ export function NativeSessionObserver({
       clearSessionIndexLiveState(target.config, target.sessionID)
     }
   }, [conversation, target.key, target.backend, target.config, target.sessionID])
+
+  useEffect(() => {
+    if (target.backend !== "opencode" || !liveError || !interactionEnabled) return
+    let disposed = false
+    // A Session can finish while another Session is selected and the final lifecycle edge can be lost.
+    // On remount, verify the durable tail once before trusting the older live error indefinitely. This
+    // is error-only recovery, not polling: ordinary idle/pre-Send OpenCode still performs no status or
+    // transcript probe here. A terminal assistant error does not satisfy the completion predicate.
+    void api.loadMessagePage(target.config, target.sessionID, target.directory, undefined, 80, true)
+      .then((page) => {
+        if (!disposed && latestOpenCodeTurnHasDurableCompletion(page.messages)) {
+          clearSessionIndexLiveState(target.config, target.sessionID)
+        }
+      })
+      .catch((reason) => {
+        if (!disposed && /cannot reach|timed out|network|connection/i.test(reason instanceof Error ? reason.message : String(reason))) {
+          onConnectionIssue?.()
+        }
+      })
+    return () => { disposed = true }
+  }, [
+    target.key,
+    target.backend,
+    target.sessionID,
+    target.directory,
+    target.config.host,
+    target.config.port,
+    target.config.username,
+    target.config.password,
+    target.config.agentId,
+    liveError,
+    interactionEnabled,
+    onConnectionIssue
+  ])
 
   useEffect(() => {
     if (!interactionEnabled) return
