@@ -150,6 +150,18 @@ test("OpenCode session.error survives navigation until a real retry resumes", ()
   })
 })
 
+test("a newer OpenCode session.error supersedes an older retry until work really resumes", () => {
+  const sessionID = "ses_order"
+  noteSessionIndexLiveEvent(base, { type: "session.status", sessionID, status: "retry", statusMessage: "old retry" }, 3_000)
+  noteSessionIndexLiveEvent(base, { type: "session.error", sessionID, errorMessage: "new terminal failure" }, 3_100)
+  assert.equal(liveSessionIndexError(base, sessionID, 3_101), "new terminal failure")
+  assert.deepEqual(liveSessionIndexStatus(base, sessionID, 3_101), { type: "error", message: "new terminal failure" })
+
+  noteSessionIndexLiveEvent(base, { type: "session.status", sessionID, status: "busy" }, 3_200)
+  assert.equal(liveSessionIndexError(base, sessionID, 3_201), undefined)
+  assert.deepEqual(liveSessionIndexStatus(base, sessionID, 3_201), { type: "busy" })
+})
+
 test("OpenCode nested provider error messages beat generic error names", () => {
   const event = taskDeskLiveEvent(undefined, {
     type: "session.error",
@@ -218,6 +230,7 @@ test("durable controller transitions can retire stale event authority explicitly
 
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID, status: "retry", statusMessage: "routing" })
   noteSessionIndexLiveEvent(base, { type: "session.error", sessionID, errorMessage: "transient current-turn error" })
+  noteSessionIndexLiveEvent(base, { type: "session.status", sessionID, status: "idle" })
   assert.equal(liveSessionIndexError(base, sessionID), "transient current-turn error")
   assert.equal(liveSessionIndexStatus(base, sessionID)?.type, "error")
 
