@@ -162,11 +162,13 @@ export function noteSessionIndexLiveEvent(
     const bySession = liveStatuses.get(key) ?? new Map<string, LiveStatus>()
     bySession.set(event.sessionID, { status, observedAt: now })
     liveStatuses.set(key, bySession)
-    // A real retry/busy edge proves that an earlier terminal-looking error was not final.
-    if (status.type === "busy" || status.type === "retry") deleteError(key, event.sessionID)
+    // A real retry/busy edge proves that an earlier terminal-looking OpenCode error was not final.
+    if (config.backend === "opencode" && (status.type === "busy" || status.type === "retry")) deleteError(key, event.sessionID)
   }
 
-  if (event.type === "session.error" && event.errorMessage) {
+  // Error-envelope timing and retry semantics here are OpenCode-specific. ACP backends keep their
+  // established durable adapter/transcript authority and must not inherit this temporary overlay.
+  if (config.backend === "opencode" && event.type === "session.error" && event.errorMessage) {
     // session.error is newer authority than a preceding retry/busy edge. Drop that older status so
     // the failure is visible immediately; a later real busy/retry edge can still retract it.
     deleteStatus(key, event.sessionID)
@@ -191,7 +193,7 @@ export function noteSessionIndexStreamConnected(
 ): void {
   const key = endpointKey(config)
   liveStatuses.delete(key)
-  pruneLiveErrors(key, Date.now())
+  if (config.backend === "opencode") pruneLiveErrors(key, Date.now())
   invalidateSessionIndex()
 }
 
@@ -200,6 +202,7 @@ export function liveSessionIndexError(
   sessionID: string,
   now = Date.now()
 ): string | undefined {
+  if (config.backend !== "opencode") return undefined
   const key = endpointKey(config)
   pruneLiveErrors(key, now)
   return liveErrors.get(key)?.get(sessionID)?.message
@@ -212,9 +215,9 @@ export function liveSessionIndexStatus(
 ): SessionStatus | undefined {
   const key = endpointKey(config)
   pruneLiveStatuses(key, now)
-  pruneLiveErrors(key, now)
+  if (config.backend === "opencode") pruneLiveErrors(key, now)
   const status = liveStatuses.get(key)?.get(sessionID)?.status
-  const error = liveErrors.get(key)?.get(sessionID)?.message
+  const error = config.backend === "opencode" ? liveErrors.get(key)?.get(sessionID)?.message : undefined
   // A terminal lifecycle error must beat a trailing idle status in the rail. A later busy/retry
   // edge clears the cached error above, so automatic provider recovery still wins immediately.
   if (error && !status?.type?.match(/^(busy|retry)$/)) return { type: "error", message: error }
