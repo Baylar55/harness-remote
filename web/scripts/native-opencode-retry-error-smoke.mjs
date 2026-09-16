@@ -17,6 +17,8 @@ const FAILING_PROMPT = "TRIGGER-OPENCODE-RETRY-ERROR"
 const RECOVERED_REPLY = "OPENCODE-RECOVERED-AFTER-RETRY"
 const SECOND_PROMPT = "OPENCODE-SECOND-SEND-AFTER-RECOVERY"
 const SECOND_REPLY = "OPENCODE-SECOND-SEND-REPLY"
+const DURABLE_AFTER_ERROR_PROMPT = "OPENCODE-DURABLE-ANSWER-AFTER-ERROR"
+const DURABLE_AFTER_ERROR_REPLY = "OPENCODE-DURABLE-ANSWER-WINS"
 const PROVIDER_ERROR = "No available channel"
 
 let sessions
@@ -131,7 +133,10 @@ function emitBusy(sessionID) {
 
 function emitRetry(sessionID, attempt = 1) {
   const status = { type: "retry", attempt, message: PROVIDER_ERROR, next: Date.now() + 2_000 }
-  statuses.set(sessionID, status)
+  // Keep the legacy status endpoint deliberately stale. The streamed retry must remain authoritative
+  // across navigation; opening Session B must not erase A's live retry just because B creates another
+  // detail subscription to the same endpoint.
+  statuses.set(sessionID, { type: "idle" })
   emit("session.status", { sessionID, status })
 }
 
@@ -398,15 +403,20 @@ try {
   await retryNotice.getByText(PROVIDER_ERROR, { exact: false }).waitFor({ state: "visible", timeout: 2_000 })
   assert.match(await retryNotice.textContent(), /OpenCode is retrying/i)
 
-  // Leave A while it is retrying. The terminal provider error then arrives while another Session is
-  // selected, exactly matching the real failure reported from RC2.
+  // Leave A while it is retrying. The status endpoint is deliberately stale-idle, so A can stay
+  // Working here only if the persistent machine stream retained the streamed retry. Mounting B's
+  // detail stream must not erase A's live lifecycle cache.
   await bButton.click()
   assert.equal(await bButton.getAttribute("aria-current"), "page")
+  await waitForRowState(aButton, "working", 2_000)
+
+  // The terminal provider error then arrives while another Session is selected, exactly matching the
+  // real failure reported from RC2.
   emitTerminalError(SESSION_A)
   await waitForRowState(aButton, "attention")
   assert.equal(await aButton.getAttribute("aria-current"), null, "A must become attention without reopening it")
 
-  // Reopening A creates a fresh event subscription. That must not erase the terminal lifecycle error
+  // Reopening A creates a fresh detail subscription. That must not erase the terminal lifecycle error
   // before OpenCode has persisted an assistant error envelope.
   await aButton.click()
   await page.getByText(PROVIDER_ERROR, { exact: false }).first().waitFor({ state: "visible", timeout: 2_500 })
@@ -431,15 +441,32 @@ try {
   await waitForRowState(aButton, "ready", 4_000)
   assert.equal(await page.getByText(PROVIDER_ERROR, { exact: false }).count(), 0, "prior provider error must not reappear on a later successful turn")
 
-  // Remount once more after success: durable transcript must stay authoritative and still show both
+  // Harder missed-lifecycle case: a terminal-looking session.error is observed, then the durable
+  // assistant answer appears without a later busy/retry/idle lifecycle edge to rescue presentation.
+  // Once the Session-scoped controller proves the final transcript, that durable state must retire
+  // the temporary error bridge and become Ready by itself.
+  await composer.fill(DURABLE_AFTER_ERROR_PROMPT)
+  await page.getByRole("button", { name: "Send" }).click()
+  await waitForPromptCount(3)
+  await waitForRowState(aButton, "working")
+  emitTerminalError(SESSION_A)
+  await page.getByText(PROVIDER_ERROR, { exact: false }).first().waitFor({ state: "visible", timeout: 2_500 })
+  appendAssistant(SESSION_A, DURABLE_AFTER_ERROR_REPLY)
+  emit("message.updated", { info: { sessionID: SESSION_A } })
+  await page.getByText(DURABLE_AFTER_ERROR_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 3_000 })
+  await waitForRowState(aButton, "ready", 4_000)
+  assert.equal(await page.getByText(PROVIDER_ERROR, { exact: false }).count(), 0, "durable final reply must retire the live terminal-looking error without another lifecycle edge")
+
+  // Remount once more after success: durable transcript must stay authoritative and still show all
   // recovered replies without restoring stale retry/error presentation.
   await bButton.click()
   await aButton.click()
   await page.getByText(RECOVERED_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 2_500 })
   await page.getByText(SECOND_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 2_500 })
+  await page.getByText(DURABLE_AFTER_ERROR_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 2_500 })
   assert.equal(await page.getByText(PROVIDER_ERROR, { exact: false }).count(), 0)
 
-  console.log("native OpenCode retry/error smoke: retry detail, navigate-away error, remount and recovery are coherent")
+  console.log("native OpenCode retry/error smoke: retry detail, stale status, navigate-away error, remount, recovery and durable settlement are coherent")
 } finally {
   if (context) await context.close().catch(() => {})
   if (browser) await browser.close().catch(() => {})
