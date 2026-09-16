@@ -21,13 +21,59 @@ function stopWindowsProcessTree(processID) {
   spawnSync("taskkill", ["/pid", String(processID), "/t", "/f"], { stdio: "ignore", windowsHide: true })
 }
 
-function stopPosixProcessGroup(processID, signal = "SIGTERM") {
-  // The npm OpenCode launcher can spawn the real Bun server as a child. Killing only the launcher
-  // leaves that server bound to the managed port, so the next Harness Remote daemon cannot start.
-  // Production OpenCode is spawned detached below, making its PID the process-group id; target that
-  // group rather than a port so an unrelated OpenCode instance can never be killed accidentally.
-  process.kill(-processID, signal)
-  return true
+function posixProcessTree(processID, listProcesses = spawnSync) {
+  const result = listProcesses("ps", ["-eo", "pid=,ppid="], {
+    encoding: "utf8",
+    windowsHide: true
+  })
+  if (result?.error || result?.status !== 0 || typeof result?.stdout !== "string") return [processID]
+
+  const children = new Map()
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line)
+    if (!match) continue
+    const pid = Number(match[1])
+    const ppid = Number(match[2])
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue
+    const current = children.get(ppid) ?? []
+    current.push(pid)
+    children.set(ppid, current)
+  }
+
+  // Return descendants before parents. OpenCode's npm/native serve chain has historically left the
+  // innermost server alive when only its launcher receives SIGTERM; snapshotting the tree while the
+  // launcher is still alive preserves those exact descendant PIDs before they can be re-parented.
+  const ordered = []
+  const visited = new Set()
+  const visit = (pid) => {
+    if (visited.has(pid)) return
+    visited.add(pid)
+    for (const child of children.get(pid) ?? []) visit(child)
+    ordered.push(pid)
+  }
+  visit(processID)
+  return ordered
+}
+
+export function stopPosixProcessTree(
+  processID,
+  _requestedSignal = "SIGTERM",
+  { listProcesses = spawnSync, killProcess = (pid, signal) => process.kill(pid, signal) } = {}
+) {
+  // OpenCode `serve` has had multiple upstream lifecycle regressions where SIGTERM is consumed while
+  // an internal server/child remains alive. Harness Remote owns only this exact process tree, so use
+  // SIGKILL on the snapshotted PIDs rather than guessing by port or signalling unrelated processes.
+  // This mirrors Windows' existing `taskkill /T /F` semantics and makes daemon restart deterministic.
+  let signalled = false
+  for (const pid of posixProcessTree(processID, listProcesses)) {
+    try {
+      killProcess(pid, "SIGKILL")
+      signalled = true
+    } catch (error) {
+      if (error?.code !== "ESRCH") throw error
+    }
+  }
+  return signalled
 }
 
 const READINESS_RETRY_MS = 100
@@ -119,8 +165,8 @@ export class ManagedOpenCodeHost extends EventEmitter {
     spawnProcess = spawn,
     platform = process.platform,
     stopProcessTree = stopWindowsProcessTree,
-    stopProcessGroup = stopPosixProcessGroup,
-    usePosixProcessGroup = platform !== "win32" && spawnProcess === spawn,
+    stopPosixTree = stopPosixProcessTree,
+    isolatePosixProcessTree = platform !== "win32" && spawnProcess === spawn,
     readinessHost,
     startTimeoutMs = DEFAULT_START_TIMEOUT_MS,
     waitUntilReady = waitForOpenCodeHealth
@@ -135,14 +181,14 @@ export class ManagedOpenCodeHost extends EventEmitter {
     this.spawnProcess = spawnProcess
     this.platform = platform
     this.stopProcessTree = stopProcessTree
-    this.stopProcessGroup = stopProcessGroup
-    this.usePosixProcessGroup = usePosixProcessGroup
+    this.stopPosixTree = stopPosixTree
+    this.isolatePosixProcessTree = isolatePosixProcessTree
     this.readinessHost = readinessHost ?? (host === "0.0.0.0" ? "127.0.0.1" : host)
     this.startTimeoutMs = startTimeoutMs
     this.waitUntilReady = waitUntilReady
     this.child = undefined
     this.windowsShellChild = false
-    this.posixProcessGroup = false
+    this.posixManagedTree = false
     this.starting = undefined
   }
 
@@ -185,11 +231,11 @@ export class ManagedOpenCodeHost extends EventEmitter {
     const child = this.spawnProcess(invocation.command, invocation.args, {
       // Keep OpenCode stdout quiet so the daemon owns the startup summary. Pipe stderr instead of
       // inheriting it so every upstream warning can be identified as OpenCode by the parent CLI.
-      // On POSIX, give the managed launcher its own process group: current npm OpenCode can spawn a
-      // Bun server child which otherwise survives a launcher-only SIGTERM and keeps the port bound.
+      // POSIX production isolates only this managed tree; shutdown snapshots and kills those exact
+      // descendants, including internal OpenCode server children that may otherwise survive SIGTERM.
       stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
-      detached: this.usePosixProcessGroup,
+      detached: this.isolatePosixProcessTree,
       env: {
         ...this.environment,
         OPENCODE_SERVER_USERNAME: this.username,
@@ -199,7 +245,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
     this.child = child
     forwardStderrLines(child, (line) => this.emit("stderr", line))
     this.windowsShellChild = this.platform === "win32" && this.spawnProcess === spawn && invocation.command !== this.command
-    this.posixProcessGroup = this.usePosixProcessGroup && Number.isInteger(child.pid)
+    this.posixManagedTree = this.isolatePosixProcessTree && Number.isInteger(child.pid)
 
     const exited = new Promise((_, reject) => {
       child.once("error", (error) => reject(error))
@@ -244,12 +290,11 @@ export class ManagedOpenCodeHost extends EventEmitter {
       this.stopProcessTree(child.pid)
       return true
     }
-    if (this.posixProcessGroup && Number.isInteger(child.pid)) {
+    if (this.posixManagedTree && Number.isInteger(child.pid)) {
       try {
-        return this.stopProcessGroup(child.pid, signal) !== false
+        return this.stopPosixTree(child.pid, signal) !== false
       } catch {
-        // A process-group signal should be authoritative in production, but if the launcher exited
-        // between the state check and kill, retain the old child-level best effort.
+        // If process enumeration itself becomes unavailable, retain a precise launcher-only fallback.
         return child.kill(signal)
       }
     }
@@ -260,7 +305,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
     if (!this.child) return
     this.child = undefined
     this.windowsShellChild = false
-    this.posixProcessGroup = false
+    this.posixManagedTree = false
     this.emit("unavailable", error)
   }
 }
