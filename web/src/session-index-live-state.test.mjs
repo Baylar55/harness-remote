@@ -176,6 +176,14 @@ test("OpenCode nested provider error messages beat generic error names", () => {
   assert.equal(event?.errorMessage, "Provider routing exhausted")
 })
 
+test("OpenCode live provider errors do not change ACP backend semantics", () => {
+  const codex = { ...base, backend: "codex" }
+  const sessionID = "codex_error"
+  noteSessionIndexLiveEvent(codex, { type: "session.error", sessionID, errorMessage: "ACP owns this failure" })
+  assert.equal(liveSessionIndexError(codex, sessionID), undefined)
+  assert.equal(liveSessionIndexStatus(codex, sessionID), undefined, "ACP session.error must stay with the established adapter/transcript path")
+})
+
 test("a fresh streamed idle edge beats a briefly stale busy status read", async () => {
   const now = Date.now()
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "idle" }, now)
