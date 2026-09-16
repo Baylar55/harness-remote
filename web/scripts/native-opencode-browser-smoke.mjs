@@ -430,8 +430,8 @@ function startFakeDaemon() {
         json(response, 200, { status: "accepted", clientRequestId: requestId })
         emitLiveEvent(sessionID, "message.updated")
         emitLiveEvent(sessionID, "session.status")
-        // A second stable idle observation after the 750 ms debounce is the actual confirmation;
-        // only after that do we reproduce a slower automatic retry whose busy edge must retract it.
+        // Repeated idle edges can happen before the 15s silent-turn grace expires. They are
+        // enrichment only; a later busy retry must keep the turn live without flashing an error.
         setTimeout(() => emitLiveEvent(sessionID, "session.status"), 1_100)
         setTimeout(() => {
           sessionStatuses.set(sessionID, { type: "busy" })
@@ -708,24 +708,25 @@ async function assertExistingContract(browser, viewport, mobile) {
   assert.equal(await page.getByText("Response interrupted", { exact: true }).count(), 0)
   await waitForReady(page)
 
-  // A slower provider retry can begin after the bounded idle confirmation. In that case the banner
-  // may briefly be correct, but the busy edge must retract it while the agent is working again.
+  // Repeated idle edges are still enrichment while the bounded silent-turn grace is open. A slower
+  // provider retry inside that grace must stay live and must not flash a false terminal banner.
   await sendPrompt(page, LATE_RECOVERY_PROMPT)
   const lateBanner = page.getByText("Response interrupted", { exact: true })
-  await lateBanner.waitFor({ state: "visible", timeout: 12_000 })
-  await lateBanner.waitFor({ state: "detached", timeout: 12_000 })
+  await page.waitForTimeout(2_000)
+  assert.equal(await lateBanner.count(), 0, "late retry inside the silent-turn grace must not flash a terminal interruption")
   assert.equal(
     await page.getByText(LATE_RECOVERY_REPLY, { exact: true }).count(),
     0,
-    "late-recovery interruption must be retracted on busy before final text exists"
+    "late retry should still be working before the durable final text exists"
   )
   await page.getByText(LATE_RECOVERY_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await lateBanner.count(), 0, "late retry recovery must finish without a stale interruption banner")
   await waitForReady(page)
 
   // The suppression is not blanket error hiding: if OpenCode stays idle and never produces a final
-  // reply, the same no-final transcript must eventually resolve to the real terminal interruption.
+  // reply, the bounded silent-turn recovery must eventually expose the real terminal interruption.
   await sendPrompt(page, TERMINAL_INTERRUPT_PROMPT)
-  await page.getByText("Response interrupted", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
+  await page.getByText("Response interrupted", { exact: true }).waitFor({ state: "visible", timeout: 25_000 })
   assert.equal(
     await page.getByText("The coding agent stopped before producing a final answer.", { exact: true }).count(),
     1,
