@@ -4,6 +4,7 @@ import type {
   DesktopCompletionNotification,
   DesktopEvent,
   DesktopEventStatus,
+  DesktopEventSubscriptionOptions,
   DesktopLocalRuntimeState,
   DesktopMenuCommand,
   DesktopMenuTemplate,
