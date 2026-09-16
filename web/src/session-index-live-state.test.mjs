@@ -184,6 +184,25 @@ test("OpenCode live provider errors do not change ACP backend semantics", () => 
   assert.equal(liveSessionIndexStatus(codex, sessionID), undefined, "ACP session.error must stay with the established adapter/transcript path")
 })
 
+test("OpenCode live lifecycle is isolated by routed agent identity", () => {
+  const sessionID = "shared_session_id"
+  const first = { ...base, agentId: "opencode-primary" }
+  const second = { ...base, agentId: "opencode-secondary" }
+
+  noteSessionIndexLiveEvent(first, { type: "session.error", sessionID, errorMessage: "primary route failed" }, 4_000)
+  assert.equal(liveSessionIndexError(first, sessionID, 4_001), "primary route failed")
+  assert.equal(liveSessionIndexError(second, sessionID, 4_001), undefined, "a sibling routed agent must not inherit the primary agent error")
+  assert.equal(liveSessionIndexStatus(second, sessionID, 4_001), undefined)
+
+  noteSessionIndexLiveEvent(second, { type: "session.status", sessionID, status: "busy" }, 4_100)
+  assert.deepEqual(liveSessionIndexStatus(second, sessionID, 4_101), { type: "busy" })
+  assert.deepEqual(liveSessionIndexStatus(first, sessionID, 4_101), { type: "error", message: "primary route failed" }, "secondary activity must not retract the primary agent error")
+
+  clearSessionIndexLiveState(first, sessionID)
+  assert.equal(liveSessionIndexStatus(first, sessionID, 4_102), undefined)
+  assert.deepEqual(liveSessionIndexStatus(second, sessionID, 4_102), { type: "busy" }, "clearing one routed agent must not clear another")
+})
+
 test("a fresh streamed idle edge beats a briefly stale busy status read", async () => {
   const now = Date.now()
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "idle" }, now)
