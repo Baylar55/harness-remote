@@ -23,7 +23,7 @@ export type {
 
 type Props = ComponentProps<typeof NativeSessionHomeWithAttention>
 
-function needsOpenCodeRailStream(agent: MachineAgentHost): boolean {
+export function needsOpenCodeRailStream(agent: MachineAgentHost): boolean {
   return agent.backend === "opencode"
     && agent.state === "available"
     && agent.capabilities?.sessions !== false
