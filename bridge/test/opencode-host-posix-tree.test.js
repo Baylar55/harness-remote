@@ -41,6 +41,11 @@ test("POSIX managed OpenCode isolates and force-terminates its exact process tre
   assert.equal(host.stop("SIGTERM"), true)
   assert.deepEqual(treeStops, [[7331, "SIGTERM"]], "shutdown must target only the managed OpenCode tree")
   assert.deepEqual(child.killSignals, [], "tree shutdown must not fall back to killing only the launcher")
+  await assert.rejects(
+    host.start(),
+    /Managed OpenCode host is closed/,
+    "traffic draining after daemon shutdown must never resurrect a replacement OpenCode process"
+  )
 })
 
 test("POSIX tree shutdown falls back to the launcher if process enumeration itself fails", async () => {

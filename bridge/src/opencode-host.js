@@ -190,6 +190,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
     this.windowsShellChild = false
     this.posixManagedTree = false
     this.starting = undefined
+    this.closed = false
   }
 
   get processID() {
@@ -202,7 +203,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
       this.eventNames().map((eventName) => [String(eventName), this.listenerCount(eventName)])
     )
     return {
-      state: this.starting ? "starting" : this.processID ? "running" : "stopped",
+      state: this.closed ? "closed" : this.starting ? "starting" : this.processID ? "running" : "stopped",
       processID: this.processID,
       startInFlight: Boolean(this.starting),
       listenerCount: Object.values(listenerCounts).reduce((total, count) => total + count, 0),
@@ -211,6 +212,11 @@ export class ManagedOpenCodeHost extends EventEmitter {
   }
 
   async start() {
+    // `stop()` is the daemon-shutdown boundary. Browser/event traffic can still arrive while the
+    // outer HTTP server drains, but it must never resurrect OpenCode after MachineDaemon.close()
+    // already killed the managed process. A natural crash remains restartable because it never sets
+    // this terminal lifecycle latch.
+    if (this.closed) throw new Error("Managed OpenCode host is closed")
     if (this.child && this.child.exitCode == null && this.child.signalCode == null) return
     if (this.starting) return this.starting
     this.starting = this.#start()
@@ -271,7 +277,9 @@ export class ManagedOpenCodeHost extends EventEmitter {
       this.emit("available", { pid: this.processID, host: this.host, port: this.port })
     } catch (error) {
       timeout.cancel()
-      this.stop("SIGTERM")
+      // A failed lazy startup is recoverable. Terminate this attempt without closing the host so a
+      // later authenticated request can retry; only the public stop() method is a terminal shutdown.
+      this.#terminate("SIGTERM")
       throw error
     }
 
@@ -283,7 +291,7 @@ export class ManagedOpenCodeHost extends EventEmitter {
     )))
   }
 
-  stop(signal = "SIGTERM") {
+  #terminate(signal = "SIGTERM") {
     const child = this.child
     if (!child || child.exitCode != null || child.signalCode != null) return false
     if (this.windowsShellChild && Number.isInteger(child.pid)) {
@@ -299,6 +307,14 @@ export class ManagedOpenCodeHost extends EventEmitter {
       }
     }
     return child.kill(signal)
+  }
+
+  stop(signal = "SIGTERM") {
+    // MachineDaemon.close() calls this while its HTTP server can still have live EventSource/model
+    // requests draining. Make that boundary terminal before killing the process so those requests
+    // cannot race through ensureManagedHttpAvailable() and start a replacement OpenCode instance.
+    this.closed = true
+    return this.#terminate(signal)
   }
 
   #handleExit(error) {
