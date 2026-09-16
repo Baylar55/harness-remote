@@ -84,7 +84,6 @@ function canonicalText(value: string): string {
   return value.replace(/\r\n/g, "\n").trim()
 }
 
-
 /**
  * PI can expose one logical turn under two transport identities: the live ACP cache first, then the
  * authoritative JSONL journal. The mature v3 tail merge deliberately retains unseen ids so older
@@ -281,9 +280,9 @@ function reconcileOpenCodeTranscriptStatus(entry: NativeConversationEntry, page:
   const completedByTranscript = openCodeAssistantProvesTurnCompleted(latestAssistant)
   const terminalError = Boolean(latestAssistant.info.error)
   if (!completedByTranscript && !terminalError) {
-    // OpenCode creates an empty assistant envelope before the first token. It is not evidence that
-    // the turn has left the silent phase: keep the bounded recovery timer alive until the envelope
-    // is completed or contains a terminal error.
+    // OpenCode creates an empty or reasoning-only assistant envelope before a durable final answer.
+    // Neither is evidence that the user turn completed: keep the bounded recovery alive until final
+    // text appears or native state proves the turn stopped without one.
     return
   }
   clearOpenCodeSilentTurn(entry)
@@ -378,10 +377,11 @@ async function settleOpenCodeSilentTurn(entry: NativeConversationEntry, turnID: 
     captureUserTurns(entry, page)
     reconcileOpenCodeTranscriptStatus(entry, page)
     const latestAssistant = latestOpenCodeAssistantForCurrentTurn(entry, page)
-    if (latestAssistant && openCodeAssistantHasActivity(latestAssistant)) {
-      notifyTranscript(entry)
-      return
-    }
+    if (latestAssistant && openCodeAssistantHasActivity(latestAssistant)) notifyTranscript(entry)
+    // Durable final/error reconciliation may already have settled the turn. Reasoning-only activity
+    // deliberately does not settle it: continue to native status so a stopped no-final turn becomes
+    // an explicit failure instead of a false Ready state or a permanently wedged second Send.
+    if (entry.forcedStatus !== "running") return
   } catch {
     // A transport read cannot prove that the native prompt failed. Keep a bounded retry alive.
     retry()
@@ -404,8 +404,9 @@ async function settleOpenCodeSilentTurn(entry: NativeConversationEntry, turnID: 
     return
   }
 
-  // prompt_async was accepted, but OpenCode has produced neither a response nor a status record.
-  // Preserve a recovery watch: a delayed retry can still make the turn running again on a later edge.
+  // prompt_async was accepted, but OpenCode has produced no durable final while native state is no
+  // longer working. Preserve a recovery watch: a delayed provider retry can still make the turn
+  // running again on a later edge, but the user must never see a successful Ready-without-answer.
   entry.statusType = "idle"
   entry.forcedStatus = null
   entry.error = { message: "OpenCode ended this request without a response. Check the selected model/provider credentials and try again." }
@@ -680,11 +681,11 @@ async function refreshStatus(entry: NativeConversationEntry): Promise<void> {
   // directory Session entirely. Never put it back in the ordinary idle pre-Send path: a slow status
   // endpoint must not delay prompt delivery before OpenCode even starts reasoning.
   //
-  // After HR has accepted a prompt, however, the status read is valuable for the one transcript case
-  // that is intentionally ambiguous: an interruption/error or a completed tool step with no final
-  // answer. Confirm an idle edge across the existing bounded lifecycle-settle window. If a provider
-  // retry starts after that confirmation, keep a bounded recovery watch so the next busy event can
-  // retract the red interruption immediately rather than waiting for the eventual final answer.
+  // After HR has accepted a prompt, status remains useful to detect busy/retry edges. An idle edge is
+  // not success proof: real OpenCode can report idle while the newest assistant envelope contains
+  // reasoning and `finish: stop` but no user-visible final text. Keep the optimistic turn running
+  // until the durable transcript proves a final answer or the bounded silent-turn recovery converts
+  // stable idle/no-final state into an explicit failure.
   const now = Date.now()
   const openCodeRecoveryWatchActive = entry.target.backend === "opencode"
     && entry.openCodeRecoveryWatchUntil > now
@@ -706,7 +707,7 @@ async function refreshStatus(entry: NativeConversationEntry): Promise<void> {
         }
         return
       }
-      // Once a terminal-looking interruption has been confirmed, another idle observation during the
+      // Once an explicit no-final failure has been confirmed, another idle observation during the
       // recovery watch changes nothing. A later busy edge is the only signal that may resurrect it.
       if (entry.forcedStatus !== "running") return
       if (entry.openCodeIdleObservedAt === null) {
@@ -715,9 +716,8 @@ async function refreshStatus(entry: NativeConversationEntry): Promise<void> {
       }
       if (now - entry.openCodeIdleObservedAt < OPENCODE_IDLE_CONFIRM_MS) return
       entry.statusType = next
-      entry.forcedStatus = null
-      entry.openCodeIdleObservedAt = null
-      entry.openCodeRecoveryWatchUntil = now + OPENCODE_RECOVERY_WATCH_MS
+      // Do not clear forcedStatus here. Native idle is enrichment, not final-answer evidence. The
+      // transcript or bounded silent-turn recovery owns the terminal transition.
       return
     }
 
