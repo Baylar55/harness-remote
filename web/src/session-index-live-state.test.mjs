@@ -187,7 +187,7 @@ test("a fresh streamed idle edge beats a briefly stale busy status read", async 
   )
 })
 
-test("stream reconnect drops transient status and error authority and invalidates the Session index", () => {
+test("stream remount drops transient status but preserves a terminal error until recovery", () => {
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "idle" })
   noteSessionIndexLiveEvent(base, { type: "session.error", sessionID: "ses_a", errorMessage: "temporary failure" })
   const before = sessionIndexInvalidationRevision()
@@ -195,7 +195,11 @@ test("stream reconnect drops transient status and error authority and invalidate
   assert.equal(liveSessionIndexError(base, "ses_a"), "temporary failure")
 
   noteSessionIndexStreamConnected(base)
-  assert.equal(liveSessionIndexStatus(base, "ses_a"), undefined)
-  assert.equal(liveSessionIndexError(base, "ses_a"), undefined)
+  assert.deepEqual(liveSessionIndexStatus(base, "ses_a"), { type: "error", message: "temporary failure" })
+  assert.equal(liveSessionIndexError(base, "ses_a"), "temporary failure")
   assert.equal(sessionIndexInvalidationRevision(), before + 1)
+
+  noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "busy" })
+  assert.equal(liveSessionIndexError(base, "ses_a"), undefined, "real resumed work must retract the old terminal-looking error")
+  assert.deepEqual(liveSessionIndexStatus(base, "ses_a"), { type: "busy" })
 })
