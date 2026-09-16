@@ -10,29 +10,56 @@
 - Merge into integration only after the relevant CI is completely green.
 - ACP, Native Session, routing, models and harness-runtime changes require regression review against previously fixed failures.
 - Prefer executable behavioral coverage over new source-text guards.
+- Do not publish comments/reviews on external contributor PRs unless explicitly requested by the repository owner.
 
 ## Current integration baseline
 
-- Integration head after PR #513: `0dadac745aa346caf4e9c57e2c1ed857e238303a`.
+- Integration head after release-prep PR #515: `a5695af0c874deeb2934f8308bc78f2196b5be1c`.
+- `web/package.json` is now `3.1.0`.
 - PR #511 marked the Harness Remote 3.1.0 release-readiness boundary.
 - PR #513 integrated the OpenCode Session-rail lifecycle fix discovered during real testing: a Session that completed while another Session was selected could remain visually `Working` until reopened.
-- #513 uses lifecycle-driven Session-index invalidation, a bounded 15s streamed-status grace and a blocking Chromium product smoke. It does **not** change prompt/Send routing, Stop, ACP writer ownership, transcript settlement, polling cadence or the #351 pre-Send invariant.
-- #513 was validated before merge with regressions/type-check, OpenCode permission transport, bridge macOS/Windows, Chromium including the new rail-state scenario and cross-machine coverage, desktop Ubuntu/macOS/Windows, signed Debug APK and artifact upload.
-- There is no push-triggered workflow on the integration branch; after merge the branch head was verified directly at the merge commit above.
+- PR #514 refreshed the development handoff after #513.
+- PR #515 prepared 3.1.0 release metadata only; no runtime behavior changed.
 
-No feature branch is currently the active integration WIP. The branch is in **3.1.0 release-candidate stabilization**.
+The integration line is in **3.1.0 release-candidate stabilization**. Do not start opportunistic feature work while release blockers remain.
+
+## RC1 result — failed
+
+Frozen RC1 branch: `codex/release-candidate-3.1.0` at `a5695af0c874deeb2934f8308bc78f2196b5be1c`.
+
+Real desktop testing exposed a release blocker: when the embedded local runtime is healthy and another saved machine endpoint is slow/unreachable, the app can remain on `Connecting to your machines…` indefinitely even though the local machine is already usable.
+
+Root cause:
+
+- 3.1 introduced the desktop-owned local runtime and polls its state every 4 seconds after startup;
+- Electron IPC returns a fresh object for every `getLocalRuntimeState()` call even when semantic state is unchanged;
+- `main.tsx` feeds that fresh state into React, rebuilding the composed `machines` array;
+- `NativeSessionsWorkspace` keys machine discovery by that array identity, so every 4-second poll cancels and restarts any slower remote discovery before it can settle offline;
+- the Session rail waits for configured machine discovery to settle, so the UI can remain in the startup phase forever.
+
+This explains why the issue did not occur on 3.0.2: that line had no automatic embedded-local-runtime polling. It also explains why the failure is indefinite rather than merely one 30-second Electron request timeout.
+
+Active fix branch: `codex/fix-startup-offline-machine`.
+
+Fix direction:
+
+- preserve referential identity for semantically unchanged `DesktopLocalRuntimeState` values in `desktopBridge.ts`;
+- still return a new state when status, profile id, host, port or PID actually changes;
+- behavioral coverage in `desktop-workspace-bridge.test.mjs` asserts both unchanged-state stability and real restart detection;
+- do not weaken offline-machine visibility or hide saved unreachable machines.
+
+RC1 must remain frozen as failed evidence. Cut RC2 only after this fix passes the complete PR gate and merges into integration.
 
 ## Stable `main` line
 
-- `main` remains at the 3.0.2 line and was not modified by #513.
-- Stable-line PR #512 contains the corresponding OpenCode rail fix adapted to the 3.0 shell. Its final head is `9ce62fd0af26baf20cb927af9202f7574eb67f31`.
-- #512 is fully green: type-check/regressions, bridge macOS/Windows, Chromium reproducing `A Working → open B → A Ready without reopening A`, desktop menu coverage, Debug APK build/signature and artifact upload.
-- #512 remains **open and unmerged**. Do not merge it into `main` without explicit authorization.
-- The earlier client-only `MachineSnapshot` epoch design was removed. The stable implementation keeps `/v1/machine`, `MachineSnapshot`, config and daemon payload contracts clean and invalidates exactly the next structural workspace reconciliation instead.
+- `main` remains on Harness Remote 3.0.2 and has not been modified by the 3.1 work.
+- Stable-line PR #512 contains the OpenCode rail-state fix adapted to the 3.0 shell.
+- #512 is fully green but remains **open and unmerged**. Do not merge it into `main` without explicit authorization.
+- The RC1 startup loop is specific to the 3.1 desktop-owned local-runtime polling path; 3.0.2 does not contain that mechanism.
 
 ## OpenCode reliability guardrails
 
-Do not regress the behavior established by #304/#306/#337/#351/#355/#391/#421/#422/#425/#451/#452/#453.
+Do not regress behavior established by #304/#306/#337/#351/#355/#391/#421/#422/#425/#451/#452/#453.
 
 In particular:
 
@@ -42,31 +69,27 @@ In particular:
 - unresolved requests remain Attention rather than being silently treated as completed (#451);
 - PR #501 extracted deterministic OpenCode assistant-envelope classification without changing the stateful #351 lifecycle.
 
-The remaining source-guard families around current-turn OpenCode matching, model fallback, writer acquisition, projection disposal, silent recovery, pending-prompt reconciliation and reply settle still protect distinct behavior. Do not delete them merely to reduce guard count; first provide equivalent executable coverage.
+## CI / packaging
 
-## CI / packaging note
-
-Validation of #512/#513 exposed a repository CI failure unrelated to product behavior: `android-actions/setup-android@v4` still defaulted to the retired Android SDK `tools` package. The workflow now skips that default package set (`packages: ''`) and explicitly installs Android 36 platform/build-tools. Both #512 and #513 subsequently built, signed and uploaded the Debug APK successfully.
+- #513/#514/#515 completed the normal release-candidate gate: type-check/regressions, OpenCode permission transport, bridge macOS/Windows, Chromium product smoke including cross-machine scenarios, desktop Ubuntu/macOS/Windows and signed Debug APK.
+- Android CI was previously repaired so `android-actions/setup-android@v4` no longer requests the retired SDK `tools` package; Android 36 packages are installed explicitly.
+- There is no push-triggered workflow on the integration branch, so PR validation is the applicable gate before merge.
 
 ## External PRs
 
-- PR #494 (`Mimocode`) was closed without merge. Real validation showed that with OpenCode + Mimocode installed, both CLIs could be detected while only OpenCode was exposed as the managed backend; its external-session behavior was also narrower than advertised. Do not revive or port #494 into 3.1.
-- PR #504 (`custom ACP primaries`) is not part of the 3.1.0 candidate. Its helper-level plan must not bypass the real `parseConfig()` / `harnessProfile()` startup boundary. Re-review only with coherent end-to-end behavior and executable coverage of the actual parse/start path.
-
-Do not publish comments/reviews on external contributor PRs unless explicitly requested by the repository owner.
+- PR #494 (`Mimocode`) was closed without merge after real validation showed its primary product behavior was not delivered when OpenCode and Mimocode coexist.
+- PR #504 (`custom ACP primaries`) is not part of the 3.1.0 candidate. Re-review only with coherent end-to-end parse/start behavior and executable coverage of the actual boundary.
 
 ## Release boundary
 
-The intended next release is **Harness Remote 3.1.0**, not 3.0.3. Compared with 3.0.2, integration already contains substantial P1/P2 work: pairing/onboarding, Attention semantics, desktop-owned local runtime/recovery, Project/outcome evidence and cross-machine Native Session continuity.
+The intended next release is **Harness Remote 3.1.0**, not 3.0.3.
 
-Repository/fixture-side release coverage is essentially exhausted. Release publication remains blocked by true-boundary evidence and repository administration:
+After the RC1 startup blocker is fixed and RC2 is frozen, remaining release evidence is true-boundary validation:
 
-- strict `gate:real-harness` against the actually installed OpenCode/Codex/Claude/OMP/PI builds, using known-working models where available and explicitly recording unavailable inference;
-- real daemon/adapter restart plus persisted-Session resume/claim on the candidate build;
-- physical Android foreground/background plus real network interruption/reconnect validation;
-- `main` ruleset/branch protection requiring pull requests and always-present release checks. The connected GitHub App cannot perform this administration write.
-
-Freeze the 3.1.0 release candidate from the current integration line only after deciding the remaining true-boundary evidence plan. Do not start opportunistic P3 provider expansion or source-guard cleanup before the release.
+- strict real-harness checks against installed OpenCode/Codex/Claude/OMP/PI builds, recording unavailable harness/model combinations rather than inventing substitutes;
+- real daemon/adapter restart plus persisted-Session resume/claim;
+- physical Android foreground/background and real network interruption/reconnect;
+- repository-admin enforcement on `main` requiring pull requests and required checks. The connected GitHub App cannot perform that administration write.
 
 ## Roadmap boundaries
 
@@ -76,7 +99,7 @@ Keep open for the true-boundary release evidence and repository-admin enforcemen
 
 ### P1 — issue #369
 
-Repo-side pairing, Attention semantics, desktop-owned local runtime, packaged-runtime execution, PATH recovery, health/reconnect recovery and Machines simplification are implemented. Do not invent additional P1 UI/runtime surface merely because the issue remains open; its remaining dependency is P0 real-boundary evidence.
+Repo-side pairing, Attention semantics, desktop-owned local runtime, packaged-runtime execution, PATH recovery, health/reconnect recovery and Machines simplification are implemented. Its remaining dependency is P0 evidence plus the RC1 startup blocker fix.
 
 ### P2 — issue #371
 
@@ -88,7 +111,7 @@ Do not redo already-integrated federation/cross-machine continuity:
 - #437-#439/#469: bounded Project/outcome evidence and Git aggregates;
 - #471/#472: blocking Chromium planning and full cross-machine execution coverage.
 
-One deliberate non-claim remains: do not infer `checks run/failed` from transcript/tool prose. There is no provider-neutral structured source yet, so absence is safer than heuristic evidence.
+Do not infer `checks run/failed` from transcript/tool prose. There is no provider-neutral structured source yet.
 
 ## Product direction
 
