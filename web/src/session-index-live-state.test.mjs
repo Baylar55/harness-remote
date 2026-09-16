@@ -4,6 +4,8 @@ import { discoverAgentNativeSessionPage } from "./native-session-discovery.ts"
 import { taskDeskLiveEvent } from "./taskdesk-live-events.ts"
 import {
   LIVE_SESSION_STATUS_GRACE_MS,
+  clearSessionIndexLiveError,
+  clearSessionIndexLiveState,
   liveSessionIndexError,
   liveSessionIndexStatus,
   noteSessionIndexLiveEvent,
@@ -202,4 +204,26 @@ test("stream remount drops transient status but preserves a terminal error until
   noteSessionIndexLiveEvent(base, { type: "session.status", sessionID: "ses_a", status: "busy" })
   assert.equal(liveSessionIndexError(base, "ses_a"), undefined, "real resumed work must retract the old terminal-looking error")
   assert.deepEqual(liveSessionIndexStatus(base, "ses_a"), { type: "busy" })
+})
+
+test("durable controller transitions can retire stale event authority explicitly", () => {
+  const sessionID = "ses_durable"
+  noteSessionIndexLiveEvent(base, { type: "session.error", sessionID, errorMessage: "old provider failure" })
+  assert.equal(liveSessionIndexError(base, sessionID), "old provider failure")
+
+  const beforeErrorClear = sessionIndexInvalidationRevision()
+  clearSessionIndexLiveError(base, sessionID)
+  assert.equal(liveSessionIndexError(base, sessionID), undefined)
+  assert.equal(sessionIndexInvalidationRevision(), beforeErrorClear + 1, "starting a new durable turn must invalidate the stale error overlay")
+
+  noteSessionIndexLiveEvent(base, { type: "session.status", sessionID, status: "retry", statusMessage: "routing" })
+  noteSessionIndexLiveEvent(base, { type: "session.error", sessionID, errorMessage: "transient current-turn error" })
+  assert.equal(liveSessionIndexError(base, sessionID), "transient current-turn error")
+  assert.equal(liveSessionIndexStatus(base, sessionID)?.type, "error")
+
+  const beforeSettlement = sessionIndexInvalidationRevision()
+  clearSessionIndexLiveState(base, sessionID)
+  assert.equal(liveSessionIndexError(base, sessionID), undefined)
+  assert.equal(liveSessionIndexStatus(base, sessionID), undefined)
+  assert.equal(sessionIndexInvalidationRevision(), beforeSettlement + 1, "durable terminal reconciliation must retire both status and error bridges")
 })
