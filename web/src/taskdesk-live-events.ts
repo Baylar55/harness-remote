@@ -15,18 +15,38 @@ export type TaskDeskLiveEvent = {
   type: string
   sessionID?: string
   status?: string
+  statusMessage?: string
+  statusAttempt?: number
+  statusNext?: number
+  errorMessage?: string
 }
 
 type Subscription = { close(): void }
 
 function text(value: unknown): string | undefined {
-  return typeof value === "string" && value ? value : undefined
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
 }
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
+}
+
+function lifecycleErrorMessage(value: unknown): string | undefined {
+  if (typeof value === "string") return text(value)
+  const error = object(value)
+  if (!error) return undefined
+  const data = object(error.data)
+  const nested = object(data?.error)
+  return text(data?.message)
+    ?? text(nested?.message)
+    ?? text(error.message)
+    ?? text(error.name)
 }
 
 /** Normalize bridge-native and OpenCode event envelopes into the fields TaskDesk needs. */
@@ -52,10 +72,18 @@ export function taskDeskLiveEvent(name: string | undefined, data: unknown): Task
     ?? text(part?.sessionId)
     ?? text(part?.sessionID)
   const statusType = text(status?.type)
+  const statusMessage = text(status?.message)
+  const statusAttempt = finiteNumber(status?.attempt)
+  const statusNext = finiteNumber(status?.next)
+  const errorMessage = type === "session.error" ? lifecycleErrorMessage(properties?.error) : undefined
   return {
     type,
     ...(sessionID ? { sessionID } : {}),
-    ...(statusType ? { status: statusType } : {})
+    ...(statusType ? { status: statusType } : {}),
+    ...(statusMessage ? { statusMessage } : {}),
+    ...(statusAttempt !== undefined ? { statusAttempt } : {}),
+    ...(statusNext !== undefined ? { statusNext } : {}),
+    ...(errorMessage ? { errorMessage } : {})
   }
 }
 
