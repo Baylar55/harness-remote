@@ -20,7 +20,8 @@ const base = {
   host: "127.0.0.1",
   port: 4097,
   username: "harness",
-  password: "secret"
+  password: "secret",
+  agentId: "opencode"
 }
 
 const agent = {
