@@ -90,26 +90,33 @@ export function taskDeskLiveEvent(name: string | undefined, data: unknown): Task
 /**
  * Use the transport already proven by Classic on each platform. Browser and Electron fetch streams
  * can carry auth headers, Android uses the native SSE plugin, and Electron main owns desktop sockets.
+ *
+ * `trackSessionIndex` belongs to the long-lived machine subscription only. The selected Session also
+ * owns a detail stream so it can refresh transcript/attention quickly, but opening or changing that
+ * detail must never reset the shared rail lifecycle cache for every other Session on the endpoint.
  */
 export function subscribeTaskDeskLiveEvents({
   config,
   onEvent,
-  onStatus
+  onStatus,
+  trackSessionIndex = true
 }: {
   config: ServerConfig
   onEvent: (event: TaskDeskLiveEvent) => void
   onStatus?: (status: EventStreamStatus) => void
+  trackSessionIndex?: boolean
 }): Subscription {
   const emit = (name: string | undefined, data: unknown) => {
     const normalized = taskDeskLiveEvent(name, data)
     if (!normalized) return
-    noteSessionIndexLiveEvent(config, normalized)
+    if (trackSessionIndex) noteSessionIndexLiveEvent(config, normalized)
     onEvent(normalized)
   }
   const emitStatus = (status: EventStreamStatus) => {
-    // A newly-connected stream may have missed a complete turn while it was down. Force the next
-    // machine reconciliation to invalidate the Session index instead of trusting pre-gap row state.
-    if (status.type === "connected") noteSessionIndexStreamConnected(config)
+    // Only the persistent machine stream owns rail authority. A selected-detail stream reports the
+    // same transport lifecycle but is created/destroyed by navigation; treating its ordinary mount
+    // as a reconnect used to wipe a retry from another Session as soon as the user opened this one.
+    if (trackSessionIndex && status.type === "connected") noteSessionIndexStreamConnected(config)
     onStatus?.(status)
   }
 
