@@ -66,10 +66,10 @@ jobs:
           fi
           echo "Zen credential is configured (value intentionally not printed)."
 
-      - name: Run real OpenCode multi-turn release gate
+      - name: Run real OpenCode existing-Session release gate
         env:
           OPENCODE_ZEN_API_KEY: ${{ secrets.OPENCODE_ZEN_API_KEY }}
-        run: node scripts/native-opencode-live-zen-smoke.mjs
+        run: node scripts/native-opencode-live-zen-release-gate.mjs
         working-directory: web
 
       - name: Upload sanitized live-runtime evidence
