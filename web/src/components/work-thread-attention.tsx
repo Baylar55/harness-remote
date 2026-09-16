@@ -32,16 +32,19 @@ function permissionExplanation(request: PermissionRequest): string | undefined {
 
 /**
  * A native permission/question reply is acknowledged before OpenCode necessarily makes the resumed
- * turn's final transcript durable. Event delivery normally closes that gap, but authorization must
- * not depend on one `permission.replied`/`question.replied` edge surviving navigation, reconnect or
- * renderer scheduling. Reconcile immediately, then exactly once more after the same bounded settle
- * window used by the live Session controller. This is user-action driven, not polling.
+ * turn's final transcript durable. Event delivery normally closes that gap, but OpenCode must not
+ * depend on one `permission.replied`/`question.replied` edge surviving navigation, reconnect or
+ * renderer scheduling. Reconcile immediately for every backend (the pre-existing behavior), then
+ * exactly once more for OpenCode after the same bounded settle window used by the live Session
+ * controller. This is user-action driven, not polling, and leaves ACP resolution semantics unchanged.
  */
 export async function settleResolvedAttention(
   onResolved: () => Promise<void> | void,
+  backend: ServerConfig["backend"],
   delayMs = ATTENTION_RESOLUTION_SETTLE_MS
 ): Promise<void> {
   await onResolved()
+  if (backend !== "opencode") return
   await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, delayMs)))
   await onResolved()
 }
@@ -99,7 +102,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
       // or deny that already happened.
       await api.replyPermission(config, request.id, reply, directory)
       void persistSuccessfulPermissionDecision(request, reply).catch(() => undefined)
-      await settleResolvedAttention(onResolved)
+      await settleResolvedAttention(onResolved, config.backend)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -122,7 +125,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
     setError(null)
     try {
       await api.replyQuestion(config, request.id, result, directory)
-      await settleResolvedAttention(onResolved)
+      await settleResolvedAttention(onResolved, config.backend)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {

@@ -77,15 +77,15 @@ test("OpenCode permission replies stay fail-closed at the UI boundary", () => {
   assert.match(api, /body: \{ reply \}/)
   assert.match(responder, /await api\.replyPermission\(config, request\.id, reply, directory\)/)
   assert.match(responder, /void persistSuccessfulPermissionDecision\(request, reply\)\.catch/)
-  assert.match(responder, /await settleResolvedAttention\(onResolved\)/)
+  assert.match(responder, /await settleResolvedAttention\(onResolved, config\.backend\)/)
   assert.match(responder, /catch \(reason\)[\s\S]*?setError\(/)
   assert.match(attention, /export async function settleResolvedAttention/)
-  assert.match(attention, /await onResolved\(\)[\s\S]*?setTimeout\([\s\S]*?await onResolved\(\)/, "native attention ACK must have one bounded trailing reconciliation even if the SSE resolution edge is lost")
+  assert.match(attention, /await onResolved\(\)[\s\S]*?if \(backend !== "opencode"\) return[\s\S]*?setTimeout\([\s\S]*?await onResolved\(\)/, "native attention ACK must reconcile once for every backend and add a bounded trailing pass only for OpenCode")
 
   const nativeReply = responder.indexOf("await api.replyPermission")
   const metadata = responder.indexOf("persistSuccessfulPermissionDecision")
-  const refresh = responder.indexOf("await settleResolvedAttention(onResolved)")
-  assert.ok(nativeReply >= 0 && metadata > nativeReply && refresh > nativeReply, "native OpenCode reply must succeed before local metadata or bounded resolution refresh")
+  const refresh = responder.indexOf("await settleResolvedAttention(onResolved, config.backend)")
+  assert.ok(nativeReply >= 0 && metadata > nativeReply && refresh > nativeReply, "native OpenCode reply must succeed before local metadata or bounded OpenCode resolution refresh")
 
   // A failed POST must leave the authoritative request in props. Never optimistically remove it,
   // clear Attention, or record an allow/deny before the native harness acknowledges the decision.
