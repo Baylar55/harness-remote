@@ -16,6 +16,8 @@ type Props = {
 type AnswerMap = Record<string, string[]>
 type CustomMap = Record<string, string>
 
+const ATTENTION_RESOLUTION_SETTLE_MS = 900
+
 function answerKey(requestID: string, index: number): string {
   return `${requestID}:${index}`
 }
@@ -26,6 +28,22 @@ function permissionExplanation(request: PermissionRequest): string | undefined {
     if (typeof value === "string" && value.trim()) return value.trim()
   }
   return undefined
+}
+
+/**
+ * A native permission/question reply is acknowledged before OpenCode necessarily makes the resumed
+ * turn's final transcript durable. Event delivery normally closes that gap, but authorization must
+ * not depend on one `permission.replied`/`question.replied` edge surviving navigation, reconnect or
+ * renderer scheduling. Reconcile immediately, then exactly once more after the same bounded settle
+ * window used by the live Session controller. This is user-action driven, not polling.
+ */
+export async function settleResolvedAttention(
+  onResolved: () => Promise<void> | void,
+  delayMs = ATTENTION_RESOLUTION_SETTLE_MS
+): Promise<void> {
+  await onResolved()
+  await new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, delayMs)))
+  await onResolved()
 }
 
 export function WorkThreadAttention({ config, directory, questions, permissions, approvalIdentity, onResolved }: Props) {
@@ -81,7 +99,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
       // or deny that already happened.
       await api.replyPermission(config, request.id, reply, directory)
       void persistSuccessfulPermissionDecision(request, reply).catch(() => undefined)
-      await onResolved()
+      await settleResolvedAttention(onResolved)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
@@ -104,7 +122,7 @@ export function WorkThreadAttention({ config, directory, questions, permissions,
     setError(null)
     try {
       await api.replyQuestion(config, request.id, result, directory)
-      await onResolved()
+      await settleResolvedAttention(onResolved)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
