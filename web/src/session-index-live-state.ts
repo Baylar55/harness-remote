@@ -82,7 +82,11 @@ function deleteError(key: string, sessionID: string): boolean {
 }
 
 function deleteSessionState(key: string, sessionID: string): boolean {
-  return deleteStatus(key, sessionID) || deleteError(key, sessionID)
+  // Do not short-circuit: a Session can legitimately hold both a transient status and a terminal
+  // error bridge at once. Both must be retired when durable state becomes authoritative.
+  const statusDeleted = deleteStatus(key, sessionID)
+  const errorDeleted = deleteError(key, sessionID)
+  return statusDeleted || errorDeleted
 }
 
 function invalidateSessionIndex(): void {
