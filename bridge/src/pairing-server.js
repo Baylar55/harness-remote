@@ -122,8 +122,8 @@ export function renderPairingQRCode(uri, { load = () => require("qrcode-terminal
 
 /**
  * The one-time URI is an implementation detail of phone pairing, not useful terminal UI. Show a
- * single QR for the preferred reachable endpoint and keep the manual machine URL/credentials as the
- * fallback. In particular, never dump raw deep links or alternate interface URLs below the QR.
+ * single QR for the preferred reachable endpoint and keep manual machine setup as the fallback. In
+ * particular, never dump raw deep links or alternate interface URLs below the QR.
  */
 export function announceMachinePairing(config, grant, {
   write = (text) => process.stdout.write(text),
@@ -139,7 +139,7 @@ export function announceMachinePairing(config, grant, {
     write(`${qr}\n`)
     write("Scan this QR in Harness Remote to add the machine automatically.\n")
   } else {
-    write("QR unavailable. Use Machines → Add machine with the Machine URL and credentials above.\n")
+    write("QR unavailable. Use Machines → Add machine with this machine's address and credentials.\n")
   }
   return links
 }
