@@ -127,20 +127,20 @@ for (const backend of ["opencode", "codex", "claude", "omp", "pi"]) {
     stableItem(backend, "older", 900, "busy"),
     stableItem(backend, "recent", 700, "idle"),
     stableItem(backend, "middle", 800, "done")
-  ], { keepMissingSelected: () => true })
+  ], { keepMissing: () => true })
   assert.deepEqual(stableKeys(rail), ["recent", "middle", "older"], `${backend}: Working/Done timestamp changes must not move existing rows`)
   assert.equal(rail.find((entry) => entry.record.session.id === "older").record.status.type, "busy", `${backend}: stable layout must still accept fresh live metadata`)
 
   rail = reconcileStableSessionRecords(rail, [
     stableItem(backend, "recent", 700, "idle")
-  ], { keepMissingSelected: () => true })
+  ], { keepMissing: () => true })
   assert.deepEqual(stableKeys(rail), ["recent", "middle", "older"], `${backend}: a transient first-page omission must not make already-visible Sessions disappear`)
 
   rail = reconcileStableSessionRecords(rail, [
     stableItem(backend, "older", 950, "done"),
     stableItem(backend, "middle", 800, "done"),
     stableItem(backend, "recent", 700, "idle")
-  ], { keepMissingSelected: () => true })
+  ], { keepMissing: () => true })
   assert.deepEqual(stableKeys(rail), ["recent", "middle", "older"], `${backend}: completion must update in place rather than teleport the row`)
   assert.equal(rail.find((entry) => entry.record.session.id === "older").record.status.type, "done", `${backend}: terminal state must reconcile onto the retained row`)
 
@@ -149,19 +149,19 @@ for (const backend of ["opencode", "codex", "claude", "omp", "pi"]) {
     stableItem(backend, "older", 950, "done"),
     stableItem(backend, "middle", 800, "done"),
     stableItem(backend, "recent", 700, "idle")
-  ], { keepMissingSelected: () => true })
+  ], { keepMissing: () => true })
   assert.deepEqual(stableKeys(rail), ["new", "recent", "middle", "older"], `${backend}: a genuinely new Session may enter at the top without reordering existing rows`)
 
   rail = reconcileStableSessionRecords(rail, [
     ...rail,
     stableItem(backend, "very-old", 10)
-  ], { keepMissingSelected: () => true, newPosition: "back" })
+  ], { keepMissing: () => true, newPosition: "back" })
   assert.deepEqual(stableKeys(rail), ["new", "recent", "middle", "older", "very-old"], `${backend}: Load older must append rather than disturb the visible list`)
 
   const deletedKey = `daemon-1:${backend}:middle`
   rail = reconcileStableSessionRecords(rail, rail.filter((entry) => entry.record.session.id !== "middle"), {
     deletedKeys: new Set([deletedKey]),
-    keepMissingSelected: () => true
+    keepMissing: () => true
   })
   assert.equal(stableKeys(rail).includes("middle"), false, `${backend}: an explicit delete must beat stable-layout retention immediately`)
 }
@@ -268,7 +268,7 @@ const source = readFileSync(new URL("./components/native-session-home-base.tsx",
 assert.match(source, /presentationOverrides/, "live detail status must survive selecting another Session")
 assert.match(source, /\{ \.\.\.current, \[selectedKey\]: selectedState \}/, "the status bridge must be keyed by native Session identity")
 assert.match(source, /reconcileStableSessionRecords\(current, freshRecords/, "native refreshes must reconcile into stable visual positions instead of replacing the rail order")
-assert.match(source, /keepMissingSelected: \(item\)/, "already-visible Sessions must survive transient native-index omissions while their source still exists")
+assert.match(source, /keepMissing: \(item\)/, "already-visible Sessions must survive transient native-index omissions while their source still exists")
 assert.match(source, /newPosition: "back"/, "explicit older-page loading must append new rows instead of reordering the rail")
 assert.doesNotMatch(source, /selectedActivityAnchor/, "layout stability must not be a selected-row-only timestamp workaround")
 assert.doesNotMatch(source, /\[expandedProjects, selectedKey, selectedState\]/, "Working/Done changes must not force the selected row to scroll again")
