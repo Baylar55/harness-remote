@@ -107,6 +107,7 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
   let reconnectTimer: TimerID | undefined
   let reconnectDelayMs = initialDelayMs
   let closed = false
+  let observedBackground = false
 
   const publishStatus = (status: EventStreamStatus) => options.onStatus?.(status)
   const scheduleReconnect = () => {
@@ -189,9 +190,9 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
 
   // Browser timers and TCP reads can both be frozen while a tab, display, or laptop is suspended.
   // Waiting for the 30s stall watchdog after foregrounding leaves the Session list looking dead even
-  // though the daemon is already reachable. A lifecycle wake invalidates the pre-sleep stream and
-  // opens one fresh connection immediately. Mark the old controller non-current before aborting it so
-  // its catch/finally path cannot schedule a second reconnect behind the new one.
+  // though the daemon is already reachable. A real lifecycle wake invalidates the pre-sleep stream
+  // and opens one fresh connection immediately. The first page load also fires `pageshow`, so it must
+  // not be mistaken for a resume: only a prior hidden state or a persisted BFCache restore qualifies.
   const reconnectAfterWake = () => {
     if (closed || !isVisible()) return
     if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
@@ -202,11 +203,25 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
     staleController?.abort()
     void connect()
   }
-  const onVisibilityChange = () => reconnectAfterWake()
-  const onPageResume = () => reconnectAfterWake()
+  const onVisibilityChange = () => {
+    if (!isVisible()) {
+      observedBackground = true
+      return
+    }
+    if (!observedBackground) return
+    observedBackground = false
+    reconnectAfterWake()
+  }
+  const onPageShow = (event: Event) => {
+    const persisted = Boolean((event as PageTransitionEvent).persisted)
+    if (!persisted && !observedBackground) return
+    observedBackground = false
+    reconnectAfterWake()
+  }
+  const onOnline = () => reconnectAfterWake()
   visibilityTarget?.addEventListener("visibilitychange", onVisibilityChange)
-  networkTarget?.addEventListener("pageshow", onPageResume)
-  networkTarget?.addEventListener("online", onPageResume)
+  networkTarget?.addEventListener("pageshow", onPageShow)
+  networkTarget?.addEventListener("online", onOnline)
 
   connect().catch(() => undefined)
   return {
@@ -214,8 +229,8 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
       if (closed) return
       closed = true
       visibilityTarget?.removeEventListener("visibilitychange", onVisibilityChange)
-      networkTarget?.removeEventListener("pageshow", onPageResume)
-      networkTarget?.removeEventListener("online", onPageResume)
+      networkTarget?.removeEventListener("pageshow", onPageShow)
+      networkTarget?.removeEventListener("online", onOnline)
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
       reconnectTimer = undefined
       controller?.abort()
