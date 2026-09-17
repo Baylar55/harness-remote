@@ -217,18 +217,23 @@ function sessionActivityCompare(left: RecordWithMachine, right: RecordWithMachin
   return left.record.key.localeCompare(right.record.key)
 }
 
+/**
+ * Reconcile native truth into the rail without using changing harness timestamps as layout
+ * coordinates. Existing rows keep their relative positions; genuinely new rows may enter at the
+ * front, while explicit older-page loads append. A native first-page read is allowed to omit a row
+ * transiently (active writer, pagination boundary, adapter lag), so callers may retain missing rows
+ * while the same machine+harness source still exists. Explicit local deletes always win.
+ */
 export function reconcileStableSessionRecords(
   previous: RecordWithMachine[],
   fresh: RecordWithMachine[],
   {
-    selectedKey,
     deletedKeys,
-    keepMissingSelected,
+    keepMissing,
     newPosition = "front"
   }: {
-    selectedKey?: string
     deletedKeys?: ReadonlySet<string>
-    keepMissingSelected?: (record: RecordWithMachine) => boolean
+    keepMissing?: (record: RecordWithMachine) => boolean
     newPosition?: "front" | "back"
   } = {}
 ): RecordWithMachine[] {
@@ -248,7 +253,7 @@ export function reconcileStableSessionRecords(
       freshByKey.delete(key)
       continue
     }
-    if (key === selectedKey && (!keepMissingSelected || keepMissingSelected(prior))) retained.push(prior)
+    if (keepMissing?.(prior)) retained.push(prior)
   }
 
   const newcomers = [...freshByKey.values()].sort(sessionActivityCompare)
@@ -354,6 +359,7 @@ export function sessionTreeRows(sessions: RecordWithMachine[]): Array<{ item: Re
     for (const child of children.get(item.record.session.id) || []) visit(child, depth + 1)
   }
   for (const root of roots) visit(root, 0)
+  // Corrupt or cyclic parent metadata must not hide a native Session.
   for (const item of sessions) visit(item, 0)
   return rows
 }
@@ -409,9 +415,7 @@ export function NativeSessionHome({
   const completionTimer = useRef<number | null>(null)
   const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
   const pageCacheSignature = useRef<string | null>(null)
-  const selectedKeyRef = useRef(selectedKey)
   const deletedKeysRef = useRef(deletedKeys)
-  selectedKeyRef.current = selectedKey
   deletedKeysRef.current = deletedKeys
   const onRefreshCompleteRef = useRef(onRefreshComplete)
   onRefreshCompleteRef.current = onRefreshComplete
@@ -509,10 +513,8 @@ export function NativeSessionHome({
       if (pageCacheSignature.current !== machineSignature) pageCache.current.clear()
       pageCacheSignature.current = machineSignature
       const activeScopes = new Set<string>()
-      const activeMachineIDs = new Set<string>()
       for (const result of results) {
         if (!result.snapshot) continue
-        activeMachineIDs.add(result.machine.id)
         for (const { agent, page } of result.pages) {
           const scope = pageScopeKey(result.machine.id, agent.id)
           activeScopes.add(scope)
@@ -545,9 +547,8 @@ export function NativeSessionHome({
       setPresentationOverrides({})
       const freshRecords = uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records))
       setRecords((current) => reconcileStableSessionRecords(current, freshRecords, {
-        selectedKey: selectedKeyRef.current,
         deletedKeys: deletedKeysRef.current,
-        keepMissingSelected: (item) => activeMachineIDs.has(item.machine.id)
+        keepMissing: (item) => activeScopes.has(pageScopeKey(item.machine.id, item.record.agentId))
       }))
       setLoadedSignature(machineSignature)
     }).catch((reason) => {
@@ -834,10 +835,12 @@ export function NativeSessionHome({
       })
     }
     const freshRecords = uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records))
+    const activeScopes = new Set(sources.flatMap(({ machine, snapshot }) =>
+      snapshot ? snapshot.agents.map((agent) => pageScopeKey(machine.id, agent.id)) : []
+    ))
     setRecords((current) => reconcileStableSessionRecords(current, freshRecords, {
-      selectedKey: selectedKeyRef.current,
       deletedKeys: deletedKeysRef.current,
-      keepMissingSelected: (item) => sources.some(({ machine, snapshot }) => machine.id === item.machine.id && Boolean(snapshot)),
+      keepMissing: (item) => activeScopes.has(pageScopeKey(item.machine.id, item.record.agentId)),
       newPosition: "back"
     }))
     setOlderSessionError(firstError)
