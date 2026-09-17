@@ -21,6 +21,7 @@ const INTERRUPT_REPLY = "OPENCODE-RECOVERED-FINAL-REPLY"
 const TERMINAL_INTERRUPT_PROMPT = "OPENCODE-TERMINAL-INTERRUPTION-PROMPT"
 const TERMINAL_ERROR_PROMPT = "OPENCODE-TERMINAL-PROVIDER-ERROR-PROMPT"
 const TERMINAL_ERROR_MESSAGE = "Error from provider (Console): Upstream request failed: Endpoint is unavailable."
+const SILENT_TURN_ERROR_MESSAGE = "OpenCode ended this request without a response. Check the selected model/provider credentials and try again."
 const LATE_RECOVERY_PROMPT = "OPENCODE-LATE-RECOVERY-PROMPT"
 const LATE_RECOVERY_REPLY = "OPENCODE-LATE-RECOVERY-FINAL-REPLY"
 const CREATE_TITLE = "OpenCode created from Harness Remote"
@@ -723,19 +724,17 @@ async function assertExistingContract(browser, viewport, mobile) {
   assert.equal(await lateBanner.count(), 0, "late retry recovery must finish without a stale interruption banner")
   await waitForReady(page)
 
-  // The suppression is not blanket error hiding: if OpenCode stays idle and never produces a final
-  // reply, the bounded silent-turn recovery must eventually expose the real terminal interruption.
+  // A permanently idle no-final turn is a real failure, not a successful Ready state. The exact
+  // failure must become visible after the bounded grace, and the next Send must recover in-place.
   await sendPrompt(page, TERMINAL_INTERRUPT_PROMPT)
-  await page.getByText("Response interrupted", { exact: true }).waitFor({ state: "visible", timeout: 25_000 })
-  assert.equal(
-    await page.getByText("The coding agent stopped before producing a final answer.", { exact: true }).count(),
-    1,
-    "a stable terminal OpenCode interruption must remain visible"
-  )
+  await page.getByText("Turn failed", { exact: true }).waitFor({ state: "visible", timeout: 25_000 })
+  await page.getByText(SILENT_TURN_ERROR_MESSAGE, { exact: true }).waitFor({ state: "visible", timeout: 25_000 })
+  await page.locator(".tdw-conversation-state.attention").waitFor({ state: "attached", timeout: 12_000 })
+  const failedComposer = page.getByRole("textbox", { name: "Message OpenCode" })
+  assert.equal(await failedComposer.isDisabled(), false, "a confirmed no-final failure must leave the composer usable for recovery")
+  assert.equal(await page.getByText("Response interrupted", { exact: true }).count(), 0, "confirmed no-final failure must not masquerade as a successful Ready interruption")
 
-  await waitForReady(page)
   await sendPrompt(page, TERMINAL_ERROR_PROMPT)
-  await page.getByText("Turn failed", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   await page.getByText(TERMINAL_ERROR_MESSAGE, { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   await waitForReady(page)
   assert.equal(
@@ -744,7 +743,7 @@ async function assertExistingContract(browser, viewport, mobile) {
     "a terminal OpenCode provider error must stop Working while the Session remains mounted even when /session/status omits it"
   )
   assert.equal(await page.getByText(TERMINAL_ERROR_PROMPT, { exact: true }).count(), 1)
-  assert.equal(await page.getByText("Turn failed", { exact: true }).count(), 1)
+  assert.equal(await page.getByText("Turn failed", { exact: true }).count(), 2, "both historical no-final failure and provider error must remain visible")
 
   if (mobile) await assertPersistedReplyWithoutLiveEvent(page, "existing OpenCode Session")
 
