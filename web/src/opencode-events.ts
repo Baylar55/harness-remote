@@ -35,6 +35,7 @@ type ReconnectConfig = {
 }
 
 type TimerID = ReturnType<typeof setTimeout>
+type LifecycleEventTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">
 type EventSubscriptionOptions = {
   url: string
   reconnect?: ReconnectConfig
@@ -75,6 +76,12 @@ type FetchEventSubscriptionOptions = {
   fetchFn?: typeof fetch
   /** Abort and reconnect when no bytes arrive for this long. Defaults to 30s (server beats every 10s). */
   stallTimeoutMs?: number
+  /** Test seam; production defaults to document/window lifecycle events when they exist. */
+  lifecycle?: {
+    visibilityTarget?: LifecycleEventTarget
+    networkTarget?: LifecycleEventTarget
+    isVisible?: () => boolean
+  }
   onEvent: (event: Extract<ParsedOpenCodeEvent, { ok: true }>) => void
   onStatus?: (status: EventStreamStatus) => void
   logger?: (message: string) => void
@@ -90,6 +97,12 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
   const fetchFn = options.fetchFn ?? fetch
   const stallTimeoutMs = validDelay(options.stallTimeoutMs, 30_000)
   const logger = options.logger ?? ((message: string) => console.debug(message))
+  const visibilityTarget = options.lifecycle?.visibilityTarget
+    ?? (typeof document !== "undefined" ? document : undefined)
+  const networkTarget = options.lifecycle?.networkTarget
+    ?? (typeof window !== "undefined" ? window : undefined)
+  const isVisible = options.lifecycle?.isVisible
+    ?? (() => typeof document === "undefined" || document.visibilityState === "visible")
   let controller: AbortController | undefined
   let reconnectTimer: TimerID | undefined
   let reconnectDelayMs = initialDelayMs
@@ -174,11 +187,35 @@ export function createFetchOpenCodeEventSubscription(options: FetchEventSubscrip
     if (!closed && controller === currentController) scheduleReconnect()
   }
 
+  // Browser timers and TCP reads can both be frozen while a tab, display, or laptop is suspended.
+  // Waiting for the 30s stall watchdog after foregrounding leaves the Session list looking dead even
+  // though the daemon is already reachable. A lifecycle wake invalidates the pre-sleep stream and
+  // opens one fresh connection immediately. Mark the old controller non-current before aborting it so
+  // its catch/finally path cannot schedule a second reconnect behind the new one.
+  const reconnectAfterWake = () => {
+    if (closed || !isVisible()) return
+    if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
+    reconnectTimer = undefined
+    reconnectDelayMs = initialDelayMs
+    const staleController = controller
+    controller = undefined
+    staleController?.abort()
+    void connect()
+  }
+  const onVisibilityChange = () => reconnectAfterWake()
+  const onPageResume = () => reconnectAfterWake()
+  visibilityTarget?.addEventListener("visibilitychange", onVisibilityChange)
+  networkTarget?.addEventListener("pageshow", onPageResume)
+  networkTarget?.addEventListener("online", onPageResume)
+
   connect().catch(() => undefined)
   return {
     close() {
       if (closed) return
       closed = true
+      visibilityTarget?.removeEventListener("visibilitychange", onVisibilityChange)
+      networkTarget?.removeEventListener("pageshow", onPageResume)
+      networkTarget?.removeEventListener("online", onPageResume)
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer)
       reconnectTimer = undefined
       controller?.abort()
