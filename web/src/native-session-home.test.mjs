@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import { appendCursorPage, refreshCursorPage, sessionTreeRows } from "./components/native-session-home.tsx"
+import { appendCursorPage, needsOpenCodeRailStream, refreshCursorPage, sessionTreeRows } from "./components/native-session-home.tsx"
 import { mergedAttentionSessionCount } from "./components/native-session-home-attention.tsx"
 import { canCreateNativeSession } from "./native-session-create.ts"
 import { classifyNativeSessionAttention, sessionNeedsAttention } from "./native-session-attention.ts"
@@ -115,6 +115,27 @@ assert.equal(canCreateNativeSession({
   state: "unavailable",
   capabilities: { sessions: true, prompt: true }
 }), false, "an unavailable harness must not be offered for native create")
+
+const railAgent = (backend, state = "available", capabilities = { sessions: true, prompt: true }) => ({
+  id: `${backend}-${state}`,
+  label: backend,
+  backend,
+  transport: backend === "opencode" ? "http" : "acp",
+  managed: true,
+  state,
+  capabilities
+})
+
+assert.equal(needsOpenCodeRailStream(railAgent("opencode")), true, "an available OpenCode agent without attention capabilities needs the persistent routed rail stream")
+for (const backend of ["codex", "claude", "omp", "pi"]) {
+  assert.equal(needsOpenCodeRailStream(railAgent(backend)), false, `${backend} must never gain the OpenCode routed rail lifecycle owner`)
+}
+for (const state of ["configured", "unavailable", "starting", "error"]) {
+  assert.equal(needsOpenCodeRailStream(railAgent("opencode", state)), false, `OpenCode ${state} must not be started just because the Session rail is visible`)
+}
+assert.equal(needsOpenCodeRailStream(railAgent("opencode", "available", { sessions: false, prompt: true })), false, "OpenCode without native Sessions does not need a Session rail stream")
+assert.equal(needsOpenCodeRailStream(railAgent("opencode", "available", { sessions: true, prompt: true, questions: true })), false, "OpenCode question capability already has an Attention-owned routed stream")
+assert.equal(needsOpenCodeRailStream(railAgent("opencode", "available", { sessions: true, prompt: true, permissions: true })), false, "OpenCode permission capability already has an Attention-owned routed stream")
 
 const permission = {
   id: "permission-1",

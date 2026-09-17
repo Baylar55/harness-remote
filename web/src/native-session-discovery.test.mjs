@@ -3,6 +3,7 @@ import {
   discoverAgentNativeSessionPage,
   discoverAgentNativeSessions,
   discoverMachineNativeSessions,
+  NativeSessionDiscoveryTimeoutError,
   nativeSessionConfig,
   nativeSessionSurfaceTarget
 } from './native-session-discovery.ts'
@@ -297,6 +298,22 @@ await assert.rejects(
   }),
   /expired cursor/
 )
+
+// A cold or hung ACP adapter must consume only its own bounded observation slot. In particular a
+// timed-out experimental index must not launch the stable fallback behind the still-running request;
+// NativeSessionHome catches this one harness failure and can render already-resolved OpenCode pages.
+let timeoutFallbackReads = 0
+const timeoutStartedAt = Date.now()
+await assert.rejects(
+  discoverAgentNativeSessionPage(base, codex, undefined, {
+    async listGlobalSessionPage() { return new Promise(() => {}) },
+    async listSessions() { timeoutFallbackReads += 1; return [] },
+    async listStatuses() { return {} }
+  }, 25),
+  (error) => error instanceof NativeSessionDiscoveryTimeoutError && /codex/.test(error.message)
+)
+assert.equal(timeoutFallbackReads, 0, "a timed-out global index must not start a second fallback request")
+assert.ok(Date.now() - timeoutStartedAt < 500, "the test harness must observe the configured discovery budget")
 
 const machineClient = {
   async listGlobalSessions(config) {

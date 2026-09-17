@@ -8,8 +8,8 @@ const reviewEvidence = readFileSync(new URL("./native-session-review-evidence.ts
 const desktopTransport = readFileSync(new URL("../electron/request-transport.ts", import.meta.url), "utf8")
 
 assert.ok(observer.includes("<NativeSessionOutcomePanel"), "native Sessions must expose the Project outcome review surface")
-assert.ok(observer.includes("conversation={conversation}"), "outcome review must receive the structured native runtime lifecycle")
-assert.ok(observer.includes("working={nativeSessionIsWorking(conversation.status)}"), "outcome refresh must follow the native turn lifecycle rather than token events")
+assert.ok(observer.includes("conversation={presentedConversation}"), "outcome review must receive the same structured lifecycle-enriched runtime shown by the conversation")
+assert.ok(observer.includes("working={nativeSessionIsWorking(presentedConversation.status)}"), "outcome refresh must follow the presented native turn lifecycle rather than token events")
 assert.ok(observer.indexOf("<NativeSessionOutcomePanel") < observer.indexOf("<WorkThreadConversation"), "outcome review must remain outside the mature composer")
 assert.equal(panel.includes("WorkThreadConversation"), false, "Project outcome must not become another conversation controller")
 assert.ok(panel.includes("if (!interactionEnabled || working) {"), "Project outcome reads must pause while a turn is working or the machine is reconnecting")

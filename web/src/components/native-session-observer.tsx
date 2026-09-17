@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { api } from "../api"
 import type { ConversationController } from "../conversation-controller"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { canCreateNativeSession } from "../native-session-create"
 import { resolveNativeSessionTargetModel } from "../native-session-model"
+import { openCodeAssistantProvesTurnCompleted } from "../native-session-opencode-reconciliation"
 import {
   continueNativeSessionOnRoute,
   type NativeSessionRouteContinueInput,
@@ -14,9 +15,17 @@ import {
   nativeSessionIsWorking,
   registerNativeSessionV3Adapter
 } from "../native-session-v3-adapter"
-import type { ConversationRuntime } from "../conversation-runtime"
+import type { ConversationRuntime, ConversationTurn } from "../conversation-runtime"
+import {
+  clearSessionIndexLiveError,
+  clearSessionIndexLiveState,
+  liveSessionIndexError,
+  liveSessionIndexStatus,
+  sessionIndexInvalidationRevision,
+  subscribeSessionIndexInvalidation
+} from "../session-index-live-state"
 import type { AgentModelScope } from "../taskClient"
-import type { CommandInfo, MachineAgentHost } from "../types"
+import type { CommandInfo, MachineAgentHost, MessageEnvelope } from "../types"
 import { LoadingIcon } from "../Icons"
 import { CrossMachineContinuePanel } from "./cross-machine-continue-panel"
 import { NativeSessionLineagePanel } from "./native-session-lineage-panel"
@@ -45,6 +54,81 @@ function visualState(conversation: ConversationRuntime, attention = false): Nati
 }
 
 export { nativeSessionIsWorking }
+
+function replaceCurrentTurn(
+  conversation: ConversationRuntime,
+  update: (turn: ConversationTurn) => ConversationTurn
+): { currentTurn: ConversationTurn | null; turns: ConversationTurn[] } {
+  const current = conversation.currentTurn
+  if (!current) return { currentTurn: null, turns: conversation.turns }
+  const next = update(current)
+  return {
+    currentTurn: next,
+    turns: conversation.turns.map((turn) => turn.id && current.id && turn.id === current.id ? next : turn)
+  }
+}
+
+/**
+ * Live OpenCode lifecycle is the fastest authority for retry/error presentation. It is intentionally
+ * an overlay rather than controller state: the durable transcript still owns final answer history,
+ * while a later busy/retry edge can retract a terminal-looking provider failure immediately.
+ */
+function withOpenCodeLiveLifecycle(
+  conversation: ConversationRuntime,
+  status: { type: string; message?: string } | undefined,
+  errorMessage: string | undefined
+): ConversationRuntime {
+  if (errorMessage) {
+    const error = { message: errorMessage }
+    const turns = replaceCurrentTurn(conversation, (turn) => ({ ...turn, status: "failed", error }))
+    return {
+      ...conversation,
+      ...turns,
+      status: "failed",
+      activityDetail: null,
+      error
+    }
+  }
+
+  if (status?.type === "busy" || status?.type === "retry") {
+    const turns = replaceCurrentTurn(conversation, (turn) => ({
+      ...turn,
+      status: "running",
+      error: null,
+      finishedAt: undefined
+    }))
+    return {
+      ...conversation,
+      ...turns,
+      status: "running",
+      activityDetail: status.type === "retry" ? status.message?.trim() || "OpenCode is retrying the provider request." : null,
+      error: null,
+      finishedAt: null
+    }
+  }
+
+  return conversation.activityDetail ? { ...conversation, activityDetail: null } : conversation
+}
+
+/** Durable success for the newest native user turn can retire an older live session.error bridge. */
+function latestOpenCodeTurnHasDurableCompletion(messages: MessageEnvelope[]): boolean {
+  let latestUserIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].info.role === "user") {
+      latestUserIndex = index
+      break
+    }
+  }
+  if (latestUserIndex < 0) return false
+
+  let latestAssistant: MessageEnvelope | null = null
+  for (let index = latestUserIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (message.info.role === "user") break
+    if (message.info.role === "assistant") latestAssistant = message
+  }
+  return Boolean(latestAssistant && openCodeAssistantProvesTurnCompleted(latestAssistant))
+}
 
 /**
  * The daemon owns one current model catalog per machine + harness. A historical native Session may
@@ -86,9 +170,30 @@ export function NativeSessionObserver({
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
   const [commands, setCommands] = useState<CommandInfo[]>([])
   const conversationRef = useRef<ConversationRuntime | null>(null)
+  const durableLifecycleRef = useRef<{ targetKey: string; status: string } | null>(null)
   const attentionRef = useRef(false)
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
+
+  const lifecycleRevision = useSyncExternalStore(
+    subscribeSessionIndexInvalidation,
+    sessionIndexInvalidationRevision,
+    sessionIndexInvalidationRevision
+  )
+  const liveStatus = useMemo(
+    () => target.backend === "opencode" ? liveSessionIndexStatus(target.config, target.sessionID) : undefined,
+    [target.backend, target.config, target.sessionID, lifecycleRevision]
+  )
+  const liveError = useMemo(
+    () => target.backend === "opencode" ? liveSessionIndexError(target.config, target.sessionID) : undefined,
+    [target.backend, target.config, target.sessionID, lifecycleRevision]
+  )
+  const presentedConversation = useMemo(
+    () => conversation && target.backend === "opencode"
+      ? withOpenCodeLiveLifecycle(conversation, liveStatus, liveError)
+      : conversation,
+    [conversation, target.backend, liveStatus, liveError]
+  )
 
   const handleConversationUpdate = useCallback((next: ConversationRuntime) => {
     conversationRef.current = next
@@ -105,6 +210,66 @@ export function NativeSessionObserver({
   const handleTranscriptRefresh = useCallback(() => {
     setTranscriptRefreshToken((current) => current + 1)
   }, [])
+
+  useEffect(() => {
+    if (presentedConversation) onStateChangeRef.current?.(visualState(presentedConversation, attentionRef.current))
+  }, [presentedConversation])
+
+  useEffect(() => {
+    if (!conversation) return
+    const previous = durableLifecycleRef.current
+    durableLifecycleRef.current = { targetKey: target.key, status: conversation.status }
+    if (target.backend !== "opencode" || !previous || previous.targetKey !== target.key) return
+
+    const wasWorking = nativeSessionIsWorking(previous.status)
+    const isWorking = nativeSessionIsWorking(conversation.status)
+    if (!wasWorking && isWorking) {
+      // A newly accepted native turn belongs to the new request. A terminal-looking event cached for
+      // the previous turn must not poison this turn before OpenCode publishes its next busy edge.
+      clearSessionIndexLiveError(target.config, target.sessionID)
+      return
+    }
+    if (wasWorking && !isWorking) {
+      // The Session-scoped controller has now reconciled durable terminal state from transcript/status.
+      // Retire the short-lived event bridge so an earlier busy/retry/error cannot keep the mounted UI
+      // on Working/Attention after the authoritative reply is already visible.
+      clearSessionIndexLiveState(target.config, target.sessionID)
+    }
+  }, [conversation, target.key, target.backend, target.config, target.sessionID])
+
+  useEffect(() => {
+    if (target.backend !== "opencode" || !liveError || !interactionEnabled) return
+    let disposed = false
+    // A Session can finish while another Session is selected and the final lifecycle edge can be lost.
+    // On remount, verify the durable tail once before trusting the older live error indefinitely. This
+    // is error-only recovery, not polling: ordinary idle/pre-Send OpenCode still performs no status or
+    // transcript probe here. A terminal assistant error does not satisfy the completion predicate.
+    void api.loadMessagePage(target.config, target.sessionID, target.directory, undefined, 80, true)
+      .then((page) => {
+        if (!disposed && latestOpenCodeTurnHasDurableCompletion(page.messages)) {
+          clearSessionIndexLiveState(target.config, target.sessionID)
+        }
+      })
+      .catch((reason) => {
+        if (!disposed && /cannot reach|timed out|network|connection/i.test(reason instanceof Error ? reason.message : String(reason))) {
+          onConnectionIssue?.()
+        }
+      })
+    return () => { disposed = true }
+  }, [
+    target.key,
+    target.backend,
+    target.sessionID,
+    target.directory,
+    target.config.host,
+    target.config.port,
+    target.config.username,
+    target.config.password,
+    target.config.agentId,
+    liveError,
+    interactionEnabled,
+    onConnectionIssue
+  ])
 
   useEffect(() => {
     if (!interactionEnabled) return
@@ -197,6 +362,7 @@ export function NativeSessionObserver({
     setConversation(null)
     setController(null)
     conversationRef.current = null
+    durableLifecycleRef.current = null
     attentionRef.current = false
 
     // Mount the mature controller on the Session itself, before any model enrichment. Gating the
@@ -231,7 +397,7 @@ export function NativeSessionObserver({
     return () => { disposed = true }
   }, [target.key, interactionEnabled, onConnectionIssue])
 
-  if (!conversation || !controller) {
+  if (!presentedConversation || !controller) {
     return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session into the v3 controller...</div>
   }
 
@@ -246,8 +412,8 @@ export function NativeSessionObserver({
 
       <NativeSessionOutcomePanel
         target={target}
-        conversation={conversation}
-        working={nativeSessionIsWorking(conversation.status)}
+        conversation={presentedConversation}
+        working={nativeSessionIsWorking(presentedConversation.status)}
         interactionEnabled={interactionEnabled}
         onConnectionIssue={onConnectionIssue}
       />
@@ -263,9 +429,15 @@ export function NativeSessionObserver({
         />
       ) : null}
 
+      {presentedConversation.activityDetail ? (
+        <div className="tdw-connection-notice" role="status" aria-live="polite">
+          <strong>OpenCode is retrying.</strong> {presentedConversation.activityDetail}
+        </div>
+      ) : null}
+
       <WorkThreadConversation
         key={target.key}
-        conversation={conversation}
+        conversation={presentedConversation}
         baseConfig={target.config}
         agents={[agent]}
         modelScope={NATIVE_SESSION_MODEL_SCOPE}

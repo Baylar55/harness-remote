@@ -63,7 +63,7 @@ function assistantEnvelope({ role = "assistant", finish, completed, error, parts
   }
 }
 
-test("OpenCode turn completion rejects intermediate tool finishes and provider errors", () => {
+test("OpenCode turn completion requires final text even when the envelope says stop", () => {
   for (const finish of ["tool", "tool-call", "tool-calls", "tool_calls", "  TOOL-CALLS  "]) {
     assert.equal(
       openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish })),
@@ -72,15 +72,33 @@ test("OpenCode turn completion rejects intermediate tool finishes and provider e
     )
   }
 
-  assert.equal(openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "stop" })), true)
-  assert.equal(openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "end_turn" })), true)
+  for (const parts of [
+    [],
+    [{ id: "reasoning", type: "reasoning", text: "I should answer the user now" }],
+    [{ id: "step", type: "step-finish" }]
+  ]) {
+    assert.equal(
+      openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "stop", parts })),
+      false,
+      "a real OpenCode stop marker without user-visible final text must not turn the Session Ready"
+    )
+  }
+
   assert.equal(
-    openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "stop", error: "provider retry" })),
+    openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "stop", parts: [{ id: "text", type: "text", text: "Final answer" }] })),
+    true
+  )
+  assert.equal(
+    openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "end_turn", parts: [{ id: "text", type: "text", text: "Final answer" }] })),
+    true
+  )
+  assert.equal(
+    openCodeAssistantProvesTurnCompleted(assistantEnvelope({ finish: "stop", error: "provider retry", parts: [{ id: "text", type: "text", text: "partial" }] })),
     false,
     "a provider error may still be followed by an automatic retry"
   )
   assert.equal(
-    openCodeAssistantProvesTurnCompleted(assistantEnvelope({ role: "user", finish: "stop" })),
+    openCodeAssistantProvesTurnCompleted(assistantEnvelope({ role: "user", finish: "stop", parts: [{ id: "text", type: "text", text: "prompt" }] })),
     false,
     "only assistant envelopes can prove assistant completion"
   )
@@ -117,6 +135,7 @@ test("OpenCode activity keeps empty assistant envelopes in the silent phase", ()
   assert.equal(openCodeAssistantHasActivity(assistantEnvelope()), false)
   assert.equal(openCodeAssistantHasActivity(assistantEnvelope({ parts: [{ id: "step", type: "step-start" }] })), true)
   assert.equal(openCodeAssistantHasActivity(assistantEnvelope({ finish: "tool-calls" })), true)
+  assert.equal(openCodeAssistantHasActivity(assistantEnvelope({ finish: "stop", parts: [{ id: "reasoning", type: "reasoning", text: "thinking" }] })), true)
   assert.equal(openCodeAssistantHasActivity(assistantEnvelope({ error: "provider error" })), true)
   assert.equal(
     openCodeAssistantHasActivity(assistantEnvelope({ role: "user", parts: [{ id: "text", type: "text", text: "prompt" }] })),

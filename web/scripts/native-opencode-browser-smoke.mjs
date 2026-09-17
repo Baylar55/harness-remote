@@ -21,6 +21,7 @@ const INTERRUPT_REPLY = "OPENCODE-RECOVERED-FINAL-REPLY"
 const TERMINAL_INTERRUPT_PROMPT = "OPENCODE-TERMINAL-INTERRUPTION-PROMPT"
 const TERMINAL_ERROR_PROMPT = "OPENCODE-TERMINAL-PROVIDER-ERROR-PROMPT"
 const TERMINAL_ERROR_MESSAGE = "Error from provider (Console): Upstream request failed: Endpoint is unavailable."
+const SILENT_TURN_ERROR_MESSAGE = "OpenCode ended this request without a response. Check the selected model/provider credentials and try again."
 const LATE_RECOVERY_PROMPT = "OPENCODE-LATE-RECOVERY-PROMPT"
 const LATE_RECOVERY_REPLY = "OPENCODE-LATE-RECOVERY-FINAL-REPLY"
 const CREATE_TITLE = "OpenCode created from Harness Remote"
@@ -430,8 +431,9 @@ function startFakeDaemon() {
         json(response, 200, { status: "accepted", clientRequestId: requestId })
         emitLiveEvent(sessionID, "message.updated")
         emitLiveEvent(sessionID, "session.status")
-        // Stay idle long enough for Harness Remote to confirm the interruption, then reproduce a
-        // slower automatic provider retry. The busy edge must retract the banner before final text.
+        // Repeated idle edges can happen before the 15s silent-turn grace expires. They are
+        // enrichment only; a later busy retry must keep the turn live without flashing an error.
+        setTimeout(() => emitLiveEvent(sessionID, "session.status"), 1_100)
         setTimeout(() => {
           sessionStatuses.set(sessionID, { type: "busy" })
           emitLiveEvent(sessionID, "session.status")
@@ -707,33 +709,32 @@ async function assertExistingContract(browser, viewport, mobile) {
   assert.equal(await page.getByText("Response interrupted", { exact: true }).count(), 0)
   await waitForReady(page)
 
-  // A slower provider retry can begin after the bounded idle confirmation. In that case the banner
-  // may briefly be correct, but the busy edge must retract it while the agent is working again.
+  // Repeated idle edges are still enrichment while the bounded silent-turn grace is open. A slower
+  // provider retry inside that grace must stay live and must not flash a false terminal banner.
   await sendPrompt(page, LATE_RECOVERY_PROMPT)
   const lateBanner = page.getByText("Response interrupted", { exact: true })
-  await lateBanner.waitFor({ state: "visible", timeout: 12_000 })
-  await lateBanner.waitFor({ state: "detached", timeout: 12_000 })
+  await page.waitForTimeout(2_000)
+  assert.equal(await lateBanner.count(), 0, "late retry inside the silent-turn grace must not flash a terminal interruption")
   assert.equal(
     await page.getByText(LATE_RECOVERY_REPLY, { exact: true }).count(),
     0,
-    "late-recovery interruption must be retracted on busy before final text exists"
+    "late retry should still be working before the durable final text exists"
   )
   await page.getByText(LATE_RECOVERY_REPLY, { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
+  assert.equal(await lateBanner.count(), 0, "late retry recovery must finish without a stale interruption banner")
   await waitForReady(page)
 
-  // The suppression is not blanket error hiding: if OpenCode stays idle and never produces a final
-  // reply, the same no-final transcript must eventually resolve to the real terminal interruption.
+  // A permanently idle no-final turn is a real failure, not a successful Ready state. The exact
+  // failure must become visible after the bounded grace, and the next Send must recover in-place.
   await sendPrompt(page, TERMINAL_INTERRUPT_PROMPT)
-  await page.getByText("Response interrupted", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
-  assert.equal(
-    await page.getByText("The coding agent stopped before producing a final answer.", { exact: true }).count(),
-    1,
-    "a stable terminal OpenCode interruption must remain visible"
-  )
+  await page.getByText("Turn failed", { exact: true }).waitFor({ state: "visible", timeout: 25_000 })
+  await page.getByText(SILENT_TURN_ERROR_MESSAGE, { exact: true }).waitFor({ state: "visible", timeout: 25_000 })
+  await page.locator(".tdw-conversation-state.attention").waitFor({ state: "attached", timeout: 12_000 })
+  const failedComposer = page.getByRole("textbox", { name: "Message OpenCode" })
+  assert.equal(await failedComposer.isDisabled(), false, "a confirmed no-final failure must leave the composer usable for recovery")
+  assert.equal(await page.getByText("Response interrupted", { exact: true }).count(), 0, "confirmed no-final failure must not masquerade as a successful Ready interruption")
 
-  await waitForReady(page)
   await sendPrompt(page, TERMINAL_ERROR_PROMPT)
-  await page.getByText("Turn failed", { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   await page.getByText(TERMINAL_ERROR_MESSAGE, { exact: true }).waitFor({ state: "visible", timeout: 12_000 })
   await waitForReady(page)
   assert.equal(
@@ -742,7 +743,21 @@ async function assertExistingContract(browser, viewport, mobile) {
     "a terminal OpenCode provider error must stop Working while the Session remains mounted even when /session/status omits it"
   )
   assert.equal(await page.getByText(TERMINAL_ERROR_PROMPT, { exact: true }).count(), 1)
-  assert.equal(await page.getByText("Turn failed", { exact: true }).count(), 1)
+  assert.equal(
+    await page.getByText("Turn failed", { exact: true }).count(),
+    1,
+    "the current provider error must remain an explicit failed turn"
+  )
+  assert.equal(
+    await page.locator(".uw-message-turn-error").count(),
+    2,
+    "the historical no-final interruption and current provider error must both remain visible"
+  )
+  assert.equal(
+    await page.getByText("Response interrupted", { exact: true }).count(),
+    1,
+    "the prior no-final turn should remain represented after the next Send"
+  )
 
   if (mobile) await assertPersistedReplyWithoutLiveEvent(page, "existing OpenCode Session")
 
