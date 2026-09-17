@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import path from "node:path"
 import test from "node:test"
-import { bridgeEnvironment, buildBridgeArgs, buildDaemonArgs, canListenForBind, createManagedShutdown, detectBackends, formatStartupSummary, lanAddresses, resolveBackend, resolveLaunchPlan, startManagedOpenCode } from "../src/launcher.js"
+import { bridgeEnvironment, browserClientURL, buildBridgeArgs, buildDaemonArgs, canListenForBind, createManagedShutdown, detectBackends, formatStartupSummary, lanAddresses, resolveBackend, resolveLaunchPlan, startManagedOpenCode } from "../src/launcher.js"
 
 test("detects executable agent files on PATH without running them", () => {
   const pathValue = ["/bin", "/tools"].join(path.delimiter)
@@ -81,18 +81,36 @@ test("requires an installed or explicit backend when discovery finds none", () =
   assert.throws(() => resolveLaunchPlan([], []), /No supported agent CLI was found on PATH/)
 })
 
-test("describes every daemon harness as available instead of claiming secondary ACP hosts are not started", () => {
+test("browser link comes only from an actually configured CORS origin", () => {
+  assert.equal(browserClientURL([], {}), undefined)
+  assert.equal(browserClientURL(["--cors", "http://localhost:5173"], {}), "http://localhost:5173")
+  assert.equal(browserClientURL([], { HARNESS_REMOTE_CORS: "http://127.0.0.1:5173/" }), "http://127.0.0.1:5173")
+  assert.equal(browserClientURL(["--cors", "https://example.com/not-an-origin"], {}), undefined)
+})
+
+test("hosted browser link uses the Harness Remote Pages path while keeping the configured CORS origin", () => {
+  const browserURL = browserClientURL(["--cors", "https://giuliastro.github.io"], {})
+  assert.equal(browserURL, "https://giuliastro.github.io/harness-remote/")
+  assert.equal(new URL(browserURL).origin, "https://giuliastro.github.io")
+})
+
+test("startup summary prints one machine endpoint, one browser link and one ordered harness list", () => {
   const summary = formatStartupSummary({
-    plan: { mode: "daemon", backend: "codex", detected: ["codex", "claude", "opencode"], openCode: true },
-    addresses: ["192.168.1.42"],
+    plan: { mode: "daemon", backend: "codex", detected: ["omp", "pi", "codex", "opencode"], openCode: true },
+    addresses: ["192.168.1.42", "192.168.1.43"],
     port: 4097,
     username: "harness",
-    password: "secret"
+    password: "secret",
+    browserURL: "https://giuliastro.github.io/harness-remote/"
   })
-  assert.match(summary, /codex — primary/)
-  assert.match(summary, /claude — available/)
-  assert.match(summary, /opencode — managed, starts on first use/)
-  assert.doesNotMatch(summary, /not started/)
+  assert.match(summary, /Machine URL  http:\/\/192\.168\.1\.42:4097/)
+  assert.doesNotMatch(summary, /192\.168\.1\.43/)
+  assert.match(summary, /Open in browser  https:\/\/giuliastro\.github\.io\/harness-remote\//)
+  assert.ok(summary.indexOf("codex — primary") < summary.indexOf("• omp"))
+  assert.match(summary, /• omp/)
+  assert.match(summary, /• pi/)
+  assert.match(summary, /opencode — starts on first use/)
+  assert.doesNotMatch(summary, /— available|managed, starts/)
   assert.match(summary, /Machines → Add machine/)
 })
 
@@ -104,9 +122,9 @@ test("keeps the single-backend startup summary simple", () => {
     username: "harness",
     password: "secret"
   })
-  assert.match(summary, /Harness: pi/)
-  assert.match(summary, /<this machine's LAN address>/)
-  assert.doesNotMatch(summary, /Harnesses available through this machine/)
+  assert.match(summary, /Harness  pi/)
+  assert.match(summary, /<LAN address>:4097/)
+  assert.doesNotMatch(summary, /Harnesses/)
 })
 
 test("injects quick-start defaults but never places credentials or launcher-only flags on child argv", () => {
@@ -116,6 +134,7 @@ test("injects quick-start defaults but never places credentials or launcher-only
   const environment = bridgeEnvironment({ PATH: "/bin" }, "harness", "secret")
   assert.equal(environment.HARNESS_REMOTE_USERNAME, "harness")
   assert.equal(environment.HARNESS_REMOTE_PASSWORD, "secret")
+  assert.equal(environment.HARNESS_REMOTE_LAUNCHED_BY_LAUNCHER, "1")
   assert.equal(environment.PATH, "/bin")
 })
 
