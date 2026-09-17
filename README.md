@@ -308,7 +308,7 @@ The blocking Chromium product gate exercises cross-machine continuation end to e
 
 Post-release development intentionally prioritizes Session correctness and maintainability over broad orchestration. Cross-machine federation is being hardened through explicit safety, recovery and browser gates rather than by introducing a second synthetic Session model.
 
-The automatic multi-agent launcher is still being expanded: the current release can expose one selected ACP-backed internal default alongside managed OpenCode, while additional concurrent ACP host instances remain follow-up work. The client-facing harness list intentionally does not label one harness as more important than another.
+The automatic multi-agent launcher exposes the detected harnesses through one machine connection. It retains an internal compatibility default for legacy/unprefixed routing, but the client-facing harness list intentionally does not label one harness as more important than another.
 
 That focus is deliberate. A remote coding-agent UI is only useful if you can trust that the Session you see is the Session that actually exists.
 
