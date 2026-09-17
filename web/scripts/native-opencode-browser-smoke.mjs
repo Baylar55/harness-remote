@@ -743,7 +743,21 @@ async function assertExistingContract(browser, viewport, mobile) {
     "a terminal OpenCode provider error must stop Working while the Session remains mounted even when /session/status omits it"
   )
   assert.equal(await page.getByText(TERMINAL_ERROR_PROMPT, { exact: true }).count(), 1)
-  assert.equal(await page.getByText("Turn failed", { exact: true }).count(), 2, "both historical no-final failure and provider error must remain visible")
+  assert.equal(
+    await page.getByText("Turn failed", { exact: true }).count(),
+    1,
+    "the current provider error must remain an explicit failed turn"
+  )
+  assert.equal(
+    await page.locator(".uw-message-turn-error").count(),
+    2,
+    "the historical no-final interruption and current provider error must both remain visible"
+  )
+  assert.equal(
+    await page.getByText("Response interrupted", { exact: true }).count(),
+    1,
+    "the prior no-final turn should remain represented after the next Send"
+  )
 
   if (mobile) await assertPersistedReplyWithoutLiveEvent(page, "existing OpenCode Session")
 
