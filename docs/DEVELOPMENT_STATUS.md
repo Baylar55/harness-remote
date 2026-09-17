@@ -79,7 +79,7 @@ Current fix on this branch:
 - overlapping ordinary refreshes share one transport instead of stacking duplicate HTTP requests;
 - a wake-triggered discovery that finds an in-flight request older than the normal 12s discovery window aborts that stale transport and replaces it with exactly one fresh request;
 - desktop IPC and Capacitor-native discovery paths are unchanged;
-- authenticated browser SSE immediately invalidates and reconnects its pre-idle socket on `visibilitychange` to visible, `pageshow`, or `online`;
+- authenticated browser SSE reconnects immediately after a **real** browser resume: hidden → visible, persisted BFCache `pageshow`, or explicit `online`; the initial non-persisted `pageshow` is ignored so startup does not create a duplicate stream/reconciliation cycle;
 - reconnect backoff is reset on explicit lifecycle recovery and the old controller cannot schedule a duplicate reconnect;
 - closing a subscription detaches the lifecycle listeners;
 - ordinary browser `api.ts` requests now have a bounded 30s read window matching the existing Capacitor-native default and abort the underlying fetch when it expires;
@@ -89,10 +89,15 @@ Current fix on this branch:
 Behavioral coverage added:
 
 - `web/src/machine-client-discovery.test.mjs`: simultaneous discovery coalesces to one fetch; a simulated pre-sleep request older than the discovery window is aborted and replaced by exactly one successful wake request;
-- `web/src/opencode-events.test.mjs`: hidden state does not reconnect; visible/online recovery immediately redials; closed subscriptions ignore later lifecycle events;
+- `web/src/opencode-events.test.mjs`: initial `pageshow` does not reconnect; hidden state does not reconnect; hidden → visible, persisted BFCache and online recovery do reconnect; closed subscriptions ignore later lifecycle events;
 - `web/src/api-list-models.test.mjs`: an indefinitely pending browser Session read is aborted by the 30s browser API boundary (accelerated by the test), and the timeout matches the existing native default.
 
 These tests are already part of `test:ci:full` through `test:machine-payload`, `test:events`, and `test:model`.
+
+Exact-head campaign history worth preserving:
+
+- `c99eeb0765d139c75613f7ed6aaa45a7e70613b5`: type-check/full regressions, bridge tests, desktop all platforms and real OpenCode + Zen were green, but Chromium caught a deterministic startup regression: first-load `pageshow` opened a second SSE and caused an extra pre-Send `/session/status` request (`3 !== 2`) in `native-opencode-real-regression-smoke.mjs`;
+- this was fixed by requiring a real resume boundary rather than treating initial `pageshow` as wake; rerun the complete campaign on the new exact head before any manual validation.
 
 Do **not** add a speculative daemon self-restart/watchdog without evidence that the daemon process exits. The current report proves browser/network recovery failure modes, not an idle-shutdown policy in the daemon.
 
