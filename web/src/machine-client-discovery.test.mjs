@@ -53,6 +53,64 @@ try {
     ['http://legacy-open-code.invalid:4096/v1/machine'],
     'a missing Machine endpoint must not trigger the legacy 4097 candidate probe'
   )
+
+  discoveryCalls.length = 0
+  let releaseSharedProbe
+  globalThis.fetch = (input, init = {}) => new Promise((resolve, reject) => {
+    discoveryCalls.push(String(input))
+    init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+    releaseSharedProbe = () => resolve({
+      status: 200,
+      ok: true,
+      json: async () => discoverySnapshot
+    })
+  })
+  const sharedConfig = {
+    backend: 'opencode',
+    host: 'coalesced-machine.invalid',
+    port: 4097,
+    username: 'harness',
+    password: 'secret'
+  }
+  const sharedFirst = discoverMachine(sharedConfig)
+  const sharedSecond = discoverMachine(sharedConfig)
+  await Promise.resolve()
+  assert.equal(discoveryCalls.length, 1, 'overlapping refreshes for one machine must share one browser request')
+  releaseSharedProbe()
+  assert.deepEqual(await sharedFirst, discoverySnapshot)
+  assert.deepEqual(await sharedSecond, discoverySnapshot)
+
+  discoveryCalls.length = 0
+  const realNow = Date.now
+  let fakeNow = 1_000
+  Date.now = () => fakeNow
+  try {
+    let requestNumber = 0
+    globalThis.fetch = (input, init = {}) => new Promise((resolve, reject) => {
+      requestNumber += 1
+      discoveryCalls.push(String(input))
+      init.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+      if (requestNumber === 2) {
+        resolve({ status: 200, ok: true, json: async () => discoverySnapshot })
+      }
+    })
+    const staleConfig = {
+      backend: 'opencode',
+      host: 'wake-machine.invalid',
+      port: 4097,
+      username: 'harness',
+      password: 'secret'
+    }
+    const beforeSleep = discoverMachine(staleConfig)
+    await Promise.resolve()
+    fakeNow += 12_001
+    const afterWake = discoverMachine(staleConfig)
+    await assert.rejects(beforeSleep, /restarted after a stale connection/, 'a pre-sleep request must be aborted instead of surviving the wake refresh')
+    assert.deepEqual(await afterWake, discoverySnapshot, 'wake refresh must immediately use the replacement request')
+    assert.equal(discoveryCalls.length, 2, 'wake recovery must replace exactly one stale request with one fresh request')
+  } finally {
+    Date.now = realNow
+  }
 } finally {
   globalThis.fetch = originalFetch
 }
