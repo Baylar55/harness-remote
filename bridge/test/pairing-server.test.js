@@ -100,14 +100,14 @@ test("startup pairing announcement renders one preferred QR without dumping deep
   assert.doesNotMatch(output, /harnessremote:\/\/|192\.168\.1\.44|192\.168\.1\.45|Pairing links|one-time token|secret-password/)
 })
 
-test("pairing announcement falls back to the already printed manual connection details when QR rendering is unavailable", () => {
+test("pairing announcement falls back to manual machine setup without assuming launcher-owned output", () => {
   let output = ""
   announceMachinePairing(config(), grant(), {
     interfaces: { eth0: [{ family: "IPv4", internal: false, address: "192.168.1.44" }] },
     write: (text) => { output += text },
     renderQR: () => null
   })
-  assert.match(output, /QR unavailable\. Use Machines → Add machine with the Machine URL and credentials above\./)
+  assert.match(output, /QR unavailable\. Use Machines → Add machine with this machine's address and credentials\./)
   assert.doesNotMatch(output, /harnessremote:\/\/|one-time-token|secret-password/)
 })
 
