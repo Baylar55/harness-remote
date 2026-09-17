@@ -127,6 +127,39 @@ try {
   assert.equal(plain.tools, false)
   assert.equal(plain.attachments, false)
   assert.equal(plain.isDefault, true)
+
+  // A browser request that survived a suspended tab used to have no abort boundary at all. Exercise
+  // the real listSessions path with an accelerated timer and require the request signal to abort.
+  const originalSetTimeout = globalThis.setTimeout
+  let timeoutDelay
+  let abortObserved = false
+  try {
+    globalThis.setTimeout = (callback, delay, ...args) => {
+      timeoutDelay = delay
+      return originalSetTimeout(callback, 0, ...args)
+    }
+    globalThis.fetch = (_input, init = {}) => new Promise((_resolve, reject) => {
+      init.signal?.addEventListener('abort', () => {
+        abortObserved = true
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+      }, { once: true })
+    })
+    await assert.rejects(
+      api.listSessions({
+        backend: 'opencode',
+        host: 'sleeping-machine.invalid',
+        port: 4097,
+        username: 'harness',
+        password: 'secret'
+      }),
+      /timed out after 30s/,
+      'ordinary browser Session reads must not survive indefinitely after idle/suspend'
+    )
+    assert.equal(timeoutDelay, 30_000, 'browser API timeout must match the existing native default')
+    assert.equal(abortObserved, true, 'browser API timeout must abort the underlying fetch transport')
+  } finally {
+    globalThis.setTimeout = originalSetTimeout
+  }
 } finally {
   globalThis.fetch = originalFetch
 }
