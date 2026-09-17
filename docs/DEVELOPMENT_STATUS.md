@@ -53,7 +53,7 @@ Automated evidence on `ffa09a46`:
 
 Do not merge #519 solely because the rerun is green; keep normal integration/owner-confirmation discipline.
 
-## Active idle/resume recovery
+## Active idle/resume recovery — PR #520
 
 Real browser testing exposed another release blocker after several minutes of inactivity/display-off while the computer itself remained awake:
 
@@ -62,14 +62,16 @@ Real browser testing exposed another release blocker after several minutes of in
 - there were no daemon crash/log messages.
 
 Active branch: `codex/idle-resume-recovery`, forked exactly from integration `f72f3e5a54678022654f3317a38839a30a1ba575`.
+PR #520 targets only `codex/development-2026-09-11` and must remain draft until exact-head automated green plus real idle/wake validation.
 
-Evidence-backed browser root cause:
+Evidence-backed browser failure mechanisms:
 
-- workspace visibility recovery already starts fresh discovery when the document becomes visible;
+- workspace visibility recovery already starts fresh machine discovery when the document becomes visible;
 - browser machine-discovery requests from before the idle period were not actually cancelled — old generations were only ignored after completion;
 - browser/OS suspension can freeze fetch/socket progress and timeout timers while wall-clock time continues;
 - on wake, stale pre-idle requests could therefore overlap the new discovery cycle and reconnect work, producing a machine-offline/loading storm even though the daemon process had not been shown to exit;
-- browser SSE also relied primarily on its normal stall watchdog, so a socket frozen during suspension could remain stale after foregrounding until the watchdog ran again.
+- authenticated browser SSE relied primarily on its normal stall watchdog, so a socket frozen during suspension could remain stale after foregrounding until the watchdog ran again;
+- ordinary native-Session/OpenCode browser API reads (`api.ts`) had no AbortController/read timeout at all, unlike the equivalent Capacitor-native path. A pre-idle Session/history/status request could therefore remain pending indefinitely and keep `Loading sessions…` alive after wake.
 
 Current fix on this branch:
 
@@ -80,25 +82,28 @@ Current fix on this branch:
 - authenticated browser SSE immediately invalidates and reconnects its pre-idle socket on `visibilitychange` to visible, `pageshow`, or `online`;
 - reconnect backoff is reset on explicit lifecycle recovery and the old controller cannot schedule a duplicate reconnect;
 - closing a subscription detaches the lifecycle listeners;
+- ordinary browser `api.ts` requests now have a bounded 30s read window matching the existing Capacitor-native default and abort the underlying fetch when it expires;
+- operations that already declare a 300s `readTimeout` retain that longer window;
 - Android native event transport and the unauthenticated EventSource prototype remain unchanged.
 
 Behavioral coverage added:
 
 - `web/src/machine-client-discovery.test.mjs`: simultaneous discovery coalesces to one fetch; a simulated pre-sleep request older than the discovery window is aborted and replaced by exactly one successful wake request;
-- `web/src/opencode-events.test.mjs`: hidden state does not reconnect; visible/online recovery immediately redials; closed subscriptions ignore later lifecycle events.
+- `web/src/opencode-events.test.mjs`: hidden state does not reconnect; visible/online recovery immediately redials; closed subscriptions ignore later lifecycle events;
+- `web/src/api-list-models.test.mjs`: an indefinitely pending browser Session read is aborted by the 30s browser API boundary (accelerated by the test), and the timeout matches the existing native default.
 
-Both tests are already part of `test:ci:full` through `test:machine-payload` and `test:events`.
+These tests are already part of `test:ci:full` through `test:machine-payload`, `test:events`, and `test:model`.
 
-Do **not** add a speculative daemon self-restart/watchdog without evidence that the daemon process exits. The current report proves a browser/network recovery failure, not an idle-shutdown policy in the daemon.
+Do **not** add a speculative daemon self-restart/watchdog without evidence that the daemon process exits. The current report proves browser/network recovery failure modes, not an idle-shutdown policy in the daemon.
 
 A separate ACP bridge SSE lifetime inconsistency was noticed during review: the primary bridge stream still keys cleanup from `IncomingMessage.close`, while `ManagedEventFanout` correctly owns downstream lifetime through request abort/response close. Do not fold that into this idle fix without a focused executable reproduction; changing ACP streaming speculatively would violate the release-stabilization boundary.
 
-Next steps for `codex/idle-resume-recovery`:
+Next steps for #520:
 
-1. open a draft PR targeting only `codex/development-2026-09-11`;
-2. run the complete exact-head automated campaign;
-3. fix any deterministic regression on the same branch and rerun the complete campaign;
-4. only after all automated gates are green, ask for a real idle/display-off → wake validation without reloading;
+1. run the complete exact-head automated campaign on the final branch head;
+2. fix any deterministic regression on the same branch and rerun the complete campaign;
+3. only after all automated gates are green, ask for a real idle/display-off → wake validation without reloading;
+4. verify a normal page reload still renders and reconnects after the idle cycle;
 5. merge only after that real validation succeeds and the owner explicitly confirms it.
 
 ## OpenCode reliability guardrails
