@@ -63,11 +63,6 @@ type CreateProject = {
   project: MachineProject
 }
 
-type ActivityAnchor = {
-  key: string
-  updatedAt: number
-}
-
 export type CursorPageState<T> = {
   records: T[]
   firstPageCursor?: string
@@ -170,7 +165,7 @@ function pageScopeKey(machineID: string, agentID: string): string {
 function uniqueSessionRecords(records: RecordWithMachine[]): RecordWithMachine[] {
   const unique = new Map<string, RecordWithMachine>()
   for (const item of records) unique.set(recordKey(item), item)
-  return [...unique.values()].sort(sessionActivityCompare)
+  return [...unique.values()]
 }
 
 function uniquePageRecords<T>(records: T[], key: (record: T) => string): T[] {
@@ -211,19 +206,54 @@ export function appendCursorPage<T>(
   }
 }
 
-function activityTimestamp(item: RecordWithMachine, anchor?: ActivityAnchor | null): number {
-  if (anchor?.key === recordKey(item)) return anchor.updatedAt
-  return item.record.session.time?.updated || item.record.session.time?.created || 0
-}
-
-function sessionActivityCompare(left: RecordWithMachine, right: RecordWithMachine, anchor?: ActivityAnchor | null): number {
-  const updated = activityTimestamp(right, anchor) - activityTimestamp(left, anchor)
+function sessionActivityCompare(left: RecordWithMachine, right: RecordWithMachine): number {
+  const updated = (right.record.session.time?.updated || right.record.session.time?.created || 0)
+    - (left.record.session.time?.updated || left.record.session.time?.created || 0)
   if (updated) return updated
   const created = (right.record.session.time?.created || 0) - (left.record.session.time?.created || 0)
   if (created) return created
   const machine = left.machine.id.localeCompare(right.machine.id)
   if (machine) return machine
   return left.record.key.localeCompare(right.record.key)
+}
+
+export function reconcileStableSessionRecords(
+  previous: RecordWithMachine[],
+  fresh: RecordWithMachine[],
+  {
+    selectedKey,
+    deletedKeys,
+    keepMissingSelected,
+    newPosition = "front"
+  }: {
+    selectedKey?: string
+    deletedKeys?: ReadonlySet<string>
+    keepMissingSelected?: (record: RecordWithMachine) => boolean
+    newPosition?: "front" | "back"
+  } = {}
+): RecordWithMachine[] {
+  const freshByKey = new Map<string, RecordWithMachine>()
+  for (const item of fresh) {
+    const key = recordKey(item)
+    if (!deletedKeys?.has(key)) freshByKey.set(key, item)
+  }
+
+  const retained: RecordWithMachine[] = []
+  for (const prior of previous) {
+    const key = recordKey(prior)
+    if (deletedKeys?.has(key)) continue
+    const current = freshByKey.get(key)
+    if (current) {
+      retained.push(current)
+      freshByKey.delete(key)
+      continue
+    }
+    if (key === selectedKey && (!keepMissingSelected || keepMissingSelected(prior))) retained.push(prior)
+  }
+
+  const newcomers = [...freshByKey.values()].sort(sessionActivityCompare)
+  if (previous.length === 0) return newcomers
+  return newPosition === "back" ? [...retained, ...newcomers] : [...newcomers, ...retained]
 }
 
 function relativeTime(timestamp: number): string {
@@ -271,19 +301,16 @@ function catalogProject(record: NativeSessionRecord, projects: MachineProject[],
     .sort((left, right) => normalizedPath(right.path).value.length - normalizedPath(left.path).value.length)[0]
 }
 
-function projectGroups(records: RecordWithMachine[], anchor?: ActivityAnchor | null): ProjectGroup[] {
+function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>()
   for (const item of records) {
     const nativeDirectory = item.record.session.directory || ""
     const project = item.project
-    // ProjectCatalog is authoritative when it can attribute the native cwd. Its id is already stable
-    // for machine + canonical realpath. Uncatalogued Sessions keep the exact native directory as a
-    // conservative fallback, so an unreadable catalog never hides or incorrectly merges Sessions.
     const directory = project?.path || nativeDirectory
     const key = project
       ? `${item.machine.id}\u0000project:${project.id}`
       : `${item.machine.id}\u0000directory:${nativeDirectory}`
-    const updatedAt = activityTimestamp(item, anchor)
+    const updatedAt = item.record.session.time?.updated || item.record.session.time?.created || 0
     const existing = groups.get(key)
     if (existing) {
       existing.sessions.push(item)
@@ -300,13 +327,9 @@ function projectGroups(records: RecordWithMachine[], anchor?: ActivityAnchor | n
     })
   }
 
-  // Native activity is still the ordering rule, but the Session currently open in the detail pane
-  // keeps the activity timestamp it had when it was selected. Harnesses update `time.updated` as a
-  // turn starts; without this anchor the row, its Project and sometimes its Machine all jump to the
-  // top while the user is looking at them. The live Working/Ready state remains fully independent.
-  for (const group of groups.values()) group.sessions.sort((left, right) => sessionActivityCompare(left, right, anchor))
-
-  return [...groups.values()].sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name))
+  // Records are already reconciled into a stable visual order. Preserve that order inside each
+  // Project and preserve first appearance as Project order; native timestamps remain metadata only.
+  return [...groups.values()]
 }
 
 export function sessionTreeRows(sessions: RecordWithMachine[]): Array<{ item: RecordWithMachine; depth: number }> {
@@ -331,7 +354,6 @@ export function sessionTreeRows(sessions: RecordWithMachine[]): Array<{ item: Re
     for (const child of children.get(item.record.session.id) || []) visit(child, depth + 1)
   }
   for (const root of roots) visit(root, 0)
-  // Corrupt or cyclic parent metadata must not hide a native Session.
   for (const item of sessions) visit(item, 0)
   return rows
 }
@@ -360,13 +382,6 @@ export function NativeSessionHome({
   const [records, setRecords] = useState<RecordWithMachine[]>([])
   const [projectsByMachine, setProjectsByMachine] = useState<Record<string, MachineProject[]>>({})
   const [loading, setLoading] = useState(false)
-  /**
-   * Which set of machines the list has actually been discovered for, rather than a bare "has ever
-   * loaded". Adding the first machine used to leave the flag from the empty state standing, so the
-   * workspace was told the Sessions were in while they were still being read. Keyed by machine, a
-   * genuinely new set of machines is a fresh discovery; a refresh of the same set is not, so the
-   * thirty-second cycle never drops the list back to a loading state.
-   */
   const [loadedSignature, setLoadedSignature] = useState<string | null>(null)
   const [revision, setRevision] = useState(0)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(() => new Set())
@@ -388,19 +403,18 @@ export function NativeSessionHome({
   const [agentFilter, setAgentFilter] = useState("")
   const [projectFilter, setProjectFilter] = useState("")
   const [modelFilter, setModelFilter] = useState("")
-  const [activityAnchor, setActivityAnchor] = useState<ActivityAnchor | null>(null)
   const [recentlyCompletedKey, setRecentlyCompletedKey] = useState<string | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   const previousSelectedState = useRef<{ key?: string; state?: SessionPresentationState }>({})
   const completionTimer = useRef<number | null>(null)
   const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
   const pageCacheSignature = useRef<string | null>(null)
+  const selectedKeyRef = useRef(selectedKey)
+  const deletedKeysRef = useRef(deletedKeys)
+  selectedKeyRef.current = selectedKey
+  deletedKeysRef.current = deletedKeys
   const onRefreshCompleteRef = useRef(onRefreshComplete)
   onRefreshCompleteRef.current = onRefreshComplete
-  // The selected Session receives live status before the 30s discovery list refreshes. Keep that
-  // last observed state by Session key while the user navigates elsewhere, otherwise the row falls
-  // back to its stale discovery snapshot and visibly flips Working <-> Ready. The next successful
-  // native discovery clears these bridge states and becomes authoritative again.
   const [presentationOverrides, setPresentationOverrides] = useState<Record<string, SessionPresentationState>>({})
 
   const discoveryReady = sources.every(({ state }) => state !== "loading")
@@ -454,19 +468,6 @@ export function NativeSessionHome({
   }, [])
 
   useEffect(() => {
-    if (!selectedKey) {
-      if (activityAnchor) setActivityAnchor(null)
-      return
-    }
-    if (activityAnchor?.key === selectedKey) return
-    const selected = records.find((item) => recordKey(item) === selectedKey)
-    setActivityAnchor(selected ? {
-      key: selectedKey,
-      updatedAt: selected.record.session.time?.updated || selected.record.session.time?.created || 0
-    } : null)
-  }, [activityAnchor, records, selectedKey])
-
-  useEffect(() => {
     if (machineFilter && !sources.some(({ machine }) => machine.id === machineFilter)) setMachineFilter("")
   }, [machineFilter, sources])
 
@@ -483,10 +484,6 @@ export function NativeSessionHome({
       onRefreshCompleteRef.current?.(refreshToken)
       return
     }
-    // A configured connection is not yet a discoverable machine while its daemon probe is still in
-    // flight. Running Session discovery against snapshot=null used to "complete" startup with an
-    // empty list, then flip to the real Sessions a moment later. Hold this phase explicitly until
-    // every configured machine has either produced a snapshot or definitively settled offline.
     if (!discoveryReady) {
       setLoading(true)
       setDiscoveryError(null)
@@ -512,8 +509,10 @@ export function NativeSessionHome({
       if (pageCacheSignature.current !== machineSignature) pageCache.current.clear()
       pageCacheSignature.current = machineSignature
       const activeScopes = new Set<string>()
+      const activeMachineIDs = new Set<string>()
       for (const result of results) {
         if (!result.snapshot) continue
+        activeMachineIDs.add(result.machine.id)
         for (const { agent, page } of result.pages) {
           const scope = pageScopeKey(result.machine.id, agent.id)
           activeScopes.add(scope)
@@ -527,7 +526,7 @@ export function NativeSessionHome({
           }))
           const refreshed = refreshCursorPage(existing, firstRecords, page.nextCursor, recordKey)
           const recordsForScope = uniqueSessionRecords(refreshed.records)
-            .filter((item) => !deletedKeys?.has(recordKey(item)))
+            .filter((item) => !deletedKeysRef.current?.has(recordKey(item)))
           pageCache.current.set(scope, {
             machine: result.machine,
             machineID: result.snapshot.machine.id,
@@ -543,16 +542,16 @@ export function NativeSessionHome({
       for (const scope of pageCache.current.keys()) {
         if (!activeScopes.has(scope)) pageCache.current.delete(scope)
       }
-      // This is a fresh status read from every harness, so it supersedes any presentation bridge
-      // remembered only to span the gap between a detail event and this discovery cycle.
       setPresentationOverrides({})
-      setRecords(uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records)))
+      const freshRecords = uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records))
+      setRecords((current) => reconcileStableSessionRecords(current, freshRecords, {
+        selectedKey: selectedKeyRef.current,
+        deletedKeys: deletedKeysRef.current,
+        keepMissingSelected: (item) => activeMachineIDs.has(item.machine.id)
+      }))
       setLoadedSignature(machineSignature)
     }).catch((reason) => {
-      // Preserve an already loaded list, but never present a failed refresh as a genuinely empty machine.
       if (!cancelled) {
-        // A failed pass still counts as settled: the notice above the list explains it, and the
-        // workspace must not sit on a waiting screen for a machine that is not coming back.
         setLoadedSignature(machineSignature)
         setDiscoveryError(reason instanceof Error ? reason.message : String(reason))
       }
@@ -573,8 +572,6 @@ export function NativeSessionHome({
 
   const liveStateForItem = useCallback((item: RecordWithMachine): SessionPresentationState | undefined => {
     const targetKey = recordKey(item)
-    // A pending native permission/question is stronger evidence than a stale discovery/live state.
-    // This is presentation-only: no authority, writer ownership or harness state is changed here.
     if (attentionSessionKeys?.has(targetKey)) return "attention"
     return targetKey === selectedKey && selectedState
       ? selectedState
@@ -597,8 +594,7 @@ export function NativeSessionHome({
     projectPath: item.project?.path
   }, liveStateForItem(item)), [liveStateForItem])
 
-  const selectedActivityAnchor = activityAnchor?.key === selectedKey ? activityAnchor : null
-  const groups = useMemo(() => projectGroups(records, selectedActivityAnchor), [records, selectedActivityAnchor])
+  const groups = useMemo(() => projectGroups(records), [records])
 
   useEffect(() => {
     if (!selectedKey) return
@@ -612,15 +608,12 @@ export function NativeSessionHome({
       next.delete(selectedGroup.key)
       return next
     })
-    // A collapsed machine must not be able to hide the Session that is currently open.
     setCollapsedMachines((current) => {
       if (!current.has(selectedGroup.machine.id)) return current
       const next = new Set(current)
       next.delete(selectedGroup.machine.id)
       return next
     })
-    // The compact project preview normally shows five rows. If the open Session sits below that
-    // boundary, expand exactly that project rather than letting the current Session disappear.
     const selectedIndex = sessionTreeRows(selectedGroup.sessions)
       .findIndex(({ item }) => recordKey(item) === selectedKey)
     if (selectedIndex >= COLLAPSED_PROJECT_SESSION_COUNT) {
@@ -639,7 +632,7 @@ export function NativeSessionHome({
       selectedRowRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [expandedProjects, selectedKey, selectedState])
+  }, [expandedProjects, selectedKey])
 
   const machineChoices = useMemo(() => sources.map(({ machine, snapshot }) => ({
     id: machine.id,
@@ -791,8 +784,7 @@ export function NativeSessionHome({
           count + group.sessions.filter((item) => projectionForItem(item).bucket === "attention").length, 0),
         updatedAt: projects.reduce((latest, group) => Math.max(latest, group.updatedAt), 0)
       }]
-    })
-    .sort((left, right) => right.updatedAt - left.updatedAt || left.label.localeCompare(right.label)), [agentFilter, filter, filteredGroups, machineFilter, modelFilter, projectFilter, projectionForItem, query, sources])
+    }), [agentFilter, filter, filteredGroups, machineFilter, modelFilter, projectFilter, projectionForItem, query, sources])
 
   const olderPageTargets = [...pageCache.current.entries()].filter(([, entry]) =>
     entry.nextCursor
@@ -838,10 +830,16 @@ export function NativeSessionHome({
         ...current,
         ...appended,
         records: uniqueSessionRecords(appended.records)
-          .filter((item) => !deletedKeys?.has(recordKey(item)))
+          .filter((item) => !deletedKeysRef.current?.has(recordKey(item)))
       })
     }
-    setRecords(uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records)))
+    const freshRecords = uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records))
+    setRecords((current) => reconcileStableSessionRecords(current, freshRecords, {
+      selectedKey: selectedKeyRef.current,
+      deletedKeys: deletedKeysRef.current,
+      keepMissingSelected: (item) => sources.some(({ machine, snapshot }) => machine.id === item.machine.id && Boolean(snapshot)),
+      newPosition: "back"
+    }))
     setOlderSessionError(firstError)
     setLoadingOlder(false)
   }
@@ -915,9 +913,6 @@ export function NativeSessionHome({
   }
 
   function openCreatePanel() {
-    // A machine snapshot arriving is not the end of startup. Project + Session discovery must settle
-    // first, otherwise New Session competes with those reads on the same mobile connection and can
-    // be fired while the saved machine is already in a reconnect grace state.
     if (!loaded || createMachines.length === 0) return
     const selectedRecord = records.find((item) => recordKey(item) === selectedKey)
     const preferredMachineID = createMachines.some(({ machine }) => machine.id === machineFilter)
@@ -961,7 +956,7 @@ export function NativeSessionHome({
       setRecords((current) => [
         createdRecord,
         ...current.filter((item) => !(item.machine.id === selectedCreateMachine.machine.id && item.record.key === record.key))
-      ].sort(sessionActivityCompare))
+      ])
       setCreateTitle("")
       setCreateOpen(false)
       onOpen(target)
@@ -982,9 +977,6 @@ export function NativeSessionHome({
               ? t("sf.workingShown", { working: activeCount, shown: scopedRecords.length })
               : t("sf.recentCount", { count: scopedRecords.length })}</span> : null}
         </div>
-        {/* Rename and Delete live in the chat header of the open Session, and refreshing is owned by
-            the workspace top bar plus the automatic discovery cycle. The Session list keeps exactly
-            one action: starting a new native Session. */}
         <div className="hr-native-home-actions">
           <button
             type="button"
