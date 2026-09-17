@@ -29,13 +29,15 @@ npx github:giuliastro/harness-remote \
 ```
 
 `--root` is the directory boundary used when choosing Projects. When the HR3 machine-daemon path is
-selected, startup prints a compact QR code plus a short-lived pairing link. On Android, scan/open that
-QR and Harness Remote imports the machine automatically; the QR contains a one-time token valid for
-five minutes, **not** the daemon password. The link can be used once.
+selected, startup prints one compact QR code for the preferred reachable machine endpoint. On
+Android, scan the QR and Harness Remote imports the machine automatically. The QR contains a
+256-bit one-time token valid for five minutes, **not** the daemon password, and that token can be
+claimed only once.
 
-If QR rendering is unavailable in a source checkout, the same one-time pairing link is still printed
-as text. Host, port, username and password are also printed and remain the manual fallback. Pairing
-is currently a machine-daemon HR3 feature; legacy single-backend bridges keep their existing manual
+The terminal intentionally does **not** dump the raw `harnessremote://` pairing URI, token or every
+alternate network-interface address. If QR rendering is unavailable, use **Machines → Add machine**
+with the single machine address, username and password already printed in the connection summary.
+Pairing is currently a machine-daemon HR3 feature; legacy single-backend bridges keep their manual
 connection flow.
 
 To use the web/PWA frontend from a checkout:
@@ -47,8 +49,18 @@ npm run dev
 ```
 
 Open the URL Vite prints, normally `http://localhost:5173`, then choose **Machines** > **Add
-machine** and enter the address, port, username and password from the launcher. The `--cors` value
-above permits that browser origin; use the exact origin if you host the frontend elsewhere.
+machine** and enter the machine address, username and password from the launcher. The `--cors` value
+above permits that exact browser origin. The backend launcher deliberately does not print a browser
+URL, because it cannot guarantee that a separate web frontend is running there.
+
+For the hosted client, start the machine with:
+
+```bash
+harness-remote --cors https://giuliastro.github.io
+```
+
+Then open `https://giuliastro.github.io/harness-remote/` yourself in a browser. The launcher only
+configures the allowed CORS origin; it does not present that address as a backend-owned web page.
 
 Desktop and Android clients use the same machine address and credentials. Android can use the
 scan-first pairing flow above; manual **Machines → Add machine** remains available on every client.
@@ -66,8 +78,8 @@ npm start -- \
 ```
 
 Run `npm install` once at the repository root if you want the checkout to render the terminal QR;
-without that presentation dependency the launcher deliberately falls back to the same one-time text
-link instead of making startup fail.
+without that optional presentation dependency startup still succeeds and the printed machine address
+and credentials remain the manual fallback.
 
 When installed as a repository/package binary, the command is `harness-remote`. The root package
 remains private: the GitHub/repository launch path is intentional and does not imply that an npm
@@ -79,15 +91,16 @@ The launcher inspects `PATH` without executing discovered agent binaries and cho
 
 - with exactly one supported CLI, it preserves the existing single-backend startup path;
 - with multiple supported CLIs and at least one ACP-backed agent, it starts the machine daemon automatically;
-- the daemon exposes every detected ACP-backed agent through the same machine endpoint and selects one of them as the primary for legacy/unprefixed routing;
-- managed OpenCode is included when OpenCode is installed and starts lazily on first use;
-- `--backend <name>` selects the ACP primary on a multi-agent machine;
+- the daemon exposes every detected ACP-backed agent through the same machine endpoint and keeps an internal compatibility default for legacy/unprefixed routing;
+- managed OpenCode is included when OpenCode is installed;
+- `--backend <name>` selects that internal ACP compatibility default on a multi-agent machine;
 - `--single --backend <name>` explicitly opts out of the daemon and forces the legacy single-backend path;
 - if managed OpenCode is included, the launcher chooses a free loopback port automatically instead of assuming 4096 is unused;
 - credentials are generated automatically and kept out of child-process argv;
 - the HR3 machine daemon creates a 256-bit in-memory one-time pairing grant with a five-minute TTL;
-- startup renders a QR for the preferred LAN endpoint when the terminal QR renderer is installed, and always prints the one-time links as a fallback;
-- the LAN address, credentials, available harnesses and next client action are printed before startup continues.
+- startup renders one QR for the preferred reachable endpoint when the terminal QR renderer is installed and never prints the raw pairing deep link;
+- one non-clickable machine address, credentials and a plain harness list are printed once by the launcher;
+- launcher-owned daemon/bridge children finish with a concise ready line instead of repeating endpoint, machine ID and harness details.
 
 The supported CLI names are `omp`, `pi`, `claude`, `codex`, and `opencode`.
 
@@ -97,22 +110,21 @@ For example, on a workstation with Codex, Claude Code and OpenCode installed, th
 harness-remote
 ```
 
-starts one machine daemon instead of failing and asking you to choose a backend. The launcher reports the CLIs it detected, selects an ACP primary, finds a free loopback port for managed OpenCode, and exposes the machine through one authenticated daemon connection.
+starts one machine daemon instead of failing and asking you to choose a backend. The launcher reports the CLIs it detected, keeps an internal ACP compatibility default, finds a free loopback port for managed OpenCode, and exposes the machine through one authenticated daemon connection.
 
 The current automatic multi-host shape is:
 
 ```text
 Harness daemon :4097
   ├── Codex / Claude / OMP / PI — every detected ACP harness
-  │   └── one selected as primary for legacy/unprefixed routing
-  └── OpenCode, when installed — managed loopback host, started on first use
+  └── OpenCode, when installed — managed loopback host
 ```
 
-The daemon registers the detected ACP harnesses independently, so choosing one primary does not hide the others from agent-scoped machine APIs. Harness processes may still be started lazily by their adapters; “available” describes what the machine endpoint exposes, not a promise that every CLI process is already resident before first use.
+The daemon registers the detected harnesses independently. Internal routing defaults do not hide or demote any harness in the client, and the normal startup list intentionally presents them without lifecycle or priority labels.
 
-## Choose the daemon primary or force one backend
+## Choose the daemon compatibility default or force one backend
 
-On a multi-agent machine, choose the daemon's ACP primary with:
+On a multi-agent machine, choose the daemon's internal ACP compatibility default with:
 
 ```bash
 harness-remote --backend codex --root ~/dev
@@ -144,7 +156,7 @@ If OpenCode is present on a multi-agent machine, an existing process already usi
 
 ## OpenCode
 
-When OpenCode is the only selected backend, Harness Remote starts `opencode serve` itself, passes credentials through `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD`, verifies the authenticated health endpoint, prints connection details, and supervises the child process until shutdown.
+When OpenCode is the only selected backend, Harness Remote starts `opencode serve` itself, passes credentials through `OPENCODE_SERVER_USERNAME` and `OPENCODE_SERVER_PASSWORD`, verifies the authenticated health endpoint, prints the launcher-owned connection summary, and supervises the child process until shutdown.
 
 ```bash
 harness-remote --backend opencode
@@ -166,6 +178,8 @@ or:
 harness-remote-daemon --backend codex --host 127.0.0.1
 ```
 
+Direct advanced daemon/bridge invocation keeps its diagnostic startup information. The concise output ownership described above applies when the normal `harness-remote` launcher owns the child runtime.
+
 `GET /v1/machine` and `GET /global/machine` expose the shared machine registry and stable machine identity. Host lifecycle is isolated: an unavailable managed host does not make the machine disappear.
 
 Agent-scoped requests share the daemon connection:
@@ -177,7 +191,7 @@ Agent-scoped requests share the daemon connection:
 /v1/agents/opencode/global/event
 ```
 
-The selected primary ACP agent is routed through the normalized bridge API. Managed OpenCode requests are streamed through the daemon to the loopback process; external credentials are authenticated at the daemon boundary and replaced with the managed host credentials for the internal request. Legacy unprefixed routes remain available during migration.
+The selected internal ACP compatibility default is routed through the normalized bridge API. Managed OpenCode requests are streamed through the daemon to the loopback process; external credentials are authenticated at the daemon boundary and replaced with the managed host credentials for the internal request. Legacy unprefixed routes remain available during migration.
 
 Managed OpenCode binds to `127.0.0.1` by default even when the daemon binds to `0.0.0.0`. Wider exposure is explicit:
 

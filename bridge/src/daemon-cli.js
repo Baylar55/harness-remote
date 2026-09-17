@@ -245,15 +245,19 @@ async function main() {
   })
 
   const managedResults = await daemon.startManagedHosts()
-  process.stdout.write(`Harness daemon ready at http://${config.host}:${config.port}\n`)
-  process.stdout.write(`Machine: ${identity.name} (${identity.id})\n`)
-  process.stdout.write("Active agents:\n")
-  for (const host of daemon.snapshot().agents) {
-    if (host.id === primaryProfile.id) {
-      process.stdout.write(`  • ${host.label} - primary (${host.transport.toUpperCase()})\n`)
-      continue
+  if (process.env.HARNESS_REMOTE_LAUNCHED_BY_LAUNCHER === "1") {
+    process.stdout.write("\nHarness Remote is ready. Keep this terminal open while you use it.\n")
+  } else {
+    process.stdout.write(`Harness daemon ready at http://${config.host}:${config.port}\n`)
+    process.stdout.write(`Machine: ${identity.name} (${identity.id})\n`)
+    process.stdout.write("Active agents:\n")
+    for (const host of daemon.snapshot().agents) {
+      if (host.id === primaryProfile.id) {
+        process.stdout.write(`  • ${host.label} - primary (${host.transport.toUpperCase()})\n`)
+        continue
+      }
+      process.stdout.write(`  • ${host.label} - managed ${host.transport.toUpperCase()}, ${host.state}\n`)
     }
-    process.stdout.write(`  • ${host.label} - managed ${host.transport.toUpperCase()}, ${host.state}\n`)
   }
   for (const result of managedResults) {
     if (result.status !== "available") process.stderr.write(`[${result.id}] unavailable: ${result.error?.message ?? "startup failed"}\n`)

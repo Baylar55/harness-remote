@@ -71,14 +71,14 @@ test("terminal QR renderer asks for compact output and returns the generated cod
   })
 })
 
-test("terminal QR renderer fails open to the plain pairing link when the presentation dependency is unavailable", () => {
+test("terminal QR renderer is optional when the presentation dependency is unavailable", () => {
   const output = renderPairingQRCode("harnessremote://pair?token=abc", {
     load: () => { throw new Error("module not installed") }
   })
   assert.equal(output, null)
 })
 
-test("startup pairing announcement renders one preferred QR and keeps alternate LAN links as text", () => {
+test("startup pairing announcement renders one preferred QR without raw deep links or endpoints", () => {
   let output = ""
   let renderedURI
   const links = announceMachinePairing(config(), grant(), {
@@ -94,11 +94,29 @@ test("startup pairing announcement renders one preferred QR and keeps alternate 
   })
   assert.equal(links.length, 2)
   assert.equal(renderedURI, links[0].uri)
+  assert.match(output, /Phone pairing/)
   assert.match(output, /<QR>/)
-  assert.match(output, /Scan the QR above for http:\/\/192\.168\.1\.44:4097/)
-  assert.match(output, /192\.168\.1\.45%3A4097/)
-  assert.match(output, /one-time token, not the daemon password/i)
-  assert.doesNotMatch(output, /secret-password/)
+  assert.match(output, /Scan this QR in Harness Remote/)
+  assert.doesNotMatch(output, /harnessremote:\/\//)
+  assert.doesNotMatch(output, /one-time-token|secret-password/)
+  assert.doesNotMatch(output, /https?:\/\//)
+  assert.doesNotMatch(output, /192\.168\.1\.44|192\.168\.1\.45/)
+})
+
+test("pairing announcement falls back to normal machine setup without leaking pairing authority", () => {
+  let output = ""
+  announceMachinePairing(config(), grant(), {
+    interfaces: {
+      eth0: [{ family: "IPv4", internal: false, address: "192.168.1.44" }]
+    },
+    write: (text) => { output += text },
+    renderQR: () => null
+  })
+  assert.match(output, /Machines → Add machine/)
+  assert.match(output, /address and credentials/)
+  assert.doesNotMatch(output, /harnessremote:\/\//)
+  assert.doesNotMatch(output, /one-time-token|secret-password/)
+  assert.doesNotMatch(output, /https?:\/\//)
 })
 
 test("pairing claim returns the existing daemon credentials without Basic Auth", async () => {

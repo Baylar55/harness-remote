@@ -7,147 +7,88 @@
 - Persistent integration branch: `codex/development-2026-09-11`.
 - Never merge development work directly into `main`.
 - Internal feature/fix PRs target `codex/development-2026-09-11` only.
-- Merge into integration only after the exact-head automated campaign is completely green and the repository owner explicitly authorizes the merge after real validation when applicable.
+- Merge into integration only after all applicable CI is green on the exact head and the repository owner explicitly authorizes the merge after any required real validation.
 - ACP, Native Session, routing, models and harness-runtime changes require regression review against previously fixed failures.
-- Prefer executable behavioral coverage over source-text guards.
-- Do not ask the repository owner to manually validate a candidate until all applicable automated gates are green.
+- Prefer executable behavioral coverage over source-text assertions when a behavior can be exercised directly.
+- Do not ask the repository owner for manual validation until code/diff review and all applicable automated gates are green.
 
 ## Current integration baseline
 
-- Integration head: `f72f3e5a54678022654f3317a38839a30a1ba575`.
-- PR #517 (`fix(opencode): stabilize retry, error and remount lifecycle`) is merged into the integration branch after the repository owner confirmed the real Zorin/OpenCode flow works.
-- The previously failing real behavior on `9a09b50` — reasoning-only false `Ready` and a stalled second Send — is fixed by the merged #517 line.
-- `web/package.json` remains `3.1.0`.
-- `main` remains the stable 3.0.2 line at `21ce6db49af708c4c7c3f96ef6a50f62dced8dab`. Do not modify it.
+- Integration head: `aa474fead5d6d1ab5afc3f0e2912bdfdf3005d94`.
+- PR #517 (`fix(opencode): stabilize retry, error and remount lifecycle`) is merged into integration after real Zorin/OpenCode validation.
+- PR #520 (`fix: recover browser machine state after idle`) is merged into integration after exact-head automated validation and accepted real idle/wake validation.
+- The earlier `9a09b50afb504834df8743418f5ce99ff12e896f` OpenCode candidate remains failed real-validation evidence: it could show reasoning-only false `Ready` and wedge a second Send. Do not use its old green synthetic CI as release evidence.
+- `web/package.json` is `3.1.0`.
+- `main` remains on Harness Remote 3.0.2 at `21ce6db49af708c4c7c3f96ef6a50f62dced8dab`; the 3.1 development line has not been merged to `main`.
 
-## RC3
+The integration line is still in **3.1.0 release-candidate stabilization**. Avoid unrelated feature work until the release boundary is cleared.
 
-- Frozen candidate branch: `codex/release-candidate-3.1.0-rc3`.
-- RC3 was frozen from the post-#517 integration head. Keep that branch immutable as candidate evidence.
-- No final 3.1.0 tag/release has been published from RC3.
-- Remaining final-release evidence still includes the true-boundary multi-provider/restart/physical-device checks described below.
-
-## Startup-output cleanup — PR #519
+## Active work — PR #519 startup-output cleanup
 
 - branch: `codex/startup-output-cleanup`;
-- PR: #519, draft;
+- PR: **#519** `ux: simplify startup output`;
 - target: `codex/development-2026-09-11` only;
-- exact feature head: `ffa09a46d4aed394629f2896a7fb4783b7576157`.
+- branch was resynchronized with integration after #520 merged;
+- PR remains **draft** until the final exact-head automated campaign is green;
+- this work is terminal/onboarding UX only and must not change ACP routing, Native Session behavior, OpenCode lifecycle, model routing, pairing authorization, credentials or the one-time token protocol.
 
-Purpose: make the launcher output usable by humans without changing runtime semantics.
+Final user-approved output contract:
 
-- one preferred reachable Machine URL;
-- one optional browser URL only when backed by the configured CORS origin;
-- no normal-user `0.0.0.0` URL;
-- no raw `harnessremote://` deep-link dump under the QR;
-- one harness list, one QR, one Ready message;
-- launcher-owned daemon/bridge children suppress duplicate endpoint/machine/agent output, while direct daemon/bridge invocation keeps diagnostics.
+- one launcher-owned **Connection** block;
+- one preferred reachable machine address displayed as `IP:port`, deliberately without `http://` so the backend endpoint is not presented as a clickable web page;
+- username/password exactly once;
+- no `Open in browser` line: the launcher cannot guarantee that Vite or any other separate web frontend is running;
+- one **Harnesses** list containing only harness names, with no `primary`, `starts on first use`, `available`, transport or lifecycle qualifiers;
+- one optional phone-pairing QR;
+- no raw `harnessremote://...` URI, token, alternate interface URL or duplicate endpoint under the QR;
+- if QR rendering is unavailable, fall back to the already printed machine address and credentials;
+- launcher-owned daemon/bridge children emit only the final ready line instead of repeating endpoint, machine ID and harness list;
+- direct advanced invocation of `harness-remote-daemon` / the standalone bridge keeps its diagnostic startup output.
 
-Automated evidence on `ffa09a46`:
+Behavioral coverage locks the non-clickable address, absence of browser URLs, plain harness list, preferred-address selection, pairing-output redaction and launcher/child output ownership.
 
-- desktop runtime/application-menu workflow: green on Ubuntu/macOS/Windows;
-- OpenCode live Zen gate: green;
-- type-check/build, full web regressions, permission transport and bridge tests: green;
-- Chromium product smoke initially hit a 2.5s `No available channel` timing timeout in the pre-existing OpenCode retry/error smoke, then passed completely on an unchanged same-SHA rerun, including Native Session, cross-machine continuation and complete-controls coverage;
-- Debug APK: green.
-
-Do not merge #519 solely because the rerun is green; keep normal integration/owner-confirmation discipline.
-
-## Active idle/resume recovery — PR #520
-
-Real browser testing exposed another release blocker after several minutes of inactivity/display-off while the computer itself remained awake:
-
-- the UI could return stuck on `Loading sessions…` with every saved machine shown offline;
-- reloading could leave a white page while the Vite development `index.html` itself was still returned;
-- there were no daemon crash/log messages.
-
-Active branch: `codex/idle-resume-recovery`, forked exactly from integration `f72f3e5a54678022654f3317a38839a30a1ba575`.
-PR #520 targets only `codex/development-2026-09-11` and must remain draft until exact-head automated green plus real idle/wake validation.
-
-Evidence-backed browser failure mechanisms:
-
-- workspace visibility recovery already starts fresh machine discovery when the document becomes visible;
-- browser machine-discovery requests from before the idle period were not actually cancelled — old generations were only ignored after completion;
-- browser/OS suspension can freeze fetch/socket progress and timeout timers while wall-clock time continues;
-- on wake, stale pre-idle requests could therefore overlap the new discovery cycle and reconnect work, producing a machine-offline/loading storm even though the daemon process had not been shown to exit;
-- authenticated browser SSE relied primarily on its normal stall watchdog, so a socket frozen during suspension could remain stale after foregrounding until the watchdog ran again;
-- ordinary native-Session/OpenCode browser API reads (`api.ts`) had no AbortController/read timeout at all, unlike the equivalent Capacitor-native path. A pre-idle Session/history/status request could therefore remain pending indefinitely and keep `Loading sessions…` alive after wake.
-
-Current fix on this branch:
-
-- browser `/v1/machine` discovery is single-flight per machine/credential identity;
-- overlapping ordinary refreshes share one transport instead of stacking duplicate HTTP requests;
-- a wake-triggered discovery that finds an in-flight request older than the normal 12s discovery window aborts that stale transport and replaces it with exactly one fresh request;
-- desktop IPC and Capacitor-native discovery paths are unchanged;
-- authenticated browser SSE reconnects immediately after a **real** browser resume: hidden → visible, persisted BFCache `pageshow`, or explicit `online`; the initial non-persisted `pageshow` is ignored so startup does not create a duplicate stream/reconciliation cycle;
-- reconnect backoff is reset on explicit lifecycle recovery and the old controller cannot schedule a duplicate reconnect;
-- closing a subscription detaches the lifecycle listeners;
-- ordinary browser `api.ts` requests now have a bounded 30s read window matching the existing Capacitor-native default and abort the underlying fetch when it expires;
-- operations that already declare a 300s `readTimeout` retain that longer window;
-- Android native event transport and the unauthenticated EventSource prototype remain unchanged.
-
-Behavioral coverage added:
-
-- `web/src/machine-client-discovery.test.mjs`: simultaneous discovery coalesces to one fetch; a simulated pre-sleep request older than the discovery window is aborted and replaced by exactly one successful wake request;
-- `web/src/opencode-events.test.mjs`: initial `pageshow` does not reconnect; hidden state does not reconnect; hidden → visible, persisted BFCache and online recovery do reconnect; closed subscriptions ignore later lifecycle events;
-- `web/src/api-list-models.test.mjs`: an indefinitely pending browser Session read is aborted by the 30s browser API boundary (accelerated by the test), and the timeout matches the existing native default.
-
-These tests are already part of `test:ci:full` through `test:machine-payload`, `test:events`, and `test:model`.
-
-Exact-head campaign history worth preserving:
-
-- `c99eeb0765d139c75613f7ed6aaa45a7e70613b5`: type-check/full regressions, bridge tests, desktop all platforms and real OpenCode + Zen were green, but Chromium caught a deterministic startup regression: first-load `pageshow` opened a second SSE and caused an extra pre-Send `/session/status` request (`3 !== 2`) in `native-opencode-real-regression-smoke.mjs`;
-- this was fixed by requiring a real resume boundary rather than treating initial `pageshow` as wake; rerun the complete campaign on the new exact head before any manual validation.
-
-Do **not** add a speculative daemon self-restart/watchdog without evidence that the daemon process exits. The current report proves browser/network recovery failure modes, not an idle-shutdown policy in the daemon.
-
-A separate ACP bridge SSE lifetime inconsistency was noticed during review: the primary bridge stream still keys cleanup from `IncomingMessage.close`, while `ManagedEventFanout` correctly owns downstream lifetime through request abort/response close. Do not fold that into this idle fix without a focused executable reproduction; changing ACP streaming speculatively would violate the release-stabilization boundary.
-
-Next steps for #520:
-
-1. run the complete exact-head automated campaign on the final branch head;
-2. fix any deterministic regression on the same branch and rerun the complete campaign;
-3. only after all automated gates are green, ask for a real idle/display-off → wake validation without reloading;
-4. verify a normal page reload still renders and reconnects after the idle cycle;
-5. merge only after that real validation succeeds and the owner explicitly confirms it.
+After the final #519 exact-head campaign is green, the repository owner has already instructed to proceed with integration and a new 3.1.0 release candidate. Do not mutate the frozen RC3 branch; create a new RC from the updated integration branch.
 
 ## OpenCode reliability guardrails
 
-Read `docs/OPENCODE_RELIABILITY_CONTRACT.md` before changing OpenCode Session projection, lifecycle routing or reconciliation. Do not regress #304/#306/#337/#351/#355/#391/#421/#422/#425/#451/#452/#453/#513/#517.
+Read `docs/OPENCODE_RELIABILITY_CONTRACT.md` before changing OpenCode Session projection, lifecycle routing or reconciliation. Do not regress behavior established by #304/#306/#337/#351/#355/#391/#421/#422/#425/#451/#452/#453/#513/#517.
 
 In particular:
 
 - ordinary internal idle/pre-Send OpenCode must not depend on continuous `/session/status` polling;
-- persisted replies must remain recoverable even when event delivery/status lookup is unavailable;
+- persisted replies must remain recoverable when event delivery or status lookup is unavailable;
+- permission and mounted-Session convergence must not create false red interruptions;
 - unresolved requests remain Attention rather than being silently treated as completed;
 - routed OpenCode lifecycle must not leak into ACP backends or sibling agent identities;
 - `finish: "stop"` on a reasoning-only assistant envelope is not successful turn completion;
+- a turn stays pending until durable terminal assistant text/error or bounded no-final recovery settles it;
 - a stable native idle edge after Send is enrichment, not durable-final proof;
-- ACP retains its established permission/transcript semantics.
+- OpenCode permission/question settlement may use its bounded trailing reconcile, while ACP keeps its established semantics.
 
 ## CI / packaging gate
 
-Before integration or release-candidate promotion require, on the exact candidate SHA:
+Before integration or RC freeze require, on the **exact candidate SHA**:
 
-- type-check/build and full web regressions;
+- type-check/build and web regressions;
 - OpenCode permission transport regression;
 - bridge tests on Windows and macOS;
 - Chromium product smoke including the complete OpenCode reliability matrix and cross-machine scenarios;
-- real OpenCode + Zen existing-Session gate;
-- desktop tests on Ubuntu, macOS and Windows, including packaged embedded-daemon execution where applicable;
-- signed Debug APK.
+- real OpenCode + Zen existing-Session gate when the workflow applies;
+- desktop runtime/menu tests on Ubuntu, macOS and Windows, including packaged embedded-daemon execution where applicable;
+- signed Debug APK when the PR workflow reaches that stage.
 
-There is no push-triggered workflow on the integration branch, so PR validation is the applicable pre-merge gate.
+Do not weaken a product assertion to make a flaky run green. Re-run the same SHA first when failure evidence points to timing rather than a reproducible regression.
 
-## Remaining 3.1.0 true-boundary evidence
+## Release boundary
 
-Before the final 3.1.0 release, still require where available:
+The intended next release is **Harness Remote 3.1.0**. The frozen branch `codex/release-candidate-3.1.0-rc3` remains immutable historical candidate evidence. After #519 integrates, create a new release-candidate branch from the then-current integration head rather than modifying RC3.
 
-- strict real-harness checks against installed OpenCode/Codex/Claude/OMP/PI builds, recording unavailable harness/model combinations instead of substituting synthetic ones;
-- real daemon/adapter restart plus persisted-Session resume/claim;
-- physical Android foreground/background and real network interruption/reconnect;
-- repository-admin enforcement on `main` requiring pull requests and required checks. The connected GitHub App cannot perform that administration write.
+Remaining release-readiness work still includes applicable true-boundary evidence tracked by issue #368, including real harness/runtime restart and persisted-Session recovery, physical Android foreground/background plus network interruption/reconnect, and repository-admin enforcement on `main` where the connected GitHub App lacks permission to make that administration write.
 
-## Product direction
+## Roadmap boundaries
+
+- P0 issue #368 owns true-boundary release evidence and repository-admin enforcement.
+- P1 issue #369 covers onboarding/reliability work already largely integrated; avoid rebuilding implemented pairing, Attention, desktop runtime and recovery flows.
+- P2 issue #371 owns longer-term federation/cross-machine continuity; do not redo already integrated lineage, portable handoff, Project identity/outcome and cross-machine execution work.
 
 Continue from `docs/HARNESS_3_ROADMAP.md`, prioritizing correctness/recovery, onboarding, attention visibility and Native Session federation. Avoid turning Harness Remote into a generic IDE/task manager or reimplementing capabilities that belong to native harnesses.

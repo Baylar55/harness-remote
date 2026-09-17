@@ -81,18 +81,23 @@ test("requires an installed or explicit backend when discovery finds none", () =
   assert.throws(() => resolveLaunchPlan([], []), /No supported agent CLI was found on PATH/)
 })
 
-test("describes every daemon harness as available instead of claiming secondary ACP hosts are not started", () => {
+test("startup summary prints one non-clickable address and a plain harness list", () => {
   const summary = formatStartupSummary({
-    plan: { mode: "daemon", backend: "codex", detected: ["codex", "claude", "opencode"], openCode: true },
-    addresses: ["192.168.1.42"],
+    plan: { mode: "daemon", backend: "codex", detected: ["omp", "pi", "codex", "opencode"], openCode: true },
+    addresses: ["192.168.1.42", "192.168.1.43"],
     port: 4097,
     username: "harness",
     password: "secret"
   })
-  assert.match(summary, /codex — primary/)
-  assert.match(summary, /claude — available/)
-  assert.match(summary, /opencode — managed, starts on first use/)
-  assert.doesNotMatch(summary, /not started/)
+  assert.match(summary, /Address\s+192\.168\.1\.42:4097/)
+  assert.doesNotMatch(summary, /192\.168\.1\.43/)
+  assert.doesNotMatch(summary, /https?:\/\//)
+  assert.doesNotMatch(summary, /Open in browser/)
+  assert.match(summary, /• omp/)
+  assert.match(summary, /• pi/)
+  assert.match(summary, /• codex/)
+  assert.match(summary, /• opencode/)
+  assert.doesNotMatch(summary, /— primary|starts on first use|— available|managed, starts/)
   assert.match(summary, /Machines → Add machine/)
 })
 
@@ -104,9 +109,10 @@ test("keeps the single-backend startup summary simple", () => {
     username: "harness",
     password: "secret"
   })
-  assert.match(summary, /Harness: pi/)
-  assert.match(summary, /<this machine's LAN address>/)
-  assert.doesNotMatch(summary, /Harnesses available through this machine/)
+  assert.match(summary, /Harness  pi/)
+  assert.match(summary, /<LAN address>:4097/)
+  assert.doesNotMatch(summary, /https?:\/\//)
+  assert.doesNotMatch(summary, /Harnesses/)
 })
 
 test("injects quick-start defaults but never places credentials or launcher-only flags on child argv", () => {
@@ -116,6 +122,7 @@ test("injects quick-start defaults but never places credentials or launcher-only
   const environment = bridgeEnvironment({ PATH: "/bin" }, "harness", "secret")
   assert.equal(environment.HARNESS_REMOTE_USERNAME, "harness")
   assert.equal(environment.HARNESS_REMOTE_PASSWORD, "secret")
+  assert.equal(environment.HARNESS_REMOTE_LAUNCHED_BY_LAUNCHER, "1")
   assert.equal(environment.PATH, "/bin")
 })
 

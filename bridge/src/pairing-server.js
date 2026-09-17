@@ -102,7 +102,7 @@ export function machinePairingLinks(config, grant, interfaces = networkInterface
 
 /**
  * Keep QR rendering outside the pairing authority contract. A source checkout that has not installed
- * the optional presentation dependency still gets the exact same one-time URI as plain text; npx and
+ * the optional presentation dependency still gets the exact same one-time URI internally; npx and
  * normal installs render the compact terminal QR because qrcode-terminal is installed by package.json.
  */
 export function renderPairingQRCode(uri, { load = () => require("qrcode-terminal") } = {}) {
@@ -119,9 +119,11 @@ export function renderPairingQRCode(uri, { load = () => require("qrcode-terminal
   }
 }
 
-/** Startup output keeps long-lived credentials as a manual fallback, while the QR/link itself contains
- * only a high-entropy one-time grant. Render one QR for the preferred LAN endpoint and keep every
- * discovered endpoint as text so multi-interface machines remain recoverable without guessing. */
+/**
+ * The one-time URI and endpoint are implementation details of phone pairing, not useful terminal UI.
+ * Show one QR for the preferred reachable endpoint and keep normal machine setup as the fallback.
+ * Never dump raw deep links, tokens, alternate interface URLs, or HTTP endpoints below the QR.
+ */
 export function announceMachinePairing(config, grant, {
   write = (text) => process.stdout.write(text),
   interfaces,
@@ -129,16 +131,15 @@ export function announceMachinePairing(config, grant, {
 } = {}) {
   const links = machinePairingLinks(config, grant, interfaces)
   if (!links.length) return []
-  write("\nPair a phone (one use, valid for 5 minutes):\n")
+
   const qr = renderQR(links[0].uri)
+  write("\nPhone pairing (optional, valid for 5 minutes)\n")
   if (qr) {
     write(`${qr}\n`)
-    write(`Scan the QR above for ${links[0].endpoint}.\n`)
+    write("Scan this QR in Harness Remote to add the machine automatically.\n")
+  } else {
+    write("QR unavailable. Use Machines → Add machine with this machine's address and credentials.\n")
   }
-  if (links.length > 1) write("If that network is not reachable from your phone, use another link below.\n")
-  write("Pairing links:\n")
-  for (const { uri } of links) write(`  ${uri}\n`)
-  write("The QR/link contains a one-time token, not the daemon password.\n")
   return links
 }
 

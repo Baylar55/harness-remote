@@ -214,13 +214,13 @@ npx github:giuliastro/harness-remote \
 
 `--root` defines the directory boundary Harness Remote may browse when you select Projects.
 
-The launcher detects supported CLIs on `PATH`, starts the compatible local runtime and, for the HR3 machine daemon, prints a compact pairing QR. The QR contains a 256-bit one-time token valid for five minutes — not the long-lived daemon password. Plain pairing links and the normal connection details are printed as fallback.
+The launcher detects supported CLIs on `PATH`, starts the compatible local runtime and, for the HR3 machine daemon, prints one compact pairing QR for the preferred reachable endpoint. The QR contains a 256-bit one-time token valid for five minutes — not the long-lived daemon password. The raw pairing URI and alternate interface addresses are intentionally not dumped to the terminal; one non-clickable machine address plus the credentials remain the manual fallback.
 
 ### 2. Pair Android or add the machine manually
 
 On Android, scan/open the QR. Harness Remote claims the one-time token and imports the machine automatically. The token can be used only once.
 
-If the phone cannot reach the preferred LAN address, use one of the alternate pairing links printed by the launcher. Desktop, web and Android can always use **Machines → Add machine** with the address, port, username and password printed by the launcher.
+If QR pairing is unavailable or the preferred address is not reachable from that device, use **Machines → Add machine** with the address, username and password printed by the launcher. Desktop, web and Android all use the same machine connection details.
 
 Opening **Machines** shows the machines already available; connection fields are never opened automatically. On a new install the Machines screen opens with a simple **Add machine** action, and the fields appear only after you choose to add one.
 
@@ -248,9 +248,9 @@ npx github:giuliastro/harness-remote \
   --cors http://localhost:5173
 ```
 
-Open the URL printed by Vite, normally `http://localhost:5173`.
+Open the URL printed by Vite, normally `http://localhost:5173`. The backend launcher deliberately does not print an `Open in browser` link because it cannot guarantee that Vite or another web frontend is actually running there.
 
-You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/), which runs in your local browser. To connect it to a local backend, add `--cors https://giuliastro.github.io` when starting the launcher.
+You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/), which runs in your local browser. To connect it to a local backend, add `--cors https://giuliastro.github.io` when starting the launcher. The launcher configures that allowed origin but does not present it as a backend-owned web page.
 
 For the full launcher and daemon guide, see [Quick start](docs/QUICK_START.md).
 
@@ -308,7 +308,7 @@ The blocking Chromium product gate exercises cross-machine continuation end to e
 
 Post-release development intentionally prioritizes Session correctness and maintainability over broad orchestration. Cross-machine federation is being hardened through explicit safety, recovery and browser gates rather than by introducing a second synthetic Session model.
 
-The automatic multi-agent launcher is still being expanded: the current release can expose one selected ACP-backed primary alongside managed OpenCode, while additional concurrent ACP host instances remain follow-up work.
+The automatic multi-agent launcher exposes the detected harnesses through one machine connection. It retains an internal compatibility default for legacy/unprefixed routing, but the client-facing harness list intentionally does not label one harness as more important than another.
 
 That focus is deliberate. A remote coding-agent UI is only useful if you can trust that the Session you see is the Session that actually exists.
 
