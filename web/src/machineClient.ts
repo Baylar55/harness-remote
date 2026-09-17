@@ -10,6 +10,12 @@ const BROWSER_DISCOVERY_TIMEOUT_MS = 12_000
 const DISCOVERY_STALE_GRACE_MS = 45_000
 const discoveryCache = new Map<string, { snapshot: MachineSnapshot; at: number }>()
 const projectCache = new Map<string, { projects: MachineProject[]; at: number }>()
+type BrowserDiscoveryFlight = {
+  controller: AbortController
+  startedAt: number
+  promise: Promise<MachineSnapshot | null>
+}
+const browserDiscoveryFlights = new Map<string, BrowserDiscoveryFlight>()
 
 export type ApprovalDecisionIdentity = {
   machineID: string
@@ -81,6 +87,13 @@ function cacheKey(config: ServerConfig): string {
   return `${machineBaseUrl(config)}|${config.username || ""}`
 }
 
+function browserDiscoveryKey(config: ServerConfig): string {
+  // A password change is a new request identity even though the public cache intentionally keeps its
+  // historical username-only key. Never let a stale authenticated request cancel or satisfy a probe
+  // that is using different credentials.
+  return `${machineBaseUrl(config)}|${config.username || ""}|${config.password || ""}`
+}
+
 function remember(config: ServerConfig, snapshot: MachineSnapshot): MachineSnapshot {
   discoveryCache.set(cacheKey(config), { snapshot, at: Date.now() })
   return snapshot
@@ -129,6 +142,52 @@ function approvalDecisionRecords(value: unknown): ApprovalDecisionRecord[] {
   ))
 }
 
+async function discoverBrowserMachine(config: ServerConfig): Promise<MachineSnapshot | null> {
+  const key = browserDiscoveryKey(config)
+  const now = Date.now()
+  const active = browserDiscoveryFlights.get(key)
+  if (active) {
+    // Normal refreshes can be triggered by both polling and live events. Share the same transport
+    // instead of stacking identical HTTP requests. After browser/OS suspension, however, a fetch can
+    // remain pending while its timeout timer was throttled. Date.now advances during that sleep, so a
+    // wake-triggered discovery can recognize the old transport, abort it, and start one clean probe.
+    if (now - active.startedAt < BROWSER_DISCOVERY_TIMEOUT_MS) return active.promise
+    browserDiscoveryFlights.delete(key)
+    active.controller.abort()
+  }
+
+  const target = `${machineBaseUrl(config)}/v1/machine`
+  const controller = new AbortController()
+  let timedOut = false
+  let promise!: Promise<MachineSnapshot | null>
+  promise = (async () => {
+    const timer = globalThis.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, BROWSER_DISCOVERY_TIMEOUT_MS)
+    try {
+      const response = await fetch(target, { headers: headers(config), signal: controller.signal })
+      if (noMachineStatus(response.status)) return null
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      return remember(config, machineSnapshot(await response.json()))
+    } catch (error) {
+      if (timedOut) {
+        throw new Error(`Machine discovery at ${config.host}:${config.port} timed out after ${BROWSER_DISCOVERY_TIMEOUT_MS / 1000}s.`)
+      }
+      if (controller.signal.aborted) {
+        throw new Error(`Machine discovery at ${config.host}:${config.port} was restarted after a stale connection.`)
+      }
+      if (error instanceof Error && /^HTTP \d+$/.test(error.message)) throw error
+      throw new Error(`Cannot reach ${config.host}:${config.port}.`)
+    } finally {
+      globalThis.clearTimeout(timer)
+      if (browserDiscoveryFlights.get(key)?.promise === promise) browserDiscoveryFlights.delete(key)
+    }
+  })()
+  browserDiscoveryFlights.set(key, { controller, startedAt: now, promise })
+  return promise
+}
+
 /**
  * Best-effort daemon discovery. A legacy bridge/OpenCode server, or a bridge without a machine
  * registry configured, returns null so every pre-daemon saved profile keeps working as before.
@@ -172,26 +231,15 @@ export async function discoverMachine(
     return remember(config, machineSnapshot(response.data))
   }
 
-  const controller = new AbortController()
-  const timer = globalThis.setTimeout(() => controller.abort(), BROWSER_DISCOVERY_TIMEOUT_MS)
-  let response: Response
   try {
-    response = await fetch(target, { headers: headers(config), signal: controller.signal })
+    return await discoverBrowserMachine(config)
   } catch (error) {
     if (allowCachedOnTransportFailure) {
       const cached = recentCachedSnapshot(config)
       if (cached) return cached
     }
-    if (controller.signal.aborted) {
-      throw new Error(`Machine discovery at ${config.host}:${config.port} timed out after ${BROWSER_DISCOVERY_TIMEOUT_MS / 1000}s.`)
-    }
-    throw new Error(`Cannot reach ${config.host}:${config.port}.`)
-  } finally {
-    globalThis.clearTimeout(timer)
+    throw error
   }
-  if (noMachineStatus(response.status)) return null
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return remember(config, machineSnapshot(await response.json()))
 }
 
 /** Read the daemon's canonical, machine-scoped Project catalog without depending on Task storage. */
