@@ -29,7 +29,6 @@ The integration line is still in **3.1.0 release-candidate stabilization**. Avoi
 - PR: **#519** `ux: simplify startup output`;
 - target: `codex/development-2026-09-11` only;
 - branch was resynchronized with integration after #520 merged;
-- final feature head after the user-requested UX simplification: `57f1c53883c848aa9a69292fadc931ff3fd9ed36`;
 - PR remains **draft** until the final exact-head automated campaign is green;
 - this work is terminal/onboarding UX only and must not change ACP routing, Native Session behavior, OpenCode lifecycle, model routing, pairing authorization, credentials or the one-time token protocol.
 
