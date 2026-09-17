@@ -91,9 +91,9 @@ The launcher inspects `PATH` without executing discovered agent binaries and cho
 
 - with exactly one supported CLI, it preserves the existing single-backend startup path;
 - with multiple supported CLIs and at least one ACP-backed agent, it starts the machine daemon automatically;
-- the daemon exposes every detected ACP-backed agent through the same machine endpoint and selects one of them internally for legacy/unprefixed routing;
-- managed OpenCode is included when OpenCode is installed and starts lazily on first use;
-- `--backend <name>` selects the internal ACP default on a multi-agent machine;
+- the daemon exposes every detected ACP-backed agent through the same machine endpoint and keeps an internal compatibility default for legacy/unprefixed routing;
+- managed OpenCode is included when OpenCode is installed;
+- `--backend <name>` selects that internal ACP compatibility default on a multi-agent machine;
 - `--single --backend <name>` explicitly opts out of the daemon and forces the legacy single-backend path;
 - if managed OpenCode is included, the launcher chooses a free loopback port automatically instead of assuming 4096 is unused;
 - credentials are generated automatically and kept out of child-process argv;
@@ -110,7 +110,7 @@ For example, on a workstation with Codex, Claude Code and OpenCode installed, th
 harness-remote
 ```
 
-starts one machine daemon instead of failing and asking you to choose a backend. The launcher reports the CLIs it detected, selects an internal ACP default for compatibility routing, finds a free loopback port for managed OpenCode, and exposes the machine through one authenticated daemon connection.
+starts one machine daemon instead of failing and asking you to choose a backend. The launcher reports the CLIs it detected, keeps an internal ACP compatibility default, finds a free loopback port for managed OpenCode, and exposes the machine through one authenticated daemon connection.
 
 The current automatic multi-host shape is:
 
@@ -122,9 +122,9 @@ Harness daemon :4097
 
 The daemon registers the detected harnesses independently. Internal routing defaults do not hide or demote any harness in the client, and the normal startup list intentionally presents them without lifecycle or priority labels.
 
-## Choose the daemon default or force one backend
+## Choose the daemon compatibility default or force one backend
 
-On a multi-agent machine, choose the daemon's ACP default with:
+On a multi-agent machine, choose the daemon's internal ACP compatibility default with:
 
 ```bash
 harness-remote --backend codex --root ~/dev
@@ -191,7 +191,7 @@ Agent-scoped requests share the daemon connection:
 /v1/agents/opencode/global/event
 ```
 
-The selected internal ACP default is routed through the normalized bridge API. Managed OpenCode requests are streamed through the daemon to the loopback process; external credentials are authenticated at the daemon boundary and replaced with the managed host credentials for the internal request. Legacy unprefixed routes remain available during migration.
+The selected internal ACP compatibility default is routed through the normalized bridge API. Managed OpenCode requests are streamed through the daemon to the loopback process; external credentials are authenticated at the daemon boundary and replaced with the managed host credentials for the internal request. Legacy unprefixed routes remain available during migration.
 
 Managed OpenCode binds to `127.0.0.1` by default even when the daemon binds to `0.0.0.0`. Wider exposure is explicit:
 
