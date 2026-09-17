@@ -214,13 +214,13 @@ npx github:giuliastro/harness-remote \
 
 `--root` defines the directory boundary Harness Remote may browse when you select Projects.
 
-The launcher detects supported CLIs on `PATH`, starts the compatible local runtime and, for the HR3 machine daemon, prints a compact pairing QR. The QR contains a 256-bit one-time token valid for five minutes — not the long-lived daemon password. Plain pairing links and the normal connection details are printed as fallback.
+The launcher detects supported CLIs on `PATH`, starts the compatible local runtime and, for the HR3 machine daemon, prints one compact pairing QR for the preferred reachable endpoint. The QR contains a 256-bit one-time token valid for five minutes — not the long-lived daemon password. The raw pairing URI and alternate interface addresses are intentionally not dumped to the terminal; the single Machine URL and credentials remain the manual fallback.
 
 ### 2. Pair Android or add the machine manually
 
 On Android, scan/open the QR. Harness Remote claims the one-time token and imports the machine automatically. The token can be used only once.
 
-If the phone cannot reach the preferred LAN address, use one of the alternate pairing links printed by the launcher. Desktop, web and Android can always use **Machines → Add machine** with the address, port, username and password printed by the launcher.
+If QR pairing is unavailable or the preferred address is not reachable from that device, use **Machines → Add machine** with the Machine URL, username and password printed by the launcher. Desktop, web and Android all use the same machine connection details.
 
 Opening **Machines** shows the machines already available; connection fields are never opened automatically. On a new install the Machines screen opens with a simple **Add machine** action, and the fields appear only after you choose to add one.
 
@@ -248,9 +248,9 @@ npx github:giuliastro/harness-remote \
   --cors http://localhost:5173
 ```
 
-Open the URL printed by Vite, normally `http://localhost:5173`.
+Open the URL printed by Vite, normally `http://localhost:5173`. When a valid browser origin is configured through `--cors`, the launcher also prints a single `Open in browser` URL derived from that same allowed origin.
 
-You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/), which runs in your local browser. To connect it to a local backend, add `--cors https://giuliastro.github.io` when starting the launcher.
+You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/), which runs in your local browser. To connect it to a local backend, add `--cors https://giuliastro.github.io` when starting the launcher; the printed browser URL is `https://giuliastro.github.io/harness-remote/`, whose origin matches the CORS entry.
 
 For the full launcher and daemon guide, see [Quick start](docs/QUICK_START.md).
 
