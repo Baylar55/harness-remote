@@ -314,7 +314,8 @@ assert.match(source, /machine\.config\.username,[\s\S]*machine\.config\.password
 assert.match(source, /onRefreshCompleteRef\.current\?\.\(refreshToken\)/, "a requested Session refresh must settle only after its index read completes")
 assert.doesNotMatch(source, /discoverMachineNativeSessions/, "the recurring rail must not eagerly flatten every Session page")
 assert.match(source, /entry\.nextCursor[\s\S]*loadOlderSessions/, "older native Session pages must require an explicit user action")
-assert.match(source, /refreshCursorPage\(existing, firstRecords, page\.nextCursor/, "a recurring first-page refresh must preserve the manual pagination tail")
+assert.match(source, /refreshCursorPage\(authoritativeRefresh \? undefined : existing, firstRecords, page\.nextCursor/, "automatic first-page refreshes must preserve the manual pagination tail while explicit Refresh rebuilds native truth")
+assert.match(source, /authoritativeRefreshToken !== authoritativeRefreshApplied\.current/, "only an explicit Refresh token may switch the rail into authoritative pruning")
 assert.match(source, /agent\.processID/, "adapter restarts must invalidate connection-bound ACP cursors")
 
 const inboxSource = readFileSync(new URL("./components/native-session-home-attention.tsx", import.meta.url), "utf8")
