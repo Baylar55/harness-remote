@@ -85,6 +85,10 @@ type Props = {
   /** Bumped by the shell after a native mutation (rename/delete) so the list re-reads its Sessions
    * immediately instead of waiting for its own refresh cycle. */
   refreshToken?: number
+  /** Bumped only for an explicit user refresh. Successful first-page reads are authoritative for
+   * those harness scopes so externally deleted Sessions can be pruned without making automatic
+   * lifecycle refreshes destructive. */
+  authoritativeRefreshToken?: number
   /** The rail already counts Sessions needing input; the mobile nav needs that count outside it. */
   onAttentionCountChange?: (count: number) => void
   /** Structured pending permission/question identities from the global attention index. */
@@ -217,6 +221,13 @@ function sessionActivityCompare(left: RecordWithMachine, right: RecordWithMachin
   return left.record.key.localeCompare(right.record.key)
 }
 
+function visualProjectKey(item: RecordWithMachine): string {
+  const nativeDirectory = item.record.session.directory || ""
+  return item.project
+    ? `${item.machine.id}\u0000project:${item.project.id}`
+    : `${item.machine.id}\u0000directory:${nativeDirectory}`
+}
+
 /**
  * Reconcile native truth into the rail without using changing harness timestamps as layout
  * coordinates. Existing rows keep their relative positions; genuinely new rows may enter at the
@@ -258,7 +269,24 @@ export function reconcileStableSessionRecords(
 
   const newcomers = [...freshByKey.values()].sort(sessionActivityCompare)
   if (previous.length === 0) return newcomers
-  return newPosition === "back" ? [...retained, ...newcomers] : [...newcomers, ...retained]
+  if (newPosition === "back") return [...retained, ...newcomers]
+
+  // New activity belongs at the front of its existing Project, not at the front of the whole rail.
+  // Otherwise creating or discovering a Session in Project B makes Project B jump above Project A.
+  // Truly new Projects may enter at the front because no existing visual anchor is displaced.
+  const result = [...retained]
+  const newcomerGroups = new Map<string, RecordWithMachine[]>()
+  for (const item of newcomers) {
+    const key = visualProjectKey(item)
+    newcomerGroups.set(key, [...(newcomerGroups.get(key) || []), item])
+  }
+  const newProjectRecords: RecordWithMachine[] = []
+  for (const [projectKey, projectNewcomers] of newcomerGroups) {
+    const existingIndex = result.findIndex((item) => visualProjectKey(item) === projectKey)
+    if (existingIndex >= 0) result.splice(existingIndex, 0, ...projectNewcomers)
+    else newProjectRecords.push(...projectNewcomers)
+  }
+  return [...newProjectRecords, ...result]
 }
 
 function relativeTime(timestamp: number): string {
@@ -372,6 +400,7 @@ export function NativeSessionHome({
   sources,
   onOpen,
   refreshToken = 0,
+  authoritativeRefreshToken = 0,
   onAttentionCountChange,
   attentionSessionKeys,
   onAttentionKeysChange,
@@ -417,6 +446,7 @@ export function NativeSessionHome({
   const pageCacheSignature = useRef<string | null>(null)
   const deletedKeysRef = useRef(deletedKeys)
   deletedKeysRef.current = deletedKeys
+  const authoritativeRefreshApplied = useRef(authoritativeRefreshToken)
   const onRefreshCompleteRef = useRef(onRefreshComplete)
   onRefreshCompleteRef.current = onRefreshComplete
   const [presentationOverrides, setPresentationOverrides] = useState<Record<string, SessionPresentationState>>({})
@@ -497,6 +527,7 @@ export function NativeSessionHome({
     setLoading(true)
     setDiscoveryError(null)
     setOlderSessionError(null)
+    const authoritativeRefresh = authoritativeRefreshToken !== authoritativeRefreshApplied.current
     void Promise.all(sources.map(async ({ machine, snapshot }) => {
       if (!snapshot) return { machine, snapshot, projects: [] as MachineProject[], pages: [] }
       const [pages, projects] = await Promise.all([
@@ -513,6 +544,7 @@ export function NativeSessionHome({
       if (pageCacheSignature.current !== machineSignature) pageCache.current.clear()
       pageCacheSignature.current = machineSignature
       const activeScopes = new Set<string>()
+      const authoritativeScopes = new Set<string>()
       for (const result of results) {
         if (!result.snapshot) continue
         for (const { agent, page } of result.pages) {
@@ -520,13 +552,14 @@ export function NativeSessionHome({
           activeScopes.add(scope)
           const existing = pageCache.current.get(scope)
           if (!page) continue
+          if (authoritativeRefresh) authoritativeScopes.add(scope)
           const firstRecords = page.records.map((record) => ({
             machine: result.machine,
             machineID: result.snapshot!.machine.id,
             record,
             project: catalogProject(record, result.projects, result.snapshot!.machine.id)
           }))
-          const refreshed = refreshCursorPage(existing, firstRecords, page.nextCursor, recordKey)
+          const refreshed = refreshCursorPage(authoritativeRefresh ? undefined : existing, firstRecords, page.nextCursor, recordKey)
           const recordsForScope = uniqueSessionRecords(refreshed.records)
             .filter((item) => !deletedKeysRef.current?.has(recordKey(item)))
           pageCache.current.set(scope, {
@@ -548,8 +581,12 @@ export function NativeSessionHome({
       const freshRecords = uniqueSessionRecords([...pageCache.current.values()].flatMap((entry) => entry.records))
       setRecords((current) => reconcileStableSessionRecords(current, freshRecords, {
         deletedKeys: deletedKeysRef.current,
-        keepMissing: (item) => activeScopes.has(pageScopeKey(item.machine.id, item.record.agentId))
+        keepMissing: (item) => {
+          const scope = pageScopeKey(item.machine.id, item.record.agentId)
+          return activeScopes.has(scope) && (!authoritativeRefresh || !authoritativeScopes.has(scope))
+        }
       }))
+      if (authoritativeRefresh) authoritativeRefreshApplied.current = authoritativeRefreshToken
       setLoadedSignature(machineSignature)
     }).catch((reason) => {
       if (!cancelled) {
@@ -563,7 +600,7 @@ export function NativeSessionHome({
       }
     })
     return () => { cancelled = true }
-  }, [sources, revision, refreshToken, discoveryReady, machineSignature, deletedKeys])
+  }, [sources, revision, refreshToken, authoritativeRefreshToken, discoveryReady, machineSignature, deletedKeys])
 
   useEffect(() => {
     if (!loaded || document.visibilityState !== "visible") return
@@ -956,10 +993,14 @@ export function NativeSessionHome({
           records: uniqueSessionRecords([...cached.records, createdRecord])
         })
       }
-      setRecords((current) => [
-        createdRecord,
-        ...current.filter((item) => !(item.machine.id === selectedCreateMachine.machine.id && item.record.key === record.key))
-      ])
+      setRecords((current) => reconcileStableSessionRecords(
+        current,
+        [
+          ...current.filter((item) => !(item.machine.id === selectedCreateMachine.machine.id && item.record.key === record.key)),
+          createdRecord
+        ],
+        { keepMissing: () => true }
+      ))
       setCreateTitle("")
       setCreateOpen(false)
       onOpen(target)
