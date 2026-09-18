@@ -89,7 +89,7 @@ const replacementPage = refreshCursorPage({
 }, [{ id: "current", title: "Current" }], undefined, byID)
 assert.deepEqual(replacementPage.records.map(byID), ["current"], "the native page cache remains exact before manual pagination; visual stability belongs to the rail reconciliation layer")
 
-function stableItem(backend, id, updated, status = "idle") {
+function stableItem(backend, id, updated, status = "idle", directory = "/repo") {
   return {
     machine: { id: "machine-1", name: "Machine", config: {} },
     machineID: "daemon-1",
@@ -106,7 +106,7 @@ function stableItem(backend, id, updated, status = "idle") {
       session: {
         id,
         title: id,
-        directory: "/repo",
+        directory,
         time: { created: updated - 100, updated }
       },
       status: { type: status }
@@ -135,6 +135,11 @@ for (const backend of ["opencode", "codex", "claude", "omp", "pi"]) {
     stableItem(backend, "recent", 700, "idle")
   ], { keepMissing: () => true })
   assert.deepEqual(stableKeys(rail), ["recent", "middle", "older"], `${backend}: a transient first-page omission must not make already-visible Sessions disappear`)
+
+  const authoritativeRail = reconcileStableSessionRecords(rail, [
+    stableItem(backend, "recent", 700, "idle")
+  ])
+  assert.deepEqual(stableKeys(authoritativeRail), ["recent"], `${backend}: an explicit authoritative refresh must prune Sessions absent from a successful native read`)
 
   rail = reconcileStableSessionRecords(rail, [
     stableItem(backend, "older", 950, "done"),
@@ -165,6 +170,21 @@ for (const backend of ["opencode", "codex", "claude", "omp", "pi"]) {
   })
   assert.equal(stableKeys(rail).includes("middle"), false, `${backend}: an explicit delete must beat stable-layout retention immediately`)
 }
+
+let projectStableRail = reconcileStableSessionRecords([], [
+  stableItem("codex", "project-a", 300, "idle", "/repo-a"),
+  stableItem("codex", "project-b", 200, "idle", "/repo-b")
+])
+projectStableRail = reconcileStableSessionRecords(projectStableRail, [
+  stableItem("codex", "project-b-new", 400, "idle", "/repo-b"),
+  stableItem("codex", "project-a", 300, "idle", "/repo-a"),
+  stableItem("codex", "project-b", 200, "idle", "/repo-b")
+], { keepMissing: () => true })
+assert.deepEqual(
+  stableKeys(projectStableRail),
+  ["project-a", "project-b-new", "project-b"],
+  "new activity in an existing Project must enter at that Project's front without moving the Project itself"
+)
 
 for (const [backend, transport] of [
   ["opencode", "http"],
