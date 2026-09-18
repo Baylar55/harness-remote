@@ -411,6 +411,10 @@ function NativeSessionsWorkspace({
   // return an identical snapshot, so the Session list needs an explicit signal to re-read its
   // Sessions after a rename or delete instead of waiting up to 30s for its own refresh.
   const [listRevision, setListRevision] = useState(0)
+  // Only an explicit user refresh may treat a successful first-page read as authoritative absence.
+  // Automatic lifecycle refreshes keep this token stable so transient omissions cannot make active
+  // Sessions disappear from the rail.
+  const [authoritativeListRevision, setAuthoritativeListRevision] = useState(0)
   // A successful DELETE is authoritative before the next Session-index read completes. Keep that
   // stale rail row as a disabled "Deleting..." tombstone instead of briefly presenting it as usable.
   const [deletingSessionKeys, setDeletingSessionKeys] = useState<Set<string>>(() => new Set())
@@ -432,6 +436,7 @@ function NativeSessionsWorkspace({
     setRefreshOrigin(origin)
     setMachineRefreshPending(true)
     setRevision((value) => value + 1)
+    setAuthoritativeListRevision((value) => value + 1)
     setListRevision((value) => {
       const next = value + 1
       pendingSessionRefreshToken.current = next
@@ -887,6 +892,7 @@ function NativeSessionsWorkspace({
             sources={runtimes}
             onOpen={openSession}
             refreshToken={listRevision}
+            authoritativeRefreshToken={authoritativeListRevision}
             onAttentionCountChange={onAttentionCountChange}
             onDiscoveredChange={setSessionsDiscovered}
             onRefreshComplete={completeSessionRefresh}
