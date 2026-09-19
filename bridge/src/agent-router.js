@@ -1,11 +1,13 @@
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
 import { ManagedEventFanout } from "./managed-event-fanout.js"
+import { inspectGitProjectIdentity } from "./project-identity.js"
+import { inspectGitProjectOutcome } from "./project-outcome.js"
 import { normalizeTaskModel } from "./task-model.js"
 
 const AGENT_ROUTE = /^\/v1\/agents\/([^/]+)(\/.*)?$/
 const TASK_WORKTREE_ROUTE = /^\/v1\/tasks\/([^/]+)\/worktree$/
-const MACHINE_ROUTES = new Set(["/v1/machine", "/global/machine", "/v1/projects", "/v1/tasks", "/v1/diagnostics"])
+const MACHINE_ROUTES = new Set(["/v1/machine", "/global/machine", "/v1/projects", "/v1/project-identity", "/v1/project-outcome", "/v1/tasks", "/v1/diagnostics"])
 const HOP_BY_HOP = new Set([
   "connection",
   "keep-alive",
@@ -61,6 +63,20 @@ async function readJSONBody(request) {
   return body ? JSON.parse(body) : {}
 }
 
+function authenticateMachineRequest(request, response, config) {
+  applyCorsHeaders(request, response, config)
+  if (request.method === "OPTIONS") {
+    response.writeHead(allowedOrigin(request, config) ? 204 : 403)
+    response.end()
+    return false
+  }
+  if (!matchesCredentials(request, config)) {
+    response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Harness Remote Daemon"' })
+    response.end()
+    return false
+  }
+  return true
+}
 
 export function agentScopedRequest(request) {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
@@ -187,6 +203,8 @@ export function createAgentRoutingServer({
   acpBridgeServer,
   taskStore,
   projectCatalog,
+  projectIdentity = inspectGitProjectIdentity,
+  projectOutcome = inspectGitProjectOutcome,
   worktreeManager,
   diagnostics,
   createServer = http.createServer,
@@ -230,7 +248,7 @@ export function createAgentRoutingServer({
 
     const worktreeMatch = TASK_WORKTREE_ROUTE.exec(requestURL.pathname)
     if (MACHINE_ROUTES.has(requestURL.pathname) || worktreeMatch) {
-      if (!authenticateDaemonRequest(request, response, config)) return
+      if (!authenticateMachineRequest(request, response, config)) return
       try {
         if (request.method === "GET" && (requestURL.pathname === "/v1/machine" || requestURL.pathname === "/global/machine")) {
           writeJSON(response, 200, daemon.snapshot())
@@ -246,6 +264,42 @@ export function createAgentRoutingServer({
         if (request.method === "GET" && requestURL.pathname === "/v1/projects") {
           const projects = await projectCatalog()
           writeJSON(response, 200, { projects })
+          return
+        }
+        if (request.method === "GET" && requestURL.pathname === "/v1/project-identity") {
+          const projectId = requestURL.searchParams.get("projectId")?.trim() || ""
+          if (!projectId) {
+            writeJSON(response, 400, { error: "A projectId is required" })
+            return
+          }
+          const projects = await projectCatalog()
+          const project = projects.find((candidate) => candidate.id === projectId)
+          if (!project) {
+            writeJSON(response, 404, { error: `Unknown project: ${projectId}` })
+            return
+          }
+          // Never accept a caller-supplied path here. Identity inspection is limited to a path that
+          // the daemon itself already admitted into the canonical Project catalog.
+          const identity = project.kind === "git" ? await projectIdentity(project.path) : null
+          writeJSON(response, 200, { projectId: project.id, identity })
+          return
+        }
+        if (request.method === "GET" && requestURL.pathname === "/v1/project-outcome") {
+          const projectId = requestURL.searchParams.get("projectId")?.trim() || ""
+          if (!projectId) {
+            writeJSON(response, 400, { error: "A projectId is required" })
+            return
+          }
+          const projects = await projectCatalog()
+          const project = projects.find((candidate) => candidate.id === projectId)
+          if (!project) {
+            writeJSON(response, 404, { error: `Unknown project: ${projectId}` })
+            return
+          }
+          // Outcome inspection has the same Project-scoped boundary as identity inspection: a caller
+          // chooses only a catalog id, never a filesystem path. Returned file names stay repo-relative.
+          const outcome = project.kind === "git" ? await projectOutcome(project.path) : null
+          writeJSON(response, 200, { projectId: project.id, outcome })
           return
         }
         if (request.method === "GET" && requestURL.pathname === "/v1/tasks") {
@@ -317,7 +371,7 @@ export function createAgentRoutingServer({
 
     const optionalPayload = unsupportedOptionalRead(daemon, route, request.method)
     if (optionalPayload !== undefined) {
-      if (!authenticateDaemonRequest(request, response, config)) return
+      if (!authenticateMachineRequest(request, response, config)) return
       writeJSON(response, 200, optionalPayload)
       return
     }
@@ -328,7 +382,17 @@ export function createAgentRoutingServer({
       return
     }
 
-    if (!authenticateDaemonRequest(request, response, config)) return
+    applyCorsHeaders(request, response, config)
+    if (request.method === "OPTIONS") {
+      response.writeHead(allowedOrigin(request, config) ? 204 : 403)
+      response.end()
+      return
+    }
+    if (!matchesCredentials(request, config)) {
+      response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Harness Remote Daemon"' })
+      response.end()
+      return
+    }
 
     const entry = daemon.hostEntry(route.agentID)
     if (!entry) {

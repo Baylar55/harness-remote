@@ -5,7 +5,7 @@
   "type": "module",
   "bin": {
     "harness-remote": "./bridge/src/launcher.js",
-    "harness-remote-daemon": "./bridge/src/daemon-cli.js"
+    "harness-remote-daemon": "./bridge/src/daemon-bin.js"
   },
   "scripts": {
     "start": "node bridge/src/launcher.js",
@@ -14,6 +14,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "qrcode-terminal": "0.12.0"
   },
   "description": "Local-first control plane for native AI coding-agent sessions across Codex CLI, Claude Code, OpenCode, Oh My Pi and PI.",
   "license": "Apache-2.0",

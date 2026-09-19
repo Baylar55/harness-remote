@@ -5,16 +5,21 @@
   "type": "module",
   "bin": {
     "harness-remote-bridge": "./src/cli.js",
-    "harness-remote-daemon": "./src/daemon-cli.js"
+    "harness-remote-daemon": "./src/daemon-bin.js"
   },
   "scripts": {
     "start": "node src/cli.js",
     "daemon": "node src/daemon-cli.js",
     "audit:probe": "node scripts/backend-audit-probe.mjs",
     "smoke:omp": "node scripts/omp-real-smoke.mjs",
+    "soak:session": "node scripts/session-first-soak.mjs",
+    "gate:real-harness": "node scripts/real-harness-release-gate.mjs",
     "test": "node --test"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "qrcode-terminal": "0.12.0"
   }
 }

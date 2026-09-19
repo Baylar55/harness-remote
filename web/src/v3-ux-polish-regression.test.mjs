@@ -7,10 +7,11 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const read = (name) => fs.readFileSync(path.join(here, name), "utf8")
 const exists = (name) => fs.existsSync(path.join(here, name))
 
-const machines = read("workspaceMachines.ts")
+const profiles = read("serverProfiles.ts")
 const main = read("main.tsx")
 const standalone = read("components/standalone-universal-workspace.tsx")
-const home = read("components/native-session-home.tsx")
+const home = read("components/native-session-home-base.tsx")
+const attentionHome = read("components/native-session-home-attention.tsx")
 const observer = read("components/native-session-observer.tsx")
 const chat = read("components/work-thread-conversation.tsx")
 const conversationSurface = read("components/taskdesk-conversation.tsx")
@@ -23,9 +24,9 @@ const machineClient = read("machineClient.ts")
 const machineLiveRefresh = read("machine-live-refresh.ts")
 
 
-// Workspace machine defaults: 3.0 boots from machines.
-assert.match(machines, /port: 4097/)
-assert.match(machines, /username: "harness"/)
+// Legacy profile defaults remain readable for 2.x compatibility, while 3.0 boots from machines.
+assert.match(profiles, /port: 4097/)
+assert.match(profiles, /username: "harness"/)
 assert.doesNotMatch(main, /loadServerProfiles/)
 assert.match(main, /loadWorkspaceMachines/)
 assert.match(main, /import "\.\/conversation-control-plane-overrides\.css"/)
@@ -47,12 +48,15 @@ assert.doesNotMatch(standalone, /New conversation/i)
 assert.doesNotMatch(standalone, />Conversations</)
 assert.doesNotMatch(standalone, /TaskDeskWorkspace/)
 
-// The navigation hierarchy remains Machine -> Project -> native Session.
+// The navigation hierarchy remains Machine -> Project -> native Session, with global Attention
+// composed above it rather than replacing the mature rail.
 assert.match(home, /hr-native-machine-group/)
 assert.match(home, /hr-native-project-group/)
 assert.match(home, /hr-native-session-row/)
 assert.match(home, /sessionTreeRows/)
 assert.match(home, /createNativeSessionTarget/)
+assert.match(attentionHome, /<NativeSessionHomeBase/)
+assert.match(attentionHome, /hr-native-attention-inbox/)
 assert.match(observer, /<WorkThreadConversation/)
 assert.match(chat, /<TaskDeskConversation/)
 assert.match(sessionWorkbench, /hr-native-workspace/)

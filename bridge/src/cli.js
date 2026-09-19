@@ -64,6 +64,10 @@ if (config) {
   })
 
   server.listen(config.port, config.host, () => {
+    if (process.env.HARNESS_REMOTE_LAUNCHED_BY_LAUNCHER === "1") {
+      process.stdout.write("\nHarness Remote is ready. Keep this terminal open while you use it.\n")
+      return
+    }
     process.stdout.write(`${config.backend.toUpperCase()} bridge listening on http://${config.host}:${config.port}\n`)
     process.stdout.write(`Machine: ${machineIdentity.name} (${machineIdentity.id})\n`)
   })

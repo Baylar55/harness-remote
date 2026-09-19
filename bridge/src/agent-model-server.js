@@ -1,11 +1,26 @@
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
+import { announceMachinePairing, createOneTimePairingGrant, createPairingServer } from "./pairing-server.js"
 
 const MODEL_ROUTE = /^\/v1\/agents\/([^/]+)\/models$/
 const TASK_LAUNCH_ROUTE = /^\/v1\/tasks\/([^/]+)\/launch$/
 const DEFAULT_MODEL_WAIT_MS = 4_000
 const MAX_MODEL_WAIT_MS = 8_000
 
+function authenticate(request, response, config) {
+  applyCorsHeaders(request, response, config)
+  if (request.method === "OPTIONS") {
+    response.writeHead(allowedOrigin(request, config) ? 204 : 403)
+    response.end()
+    return false
+  }
+  if (!matchesCredentials(request, config)) {
+    response.writeHead(401, { "WWW-Authenticate": 'Basic realm="Harness Remote Daemon"' })
+    response.end()
+    return false
+  }
+  return true
+}
 
 function modelWaitMs(url) {
   const raw = url.searchParams.get("waitMs")
@@ -33,11 +48,11 @@ async function settleWithin(promise, waitMs) {
 }
 
 export function createAgentModelServer({ innerServer, config, daemon, taskStore, createServer = http.createServer }) {
-  return createServer(async (request, response) => {
+  const authenticatedServer = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     const modelMatch = MODEL_ROUTE.exec(url.pathname)
     if (modelMatch) {
-      if (!authenticateDaemonRequest(request, response, config)) return
+      if (!authenticate(request, response, config)) return
       if (request.method !== "GET") {
         response.writeHead(405, { Allow: "GET, OPTIONS" })
         response.end()
@@ -77,7 +92,7 @@ export function createAgentModelServer({ innerServer, config, daemon, taskStore,
 
     const launchMatch = TASK_LAUNCH_ROUTE.exec(url.pathname)
     if (launchMatch && request.method === "POST") {
-      if (!authenticateDaemonRequest(request, response, config)) return
+      if (!authenticate(request, response, config)) return
       const taskID = decodeURIComponent(launchMatch[1])
       try {
         const task = await taskStore.get(taskID)
@@ -97,4 +112,13 @@ export function createAgentModelServer({ innerServer, config, daemon, taskStore,
 
     innerServer.emit("request", request, response)
   })
+
+  // This wrapper exists only in the multi-host machine daemon composition. Legacy standalone ACP /
+  // OpenCode bridge servers never construct createAgentModelServer, so their auth and startup
+  // contracts remain byte-for-byte outside the pairing path.
+  const machine = daemon.snapshot?.().machine
+  if (!machine) return authenticatedServer
+  const grant = createOneTimePairingGrant()
+  if (process.argv[1]?.endsWith("daemon-cli.js")) announceMachinePairing(config, grant)
+  return createPairingServer({ innerServer: authenticatedServer, config, machine, grant, createServer })
 }

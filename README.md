@@ -149,19 +149,27 @@ Harness Remote 3 currently integrates with:
 
 Harness Remote discovers model and control capabilities from the running harness instead of assuming every provider supports the same options.
 
+Model defaults, capability flags, context/output limits and variant order come from the harness catalog; Harness Remote does not reinterpret variant labels.
+
 If a harness advertises a control, Harness Remote can surface it. If it does not, Harness Remote does not invent one.
 
 See the [Harness capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md) for the detailed runtime contract.
 
 ## Desktop, Android and web
 
-Use the same machine from:
+Use the same native Sessions from:
 
-- **Desktop** — Windows, macOS and Linux.
-- **Android** — native HTTP transport to your Harness Remote machine.
-- **Web / PWA** — browser client for local or remotely reachable machines.
+- **Desktop** — on Windows and macOS, open the Harness Remote app and use the local machine immediately. You do **not** need to start a gateway or terminal process for that computer. The desktop app starts and supervises its local Machine runtime for you.
+- **Android** — add a remote machine by scanning the QR code printed by its Harness Remote gateway. No host, port, username or password needs to be typed for the normal QR flow.
+- **Web / PWA** — connect from a browser to a reachable Harness Remote gateway; browser access needs the appropriate optional CORS origin.
+
+To use **another computer** from desktop, Android or web, run one Harness Remote gateway on that other computer. One gateway exposes all detected supported coding agents on that machine.
 
 The client lets you inspect Sessions, follow live activity, send prompts, answer supported questions or permissions, Stop native turns, switch model/harness where supported and review working-tree changes.
+
+The Session outcome keeps that review compact: it can show branch/worktree state, bounded changed-file evidence and aggregate Git totals such as tracked files, inserted/deleted lines and binary files. Raw diff hunks, patch contents and source text are not sent to the client for this summary.
+
+The desktop-managed local runtime is supervised automatically. If it becomes stopped or unresponsive, the app performs bounded recovery and cleans up the managed process tree before restarting it, including the managed OpenCode runtime when present.
 
 ## Local-first by design
 
@@ -186,39 +194,89 @@ See [REFERENCE.md](REFERENCE.md) for detailed security and backend notes.
 
 ## Quick start
 
-> **Upgrading from Harness Remote 2.x?** HR3 uses a **Machine daemon** as its normal connection contract, not the old per-harness server profile model. Old standalone ACP bridge commands still start and can expose native Sessions, but they are a legacy compatibility path and do not provide the complete HR3 Machine → Project → Session workflow. A direct 2.x-style `opencode serve` endpoint is **not** an HR3 Machine endpoint. Saved 2.x server profiles are also not automatically imported into the new Machines list, so add the machine again after upgrading. For HR3, prefer the launcher/daemon setup below and connect through **Machines → Add machine**.
+### Desktop: just open the app
 
-### 1. Start Harness Remote on the machine with your code
+On **Windows or macOS**, install and open Harness Remote.
 
-Requirements:
+That is enough for the computer you are using: **there is no local gateway command to run**. Harness Remote starts and supervises its local Machine runtime automatically and discovers the supported coding-agent CLIs already installed on that computer.
 
-- Node.js 20+
-- at least one supported coding-agent CLI installed and authenticated
+If you also want to control a **different computer**, start the gateway on that other computer using the one command below.
 
-Then run:
+### Android: scan the QR code
+
+On the computer you want to control, install Node.js 20+, make sure at least one supported coding-agent CLI is installed and authenticated, then run:
 
 ```bash
-npx github:giuliastro/harness-remote \
-  --host 0.0.0.0 \
-  --port 4097 \
-  --username harness \
-  --password "use-a-long-unique-password" \
-  --root "$HOME/Software"
+npx --yes github:giuliastro/harness-remote
 ```
 
-`--root` defines the directory boundary Harness Remote may browse when you select Projects.
+Keep that terminal open.
 
-The launcher detects supported CLIs on `PATH`, starts the compatible local runtime and prints the connection details.
+The launcher automatically detects the supported coding agents, chooses the runtime and available ports, generates credentials and starts the Harness Remote endpoint. In the normal HR3 Machine gateway flow it also prints a short-lived one-time pairing QR.
 
-### 2. Connect from desktop or Android
+On Android:
 
-Open **Machines → Add machine** and enter the address, port, username and password printed by the launcher.
+1. Open **Machines**.
+2. Tap **Scan machine QR code**.
+3. Scan the QR shown by the gateway.
+4. Tap **View sessions**.
 
-One machine endpoint exposes the harnesses managed by that machine — you do not need a separate public endpoint for every coding agent.
+That is the normal mobile setup. You do not need to type the machine address or credentials when QR pairing is available.
 
-### 3. Or open the web client
+The pairing QR contains a one-time 256-bit token valid for five minutes. It does **not** contain the long-lived daemon password and can be claimed only once.
 
-From a Harness Remote checkout:
+### Gateway for another machine
+
+For any computer that is **not** the local computer managed automatically by the desktop app, the recommended command is still just:
+
+```bash
+npx --yes github:giuliastro/harness-remote
+```
+
+The launcher handles the normal choices automatically:
+
+- detects **Codex CLI, Claude Code, OpenCode, Oh My Pi and PI** from `PATH`;
+- exposes the supported harnesses through one Machine connection;
+- starts managed OpenCode when appropriate;
+- chooses free ports;
+- generates authentication credentials;
+- prints a compact connection summary;
+- prints the Android pairing QR when using the HR3 Machine gateway path.
+
+All common tuning is optional:
+
+```bash
+# Limit Project browsing to one directory
+npx --yes github:giuliastro/harness-remote --root ~/dev
+
+# Prefer a fixed external port
+npx --yes github:giuliastro/harness-remote --port 4900
+
+# Supply your own credentials instead of generated ones
+npx --yes github:giuliastro/harness-remote \
+  --username harness \
+  --password 'choose-a-strong-password'
+
+# Allow one browser origin
+npx --yes github:giuliastro/harness-remote \
+  --cors https://giuliastro.github.io
+```
+
+You normally do **not** need `--host`, `--port`, `--username`, `--password`, `--backend` or `--root`. Use them only when you want to override the automatic defaults.
+
+For remote access, keep the gateway on a trusted LAN or VPN. Do not expose it directly to the public internet.
+
+### Adding the remote machine from each client
+
+- **Android:** scan the gateway QR. This is the preferred path.
+- **Windows/macOS desktop:** the local computer is already present automatically. For an additional remote computer, open **Machines → Add machine** and use the address and generated credentials printed by that remote gateway.
+- **Web/PWA:** add the gateway using its printed address and credentials. Start the gateway with the browser's exact `--cors` origin.
+
+One Machine endpoint exposes all harnesses managed by that machine; you do not need one public endpoint per coding agent.
+
+### Web client
+
+From a checkout:
 
 ```bash
 cd web
@@ -226,23 +284,21 @@ npm ci
 npm run dev
 ```
 
-For browser access, restart the machine with the exact browser origin allowed:
+Then start the remote gateway with the Vite origin allowed, for example:
 
 ```bash
-npx github:giuliastro/harness-remote \
-  --host 0.0.0.0 \
-  --port 4097 \
-  --username harness \
-  --password "use-a-long-unique-password" \
-  --root "$HOME/Software" \
-  --cors http://localhost:5173
+npx --yes github:giuliastro/harness-remote --cors http://localhost:5173
 ```
 
 Open the URL printed by Vite, normally `http://localhost:5173`.
 
-You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/), which runs in your local browser. To connect it to a local backend, add `--cors https://giuliastro.github.io` when starting the launcher.
+You can also use the [hosted web app](https://giuliastro.github.io/harness-remote/). In that case the remote machine can be started with:
 
-For the full launcher and daemon guide, see [Quick start](docs/QUICK_START.md).
+```bash
+npx --yes github:giuliastro/harness-remote --cors https://giuliastro.github.io
+```
+
+For advanced/manual launcher options, legacy single-backend operation and troubleshooting, see the [Quick start guide](docs/QUICK_START.md) and [REFERENCE.md](REFERENCE.md).
 
 ## What Harness Remote is — and is not
 
@@ -282,17 +338,25 @@ your machine
 
 That makes it possible to add new harnesses without forcing existing ones into a single artificial behavior model.
 
-## Harness Remote 3 status
+## Harness Remote 3.1 status
 
-The Session-first architecture ships from `main`.
+Harness Remote 3.1 is the current Session-first release line.
 
-Harness Remote supports OpenCode, OMP, PI, Codex CLI and Claude Code while preserving each harness's native Session identity and behavior. The validated scope includes native Session discovery and continuation, multi-machine Session creation, same-machine cross-harness handoff with durable lineage, model selection, live Activity, Stop, rename/delete, transcript paging and reconnect recovery.
+Harness Remote supports OpenCode, OMP, PI, Codex CLI and Claude Code while preserving each harness's native Session identity and behavior. The validated scope includes native Session discovery and continuation, multi-machine Session creation, same-machine and cross-machine continuation with durable lineage, model selection, live Activity, Stop, rename/delete, transcript paging and reconnect recovery.
+
+3.1 also makes machine onboarding substantially simpler: Windows/macOS desktop manages its own local Machine runtime automatically, Android can pair a remote machine directly from the gateway QR, and the Machines flow now ends with an explicit path into native Sessions.
 
 ACP-backed Session recovery also protects freshly created Sessions from stale initial snapshots: an older empty snapshot cannot overwrite the first prompt of a Session that is already loaded in memory.
 
-Post-release work intentionally prioritizes Session correctness and maintainability over broad orchestration. Cross-machine handoff is a separate follow-up, and architectural cleanup must start from current `main` rather than reviving pre-release checkpoint/draft branches.
+The Project/Session outcome surface provides bounded Git evidence for review: changed-file visibility plus aggregate tracked-file, insertion, deletion and binary-file counts, without transmitting raw diff contents as part of the summary.
 
-The automatic multi-agent launcher is still being expanded: the current release can expose one selected ACP-backed primary alongside managed OpenCode, while additional concurrent ACP host instances remain follow-up work.
+Desktop recovery supervises the embedded Machine daemon and can restart a stopped/unresponsive managed runtime while cleaning up its process tree and preserving managed OpenCode port ownership.
+
+The blocking Chromium product gate exercises cross-machine continuation end to end: target capability/model discovery, Project identity continuity and mismatched-repository fail-closed behavior, then exactly-once target Session creation, dual-store lineage, bounded context and authority boundaries, first-prompt delivery and opening the writable target Session.
+
+Post-release development intentionally prioritizes Session correctness and maintainability over broad orchestration. Cross-machine federation is being hardened through explicit safety, recovery and browser gates rather than by introducing a second synthetic Session model.
+
+The automatic multi-agent launcher exposes the detected harnesses through one machine connection. It retains an internal compatibility default for legacy/unprefixed routing, but the client-facing harness list intentionally does not label one harness as more important than another.
 
 That focus is deliberate. A remote coding-agent UI is only useful if you can trust that the Session you see is the Session that actually exists.
 
@@ -311,10 +375,13 @@ npm ci
 npm run dev
 ```
 
+Ongoing unreleased work is summarized in [Development status](docs/DEVELOPMENT_STATUS.md) so another development session can resume from the current integration state without reconstructing it from chat history.
+
 ## Documentation
 
 - [Quick start and launcher options](docs/QUICK_START.md)
 - [Harness Remote 3 product and architecture](docs/HARNESS_3_ROADMAP.md)
+- [Current development handoff](docs/DEVELOPMENT_STATUS.md)
 - [Harness capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md)
 - [Dependency and adapter notes](docs/DEPENDENCIES.md)
 - [Backend-specific reference](REFERENCE.md)
