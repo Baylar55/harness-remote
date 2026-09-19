@@ -103,6 +103,7 @@ type Props = {
   onScanMachinePairing?: () => Promise<void>
   machinePairingBusy?: boolean
   machinePairingSuccessRevision?: number
+  machinePairingSuccessMachineName?: string | null
 }
 type NativeMachineRuntime = {
   machine: WorkspaceMachine
@@ -190,7 +191,8 @@ function MachineManager({
   onPersist,
   onScanPairing,
   pairingBusy = false,
-  pairingSuccessRevision = 0
+  pairingSuccessRevision = 0,
+  pairingSuccessMachineName = null
 }: {
   machines: WorkspaceMachine[]
   onClose: () => void
@@ -198,6 +200,7 @@ function MachineManager({
   onScanPairing?: () => Promise<void>
   pairingBusy?: boolean
   pairingSuccessRevision?: number
+  pairingSuccessMachineName?: string | null
 }) {
   const t = useTranslator()
   // Opening Machines is for inspecting the machines you already have. Creating another one is an
@@ -205,6 +208,7 @@ function MachineManager({
   // open (desktop local runtime, QR pairing, or any future machine source all follow the same rule).
   const [editingID, setEditingID] = useState<string | null>(null)
   const [confirmRemoveID, setConfirmRemoveID] = useState<string | null>(null)
+  const [completionMachineName, setCompletionMachineName] = useState<string | null>(null)
   const [health, setHealth] = useState<Record<string, MachineManagerHealth<MachineSnapshot> | undefined>>({})
   const probeRequestIDs = useRef<Record<string, number>>({})
   const dialogRef = useRef<HTMLElement>(null)
@@ -260,12 +264,17 @@ function MachineManager({
     // reach the scanner, do not leave that stale form behind after the machine was added.
     setEditingID(null)
     setConfirmRemoveID(null)
-  }, [pairingSuccessRevision])
+    setCompletionMachineName(pairingSuccessMachineName)
+  }, [pairingSuccessRevision, pairingSuccessMachineName])
 
   const save = (machine: WorkspaceMachine) => {
     if (isDesktopLocalMachine(machine)) return
-    if (editingID === "new") onPersist([...machines, machine])
-    else onPersist(machines.map((candidate) => candidate.id === machine.id ? machine : candidate))
+    if (editingID === "new") {
+      onPersist([...machines, machine])
+      setCompletionMachineName(machine.name)
+    } else {
+      onPersist(machines.map((candidate) => candidate.id === machine.id ? machine : candidate))
+    }
     setEditingID(null)
   }
 
@@ -288,6 +297,24 @@ function MachineManager({
           <button type="button" className="uw-manager-close" onClick={onClose} aria-label={t("sf.close")}>×</button>
         </header>
         <div className="uw-machine-manager-body">
+          {completionMachineName ? (
+            <div className="uw-machine-manager-success" role="status" aria-live="polite">
+              <div>
+                <strong>{t("sf.machineAddedTitle", { name: completionMachineName })}</strong>
+                <span>{t("sf.machineAddedBody")}</span>
+              </div>
+              <div className="uw-machine-manager-success-actions">
+                <button type="button" className="uw-manager-button primary" data-machine-view-sessions onClick={onClose}>
+                  {t("sf.viewSessions")}
+                </button>
+                {onScanPairing ? (
+                  <button type="button" className="uw-manager-button" data-machine-pairing-scan disabled={pairingBusy} onClick={() => void onScanPairing()}>
+                    {pairingBusy ? t("sf.openingScanner") : t("sf.scanAnotherMachine")}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {machines.length === 0 && editingID !== "new" ? (
             <div className="uw-machine-manager-empty">
               <strong>{t("sf.noMachinesConfigured")}</strong>
@@ -298,7 +325,7 @@ function MachineManager({
                     {pairingBusy ? t("sf.openingScanner") : t("sf.scanMachineQR")}
                   </button>
                 ) : null}
-                <button type="button" className="uw-manager-button" onClick={() => setEditingID("new")}>{t("sf.addManually")}</button>
+                <button type="button" className="uw-manager-button" onClick={() => { setCompletionMachineName(null); setEditingID("new") }}>{t("sf.addManually")}</button>
               </div>
             </div>
           ) : null}
@@ -341,7 +368,7 @@ function MachineManager({
                       {state === "offline" ? <button type="button" className="uw-manager-button" data-machine-retry onClick={() => probeMachine(machine)}>{t("sf.retry")}</button> : null}
                       {!runtimeOwned ? (
                         <>
-                          <button type="button" className="uw-manager-button" onClick={() => setEditingID(machine.id)}>{t("sf.edit")}</button>
+                          <button type="button" className="uw-manager-button" onClick={() => { setCompletionMachineName(null); setEditingID(machine.id) }}>{t("sf.edit")}</button>
                           <button type="button" className="uw-manager-button danger" onClick={() => setConfirmRemoveID(machine.id)}>{t("sf.remove")}</button>
                         </>
                       ) : null}
@@ -362,7 +389,7 @@ function MachineManager({
                   {pairingBusy ? t("sf.openingScanner") : t("sf.scanAnotherMachine")}
                 </button>
               ) : null}
-              <button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ {t("sf.addMachineAction")}</button>
+              <button type="button" className="uw-manager-button primary" onClick={() => { setCompletionMachineName(null); setEditingID("new") }}>+ {t("sf.addMachineAction")}</button>
             </div>
           ) : null}
         </footer>
@@ -1133,7 +1160,8 @@ export function StandaloneUniversalWorkspace({
   onPersistMachines,
   onScanMachinePairing,
   machinePairingBusy = false,
-  machinePairingSuccessRevision = 0
+  machinePairingSuccessRevision = 0,
+  machinePairingSuccessMachineName = null
 }: Props) {
   const t = useTranslator()
   // With the chat full-screen on a phone the rail is invisible, so a Session asking for input had
@@ -1224,6 +1252,7 @@ export function StandaloneUniversalWorkspace({
           onScanPairing={onScanMachinePairing}
           pairingBusy={machinePairingBusy}
           pairingSuccessRevision={machinePairingSuccessRevision}
+          pairingSuccessMachineName={machinePairingSuccessMachineName}
         />
       ) : null}
       {settingsOpen ? <MobileSettingsPage onClose={() => setSettingsOpen(false)} /> : null}
