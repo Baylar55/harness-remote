@@ -1,18 +1,49 @@
-.hr-machine-pairing-editor-action {
-  display: none;
+.uw-machine-onboarding-actions,
+.uw-machine-manager-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-/* Android renders this action only while Add/Configure Machine is open. Keeping it declarative
-   avoids DOM repair/MutationObserver work in the Session-first shell while still putting QR pairing
-   directly on the machine configuration surface. */
-#root:has(.uw-machine-editor) > .hr-machine-pairing-editor-action {
-  position: fixed;
-  z-index: 1210;
-  right: max(20px, env(safe-area-inset-right));
-  bottom: max(112px, calc(env(safe-area-inset-bottom) + 104px));
-  display: inline-flex;
-  align-items: center;
+.uw-machine-onboarding-actions {
   justify-content: center;
+  margin-top: 10px;
+}
+
+.uw-machine-manager-footer-actions {
+  justify-content: flex-end;
+}
+
+.uw-machine-manager-success {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  grid-column: 1 / -1;
+  padding: 14px 16px;
+  border: 1px solid var(--td3-border-strong, var(--tdw-border));
+  border-radius: 12px;
+  background: var(--td3-panel-2, var(--tdw-surface));
+}
+
+.uw-machine-manager-success > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.uw-machine-manager-success > div:first-child > span {
+  color: var(--td3-text-3);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.uw-machine-manager-success-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 
 .hr-machine-pairing-notice {
@@ -63,11 +94,28 @@
 }
 
 @media (max-width: 640px) {
-  #root:has(.uw-machine-editor) > .hr-machine-pairing-editor-action {
-    left: 20px;
-    right: 20px;
-    bottom: max(116px, calc(env(safe-area-inset-bottom) + 108px));
-    width: auto;
+  .uw-machine-manager-success {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .uw-machine-manager-success-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .uw-machine-manager-success-actions .uw-manager-button {
+    width: 100%;
+  }
+
+  .uw-machine-onboarding-actions {
+    width: 100%;
+  }
+
+  .uw-machine-onboarding-actions .uw-manager-button {
+    flex: 1 1 100%;
   }
 
   .hr-machine-pairing-notice {
