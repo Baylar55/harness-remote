@@ -89,6 +89,7 @@ function HarnessRemoteBoundary() {
   const [desktopSyncError, setDesktopSyncError] = useState<Error | null>(null)
   const [pairingNotice, setPairingNotice] = useState<PairingNotice | null>(null)
   const [pairingScanBusy, setPairingScanBusy] = useState(false)
+  const [pairingSuccessRevision, setPairingSuccessRevision] = useState(0)
 
   // Persistent remote-machine profiles are still acknowledged before the workspace starts issuing
   // requests. The desktop-owned local runtime is intentionally absent from this snapshot: its
@@ -174,6 +175,7 @@ function HarnessRemoteBoundary() {
       const nextMachines = upsertPairedMachine(machinesRef.current, paired)
       machinesRef.current = nextMachines
       persistMachines(nextMachines)
+      setPairingSuccessRevision((value) => value + 1)
       setPairingNotice({ kind: "success", text: `${paired.name} is connected.` })
     } catch (error) {
       // A transport failure does not imply the daemon consumed the grant. A re-scan therefore gets
@@ -223,23 +225,15 @@ function HarnessRemoteBoundary() {
       <StandaloneUniversalWorkspace
         machines={machines}
         onPersistMachines={persistMachines}
+        onScanMachinePairing={Capacitor.getPlatform() === "android" ? scanPairingQR : undefined}
+        machinePairingBusy={pairingScanBusy}
+        machinePairingSuccessRevision={pairingSuccessRevision}
       />
       {isDesktopPlatform() && localRuntime?.status === "unavailable" ? (
         <div className="hr-machine-pairing-notice error" role="status" aria-live="polite">
           <span><strong>Local desktop runtime</strong>{localRuntime.error}</span>
           <button type="button" onClick={() => void retryLocalRuntime()}>Retry</button>
         </div>
-      ) : null}
-      {Capacitor.getPlatform() === "android" ? (
-        <button
-          type="button"
-          className="uw-manager-button hr-machine-pairing-editor-action"
-          data-machine-pairing-scan
-          disabled={pairingScanBusy}
-          onClick={() => void scanPairingQR()}
-        >
-          {pairingScanBusy ? "Opening scanner…" : "Scan QR code"}
-        </button>
       ) : null}
       {pairingNotice ? (
         <div
