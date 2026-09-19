@@ -100,6 +100,9 @@ function loadRailWidth(): number | null {
 type Props = {
   machines: WorkspaceMachine[]
   onPersistMachines: (machines: WorkspaceMachine[]) => void
+  onScanMachinePairing?: () => Promise<void>
+  machinePairingBusy?: boolean
+  machinePairingSuccessRevision?: number
 }
 type NativeMachineRuntime = {
   machine: WorkspaceMachine
@@ -181,7 +184,21 @@ function MachineEditor({ machine, onCancel, onSave }: MachineEditorProps) {
   )
 }
 
-function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceMachine[]; onClose: () => void; onPersist: (machines: WorkspaceMachine[]) => void }) {
+function MachineManager({
+  machines,
+  onClose,
+  onPersist,
+  onScanPairing,
+  pairingBusy = false,
+  pairingSuccessRevision = 0
+}: {
+  machines: WorkspaceMachine[]
+  onClose: () => void
+  onPersist: (machines: WorkspaceMachine[]) => void
+  onScanPairing?: () => Promise<void>
+  pairingBusy?: boolean
+  pairingSuccessRevision?: number
+}) {
   const t = useTranslator()
   // Opening Machines is for inspecting the machines you already have. Creating another one is an
   // explicit action, so an asynchronously discovered machine can never leave a stale blank editor
@@ -237,6 +254,14 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
 
   useDialogDismiss(dialogRef, onClose)
 
+  useEffect(() => {
+    if (pairingSuccessRevision <= 0) return
+    // Pairing is authoritative external creation. If the user opened the manual draft only to
+    // reach the scanner, do not leave that stale form behind after the machine was added.
+    setEditingID(null)
+    setConfirmRemoveID(null)
+  }, [pairingSuccessRevision])
+
   const save = (machine: WorkspaceMachine) => {
     if (isDesktopLocalMachine(machine)) return
     if (editingID === "new") onPersist([...machines, machine])
@@ -263,7 +288,20 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
           <button type="button" className="uw-manager-close" onClick={onClose} aria-label={t("sf.close")}>×</button>
         </header>
         <div className="uw-machine-manager-body">
-          {machines.length === 0 && editingID !== "new" ? <div className="uw-machine-manager-empty"><strong>{t("sf.noMachinesConfigured")}</strong><span>{t("sf.noMachinesBody")}</span></div> : null}
+          {machines.length === 0 && editingID !== "new" ? (
+            <div className="uw-machine-manager-empty">
+              <strong>{t("sf.noMachinesConfigured")}</strong>
+              <span>{t("sf.noMachinesBody")}</span>
+              <div className="uw-machine-onboarding-actions">
+                {onScanPairing ? (
+                  <button type="button" className="uw-manager-button primary" data-machine-pairing-scan disabled={pairingBusy} onClick={() => void onScanPairing()}>
+                    {pairingBusy ? t("sf.openingScanner") : t("sf.scanMachineQR")}
+                  </button>
+                ) : null}
+                <button type="button" className="uw-manager-button" onClick={() => setEditingID("new")}>{t("sf.addManually")}</button>
+              </div>
+            </div>
+          ) : null}
           {machines.map((machine) => {
             const check = health[machine.id]
             const state = check?.state || "checking"
@@ -315,7 +353,19 @@ function MachineManager({ machines, onClose, onPersist }: { machines: WorkspaceM
           })}
           {draft ? <MachineEditor key={draft.id} machine={draft} onCancel={() => setEditingID(null)} onSave={save} /> : null}
         </div>
-        <footer className="uw-machine-manager-footer"><span>{t("sf.managerFooter", { machines: machines.length, agents: availableCount })}</span><button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ {machines.length ? t("sf.addMachineAction") : t("sf.addMachine")}</button></footer>
+        <footer className="uw-machine-manager-footer">
+          <span>{t("sf.managerFooter", { machines: machines.length, agents: availableCount })}</span>
+          {machines.length > 0 ? (
+            <div className="uw-machine-manager-footer-actions">
+              {onScanPairing ? (
+                <button type="button" className="uw-manager-button" data-machine-pairing-scan disabled={pairingBusy} onClick={() => void onScanPairing()}>
+                  {pairingBusy ? t("sf.openingScanner") : t("sf.scanAnotherMachine")}
+                </button>
+              ) : null}
+              <button type="button" className="uw-manager-button primary" onClick={() => setEditingID("new")}>+ {t("sf.addMachineAction")}</button>
+            </div>
+          ) : null}
+        </footer>
       </section>
     </div>
   )
@@ -1078,7 +1128,13 @@ function NativeSessionsWorkspace({
   )
 }
 
-export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Props) {
+export function StandaloneUniversalWorkspace({
+  machines,
+  onPersistMachines,
+  onScanMachinePairing,
+  machinePairingBusy = false,
+  machinePairingSuccessRevision = 0
+}: Props) {
   const t = useTranslator()
   // With the chat full-screen on a phone the rail is invisible, so a Session asking for input had
   // no way of saying so. The counts already existed per machine and per project; only the badge
@@ -1160,7 +1216,16 @@ export function StandaloneUniversalWorkspace({ machines, onPersistMachines }: Pr
   return (
     <div className="uw-standalone-host">
       <NativeSessionsWorkspace machines={machines} onManageMachines={showMachines} onManageSettings={showSettings} onAttentionCountChange={setAttentionCount} />
-      {managerOpen ? <MachineManager machines={machines} onClose={() => setManagerOpen(false)} onPersist={onPersistMachines} /> : null}
+      {managerOpen ? (
+        <MachineManager
+          machines={machines}
+          onClose={() => setManagerOpen(false)}
+          onPersist={onPersistMachines}
+          onScanPairing={onScanMachinePairing}
+          pairingBusy={machinePairingBusy}
+          pairingSuccessRevision={machinePairingSuccessRevision}
+        />
+      ) : null}
       {settingsOpen ? <MobileSettingsPage onClose={() => setSettingsOpen(false)} /> : null}
       <nav className="hr-mobile-nav" aria-label={t("sf.mainNavigation")}>
         <button type="button" className={mobileSection === "sessions" ? "active" : ""} onClick={showSessions} aria-current={mobileSection === "sessions" ? "page" : undefined}><ChatIcon size={20} /><span>{t("nav.sessions")}</span>{attentionCount ? <b className="hr-mobile-nav-badge" aria-label={t("sf.attentionCount", { count: attentionCount })}>{attentionCount > 9 ? "9+" : attentionCount}</b> : null}</button>
