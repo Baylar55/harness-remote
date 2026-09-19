@@ -20,6 +20,7 @@ import {
   type MachinePairingActivation
 } from "./machine-pairing"
 import { SERVER_STORAGE_KEYS } from "./storageKeys"
+import { useTranslator } from "./useTranslator"
 import {
   DESKTOP_LOCAL_MACHINE_ID,
   isDesktopLocalMachine,
@@ -74,6 +75,7 @@ function localRuntimeMachine(state: DesktopLocalRuntimeState | null): WorkspaceM
 }
 
 function HarnessRemoteBoundary() {
+  const t = useTranslator()
   const [revision, setRevision] = useState(0)
   const persistedMachines = useMemo(loadWorkspaceMachines, [revision])
   const [localRuntime, setLocalRuntime] = useState<DesktopLocalRuntimeState | null>(null)
@@ -90,6 +92,7 @@ function HarnessRemoteBoundary() {
   const [pairingNotice, setPairingNotice] = useState<PairingNotice | null>(null)
   const [pairingScanBusy, setPairingScanBusy] = useState(false)
   const [pairingSuccessRevision, setPairingSuccessRevision] = useState(0)
+  const [pairingSuccessMachineName, setPairingSuccessMachineName] = useState<string | null>(null)
 
   // Persistent remote-machine profiles are still acknowledged before the workspace starts issuing
   // requests. The desktop-owned local runtime is intentionally absent from this snapshot: its
@@ -168,21 +171,22 @@ function HarnessRemoteBoundary() {
     const grantKey = `${activation.endpoint}\u0000${activation.token}`
     if (pairedGrantRef.current.has(grantKey) || pairingInFlightRef.current.has(grantKey)) return
     pairingInFlightRef.current.add(grantKey)
-    setPairingNotice({ kind: "working", text: "Connecting to this machine…" })
+    setPairingNotice({ kind: "working", text: t("sf.pairingConnecting") })
     try {
       const paired = await claimMachinePairing(activation)
       pairedGrantRef.current.add(grantKey)
       const nextMachines = upsertPairedMachine(machinesRef.current, paired)
       machinesRef.current = nextMachines
       persistMachines(nextMachines)
+      setPairingSuccessMachineName(paired.name)
       setPairingSuccessRevision((value) => value + 1)
-      setPairingNotice({ kind: "success", text: `${paired.name} is connected.` })
+      setPairingNotice({ kind: "success", text: t("sf.pairingConnected", { name: paired.name }) })
     } catch (error) {
       // A transport failure does not imply the daemon consumed the grant. A re-scan therefore gets
       // another chance until the server itself reports used/expired.
       setPairingNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "Machine pairing failed."
+        text: error instanceof Error ? error.message : t("sf.pairingFailed")
       })
     } finally {
       pairingInFlightRef.current.delete(grantKey)
@@ -202,7 +206,7 @@ function HarnessRemoteBoundary() {
     } catch (error) {
       setPairingNotice({
         kind: "error",
-        text: error instanceof Error ? error.message : "QR pairing failed."
+        text: error instanceof Error ? error.message : t("sf.qrPairingFailed")
       })
     } finally {
       setPairingScanBusy(false)
@@ -228,6 +232,7 @@ function HarnessRemoteBoundary() {
         onScanMachinePairing={Capacitor.getPlatform() === "android" ? scanPairingQR : undefined}
         machinePairingBusy={pairingScanBusy}
         machinePairingSuccessRevision={pairingSuccessRevision}
+        machinePairingSuccessMachineName={pairingSuccessMachineName}
       />
       {isDesktopPlatform() && localRuntime?.status === "unavailable" ? (
         <div className="hr-machine-pairing-notice error" role="status" aria-live="polite">
@@ -241,8 +246,8 @@ function HarnessRemoteBoundary() {
           role={pairingNotice.kind === "error" ? "alert" : "status"}
           aria-live="polite"
         >
-          <span><strong>Machine pairing</strong>{pairingNotice.text}</span>
-          <button type="button" onClick={() => setPairingNotice(null)} aria-label="Dismiss machine pairing status">×</button>
+          <span><strong>{t("sf.machinePairing")}</strong>{pairingNotice.text}</span>
+          <button type="button" onClick={() => setPairingNotice(null)} aria-label={t("sf.dismissPairingStatus")}>×</button>
         </div>
       ) : null}
     </>
