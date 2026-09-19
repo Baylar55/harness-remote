@@ -413,6 +413,12 @@ type TranslationKey =
   | 'sf.machineAddedTitle'
   | 'sf.machineAddedBody'
   | 'sf.viewSessions'
+  | 'sf.machinePairing'
+  | 'sf.pairingConnecting'
+  | 'sf.pairingConnected'
+  | 'sf.pairingFailed'
+  | 'sf.qrPairingFailed'
+  | 'sf.dismissPairingStatus'
   | 'sf.preparing'
   | 'sf.connectingMachines'
   | 'sf.connectingBody'
@@ -891,6 +897,12 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machineAddedTitle': '{name} added',
     'sf.machineAddedBody': 'You’re ready to work. View this machine’s native Sessions, or connect another machine.',
     'sf.viewSessions': 'View sessions',
+    'sf.machinePairing': 'Machine pairing',
+    'sf.pairingConnecting': 'Connecting to this machine…',
+    'sf.pairingConnected': '{name} is connected.',
+    'sf.pairingFailed': 'Machine pairing failed.',
+    'sf.qrPairingFailed': 'QR pairing failed.',
+    'sf.dismissPairingStatus': 'Dismiss machine pairing status',
     'sf.preparing': 'Preparing Harness Remote',
     'sf.connectingMachines': 'Connecting to your machines…',
     'sf.connectingBody': 'Discovering Projects, installed coding agents and native Sessions. An ACP harness may need a few seconds to start.',
@@ -1369,6 +1381,12 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machineAddedTitle': 'Macchina aggiunta: {name}',
     'sf.machineAddedBody': 'È tutto pronto. Vai alle sessioni native di questa macchina oppure collegane un’altra.',
     'sf.viewSessions': 'Vai alle sessioni',
+    'sf.machinePairing': 'Collegamento macchina',
+    'sf.pairingConnecting': 'Connessione a questa macchina…',
+    'sf.pairingConnected': '{name} è connessa.',
+    'sf.pairingFailed': 'Collegamento della macchina non riuscito.',
+    'sf.qrPairingFailed': 'Collegamento tramite QR non riuscito.',
+    'sf.dismissPairingStatus': 'Chiudi stato collegamento macchina',
     'sf.preparing': 'Preparazione di Harness Remote',
     'sf.connectingMachines': 'Connessione alle tue macchine…',
     'sf.connectingBody': 'Individuazione di progetti, coding agent installati e sessioni native. Un harness ACP può richiedere alcuni secondi per avviarsi.',
@@ -1847,6 +1865,12 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machineAddedTitle': '已新增 {name}',
     'sf.machineAddedBody': '現在可以開始工作。查看這台機器的原生工作階段，或連線另一台機器。',
     'sf.viewSessions': '查看工作階段',
+    'sf.machinePairing': '機器配對',
+    'sf.pairingConnecting': '正在連線到這台機器…',
+    'sf.pairingConnected': '{name} 已連線。',
+    'sf.pairingFailed': '機器配對失敗。',
+    'sf.qrPairingFailed': 'QR 配對失敗。',
+    'sf.dismissPairingStatus': '關閉機器配對狀態',
     'sf.preparing': '正在準備 Harness Remote',
     'sf.connectingMachines': '正在連線到你的機器…',
     'sf.connectingBody': '正在探索專案、已安裝的編碼代理與原生工作階段。ACP harness 可能需要幾秒鐘啟動。',
@@ -2325,6 +2349,12 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machineAddedTitle': '已添加 {name}',
     'sf.machineAddedBody': '现在可以开始工作。查看这台机器的原生会话，或连接另一台机器。',
     'sf.viewSessions': '查看会话',
+    'sf.machinePairing': '机器配对',
+    'sf.pairingConnecting': '正在连接到这台机器…',
+    'sf.pairingConnected': '{name} 已连接。',
+    'sf.pairingFailed': '机器配对失败。',
+    'sf.qrPairingFailed': '二维码配对失败。',
+    'sf.dismissPairingStatus': '关闭机器配对状态',
     'sf.preparing': '正在准备 Harness Remote',
     'sf.connectingMachines': '正在连接你的机器…',
     'sf.connectingBody': '正在发现项目、已安装的编码代理和原生会话。ACP harness 可能需要几秒钟启动。',
