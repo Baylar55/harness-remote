@@ -1,0 +1,108 @@
+name: Publish npm CLI
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - package.json
+      - bridge/src/**
+      - bridge/test/npm-package-contract.test.js
+      - .github/workflows/npm-publish.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-harness-remote
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Use npm with Trusted Publishing support
+        run: npm install --global npm@^11.15.0
+
+      - name: Install root dependencies
+        run: npm install --ignore-scripts --no-package-lock
+
+      - name: Verify bridge and package contract
+        run: npm test
+
+      - name: Pack CLI
+        id: pack
+        shell: bash
+        run: |
+          tarball="$(npm pack --silent)"
+          test -f "$tarball"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test installed CLI
+        shell: bash
+        run: |
+          smoke="$RUNNER_TEMP/harness-remote-npm-smoke"
+          mkdir -p "$smoke"
+          cd "$smoke"
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE/${{ steps.pack.outputs.tarball }}" >/dev/null
+          ./node_modules/.bin/harness-remote --help
+
+      - name: Check npm package ownership and version
+        id: npm
+        shell: bash
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+
+          if npm view "$name" name >/dev/null 2>&1; then
+            repository="$(npm view "$name" repository.url 2>/dev/null || true)"
+            if [[ "$repository" != *"giuliastro/harness-remote"* ]]; then
+              echo "::error::npm package name '$name' already exists and does not point to this repository: $repository"
+              exit 1
+            fi
+          fi
+
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already published; skipping idempotently."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$name@$version is not published yet."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Prepare OIDC auth when no npm token is configured
+        if: steps.npm.outputs.publish == 'true'
+        shell: bash
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "Using repository NPM_TOKEN for this publish."
+            exit 0
+          fi
+
+          echo "No NPM_TOKEN is configured; attempting npm Trusted Publishing (OIDC)."
+          if [ -z "${NPM_CONFIG_USERCONFIG:-}" ]; then
+            echo "::error::setup-node did not expose NPM_CONFIG_USERCONFIG"
+            exit 1
+          fi
+          printf '%s\n' 'registry=https://registry.npmjs.org/' > "$NPM_CONFIG_USERCONFIG"
+
+      - name: Publish harness-remote
+        if: steps.npm.outputs.publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
