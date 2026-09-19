@@ -406,6 +406,10 @@ type TranslationKey =
   | 'sf.addFirstMachine'
   | 'sf.addFirstMachineBody'
   | 'sf.addMachine'
+  | 'sf.scanMachineQR'
+  | 'sf.scanAnotherMachine'
+  | 'sf.openingScanner'
+  | 'sf.addManually'
   | 'sf.preparing'
   | 'sf.connectingMachines'
   | 'sf.connectingBody'
@@ -877,6 +881,10 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.addFirstMachine': 'Add your first machine',
     'sf.addFirstMachineBody': 'Connect the computer that runs Codex, Claude, OpenCode, OMP or PI. Its native Sessions will appear here directly.',
     'sf.addMachine': 'Add machine',
+    'sf.scanMachineQR': 'Scan machine QR code',
+    'sf.scanAnotherMachine': 'Scan another machine',
+    'sf.openingScanner': 'Opening scanner…',
+    'sf.addManually': 'Add manually',
     'sf.preparing': 'Preparing Harness Remote',
     'sf.connectingMachines': 'Connecting to your machines…',
     'sf.connectingBody': 'Discovering Projects, installed coding agents and native Sessions. An ACP harness may need a few seconds to start.',
