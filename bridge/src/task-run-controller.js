@@ -355,4 +355,21 @@ export class TaskRunController {
     // Only explicit Advanced mode=resume is strict about requiring the old native Session.
     return this.launch(taskID, { ...options, prompt: text, agentId: agentID, reuseSession })
   }
+
+  async cancel(taskID) {
+    await this.#awaitReconciliation()
+    let task = await this.taskStore.get(taskID)
+    if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
+    if (!["starting", "running"].includes(task.status)) return task
+
+    await this.taskLauncher.abort(task)
+    task = await this.taskStore.get(taskID) ?? task
+    if (!["starting", "running"].includes(task.status)) return task
+
+    return this.taskStore.setRunState(taskID, {
+      status: "cancelled",
+      run: task.run,
+      expectedRunId: task.run?.id
+    })
+  }
 }
