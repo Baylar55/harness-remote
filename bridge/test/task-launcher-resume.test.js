@@ -156,10 +156,10 @@ test("TaskLauncher.abort throws for unsupported transport", async () => {
   )
 })
 
-test("TaskLauncher.abort returns false and warns when transport is absent (persist-only cancel)", async () => {
-  const warnings = []
-  const launcher = new TaskLauncher({ warn: (msg) => warnings.push(msg) })
-  assert.equal(await launcher.abort({ id: "task-1", agentId: "codex", run: { sessionId: "sess-legacy" } }), false)
-  assert.equal(warnings.length, 1)
-  assert.match(warnings[0], /sess-legacy without transport/)
+test("TaskLauncher.abort rejects an identified native session whose transport is missing", async () => {
+  const launcher = new TaskLauncher()
+  await assert.rejects(
+    () => launcher.abort({ id: "task-1", agentId: "codex", run: { sessionId: "sess-legacy" } }),
+    (error) => error.code === "native_abort_unconfirmed" && /native session transport is missing/.test(error.message)
+  )
 })

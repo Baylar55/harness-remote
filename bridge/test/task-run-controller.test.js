@@ -398,6 +398,25 @@ test("cancel does not persist cancelled if launcher abort throws", async () => {
   assert.equal(current.status, "running")
 })
 
+test("cancel refuses a skipped native abort when an active task has a session id", async () => {
+  const current = draft({
+    status: "running",
+    run: { id: "run-1", sessionId: "session-1", agentId: "codex" }
+  })
+  let persisted = false
+  const controller = new TaskRunController({
+    taskStore: {
+      async get() { return structuredClone(current) },
+      async setRunState() { persisted = true }
+    },
+    taskLauncher: { async abort() { return false } }
+  })
+
+  await assert.rejects(() => controller.cancel("task-1"), (error) => error.code === "native_abort_unconfirmed")
+  assert.equal(persisted, false)
+  assert.equal(current.status, "running")
+})
+
 test("cancel active task without sessionId persists cancelled without aborting native session", async () => {
   let current = draft({
     status: "starting",

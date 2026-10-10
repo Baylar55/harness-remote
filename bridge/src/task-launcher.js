@@ -186,8 +186,7 @@ export class TaskLauncher {
     httpRecoveryPollMs = DEFAULT_HTTP_RECOVERY_POLL_MS,
     httpRecoveryGraceMs = DEFAULT_HTTP_RECOVERY_GRACE_MS,
     httpRecoveryTimeoutMs = DEFAULT_HTTP_RECOVERY_TIMEOUT_MS,
-    sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    warn = (message) => process.stderr.write(`${message}\n`)
+    sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   } = {}) {
     this.daemon = daemon
     this.fetchImpl = fetchImpl
@@ -196,7 +195,6 @@ export class TaskLauncher {
     this.httpRecoveryGraceMs = httpRecoveryGraceMs
     this.httpRecoveryTimeoutMs = httpRecoveryTimeoutMs
     this.sleepImpl = sleepImpl
-    this.warn = warn
   }
 
   async #entry(agentID) {
@@ -464,11 +462,10 @@ export class TaskLauncher {
     const run = task?.run
     const sessionID = run?.sessionId || run?.sessionID
     if (!sessionID) return false
-    if (!run?.transport) {
-      this.warn?.(`Active task ${task?.id || ""} has session ${sessionID} without transport; native abort skipped`)
-      return false
-    }
     const agentID = runAgentID(task, run)
+    if (!run?.transport) {
+      throw taskLaunchError("native_abort_unconfirmed", `Cannot stop ${agentID}: native session transport is missing`)
+    }
 
     if (run.transport === "acp") {
       const service = this.acpService?.(agentID)

@@ -362,9 +362,13 @@ export class TaskRunController {
     if (!task) throw taskLaunchError("unknown_task", `Unknown task: ${taskID}`)
     if (!["starting", "running"].includes(task.status)) return task
 
-    await this.taskLauncher.abort(task)
+    const sessionID = task.run?.sessionId || task.run?.sessionID
+    const aborted = await this.taskLauncher.abort(task)
     task = await this.taskStore.get(taskID) ?? task
     if (!["starting", "running"].includes(task.status)) return task
+    if (sessionID && aborted === false) {
+      throw taskLaunchError("native_abort_unconfirmed", "Cannot cancel task: native session abort was not confirmed")
+    }
 
     return this.taskStore.setRunState(taskID, {
       status: "cancelled",

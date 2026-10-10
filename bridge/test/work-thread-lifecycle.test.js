@@ -123,6 +123,31 @@ test("HTTP Work Thread stuck as running is reconciled to completed from native s
   }
 })
 
+test("Stop preserves a persisted active task when its native session transport is missing", async () => {
+  const task = activeTask()
+  delete task.run.transport
+  for (const run of task.runs) delete run.transport
+  const { store, cleanup } = await storeFor(task)
+  try {
+    let abortCalls = 0
+    const acpService = () => ({ async abort() { abortCalls += 1 } })
+    const launcher = new TaskLauncher({
+      daemon: { hostEntry: () => ({ kind: "acp" }) },
+      acpService
+    })
+    const taskRunController = new TaskRunController({ taskStore: store, taskLauncher: launcher, acpService })
+    await taskRunController.reconciliation
+    const controller = new WorkThreadController({ taskStore: store, taskRunController, checkpointManager })
+    const before = await store.get("thread-1")
+
+    await assert.rejects(() => controller.markCancelled("thread-1"), /native session transport is missing/)
+    assert.equal(abortCalls, 0)
+    assert.deepEqual(await store.get("thread-1"), before)
+  } finally {
+    await cleanup()
+  }
+})
+
 test("Stop never persists cancelled if the real native abort fails", async () => {
   const { store, cleanup } = await storeFor(activeTask())
   try {
