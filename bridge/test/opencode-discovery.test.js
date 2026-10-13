@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
+import path from "node:path"
 import test from "node:test"
 import { discoverOpenCodeExecutables, openCodeGeneration, readOpenCodeVersion, assertLegacyOpenCode } from "../src/opencode-discovery.js"
-import { detectBackends, resolveLaunchPlan } from "../src/launcher.js"
+import { detectBackends, resolveLaunchPlan, findExecutable } from "../src/launcher.js"
 import { harnessProfile, resolveAcpLaunch } from "../src/harness-profiles.js"
 import { resolveManagedOpenCodeOptions } from "../src/daemon-cli.js"
 
@@ -70,6 +71,25 @@ test("version probes are bounded, ignore failures, and handle Windows npm shims"
   assert.equal(call[2].timeout, 3000)
   assert.equal(readOpenCodeVersion("opencode", { run: () => ({ status: 1, stdout: "2.0.28" }) }), "")
   assert.equal(readOpenCodeVersion("opencode", { run: () => ({ error: new Error("timeout"), stdout: "2.0.28" }) }), "")
+})
+
+test("Windows discovery and ACP launch prefer the npm cmd shim over the adjacent POSIX shim", () => {
+  const bare = path.join("/npm tools", "opencode")
+  const shim = `${bare}.cmd`
+  const options = {
+    platform: "win32", pathValue: "/npm tools",
+    exists: (command) => command === bare || command === shim,
+    readVersion: (command) => {
+      assert.equal(command, shim)
+      return "opencode v2.0.28"
+    }
+  }
+  assert.deepEqual(detectBackends(options), ["opencode2"])
+  const launch = resolveAcpLaunch(harnessProfile("opencode2"), {
+    ...options,
+    find: (name) => findExecutable(name, options)
+  })
+  assert.deepEqual(launch, { command: shim, args: ["acp"], source: "path" })
 })
 
 test("a daemon with v2 only does not register a legacy HTTP host", () => {

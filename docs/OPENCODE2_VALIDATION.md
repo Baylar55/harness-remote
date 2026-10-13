@@ -78,7 +78,7 @@ overwrite credentials or a global CLI. `HARNESS_REMOTE_OPENCODE2_TEST_DIR` and
 
 ## Validation status
 
-- Automated checks run by the agent before integration with main: 633 bridge tests passed; the full frontend
+- Automated checks run by the agent after integration with main: 656 bridge tests passed; the full frontend
   `test:ci:full` suite, TypeScript/Vite and Electron builds passed. Desktop transport
   checks include v2 profile retention, HTTP agent routing and SSE routing.
 - Real ACP 2.0.28 handshake and session creation passed in isolated native data.

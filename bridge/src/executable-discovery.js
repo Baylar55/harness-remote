@@ -7,7 +7,9 @@ function executableNames(name, platform = process.platform) {
     .split(";")
     .filter(Boolean)
     .map((extension) => extension.toLowerCase())
-  return [name, ...extensions.map((extension) => `${name}${extension}`)]
+  // npm publishes a POSIX shim beside its .cmd shim. Windows must prefer a runnable
+  // PATHEXT candidate so version probes and ACP launches never select that shell script.
+  return [...extensions.map((extension) => `${name}${extension}`), name]
 }
 
 function executable(candidate, { platform = process.platform, exists = fs.existsSync, access = fs.accessSync } = {}) {
