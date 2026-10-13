@@ -66,10 +66,10 @@ test("an ACP adapter already on PATH is preferred over fetching one", async () =
   const openCode2 = harnessProfile("opencode2")
   assert.deepEqual(resolveAcpLaunch(openCode2, { find: () => null }), {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    args: ["--yes", "--package=@opencode/cli", "opencode", "acp"],
+    args: ["--yes", "--package=@opencode/cli@2.0.28", "opencode2", "acp"],
     source: "npx"
   })
-  assert.deepEqual(resolveAcpLaunch(openCode2, { find: (name) => name === "opencode2" ? "/usr/bin/opencode2" : null }), {
+  assert.deepEqual(resolveAcpLaunch(openCode2, { find: (name) => name === "opencode2" ? "/usr/bin/opencode2" : null, readVersion: () => "opencode v2.0.28" }), {
     command: "/usr/bin/opencode2",
     args: ["acp"],
     source: "path"

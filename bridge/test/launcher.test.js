@@ -37,7 +37,7 @@ test("detects OpenCode 2 and MiMo as ACP providers without changing established 
     path.join("/tools", "copilot")
   ])
   assert.deepEqual(
-    detectBackends({ pathValue, platform: "linux", exists: (candidate) => existing.has(candidate), access: () => {} }),
+    detectBackends({ pathValue, platform: "linux", exists: (candidate) => existing.has(candidate), access: () => {}, readVersion: () => "opencode v2.0.28" }),
     ["copilot", "opencode2", "mimo"]
   )
   assert.deepEqual(
@@ -57,7 +57,7 @@ test("ignores non-executable PATH entries on Unix", () => {
 
 test("detects OpenCode as a managed direct-HTTP backend", () => {
   const candidate = path.join("/tools", "opencode")
-  assert.deepEqual(detectBackends({ pathValue: "/tools", platform: "linux", exists: (value) => value === candidate, access: () => {} }), ["opencode"])
+  assert.deepEqual(detectBackends({ pathValue: "/tools", platform: "linux", exists: (value) => value === candidate, access: () => {}, readVersion: () => "1.19.0" }), ["opencode"])
   assert.equal(resolveBackend([], ["opencode"]), "opencode")
 })
 

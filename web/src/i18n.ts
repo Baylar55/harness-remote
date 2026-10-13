@@ -121,6 +121,7 @@ type TranslationKey =
   | 'detail.jumpToLatest'
   | 'detail.you'
   | 'detail.opencode'
+  | 'detail.opencode2'
   | 'detail.projectDashboardLabel'
   | 'detail.projectLabel'
   | 'detail.vcsLabel'
@@ -213,6 +214,7 @@ type TranslationKey =
   | 'connect.step.address'
   | 'connect.step.credentials'
   | 'connect.harness.opencode'
+  | 'connect.harness.opencode2'
   | 'connect.harness.omp'
   | 'connect.harness.pi'
   | 'connect.harness.claude'
@@ -604,7 +606,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.send': 'Send',
     'detail.jumpToLatest': 'Go to latest',
     'detail.you': '👤 You',
-    'detail.opencode': '🤖 OpenCode',
+    'detail.opencode': '🤖 OpenCode Legacy',
+    'detail.opencode2': '🤖 OpenCode 2',
     'detail.projectDashboardLabel': 'Project and VCS dashboard',
     'detail.projectLabel': 'Project',
     'detail.vcsLabel': 'VCS',
@@ -763,7 +766,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.step.harness': 'Harness',
     'connect.step.address': 'Address',
     'connect.step.credentials': 'Credentials',
-    'connect.harness.opencode': 'Connect directly to an OpenCode server.',
+    'connect.harness.opencode': 'Connect directly to an OpenCode Legacy server.',
+    'connect.harness.opencode2': 'Connect to OpenCode 2 through the ACP bridge.',
     'connect.harness.omp': 'Connect through the bundled Oh My Pi bridge.',
     'connect.harness.pi': 'Connect to PI through the ACP bridge.',
     'connect.harness.claude': 'Connect to Claude Code through the ACP bridge.',
@@ -1088,7 +1092,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.send': 'Invia',
     'detail.jumpToLatest': 'Vai alla fine',
     'detail.you': '👤 Tu',
-    'detail.opencode': '🤖 OpenCode',
+    'detail.opencode': '🤖 OpenCode Legacy',
+    'detail.opencode2': '🤖 OpenCode 2',
     'detail.projectDashboardLabel': 'Dashboard progetto e VCS',
     'detail.projectLabel': 'Progetto',
     'detail.vcsLabel': 'VCS',
@@ -1247,7 +1252,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.step.harness': 'Harness',
     'connect.step.address': 'Indirizzo',
     'connect.step.credentials': 'Credenziali',
-    'connect.harness.opencode': 'Connessione diretta a un server OpenCode.',
+    'connect.harness.opencode': 'Connessione diretta a un server OpenCode Legacy.',
+    'connect.harness.opencode2': 'Connessione a OpenCode 2 tramite bridge ACP.',
     'connect.harness.omp': 'Connessione tramite il bridge incluso per Oh My Pi.',
     'connect.harness.pi': 'Connessione a PI tramite bridge ACP.',
     'connect.harness.claude': 'Connessione a Claude Code tramite bridge ACP.',
@@ -1572,7 +1578,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.send': '傳送',
     'detail.jumpToLatest': '前往最新',
     'detail.you': '👤 你',
-    'detail.opencode': '🤖 OpenCode',
+    'detail.opencode': '🤖 OpenCode Legacy',
+    'detail.opencode2': '🤖 OpenCode 2',
     'detail.projectDashboardLabel': '專案與 VCS 儀表板',
     'detail.projectLabel': '專案',
     'detail.vcsLabel': 'VCS',
@@ -1664,7 +1671,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.step.harness': 'Harness',
     'connect.step.address': '位址',
     'connect.step.credentials': '認證資訊',
-    'connect.harness.opencode': '直接連線到 OpenCode 伺服器。',
+    'connect.harness.opencode': '直接連線到 OpenCode Legacy 伺服器。',
+    'connect.harness.opencode2': '透過 ACP bridge 連線到 OpenCode 2。',
     'connect.harness.omp': '透過內附的 Oh My Pi bridge 連線。',
     'connect.harness.pi': '透過 ACP bridge 連線到 PI。',
     'connect.harness.claude': '透過 ACP bridge 連線到 Claude Code。',
@@ -2056,7 +2064,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.send': '发送',
     'detail.jumpToLatest': '前往最新',
     'detail.you': '👤 你',
-    'detail.opencode': '🤖 OpenCode',
+    'detail.opencode': '🤖 OpenCode Legacy',
+    'detail.opencode2': '🤖 OpenCode 2',
     'detail.projectDashboardLabel': '项目与 VCS 仪表盘',
     'detail.projectLabel': '项目',
     'detail.vcsLabel': 'VCS',
@@ -2148,7 +2157,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.step.harness': 'Harness',
     'connect.step.address': '地址',
     'connect.step.credentials': '凭据',
-    'connect.harness.opencode': '直接连接到 OpenCode 服务器。',
+    'connect.harness.opencode': '直接连接到 OpenCode Legacy 服务器。',
+    'connect.harness.opencode2': '通过 ACP 桥接器连接到 OpenCode 2。',
     'connect.harness.omp': '通过附带的 Oh My Pi 桥接器连接。',
     'connect.harness.pi': '通过 ACP 桥接器连接到 PI。',
     'connect.harness.claude': '通过 ACP 桥接器连接到 Claude Code。',

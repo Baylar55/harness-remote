@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process"
 import { EventEmitter } from "node:events"
+import { assertLegacyOpenCode } from "./opencode-discovery.js"
 
 const DEFAULT_START_TIMEOUT_MS = 15_000
 
@@ -228,6 +229,8 @@ export class ManagedOpenCodeHost extends EventEmitter {
   }
 
   async #start() {
+    // The shared `opencode` command can now be v2. Never expose it through v1's HTTP contract.
+    if (this.spawnProcess === spawn) assertLegacyOpenCode(this.command, { platform: this.platform, environment: this.environment })
     const invocation = openCodeSpawnInvocation(
       this.command,
       ["serve", "--hostname", this.host, "--port", String(this.port)],

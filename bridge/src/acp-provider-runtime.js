@@ -83,6 +83,7 @@ export async function createAcpProviderRuntime({
       modelCatalog,
       bridgeConfig,
       serviceOptions: {
+        replayAuthoritative: provider.replayAuthoritative,
         snapshotDirectory: path.join(config.stateDirectory, provider.id),
         historyLoader: provider.historyLoader,
         preserveListedTimestamps: provider.preserveListedTimestamps,

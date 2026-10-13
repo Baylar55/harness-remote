@@ -11,6 +11,7 @@ import { canListen, canListenForBind, harnessPortUnavailableMessage, resolveLaun
 import { loadMachineIdentity } from "./machine-registry.js"
 import { MachineDaemon, createMachineDaemonServer } from "./machine-daemon.js"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
+import { resolveOpenCodeCommand } from "./opencode-discovery.js"
 
 function requireValue(args, index, option) {
   const value = args[index + 1]
@@ -95,6 +96,11 @@ export async function ensureHarnessPortAvailable({ port, host, canListenImpl = c
   throw new Error(harnessPortUnavailableMessage(port, host))
 }
 
+export function resolveManagedOpenCodeOptions(parsed, plan, { resolve = resolveOpenCodeCommand, explicitCommand = false } = {}) {
+  const openCode = parsed.openCode && (explicitCommand || plan.detected.includes("opencode"))
+  return { ...parsed, openCode, openCodeCommand: openCode && !explicitCommand ? resolve(1) ?? parsed.openCodeCommand : parsed.openCodeCommand }
+}
+
 async function main() {
   let parsed
   try {
@@ -105,11 +111,16 @@ async function main() {
     return
   }
 
-  const { config, openCode, openCodeCommand, openCodeHost, openCodePort, openCodeTimeout } = parsed
+  const { config } = parsed
   if (config.help) {
     process.stdout.write(`${daemonUsage()}\n`)
     return
   }
+
+  const plan = resolveLaunchPlan(process.argv.slice(2))
+  const { openCode, openCodeCommand, openCodeHost, openCodePort, openCodeTimeout } = resolveManagedOpenCodeOptions(parsed, plan, {
+    explicitCommand: process.argv.includes("--opencode-command") || process.env.HARNESS_REMOTE_OPENCODE_COMMAND !== undefined
+  })
 
   if (openCode && openCodePort === config.port) {
     throw new Error(`OpenCode port ${openCodePort} conflicts with the Harness daemon port`)
@@ -119,7 +130,6 @@ async function main() {
 
   const identity = await loadMachineIdentity(config.stateDirectory)
   const daemon = new MachineDaemon(identity)
-  const plan = resolveLaunchPlan(process.argv.slice(2))
   const primaryProfile = harnessProfile(config.backend)
   const acpHosts = new Map()
   for (const providerID of resolveAcpProviderIDs(plan.detected, config.backend)) {
@@ -154,7 +164,7 @@ async function main() {
     // first use through the host's idempotent start() path.
     daemon.registerManagedHttpHost({
       id: "opencode",
-      label: "OpenCode",
+      label: "OpenCode Legacy",
       backend: "opencode",
       // These are native OpenCode HTTP primitives, not Session-first inventions. Advertising the
       // complete native subset is also what lets the global Attention index stay authoritative:

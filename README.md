@@ -128,7 +128,8 @@ That means you can start in a normal CLI, open Harness Remote later, find the sa
 
 | Coding agent | Integration |
 | --- | --- |
-| **OpenCode** | HTTP + live event stream |
+| **OpenCode 2** | Native ACP (`opencode2` backend; integration validation in progress) |
+| **OpenCode Legacy (v1)** | HTTP + live event stream (`opencode` backend) |
 | **Claude Code** | ACP adapter |
 | **Codex CLI** | ACP adapter |
 | **Oh My Pi (OMP)** | ACP adapter |

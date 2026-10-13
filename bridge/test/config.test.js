@@ -58,10 +58,10 @@ test("selects Codex defaults for the ACP backend", () => {
 })
 
 test("selects OpenCode 2 package fallback and MiMo native ACP defaults", () => {
-  const openCode2 = parseConfig(["--backend", "opencode2"], {})
+  const openCode2 = parseConfig(["--backend", "opencode2"], {}, { resolveLaunch: (profile) => ({ command: profile.command, args: profile.args }) })
   assert.equal(openCode2.backend, "opencode2")
   assert.equal(openCode2.acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
-  assert.deepEqual(openCode2.acpArgs, ["--yes", "--package=@opencode/cli", "opencode", "acp"])
+  assert.deepEqual(openCode2.acpArgs, ["--yes", "--package=@opencode/cli@2.0.28", "opencode2", "acp"])
 
   const mimo = parseConfig(["--backend", "mimo"], {})
   assert.equal(mimo.backend, "mimo")

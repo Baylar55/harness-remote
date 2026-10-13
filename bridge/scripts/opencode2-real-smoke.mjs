@@ -7,5 +7,6 @@ await runAcpProviderRealSmoke("opencode2", {
   marker: "OPENCODE2-HR-SMOKE",
   temporaryPrefix: "harness-opencode2-smoke-",
   checkCommands: true,
-  checkModels: true
+  checkModels: true,
+  defaultModel: "opencode/longcat-2.5-preview-free"
 })

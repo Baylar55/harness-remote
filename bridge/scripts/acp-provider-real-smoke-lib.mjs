@@ -32,6 +32,7 @@ export async function runAcpProviderRealSmoke(providerID, {
   marker,
   temporaryPrefix,
   defaultDirectory,
+  defaultModel,
   checkCommands = false,
   checkModels = false,
   debugLaunchArgs = []
@@ -73,6 +74,7 @@ export async function runAcpProviderRealSmoke(providerID, {
     })
     acp.on("stderr", (line) => process.stderr.write(`[${providerID}] ${line}\n`))
     const service = new AcpService(new AcpPromptEchoFilter(acp), {
+      replayAuthoritative: profile.replayAuthoritative,
       historyLoader: profile.historyLoader,
       preserveListedTimestamps: profile.preserveListedTimestamps,
       reloadOnHistoryRefresh: profile.reloadOnHistoryRefresh,
@@ -114,7 +116,10 @@ export async function runAcpProviderRealSmoke(providerID, {
       const models = await first.service.models(created.id)
       check(models.length > 0, "runtime model catalog is available through ACP config options")
       console.log(`models: ${models.slice(0, 8).map((model) => model.value ?? model.name ?? "?").join(", ")}${models.length > 8 ? ", …" : ""}`)
-      const requestedModel = argument("model")
+      const requestedModel = argument("model") ?? defaultModel
+      if (requestedModel && !models.some((model) => (model.value ?? model.name) === requestedModel)) {
+        throw new Error(`Requested smoke model ${requestedModel} is not advertised by ${label}; choose an explicitly approved alternative.`)
+      }
       const preferredSmokeModel = requestedModel
         ?? models.find((model) => (model.value ?? model.name) === "opencode/big-pickle")?.value
         ?? models.find((model) => (model.value ?? model.name) === "opencode/big-pickle")?.name

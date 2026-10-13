@@ -9,11 +9,11 @@ test("OpenCode 2 provider uses the dedicated binary alias and rich ACP surface",
 
   assert.equal(provider.label, "OpenCode 2")
   assert.equal(provider.command, process.platform === "win32" ? "npx.cmd" : "npx")
-  assert.deepEqual(provider.args, ["--yes", "--package=@opencode/cli", "opencode", "acp"])
+  assert.deepEqual(provider.args, ["--yes", "--package=@opencode/cli@2.0.28", "opencode2", "acp"])
   assert.equal(provider.adapterCommand, "opencode2")
   assert.deepEqual(provider.adapterArgs, ["acp"])
   assert.equal(provider.allowPackageFallback, true)
-  assert.deepEqual(provider.detectCommands, ["opencode2"])
+  assert.deepEqual(provider.detectCommands, ["opencode2", "opencode"])
   assert.equal(provider.launchPriority, 60)
 
   assert.equal(provider.capabilities.sessions, true)

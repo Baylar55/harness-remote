@@ -9,6 +9,7 @@ import { listAcpProviderProfiles } from "./harness-profiles.js"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
+import { discoverOpenCodeExecutables, resolveOpenCodeCommand } from "./opencode-discovery.js"
 
 const OPENCODE_BACKEND = { id: "opencode", detectCommands: ["opencode"] }
 
@@ -45,9 +46,12 @@ function hasOption(args, name) {
 export { findExecutable }
 
 export function detectBackends(options = {}) {
+  const openCode = discoverOpenCodeExecutables(options)
   const providers = [...acpProviderProfiles(), OPENCODE_BACKEND]
   return providers
-    .filter((provider) => provider.detectCommands.some((command) => findExecutable(command, options)))
+    .filter((provider) => provider.id === "opencode" || provider.executableGeneration
+      ? openCode.some((candidate) => candidate.generation === (provider.executableGeneration ?? 1))
+      : provider.detectCommands.some((command) => findExecutable(command, options)))
     .map((provider) => provider.id)
 }
 
@@ -61,7 +65,7 @@ export function resolveBackend(args, detected = detectBackends()) {
   throw new Error(`No supported agent CLI was found on PATH. Install/select one of: ${supportedBackendText()}, then re-run with --backend if needed.`)
 }
 
-/** Choose the low-friction startup shape without executing any discovered CLI. */
+/** Choose the startup shape; only OpenCode needs a bounded --version probe to select transport. */
 export function resolveLaunchPlan(args, detected = detectBackends()) {
   const explicit = optionValue(args, "--backend")
   const forceSingle = hasOption(args, "--single")
@@ -222,9 +226,9 @@ export function formatStartupSummary({ plan, addresses, port, username, password
 
   if (plan.mode === "daemon") {
     lines.push("", "Harnesses")
-    for (const agent of plan.detected) lines.push(`  • ${agent}`)
+    for (const agent of plan.detected) lines.push(`  • ${agent}${agent === "opencode" ? " (OpenCode Legacy)" : agent === "opencode2" ? " (OpenCode 2 ACP)" : ""}`)
   } else {
-    lines.push("", `Harness  ${plan.backend}`)
+    lines.push("", `Harness  ${plan.backend}${plan.backend === "opencode" ? " (OpenCode Legacy)" : plan.backend === "opencode2" ? " (OpenCode 2 ACP)" : ""}`)
   }
 
   lines.push("", "Manual setup: Harness Remote → Machines → Add machine, then use the connection details above.")
@@ -333,8 +337,11 @@ async function main() {
   }
 
   if (backend === "opencode") {
-    process.stdout.write("\nStarting OpenCode...\n")
-    const managed = await startManagedOpenCode({ host, port, username, password })
+    process.stdout.write("\nStarting OpenCode Legacy...\n")
+    const command = optionValue(args, "--opencode-command") ?? process.env.HARNESS_REMOTE_OPENCODE_COMMAND
+      ?? resolveOpenCodeCommand(1)
+    if (!command) throw new Error("OpenCode Legacy v1 was not found. Select --backend opencode2 for OpenCode 2 ACP, or provide --opencode-command <v1 executable>.")
+    const managed = await startManagedOpenCode({ host, port, username, password, command })
     process.stdout.write("Harness Remote is ready. Keep this terminal open while you use it.\n")
 
     let shuttingDown = false

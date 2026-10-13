@@ -19,18 +19,24 @@ const {
 } = await import('./serverProfiles.ts')
 
 storage.set('opencode.remote.server.opencode', JSON.stringify({ backend: 'opencode', host: 'desktop.local', port: 4096, username: 'opencode', password: '' }))
+storage.set('opencode.remote.server.opencode2', JSON.stringify({ backend: 'opencode2', host: 'v2.local', port: 4097, username: 'harness', password: 'secret', agentId: 'opencode2' }))
 storage.set('opencode.remote.server.omp', JSON.stringify({ backend: 'omp', host: 'pi.local', port: 4097, username: 'omp', password: 'secret' }))
 
 const migrated = loadServerProfiles()
-assert.equal(migrated.length, 2, 'each legacy backend configuration should migrate to its own saved server')
-assert.deepEqual(migrated.map((profile) => profile.config.backend), ['opencode', 'omp'])
+assert.equal(migrated.length, 3, 'each backend configuration should migrate to its own saved server')
+assert.deepEqual(migrated.map((profile) => profile.config.backend), ['opencode', 'opencode2', 'omp'])
+assert.equal(migrated[0].name, 'OpenCode Legacy server')
+assert.equal(migrated[1].name, 'OpenCode 2 server 2')
 
 const added = createServerProfile('Work PI', 'pi')
 const profiles = [...migrated, added]
 persistServerProfiles(profiles, added.id)
-assert.equal(JSON.parse(storage.get(SERVER_PROFILES_STORAGE_KEY)).length, 3, 'saved profiles should persist as one collection')
+assert.equal(JSON.parse(storage.get(SERVER_PROFILES_STORAGE_KEY)).length, 4, 'saved profiles should persist as one collection')
 assert.equal(storage.get(ACTIVE_PROFILE_STORAGE_KEY), added.id, 'the selected server should persist independently')
 assert.equal(loadActiveServerProfile(loadServerProfiles()).name, 'Work PI', 'the saved selection should be restored at launch')
+const restoredOpenCodeProfiles = loadServerProfiles().filter((profile) => profile.config.backend.startsWith('opencode'))
+assert.deepEqual(restoredOpenCodeProfiles.map((profile) => profile.config.backend), ['opencode', 'opencode2'], 'legacy OpenCode and OpenCode 2 must round-trip with separate backend ids')
+assert.equal(restoredOpenCodeProfiles[1].config.agentId, 'opencode2', 'OpenCode 2 agent routing must persist')
 
 // An upgrade can have a new collection created before all older backend-specific keys are migrated.
 // Loading must retain that OMP entry instead of letting a reload overwrite its only representation.

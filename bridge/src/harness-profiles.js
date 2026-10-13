@@ -4,6 +4,7 @@ import { createOmpHistoryLoader } from "./omp-session-history.js"
 import { createPiHistoryLoader } from "./pi-session-history.js"
 import { OMP_EXTENSION_ACTION_PROVIDERS } from "./extension-actions.js"
 import { createAcpProviderRegistry, defineAcpProvider } from "./acp-provider-kit.js"
+import { resolveOpenCodeCommand } from "./opencode-discovery.js"
 
 const COMMON_ACP_LIFECYCLE_CONTRACT = {
   sessionAuthority: "native-harness",
@@ -206,16 +207,18 @@ export const HARNESS_PROFILES = {
   opencode2: defineAcpProvider({
     id: "opencode2",
     label: "OpenCode 2",
-    // Official OpenCode 2 still publishes the executable name `opencode`, which collides with
-    // the existing OpenCode installation on machines that want both generations. Prefer an
-    // optional `opencode2` alias when present; otherwise explicit selection launches the official
-    // v2 npm package without replacing the user's current `opencode` binary.
+    // Both official command names are version-probed before launch. A v1 `opencode` stays on
+    // the legacy HTTP path; explicit v2 selection can fetch this verified release independently.
     command: process.platform === "win32" ? "npx.cmd" : "npx",
-    detectCommands: ["opencode2"],
+    detectCommands: ["opencode2", "opencode"],
     launchPriority: 60,
-    args: ["--yes", "--package=@opencode/cli", "opencode", "acp"],
+    args: ["--yes", "--package=@opencode/cli@2.0.28", "opencode2", "acp"],
     adapterCommand: "opencode2",
     adapterArgs: ["acp"],
+    executableGeneration: 2,
+    // V2 session/load replays the complete native transcript. A cached stopped reply can be a
+    // shorter prefix of its durable native text and must not be appended to that replay.
+    replayAuthoritative: true,
     allowPackageFallback: true,
     permissionMode: "allow",
     lifecycleContract: COMMON_ACP_LIFECYCLE_CONTRACT,
@@ -359,9 +362,11 @@ export function listAcpProviderProfiles() {
  * starts without a network round trip, and it sidesteps environments where `npx` cannot link a
  * binary - which is exactly what happens under proot on Android.
  */
-export function resolveAcpLaunch(profile, { find = findExecutable } = {}) {
+export function resolveAcpLaunch(profile, { find = findExecutable, readVersion } = {}) {
   if (!profile.adapterCommand) return { command: profile.command, args: [...profile.args], source: "harness" }
-  const installed = find(profile.adapterCommand)
+  const installed = profile.executableGeneration
+    ? resolveOpenCodeCommand(profile.executableGeneration, { find, ...(readVersion ? { readVersion } : {}) })
+    : find(profile.adapterCommand)
   if (installed) return { command: installed, args: [...(profile.adapterArgs ?? [])], source: "path" }
   return { command: profile.command, args: [...profile.args], source: "npx" }
 }
