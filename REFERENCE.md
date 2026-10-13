@@ -456,7 +456,7 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.75.1`.
+The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.84.0`.
 The version is pinned to avoid the same `notarget` issue that motivated pinning the
 PI adapter. Use `--acp-command` and repeated `--acp-arg` options to track a newer
 adapter. The first start downloads the adapter, which is why the handshake allows 90s.
@@ -522,7 +522,7 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `codex` backend defaults to `npx -y @agentclientprotocol/codex-acp@1.1.14` and authenticates
+The `codex` backend defaults to `npx -y @agentclientprotocol/codex-acp@1.13.1` and authenticates
 through the adapter's ChatGPT method, so a `codex login` on the host machine is what the bridge
 uses — an `OPENAI_API_KEY` environment variable works too, but is not required and is not preferred.
 The version is pinned to avoid the same `notarget` issue that motivated pinning the PI adapter. Use

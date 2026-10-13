@@ -141,8 +141,9 @@ export const HARNESS_PROFILES = {
     // explicitly and invoke its published binary instead of relying on npx package-spec inference.
     // 0.63.0 embeds Claude Agent SDK 0.3.220, whose Claude Code core rejects newer advertised
     // models such as Fable 5.1 at prompt time. 0.75.1 embeds 0.3.257 and retains the adapter's
-    // session-load fixes while keeping the same ACP executable contract.
-    args: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.75.1", "claude-agent-acp"],
+    // session-load fixes while keeping the same ACP executable contract. 0.84.0 embeds 0.3.284,
+    // whose model catalog includes Opus 5.5.
+    args: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.84.0", "claude-agent-acp"],
     adapterCommand: "claude-agent-acp",
     permissionMode: "allow",
     preserveListedTimestamps: true,
@@ -296,7 +297,7 @@ export const HARNESS_PROFILES = {
     launchPriority: 10,
     // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
     // explicitly and invoke its published binary instead of relying on npx package-spec inference.
-    args: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"],
+    args: ["--yes", "--package=@agentclientprotocol/codex-acp@1.13.1", "codex-acp"],
     adapterCommand: "codex-acp",
     permissionMode: "allow",
     // The adapter offers `api-key` before `chat-gpt`; the former demands CODEX_API_KEY or

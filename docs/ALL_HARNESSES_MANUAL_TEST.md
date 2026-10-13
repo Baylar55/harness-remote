@@ -93,6 +93,7 @@ The daemon was launched with `/home/giulio/Software` as its working directory.
 `--check` stopped both owned process groups afterwards. No prompts or model calls
 were made for this startup check.
 
-These checks are separate from manual flows confirmed by Giulio. Starting this
-launcher is preparation for the regression tests; it does not declare the full
-integration release-ready.
+Giulio confirmed that the all-harness test environment works on 13 October 2026
+and approved merging the integration. This manual confirmation is separate from
+the agent's startup checks. A separate Windows OpenCode Legacy run has not been
+recorded; Claude Code real prompt tests remain disabled.

@@ -6,8 +6,8 @@ names. V1 remains separately published as `opencode-ai` 1.19.0. See
 [v2 installation](https://opencode.ai/v2/docs/) and the
 [shared-command warning](https://opencode.ai/docs/).
 
-This development branch builds on the unmerged ACP Provider Kit / OpenCode 2
-prototype in #537. The legacy HTTP backend remains `opencode`; its display name
+This integration includes the ACP Provider Kit / OpenCode 2 prototype from
+#533–#537. The legacy HTTP backend remains `opencode`; its display name
 is **OpenCode Legacy**. V2 remains `opencode2` and uses native ACP. Saved profiles,
 Session ids and storage keys are not migrated between generations.
 
@@ -78,7 +78,7 @@ overwrite credentials or a global CLI. `HARNESS_REMOTE_OPENCODE2_TEST_DIR` and
 
 ## Validation status
 
-- Automated checks run by the agent: 633 bridge tests passed; the full frontend
+- Automated checks run by the agent before integration with main: 633 bridge tests passed; the full frontend
   `test:ci:full` suite, TypeScript/Vite and Electron builds passed. Desktop transport
   checks include v2 profile retention, HTTP agent routing and SSE routing.
 - Real ACP 2.0.28 handshake and session creation passed in isolated native data.
@@ -93,7 +93,10 @@ overwrite credentials or a global CLI. `HARNESS_REMOTE_OPENCODE2_TEST_DIR` and
 - UI testing found and fixed lost model metadata and duplicate partial responses
   after native replay. V2's complete replay now owns transcript content; unchanged
   cached occurrences retain their known identity and timestamps.
-- Windows legacy regression and the remaining real harness regressions are pending.
-  No manual tests have been confirmed by Giulio yet; this branch is not declared
-  release-ready. The current local `opencode` remains v2.0.11; tests use the isolated
-  v2.0.28 runtime without replacing that installation.
+- Giulio confirmed the all-harness manual test environment works on 13 October
+  2026 and approved merging this integration. The environment uses the installed
+  OpenCode 2.0.11 and existing native sessions under `Software`.
+- A separate Windows OpenCode Legacy regression has not been recorded, and Claude
+  Code real prompt tests remain disabled. These are distinct from Giulio's local
+  acceptance. Isolated agent-operated tests use v2.0.28 without replacing the
+  installed CLI or desktop application.
