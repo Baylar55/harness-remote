@@ -83,6 +83,27 @@ function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${visibleMessageText(message)}${error}`
 }
 
+function authoritativeReplay(previous, replayed) {
+  // ACP replay can omit timestamps and mint fresh ids. Retain known identities for unchanged
+  // occurrences, while the native replay alone decides content, membership and order.
+  const priorBySignature = new Map()
+  for (const message of previous) {
+    const signature = messageSignature(message)
+    const matches = priorBySignature.get(signature) ?? []
+    matches.push(message)
+    priorBySignature.set(signature, matches)
+  }
+  return replayed.map((message) => {
+    const prior = priorBySignature.get(messageSignature(message))?.shift()
+    if (!prior) return message
+    return {
+      ...message,
+      info: { ...message.info, id: prior.info.id, time: prior.info.time },
+      parts: message.parts.map((part) => ({ ...part, ...(part.messageID ? { messageID: prior.info.id } : {}) }))
+    }
+  })
+}
+
 function isConsecutiveAssistantDuplicate(previous, next) {
   if (previous?.info?.role !== "assistant" || next?.info?.role !== "assistant") return false
   if (messageSignature(previous) !== messageSignature(next)) return false
@@ -464,6 +485,7 @@ export class AcpService {
   #preferListedTitles
   #nativeRenameCommand
   #journalPageWhileOwned
+  #replayAuthoritative
   #modelVariantConfigIDs
   constructor(acp, {
     snapshotDirectory,
@@ -490,6 +512,8 @@ export class AcpService {
      * replies - which is what made a second turn look blank until the conversation was reopened.
      */
     journalPageWhileOwned = true,
+    /** A complete native ACP replay replaces cached partial turns rather than merging them. */
+    replayAuthoritative = false,
     /**
      * Config-option ids this harness uses for the reasoning variant that belongs to a model.
      * Only used to report the Session's current selection; a variant is still applied against an
@@ -508,6 +532,7 @@ export class AcpService {
     this.#preferListedTitles = preferListedTitles
     this.#nativeRenameCommand = nativeRenameCommand
     this.#journalPageWhileOwned = journalPageWhileOwned
+    this.#replayAuthoritative = replayAuthoritative
     this.#modelVariantConfigIDs = modelVariantConfigIDs
     this.#actionProviders = actionProviders
     acp.on("notification", (notification) => this.#handleNotification(notification))
@@ -955,7 +980,9 @@ export class AcpService {
    * provider reports nothing here rather than inventing one.
    */
   #configuredModelSelection(sessionID) {
-    if (this.#journalPageWhileOwned) return undefined
+    // A native journal, when present and used for paging, supplies its own model authority.
+    // Journal-less ACP providers such as OpenCode 2 must expose session/load's config model.
+    if (this.#historyLoader && this.#journalPageWhileOwned) return undefined
     const options = this.#configOptions.get(sessionID)
     const current = options?.find((item) => item.id === "model")?.currentValue
     if (typeof current !== "string") return undefined
@@ -1722,7 +1749,9 @@ export class AcpService {
       }
       this.#rememberConfigOptions(sessionID, result.configOptions)
       const replayedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
-      this.#messages.set(sessionID, replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
+      this.#messages.set(sessionID, this.#replayAuthoritative
+        ? authoritativeReplay(previousMessages, replayedMessages)
+        : replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
       // Replayed history is finished work by definition, and the adapter does not always close the
       // tool calls in it. Settling before the signature check keeps the restored (already settled)
       // snapshot and this replay comparable, so an unchanged history still reads as unchanged.

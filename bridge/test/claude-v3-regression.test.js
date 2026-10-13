@@ -92,7 +92,8 @@ test("machine discovery detects Claude and can select it as the daemon primary",
     pathValue,
     platform: "linux",
     exists: (candidate) => existing.has(candidate),
-    access: () => {}
+    access: () => {},
+    readVersion: () => "1.19.0"
   })
   assert.deepEqual(detected, ["claude", "codex", "opencode"])
   assert.deepEqual(resolveLaunchPlan(["--backend", "claude"], detected), {

@@ -47,6 +47,7 @@ const HARNESS_ICON_FILES: Record<string, string> = {
   codex: "codex.svg",
   claude: "claude.svg",
   opencode: "opencode.svg",
+  opencode2: "opencode.svg",
   omp: "omp.svg",
   pi: "pi.svg"
 }
@@ -124,7 +125,7 @@ function assistantMessageHasSignal(message: WorkThreadMessage): boolean {
 }
 
 function supportedBackend(value: string, fallback: BackendKind): BackendKind {
-  return value === "opencode" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
+  return value === "opencode" || value === "opencode2" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
     ? value
     : fallback
 }

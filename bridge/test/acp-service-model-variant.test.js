@@ -48,6 +48,17 @@ function configCalls(acp) {
   return acp.calls.filter(([method]) => method === "session/set_config_option").map(([, configId, value]) => `${configId}=${value}`)
 }
 
+test("a journal-less ACP session restores its native model and variant on transcript reads", async () => {
+  const acp = new RecordingAcp({ models: ["opencode/longcat-2.5-preview-free"] })
+  // Having resume available must not suppress the transcript replay without a journal source.
+  acp.sessionCapabilities = { resume: {} }
+  const service = new AcpService(acp, { modelVariantConfigIDs: ["thinking"] })
+  const page = await service.messagePage("s1")
+  assert.deepEqual(page.model, { providerID: "opencode", modelID: "longcat-2.5-preview-free", variant: "off" })
+  assert.ok(acp.calls.some(([method]) => method === "session/load"))
+  assert.equal(acp.calls.some(([method]) => method === "session/resume"), false)
+})
+
 test("setModel applies the model before its harness-advertised variant", async () => {
   const acp = new RecordingAcp()
   const service = new AcpService(acp, {})

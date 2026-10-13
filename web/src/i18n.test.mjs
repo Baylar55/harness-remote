@@ -69,7 +69,8 @@ assert.equal(zhCN('detail.attachImage'), '附加图片')
 
 // Unknown keys should remain visible during development instead of rendering blank UI.
 assert.equal(en('missing.key'), 'missing.key')
-assert.equal(en('detail.opencode'), '🤖 OpenCode')
+assert.equal(en('detail.opencode'), '🤖 OpenCode Legacy')
+assert.equal(en('detail.opencode2'), '🤖 OpenCode 2')
 assert.equal(it('detail.changedFilesTitle'), 'File modificati')
 assert.equal(zh('detail.changedFilesTitle'), '已變更檔案')
 assert.equal(en('detail.linesAddedDeleted', { additions: 3, deletions: 1 }), '+3 lines · -1 lines')

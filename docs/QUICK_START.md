@@ -49,11 +49,23 @@ Supported CLIs are:
 codex
 claude
 opencode
+opencode2
 omp
 pi
 ```
 
 You normally do not need to choose one manually.
+
+OpenCode's shared `opencode` executable is checked with `--version`: v2 uses the
+`opencode2` ACP backend, and v1 remains **OpenCode Legacy** on the `opencode` HTTP
+backend. Existing saved v1 profiles keep their backend and Session identities.
+Separately installed executables named `opencode-legacy` or `opencode1` can expose
+v1 alongside v2. An explicitly selected `--backend opencode2` can also use the
+pinned `@opencode/cli@2.0.28` package without replacing a global installation.
+
+The initial v2 integration and isolated manual test launcher are described in
+[OpenCode 2 validation](OPENCODE2_VALIDATION.md). UI regression validation remains
+required before this development branch is release-ready.
 
 ## Android: scan and start
 

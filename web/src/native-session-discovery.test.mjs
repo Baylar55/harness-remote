@@ -222,7 +222,8 @@ assert.deepEqual(page.records[0].status, { type: "idle" })
 assert.equal(page.nextCursor, "tail")
 
 const nonPaginatedAgents = [
-  { id: "opencode", label: "OpenCode", backend: "opencode", transport: "http" },
+  { id: "opencode", label: "OpenCode Legacy", backend: "opencode", transport: "http" },
+  { id: "opencode2", label: "OpenCode 2", backend: "opencode2", transport: "acp" },
   { id: "omp", label: "Oh My Pi", backend: "omp", transport: "acp" },
   { id: "pi", label: "PI", backend: "pi", transport: "acp" },
   { id: "claude", label: "Claude Code", backend: "claude", transport: "acp" },
