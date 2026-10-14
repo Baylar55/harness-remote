@@ -164,12 +164,17 @@ function providersResponse(models, fallbackProviderID) {
     const modelID = flat ? value : value.slice(separator + 1)
     if (!providerID || !modelID) continue
     const provider = providers.get(providerID) ?? { id: providerID, name: providerID, models: {} }
-    provider.models[modelID] = {
+    const model = provider.models[modelID] ?? {
       id: modelID,
       name: option.name ?? modelID,
       description: option.description || undefined,
       status: "active"
     }
+    if (option.variant) {
+      model.variants ??= {}
+      model.variants[option.variant] = { value: option.variantValue ?? option.variant }
+    }
+    provider.models[modelID] = model
     providers.set(providerID, provider)
     if (option.currentValue) defaults[providerID] = modelID
   }
@@ -187,7 +192,12 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     nativeRenameCommand: profile.nativeRenameCommand,
     journalPageWhileOwned: profile.journalPageWhileOwned !== false,
     replayAuthoritative: profile.replayAuthoritative === true,
-    modelVariantConfigIDs: profile.modelVariantConfigIDs ?? []
+    modelVariantConfigIDs: profile.modelVariantConfigIDs ?? [],
+    modelProviderID: profile.id,
+    excludedModelValuePrefixes: profile.excludedModelValuePrefixes ?? [],
+    inlineModelVariantValues: profile.inlineModelVariantValues ?? [],
+    modelProviderOrder: profile.modelProviderOrder ?? [],
+    requireAssistantResponse: profile.requireAssistantResponse === true
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
   const liveSessionActivity = new Map()

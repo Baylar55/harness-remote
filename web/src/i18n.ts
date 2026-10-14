@@ -122,6 +122,8 @@ type TranslationKey =
   | 'detail.you'
   | 'detail.opencode'
   | 'detail.opencode2'
+  | 'detail.copilot'
+  | 'detail.mimo'
   | 'detail.projectDashboardLabel'
   | 'detail.projectLabel'
   | 'detail.vcsLabel'
@@ -219,6 +221,8 @@ type TranslationKey =
   | 'connect.harness.pi'
   | 'connect.harness.claude'
   | 'connect.harness.codex'
+  | 'connect.harness.copilot'
+  | 'connect.harness.mimo'
   | 'connect.addressHint'
   | 'connect.runOnHost'
   | 'connect.copyCommand'
@@ -608,6 +612,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.you': '👤 You',
     'detail.opencode': '🤖 OpenCode Legacy',
     'detail.opencode2': '🤖 OpenCode 2',
+    'detail.copilot': '🤖 GitHub Copilot CLI',
+    'detail.mimo': '🤖 MiMo Code',
     'detail.projectDashboardLabel': 'Project and VCS dashboard',
     'detail.projectLabel': 'Project',
     'detail.vcsLabel': 'VCS',
@@ -772,6 +778,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.harness.pi': 'Connect to PI through the ACP bridge.',
     'connect.harness.claude': 'Connect to Claude Code through the ACP bridge.',
     'connect.harness.codex': 'Connect to Codex CLI through the ACP bridge.',
+    'connect.harness.copilot': 'Connect to GitHub Copilot CLI through the ACP bridge.',
+    'connect.harness.mimo': 'Connect to MiMo Code through the ACP bridge.',
     'connect.addressHint': 'Use the LAN address of the machine that runs the harness.',
     'connect.runOnHost': 'Run on the host machine',
     'connect.copyCommand': 'Copy command',
@@ -1094,6 +1102,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.you': '👤 Tu',
     'detail.opencode': '🤖 OpenCode Legacy',
     'detail.opencode2': '🤖 OpenCode 2',
+    'detail.copilot': '🤖 GitHub Copilot CLI',
+    'detail.mimo': '🤖 MiMo Code',
     'detail.projectDashboardLabel': 'Dashboard progetto e VCS',
     'detail.projectLabel': 'Progetto',
     'detail.vcsLabel': 'VCS',
@@ -1258,6 +1268,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.harness.pi': 'Connessione a PI tramite bridge ACP.',
     'connect.harness.claude': 'Connessione a Claude Code tramite bridge ACP.',
     'connect.harness.codex': 'Connessione a Codex CLI tramite bridge ACP.',
+    'connect.harness.copilot': 'Connessione a GitHub Copilot CLI tramite bridge ACP.',
+    'connect.harness.mimo': 'Connessione a MiMo Code tramite bridge ACP.',
     'connect.addressHint': 'Usa l’indirizzo LAN del computer che esegue l’harness.',
     'connect.runOnHost': 'Esegui sul computer host',
     'connect.copyCommand': 'Copia comando',
@@ -1580,6 +1592,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.you': '👤 你',
     'detail.opencode': '🤖 OpenCode Legacy',
     'detail.opencode2': '🤖 OpenCode 2',
+    'detail.copilot': '🤖 GitHub Copilot CLI',
+    'detail.mimo': '🤖 MiMo Code',
     'detail.projectDashboardLabel': '專案與 VCS 儀表板',
     'detail.projectLabel': '專案',
     'detail.vcsLabel': 'VCS',
@@ -1677,6 +1691,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.harness.pi': '透過 ACP bridge 連線到 PI。',
     'connect.harness.claude': '透過 ACP bridge 連線到 Claude Code。',
     'connect.harness.codex': '透過 ACP bridge 連線到 Codex CLI。',
+    'connect.harness.copilot': '透過 ACP bridge 連線到 GitHub Copilot CLI。',
+    'connect.harness.mimo': '透過 ACP bridge 連線到 MiMo Code。',
     'connect.addressHint': '使用執行 harness 的電腦之區域網路位址。',
     'connect.runOnHost': '在主機上執行',
     'connect.copyCommand': '複製命令',
@@ -2066,6 +2082,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'detail.you': '👤 你',
     'detail.opencode': '🤖 OpenCode Legacy',
     'detail.opencode2': '🤖 OpenCode 2',
+    'detail.copilot': '🤖 GitHub Copilot CLI',
+    'detail.mimo': '🤖 MiMo Code',
     'detail.projectDashboardLabel': '项目与 VCS 仪表盘',
     'detail.projectLabel': '项目',
     'detail.vcsLabel': 'VCS',
@@ -2163,6 +2181,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'connect.harness.pi': '通过 ACP 桥接器连接到 PI。',
     'connect.harness.claude': '通过 ACP 桥接器连接到 Claude Code。',
     'connect.harness.codex': '通过 ACP 桥接器连接到 Codex CLI。',
+    'connect.harness.copilot': '通过 ACP 桥接器连接到 GitHub Copilot CLI。',
+    'connect.harness.mimo': '通过 ACP 桥接器连接到 MiMo Code。',
     'connect.addressHint': '请使用运行 harness 的电脑的局域网地址。',
     'connect.runOnHost': '在主机上运行',
     'connect.copyCommand': '复制命令',

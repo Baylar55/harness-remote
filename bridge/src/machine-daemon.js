@@ -177,11 +177,13 @@ export class MachineDaemon {
   }
 
   close() {
+    const closing = []
     for (const entry of this.hosts.values()) {
-      entry.modelCatalog?.close?.()
-      if (entry.kind === "acp") entry.host.close?.()
-      else entry.host.stop?.("SIGTERM")
+      closing.push(entry.modelCatalog?.close?.())
+      if (entry.kind === "acp") closing.push(entry.host.close?.())
+      else closing.push(entry.host.stop?.("SIGTERM"))
     }
+    return Promise.allSettled(closing)
   }
 }
 

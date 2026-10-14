@@ -105,3 +105,17 @@ test('OpenCode 2 desktop SSE keeps its backend and agent route through profile v
   })
   transport.unsubscribe(owner, subscriptionId)
 })
+
+test('Copilot and MiMo desktop SSE preserve their independent backend routes', async () => {
+  for (const backend of ['copilot', 'mimo']) {
+    messages.length = 0
+    requests.length = 0
+    const scoped = { ...profile, id: `events-${backend}`, backend, agentId: backend }
+    await registry.replace([scoped], backend === 'copilot' ? 5 : 6)
+    assert.deepEqual(registry.get(scoped.id), scoped)
+    const { subscriptionId } = await transport.subscribe(owner, scoped.id, { scope: 'global' })
+    await waitFor(() => messages.some((message) => message.kind === 'event'))
+    assert.deepEqual(requests[0], { url: '/global/event', backend })
+    transport.unsubscribe(owner, subscriptionId)
+  }
+})

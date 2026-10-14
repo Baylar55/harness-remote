@@ -117,6 +117,80 @@ function piStableAssistantKey(message: MessageEnvelope): string | null {
   return text ? `text:${text}` : null
 }
 
+function piPrecedingUserID(index: number, messages: MessageEnvelope[]): string | null {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = messages[cursor]
+    if (candidate.info.role === "user") return candidate.info.id || null
+  }
+  return null
+}
+
+/**
+ * PI can stream a partial ACP assistant envelope, then journal the completed answer under a new
+ * id. Only bridge that identity when the same stabilized user turn has one unambiguous assistant
+ * envelope on each side and the visible text only grew.
+ */
+function stabilizePiProgressiveAssistantIDs(
+  previous: MessageEnvelope[],
+  next: MessageEnvelope[]
+): MessageEnvelope[] {
+  const previousIDs = new Set(previous.map((message) => message.info.id))
+  const nextIDs = new Set(next.map((message) => message.info.id))
+  const previousAssistants = new Map<string, MessageEnvelope[]>()
+  const nextAssistants = new Map<string, MessageEnvelope[]>()
+  const previousAssistantCounts = new Map<string, number>()
+  const nextAssistantCounts = new Map<string, number>()
+
+  const collect = (
+    messages: MessageEnvelope[],
+    groups: Map<string, MessageEnvelope[]>,
+    counts: Map<string, number>,
+    excludedIDs: Set<string>
+  ) => {
+    for (let index = 0; index < messages.length; index += 1) {
+      const message = messages[index]
+      if (message.info.role !== "assistant") continue
+      const userID = piPrecedingUserID(index, messages)
+      if (!userID) continue
+      counts.set(userID, (counts.get(userID) ?? 0) + 1)
+      if (excludedIDs.has(message.info.id)) continue
+      const candidates = groups.get(userID) ?? []
+      candidates.push(message)
+      groups.set(userID, candidates)
+    }
+  }
+  collect(previous, previousAssistants, previousAssistantCounts, nextIDs)
+  collect(next, nextAssistants, nextAssistantCounts, previousIDs)
+
+  let changed = false
+  const replacements = new Map<string, string>()
+  for (const [userID, before] of previousAssistants) {
+    const after = nextAssistants.get(userID)
+    if (previousAssistantCounts.get(userID) !== 1 || nextAssistantCounts.get(userID) !== 1
+      || before.length !== 1 || after?.length !== 1) continue
+    const previousText = piStableAssistantKey(before[0])?.slice("text:".length)
+    const nextText = piStableAssistantKey(after[0])?.slice("text:".length)
+    if (!previousText || !nextText || previousText === nextText) continue
+    if (!previousText.startsWith(nextText) && !nextText.startsWith(previousText)) continue
+    replacements.set(after[0].info.id, before[0].info.id)
+  }
+  if (!replacements.size) return next
+
+  const usedIDs = new Set<string>()
+  const stabilized = next.map((message) => {
+    const stableID = replacements.get(message.info.id)
+    if (!stableID || usedIDs.has(stableID)) return message
+    usedIDs.add(stableID)
+    changed = true
+    return {
+      ...message,
+      info: { ...message.info, id: stableID },
+      parts: message.parts.map((part) => ({ ...part, messageID: stableID }))
+    }
+  })
+  return changed ? stabilized : next
+}
+
 function piStableErrorTurnKey(
   message: MessageEnvelope,
   index: number,
@@ -182,6 +256,7 @@ export function stabilizePiTailMessageIDs(
   // Stabilise the prompt first. Terminal errors can then be matched to that stable prompt identity
   // even when PI changes both the assistant id and the provider-specific error sentence on flush.
   let stabilized = stabilizePiMessagesByKey(previous, next, piStableUserKey)
+  stabilized = stabilizePiProgressiveAssistantIDs(previous, stabilized)
   stabilized = stabilizePiMessagesByKey(previous, stabilized, piStableAssistantKey)
   stabilized = stabilizePiMessagesByKey(previous, stabilized, piStableErrorTurnKey)
   return stabilized
@@ -224,7 +299,7 @@ function sameModel(left: ModelSelection | null, right: ModelSelection | null): b
 }
 
 /** Backends whose transcript reads report the Session's own current model on the page itself. */
-const PAGE_MODEL_BACKENDS = new Set(["opencode", "opencode2", "codex", "omp"])
+const PAGE_MODEL_BACKENDS = new Set(["opencode", "opencode2", "codex", "omp", "copilot", "mimo"])
 
 /**
  * Model enrichment is not a mount-only read. A user can leave immediately after Send, before the

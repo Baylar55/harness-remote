@@ -194,6 +194,7 @@ async function main() {
     config,
     primaryAcp: acp,
     serviceOptions: {
+      ...daemon.hostEntry(primaryProfile.id).serviceOptions,
       snapshotDirectory: path.join(config.stateDirectory, primaryProfile.id),
       historyLoader: primaryProfile.historyLoader,
       preserveListedTimestamps: primaryProfile.preserveListedTimestamps,
@@ -241,8 +242,8 @@ async function main() {
   const shutdown = () => {
     if (shuttingDown) return
     shuttingDown = true
-    daemon.close()
-    server.close(() => process.exit(0))
+    const closing = daemon.close()
+    server.close(() => { void closing.then(() => process.exit(0)) })
     setTimeout(() => process.exit(1), 5_000).unref()
   }
   process.on("SIGINT", shutdown)

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { api } from "../api"
 import type { ConversationRuntime } from "../conversation-runtime"
 import { listMachineProjects } from "../machineClient"
+import { isMachineTransportFailure as connectionFailure } from "../machine-request-error"
 import { resolveSourceSessionProject } from "../cross-machine-route-projects"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import {
@@ -40,10 +41,6 @@ type AttentionLoad = {
   questions?: number
   permissions?: number
   connectionIssue: boolean
-}
-
-function connectionFailure(reason: unknown): boolean {
-  return /cannot reach|timed out|network|connection|failed to fetch/i.test(reason instanceof Error ? reason.message : String(reason))
 }
 
 function fileStatus(file: MachineProjectOutcomeFile): string {

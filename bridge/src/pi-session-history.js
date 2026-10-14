@@ -37,6 +37,7 @@ function messageParts(content, messageID) {
  * back, with no way to tell a failure from a missing message.
  */
 function messageError(message) {
+  if (message?.role === "assistant" && message.stopReason === "aborted") return undefined
   const detail = typeof message?.errorMessage === "string" ? message.errorMessage.trim() : ""
   if (!detail) return undefined
   return { name: "HarnessTurnError", message: detail }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { api } from "../api"
+import { isMachineTransportFailure } from "../machine-request-error"
 import type { ConversationController } from "../conversation-controller"
 import type { NativeSessionSurfaceTarget } from "../native-session-discovery"
 import { canCreateNativeSession } from "../native-session-create"
@@ -252,7 +253,7 @@ export function NativeSessionObserver({
         }
       })
       .catch((reason) => {
-        if (!disposed && /cannot reach|timed out|network|connection/i.test(reason instanceof Error ? reason.message : String(reason))) {
+        if (!disposed && isMachineTransportFailure(reason)) {
           onConnectionIssue?.()
         }
       })
@@ -395,7 +396,7 @@ export function NativeSessionObserver({
         applyDiscoveredNativeSessionModel(initialTarget, resolved.model)
       })
       .catch((reason) => {
-        if (!disposed && /cannot reach|timed out|network|connection/i.test(reason instanceof Error ? reason.message : String(reason))) {
+        if (!disposed && isMachineTransportFailure(reason)) {
           onConnectionIssue?.()
         }
       })

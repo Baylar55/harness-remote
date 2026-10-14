@@ -1,11 +1,33 @@
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
 import test from "node:test"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { AcpClient } from "../src/acp-client.js"
+
+test("a missing native project directory reports the path instead of a misleading executable ENOENT", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "harness-acp-missing-project-"))
+  try {
+    const missing = path.join(root, "removed-project")
+    const client = new AcpClient({ command: process.execPath, args: [], cwd: missing })
+    await assert.rejects(client.start(), (error) => error.message.includes(missing) && /project directory does not exist/.test(error.message))
+    assert.equal(client.processID, undefined)
+    const file = path.join(root, "a-file")
+    await writeFile(file, "test")
+    const fileClient = new AcpClient({ command: process.execPath, args: [], cwd: file })
+    await assert.rejects(fileClient.start(), /project path is not a directory/)
+    assert.equal(fileClient.processID, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
 
 class FakeChild extends EventEmitter {
   killed = false
   pid = 4242
+  exitCode = null
+  signalCode = null
   stdout = new EventEmitter()
   stderr = new EventEmitter()
   writes = []
@@ -35,9 +57,12 @@ class FakeChild extends EventEmitter {
     }
   }
 
-  kill() {
+  kill(signal = "SIGTERM") {
     this.killed = true
     this.stdin.writable = false
+    this.signalCode = signal
+    this.emit("exit", null, signal)
+    this.emit("close", null, signal)
     return true
   }
 }
@@ -80,6 +105,26 @@ test("initializes, authenticates, and lists ACP sessions", async () => {
   assert.equal(client.processID, undefined)
 })
 
+test("concurrent starts wait for the same completed initialization before sending Session RPCs", async () => {
+  let initialized
+  const sent = []
+  const client = new AcpClient({ spawnProcess: fakeSpawn((child, request) => {
+    sent.push(request.method)
+    if (request.method === "initialize") initialized = () => respondToHandshake(child, request)
+    else if (request.method === "authenticate") respondToHandshake(child, request)
+    else if (request.method === "session/list") child.respond({ jsonrpc: "2.0", id: request.id, result: { sessions: [] } })
+  }) })
+  try {
+    const starting = client.start()
+    const listing = client.listSessions()
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(sent, ["initialize"])
+    initialized()
+    await Promise.all([starting, listing])
+    assert.deepEqual(sent, ["initialize", "authenticate", "session/list"])
+  } finally { await client.close() }
+})
+
 test("preserves ACP Session pagination and sends an opaque cursor unchanged", async () => {
   const listRequests = []
   const client = new AcpClient({
@@ -110,10 +155,11 @@ test("preserves ACP Session pagination and sends an opaque cursor unchanged", as
   client.close()
 })
 
-test("merges provider-scoped environment overrides into the ACP child process", async () => {
+test("merges provider-scoped environment overrides and preserves the native project cwd", async () => {
   let spawnOptions
   const client = new AcpClient({
     environment: { HARNESS_TEST_MARKER: "provider" },
+    cwd: "/native/project",
     spawnProcess: (command, args, options) => {
       spawnOptions = options
       return new FakeChild((child, request) => respondToHandshake(child, request))
@@ -122,6 +168,7 @@ test("merges provider-scoped environment overrides into the ACP child process", 
 
   await client.start()
   assert.equal(spawnOptions.env.HARNESS_TEST_MARKER, "provider")
+  assert.equal(spawnOptions.cwd, "/native/project")
   const inherited = Object.entries(process.env).find(([, value]) => value !== undefined)
   assert.ok(inherited, "the test process must expose at least one environment variable")
   assert.equal(spawnOptions.env[inherited[0]], inherited[1])
@@ -348,4 +395,39 @@ test("rejects an in-flight request when ACP exits", async () => {
   const client = new AcpClient({ spawnProcess: () => child })
   await client.start()
   await assert.rejects(client.request("session/hang", {}), /ACP adapter exited \(1\)/)
+})
+
+test("waits for a closing child before restart and ignores its late error", async () => {
+  const children = []
+  const client = new AcpClient({
+    spawnProcess: () => {
+      const child = new FakeChild((current, request) => respondToHandshake(current, request))
+      children.push(child)
+      return child
+    }
+  })
+  await client.start()
+  const first = children[0]
+  const pendingRequest = client.request("session/hang", {})
+  first.kill = (signal) => {
+    first.killed = true
+    first.stdin.writable = false
+    first.signals = [...(first.signals || []), signal]
+    return true
+  }
+
+  const closing = client.close()
+  await assert.rejects(pendingRequest, /ACP adapter closed/, "close must reject pending RPCs before waiting for process exit")
+  const restarting = client.start()
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(children.length, 1, "restart must wait until the previous process exits")
+  assert.deepEqual(first.signals, ["SIGTERM"])
+
+  first.emit("exit", null, "SIGTERM")
+  first.emit("close", null, "SIGTERM")
+  await Promise.all([closing, restarting])
+  assert.equal(children.length, 2)
+  first.emit("error", new Error("late old child error"))
+  assert.equal(client.processID, 4242, "an old process event must not clear the current child")
+  await client.close()
 })

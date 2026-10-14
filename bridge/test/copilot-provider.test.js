@@ -25,7 +25,7 @@ test("Copilot provider advertises only the ACP capabilities currently justified 
   assert.equal(provider.capabilities.permissions, true)
   assert.equal(provider.capabilities.commands, true)
 
-  assert.equal(provider.capabilities.models, false)
+  assert.equal(provider.capabilities.models, true)
   assert.equal(provider.capabilities.todos, false)
   assert.equal(provider.capabilities.questions, false)
   assert.equal(provider.capabilities.actions, false)
