@@ -1472,6 +1472,25 @@
   background: var(--td3-chrome);
 }
 
+@media (min-width: 781px) {
+  .hr-native-workspace.session-focus-mode .hr-native-workspace-session-header,
+  .hr-native-workspace.session-focus-mode .hr-native-session-observer .tdw-conversation-toolbar {
+    display: none;
+  }
+
+  .hr-session-focus-toggle[aria-pressed="true"] {
+    color: var(--td3-blue-text);
+    border-color: var(--td3-blue-border);
+    background: var(--td3-blue-soft);
+  }
+}
+
+@media (max-width: 780px) {
+  .hr-session-focus-toggle {
+    display: none;
+  }
+}
+
 .hr-native-session-observer .tdw-model-control {
   width: min(320px, 100%);
 }
