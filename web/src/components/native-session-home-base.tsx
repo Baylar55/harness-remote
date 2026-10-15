@@ -19,15 +19,7 @@ import {
 } from "../native-session-federation-labels"
 import type { MachineAgentHost, MachineSnapshot } from "../types"
 import { nativeSessionDisplayTitle } from "../native-session-title"
-import {
-  adoptGraceUpdates,
-  loadSeenStore,
-  markSessionSeen,
-  saveSeenStore,
-  sessionIsUnseen,
-  withMachineBaselines,
-  type UnseenCandidate
-} from "../native-session-unseen"
+import { nextFinishedKeys, type SessionRailState } from "../native-session-unseen"
 import { useLanguage, useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
@@ -659,12 +651,12 @@ export function NativeSessionHome({
     return sessionPresentation(item.record, t)
   }, [liveStateForItem, t])
 
-  // A finished Session stays marked until it is opened (see native-session-unseen.ts). The open
-  // Session counts as seen only while the page is visible: a reply that lands in a hidden tab is
-  // still news when the user comes back.
-  const [seenStore, setSeenStore] = useState(loadSeenStore)
+  // A Session the rail sees finish stays marked until it is opened (see native-session-unseen.ts).
+  // The open Session counts as viewed only while the page is visible: a reply that lands in a
+  // hidden tab is still news when the user comes back.
   const [pageVisible, setPageVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible")
-  const viewingRef = useRef<{ key?: string; updated: number; settled: boolean }>({ updated: 0, settled: false })
+  const [finishedKeys, setFinishedKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const railStatesRef = useRef<ReadonlyMap<string, SessionRailState>>(new Map())
 
   useEffect(() => {
     const onVisibilityChange = () => setPageVisible(document.visibilityState === "visible")
@@ -672,48 +664,17 @@ export function NativeSessionHome({
     return () => document.removeEventListener("visibilitychange", onVisibilityChange)
   }, [])
 
-  useEffect(() => { saveSeenStore(seenStore) }, [seenStore])
-
-  const unseenCandidates = useMemo<UnseenCandidate[]>(() => records.map((item) => ({
-    key: recordKey(item),
-    machineID: item.machineID,
-    updated: item.record.session.time?.updated || item.record.session.time?.created || 0,
-    ready: presentationForItem(item).state === "ready"
-  })), [records, presentationForItem])
-
+  const viewingKey = selectedKey && pageVisible ? selectedKey : undefined
   useEffect(() => {
-    if (!loaded) return
-    setSeenStore((store) => adoptGraceUpdates(withMachineBaselines(store, unseenCandidates), unseenCandidates, Date.now()))
-  }, [loaded, unseenCandidates])
+    const current = new Map(records.map((item) => [recordKey(item), presentationForItem(item).state]))
+    const previous = railStatesRef.current
+    railStatesRef.current = current
+    setFinishedKeys((finished) => nextFinishedKeys(finished, previous, current, viewingKey))
+  }, [records, presentationForItem, viewingKey])
 
-  const selectedUpdated = selectedKey ? unseenCandidates.find((candidate) => candidate.key === selectedKey)?.updated ?? 0 : 0
-  const selectedSettled = selectedState ? selectedState !== "working" : true
-
-  useEffect(() => {
-    if (!selectedKey || !pageVisible) return
-    viewingRef.current = { key: selectedKey, updated: selectedUpdated, settled: selectedSettled }
-    setSeenStore((store) => markSessionSeen(store, selectedKey, selectedUpdated, Date.now(), false))
-  }, [selectedKey, selectedUpdated, selectedSettled, pageVisible])
-
-  // Looking away from a ready Session opens its grace window, so a reply the rail had not re-read
-  // yet is not reported back as unseen.
-  useEffect(() => {
-    if (!selectedKey || !pageVisible) return
-    return () => {
-      const { key, updated, settled } = viewingRef.current
-      if (key) setSeenStore((store) => markSessionSeen(store, key, updated, Date.now(), settled))
-    }
-  }, [selectedKey, pageVisible])
-
-  const unseenKeys = useMemo<ReadonlySet<string>>(() => {
-    const now = Date.now()
-    return new Set(unseenCandidates
-      .filter((candidate) =>
-        !(candidate.key === selectedKey && pageVisible)
-        && !deletingKeys?.has(candidate.key)
-        && sessionIsUnseen(seenStore, candidate, now))
-      .map((candidate) => candidate.key))
-  }, [unseenCandidates, seenStore, selectedKey, pageVisible, deletingKeys])
+  const unseenKeys = useMemo<ReadonlySet<string>>(() => deletingKeys?.size
+    ? new Set([...finishedKeys].filter((key) => !deletingKeys.has(key)))
+    : finishedKeys, [finishedKeys, deletingKeys])
 
   useEffect(() => {
     onUnseenReadyCountChange?.(unseenKeys.size)
