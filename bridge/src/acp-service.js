@@ -481,7 +481,7 @@ export class AcpService {
   // has flushed its terminal assistant error. These ids keep only that short-lived bridge copy alive.
   #transientFailureMessageIDs = new Map()
   #snapshotDirectory
-  #restoredSnapshots = new Set()
+  #restoredSnapshots = new Map()
   #dirtySnapshots = new Set()
   #dirtyStart = new Map()
   #snapshotWrites = new Map()
@@ -582,13 +582,19 @@ export class AcpService {
     this.#fallbackModelCommand = fallbackModelCommand
     this.#actionProviders = actionProviders
     acp.on("notification", (notification) => this.#handleNotification(notification))
-    acp.on("sessions-closed", (sessionIDs) => {
-      for (const sessionID of sessionIDs) {
-        this.#loaded.delete(sessionID)
-        this.#acpOpenSessions.delete(sessionID)
-        this.#configOptions.delete(sessionID)
-      }
-    })
+    acp.on("sessions-closed", (sessionIDs) => this.#forgetOpenSessions(sessionIDs))
+    // An adapter that exits takes every Session it had open with it. Still counting them as loaded
+    // sent the next prompt to a process that had never seen the Session, and the reload that its
+    // "Session not found" then forced ran in the middle of that turn.
+    acp.on?.("exit", () => this.#forgetOpenSessions([...this.#acpOpenSessions, ...this.#loaded]))
+  }
+
+  #forgetOpenSessions(sessionIDs) {
+    for (const sessionID of sessionIDs) {
+      this.#loaded.delete(sessionID)
+      this.#acpOpenSessions.delete(sessionID)
+      this.#configOptions.delete(sessionID)
+    }
   }
 
   subscribe(listener) {
@@ -1480,10 +1486,20 @@ export class AcpService {
       return await this.#acp.request("session/prompt", params, 300_000)
     } catch (error) {
       if (!this.#recoverMissingSessionOnPrompt || !missingAcpSession(error)) throw error
-      this.#loaded.delete(sessionID)
-      this.#acpOpenSessions.delete(sessionID)
-      this.#configOptions.delete(sessionID)
+      // The replay below rebuilds the transcript from what the harness stored, which does not yet
+      // include this turn's prompt: the adapter refused it. Keep the turn as recorded, and start its
+      // reply in a message of its own rather than in the last one the replay produced.
+      const messages = this.#messages.get(sessionID) ?? []
+      const promptIndex = messages.findLastIndex((message) => message.info.role === "user")
+      const turn = promptIndex >= 0 ? messages.slice(promptIndex) : []
+      this.#forgetOpenSessions([sessionID])
       await this.#load(sessionID, true)
+      const replayed = this.#messages.get(sessionID) ?? []
+      const replayedIDs = new Set(replayed.map((message) => message.info.id))
+      this.#messages.set(sessionID, [...replayed, ...turn.filter((message) => !replayedIDs.has(message.info.id))])
+      this.#chunkMessageIDs.delete(`${sessionID}:user`)
+      this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+      this.#emit("message.updated", sessionID)
       return this.#acp.request("session/prompt", params, 300_000)
     }
   }
@@ -1637,17 +1653,34 @@ export class AcpService {
     return path.join(this.#snapshotDirectory, `${name}.json`)
   }
 
-  async #restoreSnapshot(sessionID) {
-    if (!this.#snapshotDirectory || this.#restoredSnapshots.has(sessionID)) return
-    this.#restoredSnapshots.add(sessionID)
+  /**
+   * Every caller waits for the same read. At startup the Session list reads every snapshot at once,
+   * so a long Session's file can still be in flight when that Session is opened; returning early
+   * there let the load clear the transcript and start its replay, and the read then landed on top
+   * of it. The rest of the replay was merged into the old transcript: its text doubled onto the
+   * messages it already had, and the turns that open with a tool call piled up at the end as one
+   * Activity with no reply.
+   */
+  #restoreSnapshot(sessionID) {
+    if (!this.#snapshotDirectory) return Promise.resolve()
+    let restoring = this.#restoredSnapshots.get(sessionID)
+    if (!restoring) {
+      restoring = this.#readSnapshot(sessionID)
+      this.#restoredSnapshots.set(sessionID, restoring)
+    }
+    return restoring
+  }
+
+  async #readSnapshot(sessionID) {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
       // A freshly created Session is already loaded in this process. Its first snapshot can still
       // contain the empty pre-prompt transcript while a real prompt has since been recorded in
       // memory; restoring that stale file here would erase the visible user turn. Snapshots only
-      // seed a Session that has not been loaded yet (restart or cache eviction).
-      if (!this.#loaded.has(sessionID) && Array.isArray(snapshot.messages)) {
+      // seed a Session that has not been loaded yet (restart or cache eviction), and never one
+      // whose replay is already rebuilding it.
+      if (!this.#loaded.has(sessionID) && !this.#replaying.has(sessionID) && Array.isArray(snapshot.messages)) {
         const fragmented = mergeFragmentedPiSnapshot(snapshot.messages)
         const restored = healPoisonedSnapshot(fragmented)
         if (restored.length !== fragmented.length) {
@@ -1896,6 +1929,9 @@ export class AcpService {
         }
       }
     }
+    // A single adapter process is not restarted by a request on its own, and the one that opened
+    // this Session may have exited since. A project-scoped client starts its own process per request.
+    if (typeof this.#acp.withSession !== "function") await this.#acp.start?.()
     if (await this.#openWithoutReplay(sessionID, session)) return
     this.#replaying.add(sessionID)
     this.#messages.set(sessionID, [])
