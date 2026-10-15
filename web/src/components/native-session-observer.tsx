@@ -138,6 +138,20 @@ function latestOpenCodeTurnHasDurableCompletion(messages: MessageEnvelope[]): bo
  */
 const NATIVE_SESSION_MODEL_SCOPE: AgentModelScope = {}
 
+// The same breakpoint the stylesheets use for the phone layout, where every row keeps its own line.
+const COMPACT_LAYOUT_QUERY = "(max-width: 780px), (pointer: coarse) and (min-width: 600px) and (max-height: 640px)"
+
+function subscribeCompactLayout(onChange: () => void): () => void {
+  if (typeof window === "undefined" || !window.matchMedia) return () => {}
+  const media = window.matchMedia(COMPACT_LAYOUT_QUERY)
+  media.addEventListener("change", onChange)
+  return () => media.removeEventListener("change", onChange)
+}
+
+function compactLayoutMatches(): boolean {
+  return typeof window !== "undefined" && window.matchMedia?.(COMPACT_LAYOUT_QUERY).matches === true
+}
+
 function targetForInitialRuntime(target: NativeSessionSurfaceTarget): NativeSessionSurfaceTarget {
   // OpenCode's Session list model is provider/default metadata rather than reliable per-turn truth,
   // and Codex's list can likewise expose the adapter default while the rollout carries the model
@@ -176,6 +190,7 @@ export function NativeSessionObserver({
   const attentionRef = useRef(false)
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
+  const compactLayout = useSyncExternalStore(subscribeCompactLayout, compactLayoutMatches, () => false)
 
   const lifecycleRevision = useSyncExternalStore(
     subscribeSessionIndexInvalidation,
@@ -407,6 +422,19 @@ export function NativeSessionObserver({
     return <div className="tdw-detail-loading"><LoadingIcon size={20} /> Loading Session into the v3 controller...</div>
   }
 
+  // On a wide pane the outcome is a chip in the harness/model row, with its detail as a popover, so
+  // it stops costing the transcript a full row. A phone keeps it as its own collapsible row.
+  const outcomePanel = (
+    <NativeSessionOutcomePanel
+      target={target}
+      conversation={presentedConversation}
+      working={nativeSessionIsWorking(presentedConversation.status)}
+      interactionEnabled={interactionEnabled}
+      onConnectionIssue={onConnectionIssue}
+      compact={!compactLayout}
+    />
+  )
+
   return (
     <div className="hr-native-session-observer writable">
       <NativeSessionLineagePanel
@@ -416,13 +444,7 @@ export function NativeSessionObserver({
         onConnectionIssue={onConnectionIssue}
       />
 
-      <NativeSessionOutcomePanel
-        target={target}
-        conversation={presentedConversation}
-        working={nativeSessionIsWorking(presentedConversation.status)}
-        interactionEnabled={interactionEnabled}
-        onConnectionIssue={onConnectionIssue}
-      />
+      {compactLayout ? outcomePanel : null}
 
       {onOpenSession && crossMachineRoutes.length ? (
         <CrossMachineContinuePanel
@@ -455,6 +477,7 @@ export function NativeSessionObserver({
         commands={commands}
         interactionEnabled={interactionEnabled}
         onConnectionIssue={onConnectionIssue}
+        toolbarAccessory={compactLayout ? undefined : outcomePanel}
         routing={onOpenSession && sameMachineRoutes.length ? {
           currentMachineID: target.machineID,
           machines: sameMachineRoutes,

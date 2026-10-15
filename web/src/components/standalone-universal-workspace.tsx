@@ -1038,7 +1038,10 @@ function NativeSessionsWorkspace({
             <>
               <button type="button" className="tdw-mobile-back" onClick={() => setMobileDetailOpen(false)} aria-label={t("sf.backToSessions")}>← {t("nav.sessions")}</button>
               <header className="hr-native-workspace-session-header">
-                <div className="hr-native-session-heading">
+                <div
+                  className="hr-native-session-heading"
+                  title={[selected.external ? t("sf.startedInHarness") : t("sf.createdInHarnessRemote"), selected.directory].filter(Boolean).join(" · ")}
+                >
                   <div className="hr-native-session-eyebrow">
                     <span>{selected.agentLabel}</span>
                     {selected.nativeAgent ? <><i aria-hidden="true">/</i><span>{selected.nativeAgent}</span></> : null}
