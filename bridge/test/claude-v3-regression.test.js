@@ -158,6 +158,54 @@ test("Claude bare model ids are applied through the shared ACP session service",
   ])
 })
 
+test("Claude reloads a Session whose agent process lost its in-memory handle", async () => {
+  class RecoveringClaudeAcp extends EventEmitter {
+    constructor() {
+      super()
+      this.open = false
+      this.loads = 0
+      this.prompts = 0
+    }
+
+    async listSessions() {
+      return [{ sessionId: ACTIVITY_SESSION, cwd: process.cwd(), title: "Recoverable Claude Session", updatedAt: new Date().toISOString() }]
+    }
+
+    async request(method, params) {
+      if (method === "session/load") {
+        this.loads += 1
+        this.open = true
+        return { configOptions: [] }
+      }
+      if (method !== "session/prompt") throw new Error(`Unexpected request: ${method}`)
+      this.prompts += 1
+      if (!this.open) throw new Error("Internal error: Session not found")
+      this.emit("notification", {
+        method: "session/update",
+        params: {
+          sessionId: params.sessionId,
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `reply ${this.prompts}` } }
+        }
+      })
+      return { stopReason: "end_turn" }
+    }
+
+    notify() {}
+  }
+
+  const acp = new RecoveringClaudeAcp()
+  const service = new AcpService(acp)
+  await service.promptAndWait(ACTIVITY_SESSION, "one")
+
+  acp.open = false
+  await service.promptAndWait(ACTIVITY_SESSION, "two")
+
+  assert.equal(acp.loads, 2)
+  assert.equal(acp.prompts, 3)
+  assert.deepEqual((await service.messages(ACTIVITY_SESSION)).filter((message) => message.info.role === "user").map((message) => message.parts[0].text), ["one", "two"])
+  assert.equal((await service.messages(ACTIVITY_SESSION)).at(-1).info.error, undefined)
+})
+
 test("Claude TaskDesk launch uses the same ACP service that owns visible sessions", async () => {
   const calls = []
   const service = {
