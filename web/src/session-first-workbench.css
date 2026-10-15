@@ -1485,6 +1485,12 @@
   }
 }
 
+@media (max-width: 780px) {
+  .hr-session-focus-toggle {
+    display: none;
+  }
+}
+
 .hr-native-session-observer .tdw-model-control {
   width: min(320px, 100%);
 }
