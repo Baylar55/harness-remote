@@ -238,11 +238,6 @@ export function createMachineDaemonServer({
     scopedAcpServers.set(agentID, server)
     return server
   }
-  // A harness that resumes the turns a restart interrupted does so from its server, which is
-  // otherwise only created by the first request that names that harness.
-  for (const [agentID, entry] of daemon.hosts ?? []) {
-    if (entry.kind === "acp" && entry.serviceOptions?.resumeInterruptedTurns) acpBridgeServer(agentID)
-  }
   const machineID = daemon.snapshot().machine.id
   const roots = config.roots?.length ? config.roots : [process.cwd()]
   const stateDirectory = config.stateDirectory ?? process.cwd()
