@@ -41,7 +41,8 @@ test("MiMo uses native project-scoped sessions and excludes the retired hosted m
   assert.deepEqual(provider.detectCommands, ["mimo"])
   assert.equal(provider.launchPriority, 70)
   assert.equal(provider.authenticate, false)
-  assert.equal(provider.environment, undefined)
+  // MiMo would otherwise copy every Claude Code transcript into its own Session index.
+  assert.equal(provider.environment.MIMOCODE_DISABLE_CLAUDE_IMPORT, "1")
   assert.equal(provider.sessionListScope, "project")
   assert.deepEqual(provider.excludedModelValuePrefixes, ["mimo/mimo-auto"])
   assert.equal(provider.requireAssistantResponse, true)

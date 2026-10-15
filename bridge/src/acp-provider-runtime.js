@@ -7,7 +7,7 @@ import { resolveAcpLaunch } from "./harness-profiles.js"
 import { ProjectScopedAcpClient, acquireProjectProcessSlot } from "./project-scoped-acp-client.js"
 import { ownChildProcess, closeOwnedChildProcess } from "./managed-child-process.js"
 
-async function cleanupCatalogSession(policy, { sessionID, directory }, scoped) {
+async function cleanupCatalogSession(policy, { sessionID, directory }, scoped, environment = {}) {
   if (!/^[A-Za-z0-9._:-]+$/.test(sessionID)) throw new Error("Invalid technical catalog Session id")
   const release = scoped ? await acquireProjectProcessSlot() : () => {}
   let child
@@ -16,7 +16,7 @@ async function cleanupCatalogSession(policy, { sessionID, directory }, scoped) {
       const shim = process.platform === "win32" && !/\.(?:exe|com)$/i.test(policy.command)
       const command = shim ? process.env.ComSpec ?? "cmd.exe" : policy.command
       const args = shim ? ["/d", "/s", "/c", policy.command, ...policy.args, sessionID] : [...policy.args, sessionID]
-      child = ownChildProcess(spawn(command, args, { cwd: directory, windowsHide: true, stdio: ["ignore", "ignore", "pipe"] }))
+      child = ownChildProcess(spawn(command, args, { cwd: directory, env: { ...process.env, ...environment }, windowsHide: true, stdio: ["ignore", "ignore", "pipe"] }))
       let stderr = ""
       const timer = setTimeout(() => { child.kill(); reject(new Error("Catalog Session cleanup timed out")) }, 15_000)
       child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-1000) })
@@ -93,7 +93,7 @@ export async function createAcpProviderRuntime({
     environment: provider.environment,
     releaseAfterRefresh: provider.sessionListScope === "project",
     ...(provider.catalogSessionCleanup ? {
-      cleanupSession: (session) => cleanupCatalogSession(provider.catalogSessionCleanup, session, provider.sessionListScope === "project")
+      cleanupSession: (session) => cleanupCatalogSession(provider.catalogSessionCleanup, session, provider.sessionListScope === "project", provider.environment)
     } : {})
   }
   const modelCatalog = provider.createModelCatalog
