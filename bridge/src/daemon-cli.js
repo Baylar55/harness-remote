@@ -6,6 +6,7 @@ import { ApprovalDecisionStore } from "./approval-decision-store.js"
 import { createApprovalDecisionServer } from "./approval-decision-server.js"
 import { parseConfig, usage as bridgeUsage } from "./config.js"
 import { openCodeCapabilityContract } from "./harness-capability-contract.js"
+import { createHarnessLogWriter } from "./harness-log.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { canListen, canListenForBind, harnessPortUnavailableMessage, resolveLaunchPlan } from "./launcher.js"
 import { loadMachineIdentity } from "./machine-registry.js"
@@ -132,6 +133,7 @@ async function main() {
   const daemon = new MachineDaemon(identity)
   const primaryProfile = harnessProfile(config.backend)
   const acpHosts = new Map()
+  const writeHarnessLog = createHarnessLogWriter({ verbose: config.verbose })
   for (const providerID of resolveAcpProviderIDs(plan.detected, config.backend)) {
     const provider = harnessProfile(providerID)
     const launch = resolveAcpProviderLaunch(provider, {
@@ -141,7 +143,7 @@ async function main() {
     const runtime = await createAcpProviderRuntime({ provider, launch, config })
     const acp = daemon.registerAcpHost(runtime.registration)
     acpHosts.set(provider.id, acp)
-    acp.on("stderr", (line) => process.stderr.write(`[${provider.id}] ${line}\n`))
+    acp.on("stderr", (line) => writeHarnessLog(provider.id, line))
     acp.on("exit", (error) => process.stderr.write(`[${provider.id}] ${error.message}\n`))
   }
   const acp = acpHosts.get(primaryProfile.id)
@@ -156,7 +158,7 @@ async function main() {
       password: config.password,
       startTimeoutMs: openCodeTimeout
     })
-    managedOpenCode.on("stderr", (line) => process.stderr.write(`[opencode] ${line}\n`))
+    managedOpenCode.on("stderr", (line) => writeHarnessLog("opencode", line))
     const openCodeModels = new HttpAgentModelCatalog({ host: managedOpenCode, agentID: "opencode" })
     // OpenCode is intentionally lazy like the ACP harnesses. Starting its Bun server during daemon
     // boot used resources before the user selected it and also surfaced upstream GlobalBus listener
