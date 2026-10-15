@@ -628,8 +628,8 @@ export function NativeSessionHome({
     return sessionPresentation(item.record, t)
   }, [liveStateForItem, t])
 
-  // A Session the rail sees finish stays marked until it is clicked, including the one already open
-  // (see native-session-unseen.ts).
+  // A Session the rail sees finish stays marked until it is clicked (see native-session-unseen.ts).
+  // The open one is in front of the user already, so any sign of them clears it instead.
   const [finishedKeys, setFinishedKeys] = useState<ReadonlySet<string>>(() => new Set())
   const railStatesRef = useRef<ReadonlyMap<string, SessionRailState>>(new Map())
 
@@ -648,6 +648,22 @@ export function NativeSessionHome({
   useEffect(() => {
     if (selectedKey) clearFinished(selectedKey)
   }, [selectedKey, clearFinished])
+
+  // The open Session's mark lasts until the first click, key, scroll or mouse movement on the page
+  // after it finished - not until a click on its own row. One that finished while the window was in
+  // the background therefore stays marked until the user is back.
+  const selectedFinished = Boolean(selectedKey && finishedKeys.has(selectedKey))
+  useEffect(() => {
+    if (!selectedKey || !selectedFinished) return
+    const events = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const
+    const acknowledge = () => {
+      if (document.visibilityState === "visible") clearFinished(selectedKey)
+    }
+    for (const type of events) window.addEventListener(type, acknowledge, { capture: true, passive: true })
+    return () => {
+      for (const type of events) window.removeEventListener(type, acknowledge, { capture: true })
+    }
+  }, [selectedKey, selectedFinished, clearFinished])
 
   const unseenKeys = useMemo<ReadonlySet<string>>(() => deletingKeys?.size
     ? new Set([...finishedKeys].filter((key) => !deletingKeys.has(key)))

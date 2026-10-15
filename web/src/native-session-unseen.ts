@@ -2,7 +2,8 @@
  * Which finished Sessions the user has not clicked yet.
  *
  * A Session is marked when the rail sees it go from working to ready - the one already open too -
- * and stays marked until the user clicks it. Only that observed edge counts: comparing harness
+ * and stays marked until the user clicks it; the open one clears at the user's next interaction
+ * with the page instead. Only that observed edge counts: comparing harness
  * timestamps flagged old Sessions whenever a harness moved its `updated` time without a new turn
  * (opening a Session, or a listing with no time at all), so the marks are deliberately in-memory
  * and start empty on every load.

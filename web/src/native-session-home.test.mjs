@@ -301,6 +301,7 @@ assert.match(source, /setExpandedProjects/, "a selected Session below the compac
 assert.match(source, /scrollIntoView\(\{ block: "nearest"/, "the selected Session must be kept in the visible list viewport")
 assert.match(source, /nextFinishedKeys\(finished, previous, current\)/, "Working to Ready must mark the Session until it is clicked")
 assert.match(source, /clearFinished\(targetKey\)\s+open\(item\)/, "clicking a finished Session must clear its mark")
+assert.match(source, /\["pointerdown", "pointermove", "keydown", "wheel", "touchstart"\][\s\S]*document\.visibilityState === "visible"\) clearFinished\(selectedKey\)/, "the open Session's mark must clear at the user's next interaction with a visible page")
 assert.match(source, /snapshot && state === "online" && !error/, "a reconnect-grace machine must not remain writable just because its last snapshot is cached")
 assert.match(source, /disabled=\{!loaded \|\| createMachines\.length === 0\}/, "New Session must stay disabled until Session and Project bootstrap has settled")
 assert.match(source, /if \(!loaded \|\| createMachines\.length === 0\) return/, "the create handler must enforce the same bootstrap gate as the button")
