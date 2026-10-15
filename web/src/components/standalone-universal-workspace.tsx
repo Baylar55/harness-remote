@@ -472,6 +472,22 @@ function NativeSessionsWorkspace({
   onAttentionCountChange: (count: number) => void
 }) {
   const t = useTranslator()
+  // What is waiting for the user - input requests and finished replies not opened yet - shows in
+  // the window title, the one place it is visible while Harness Remote is a background tab.
+  const [waitingCounts, setWaitingCounts] = useState({ attention: 0, ready: 0 })
+  const handleAttentionCountChange = useCallback((count: number) => {
+    onAttentionCountChange(count)
+    setWaitingCounts((current) => current.attention === count ? current : { ...current, attention: count })
+  }, [onAttentionCountChange])
+  const handleUnseenReadyCountChange = useCallback((count: number) => {
+    setWaitingCounts((current) => current.ready === count ? current : { ...current, ready: count })
+  }, [])
+  const baseTitleRef = useRef(typeof document === "undefined" ? "" : document.title)
+  useEffect(() => {
+    const waiting = waitingCounts.attention + waitingCounts.ready
+    document.title = waiting ? `(${waiting}) ${baseTitleRef.current}` : baseTitleRef.current
+  }, [waitingCounts])
+  useEffect(() => () => { document.title = baseTitleRef.current }, [])
   const [runtimes, setRuntimes] = useState<NativeMachineRuntime[]>(() =>
     machines.map((machine) => ({ machine, snapshot: null, state: "loading", consecutiveFailures: 0 }))
   )
@@ -1000,7 +1016,8 @@ function NativeSessionsWorkspace({
             onOpen={openSession}
             refreshToken={listRevision}
             authoritativeRefreshToken={authoritativeListRevision}
-            onAttentionCountChange={onAttentionCountChange}
+            onAttentionCountChange={handleAttentionCountChange}
+            onUnseenReadyCountChange={handleUnseenReadyCountChange}
             onDiscoveredChange={setSessionsDiscovered}
             onRefreshComplete={completeSessionRefresh}
             selectedKey={selected?.key}
