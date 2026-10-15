@@ -264,10 +264,15 @@ export const HARNESS_PROFILES = {
     // Current MiMo ACP advertises `opencode-login` but its authenticate RPC throws
     // "Authentication not implemented". It relies on credentials configured in the CLI itself.
     authenticate: false,
-    // Keep the user's configured provider; the historical hosted MiMo Auto service is retired.
-    ...(process.env.HARNESS_REMOTE_MIMO_CONFIG_CONTENT
-      ? { environment: { MIMOCODE_CONFIG_CONTENT: process.env.HARNESS_REMOTE_MIMO_CONFIG_CONTENT } }
-      : {}),
+    environment: {
+      // Every `mimo` start copies new ~/.claude/projects transcripts into MiMo's own Session index,
+      // so each Claude Code Session would reappear in the rail as a MiMo Session with the same turns.
+      MIMOCODE_DISABLE_CLAUDE_IMPORT: "1",
+      // Keep the user's configured provider; the historical hosted MiMo Auto service is retired.
+      ...(process.env.HARNESS_REMOTE_MIMO_CONFIG_CONTENT
+        ? { MIMOCODE_CONFIG_CONTENT: process.env.HARNESS_REMOTE_MIMO_CONFIG_CONTENT }
+        : {})
+    },
     sessionListScope: "project",
     // MiMo replays the complete native transcript. Replacing a cached partial transcript is also
     // required when an idle project process was retired and the Session is opened again.
