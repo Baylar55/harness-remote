@@ -19,6 +19,15 @@ import {
 } from "../native-session-federation-labels"
 import type { MachineAgentHost, MachineSnapshot } from "../types"
 import { nativeSessionDisplayTitle } from "../native-session-title"
+import {
+  adoptGraceUpdates,
+  loadSeenStore,
+  markSessionSeen,
+  saveSeenStore,
+  sessionIsUnseen,
+  withMachineBaselines,
+  type UnseenCandidate
+} from "../native-session-unseen"
 import { useLanguage, useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
@@ -91,6 +100,8 @@ type Props = {
   authoritativeRefreshToken?: number
   /** The rail already counts Sessions needing input; the mobile nav needs that count outside it. */
   onAttentionCountChange?: (count: number) => void
+  /** Finished Sessions the user has not opened since, for the window title. */
+  onUnseenReadyCountChange?: (count: number) => void
   /** Structured pending permission/question identities from the global attention index. */
   attentionSessionKeys?: ReadonlySet<string>
   /** Exposes the currently scoped attention identities so the Inbox wrapper can union counts. */
@@ -403,6 +414,7 @@ export function NativeSessionHome({
   refreshToken = 0,
   authoritativeRefreshToken = 0,
   onAttentionCountChange,
+  onUnseenReadyCountChange,
   attentionSessionKeys,
   onAttentionKeysChange,
   onDiscoveredChange,
@@ -623,6 +635,66 @@ export function NativeSessionHome({
     return sessionPresentation(item.record, t)
   }, [liveStateForItem, t])
 
+  // A finished Session stays marked until it is opened (see native-session-unseen.ts). The open
+  // Session counts as seen only while the page is visible: a reply that lands in a hidden tab is
+  // still news when the user comes back.
+  const [seenStore, setSeenStore] = useState(loadSeenStore)
+  const [pageVisible, setPageVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible")
+  const viewingRef = useRef<{ key?: string; updated: number; settled: boolean }>({ updated: 0, settled: false })
+
+  useEffect(() => {
+    const onVisibilityChange = () => setPageVisible(document.visibilityState === "visible")
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange)
+  }, [])
+
+  useEffect(() => { saveSeenStore(seenStore) }, [seenStore])
+
+  const unseenCandidates = useMemo<UnseenCandidate[]>(() => records.map((item) => ({
+    key: recordKey(item),
+    machineID: item.machineID,
+    updated: item.record.session.time?.updated || item.record.session.time?.created || 0,
+    ready: presentationForItem(item).state === "ready"
+  })), [records, presentationForItem])
+
+  useEffect(() => {
+    if (!loaded) return
+    setSeenStore((store) => adoptGraceUpdates(withMachineBaselines(store, unseenCandidates), unseenCandidates, Date.now()))
+  }, [loaded, unseenCandidates])
+
+  const selectedUpdated = selectedKey ? unseenCandidates.find((candidate) => candidate.key === selectedKey)?.updated ?? 0 : 0
+  const selectedSettled = selectedState ? selectedState !== "working" : true
+
+  useEffect(() => {
+    if (!selectedKey || !pageVisible) return
+    viewingRef.current = { key: selectedKey, updated: selectedUpdated, settled: selectedSettled }
+    setSeenStore((store) => markSessionSeen(store, selectedKey, selectedUpdated, Date.now(), false))
+  }, [selectedKey, selectedUpdated, selectedSettled, pageVisible])
+
+  // Looking away from a ready Session opens its grace window, so a reply the rail had not re-read
+  // yet is not reported back as unseen.
+  useEffect(() => {
+    if (!selectedKey || !pageVisible) return
+    return () => {
+      const { key, updated, settled } = viewingRef.current
+      if (key) setSeenStore((store) => markSessionSeen(store, key, updated, Date.now(), settled))
+    }
+  }, [selectedKey, pageVisible])
+
+  const unseenKeys = useMemo<ReadonlySet<string>>(() => {
+    const now = Date.now()
+    return new Set(unseenCandidates
+      .filter((candidate) =>
+        !(candidate.key === selectedKey && pageVisible)
+        && !deletingKeys?.has(candidate.key)
+        && sessionIsUnseen(seenStore, candidate, now))
+      .map((candidate) => candidate.key))
+  }, [unseenCandidates, seenStore, selectedKey, pageVisible, deletingKeys])
+
+  useEffect(() => {
+    onUnseenReadyCountChange?.(unseenKeys.size)
+  }, [unseenKeys, onUnseenReadyCountChange])
+
   const projectionForItem = useCallback((item: RecordWithMachine) => projectFederatedSession({
     machineID: item.machineID,
     machineName: item.machine.name,
@@ -821,9 +893,11 @@ export function NativeSessionHome({
           count + group.sessions.filter((item) => projectionForItem(item).bucket === "active").length, 0),
         attentionCount: projects.reduce((count, group) =>
           count + group.sessions.filter((item) => projectionForItem(item).bucket === "attention").length, 0),
+        unseenCount: projects.reduce((count, group) =>
+          count + group.sessions.filter((item) => unseenKeys.has(recordKey(item))).length, 0),
         updatedAt: projects.reduce((latest, group) => Math.max(latest, group.updatedAt), 0)
       }]
-    }), [agentFilter, filter, filteredGroups, machineFilter, modelFilter, projectFilter, projectionForItem, query, sources])
+    }), [agentFilter, filter, filteredGroups, machineFilter, modelFilter, projectFilter, projectionForItem, query, sources, unseenKeys])
 
   const olderPageTargets = [...pageCache.current.entries()].filter(([, entry]) =>
     entry.nextCursor
@@ -1187,7 +1261,7 @@ export function NativeSessionHome({
       ) : null}
 
       <div className="hr-native-machine-list">
-        {machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => {
+        {machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount, unseenCount }) => {
           const machineCollapsed = collapsedMachines.has(machine.id)
           const reconnecting = state === "online" && Boolean(error)
           return (
@@ -1208,6 +1282,7 @@ export function NativeSessionHome({
                 </span>
                 <span className="hr-native-machine-metrics">
                   {machineAttentionCount ? <b>{t("sf.attentionCount", { count: machineAttentionCount })}</b> : null}
+                  {unseenCount ? <span className="hr-native-machine-ready">{t("sf.readyCount", { count: unseenCount })}</span> : null}
                   {workingCount ? <em>{t("sf.liveCount", { count: workingCount })}</em> : null}
                   <small>{state === "online" && loaded && !reconnecting ? sessionCount : state === "offline" ? t("sf.offline") : ""}</small>
                   <i className="hr-native-machine-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i>
@@ -1228,6 +1303,7 @@ export function NativeSessionHome({
                     const treeRows = sessionTreeRows(group.sessions)
                     const visibleRows = expanded ? treeRows : treeRows.slice(0, COLLAPSED_PROJECT_SESSION_COUNT)
                     const hiddenCount = Math.max(0, treeRows.length - COLLAPSED_PROJECT_SESSION_COUNT)
+                    const projectUnseen = group.sessions.filter((item) => unseenKeys.has(recordKey(item))).length
                     return (
                       <section className={`hr-native-project-group${collapsed ? " collapsed" : ""}`} key={group.key} aria-label={t("sf.groupSessions", { name: group.name })}>
                         <button
@@ -1241,7 +1317,7 @@ export function NativeSessionHome({
                             <strong>{group.name}</strong>
                             <small title={group.directory}>{group.directory || t("sf.noWorkingDirectory")}</small>
                           </span>
-                          <span><b>{group.sessions.length}</b><i className="hr-native-project-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i></span>
+                          <span>{projectUnseen ? <em className="hr-native-project-ready" title={t("sf.readyCount", { count: projectUnseen })}>{projectUnseen}</em> : null}<b>{group.sessions.length}</b><i className="hr-native-project-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i></span>
                         </button>
                         {!collapsed ? (
                           <>
@@ -1268,12 +1344,13 @@ export function NativeSessionHome({
                                 const targetKey = recordKey(item)
                                 const selected = targetKey === selectedKey
                                 const recentlyCompleted = targetKey === recentlyCompletedKey
+                                const unseen = unseenKeys.has(targetKey)
                                 const deleting = Boolean(deletingKeys?.has(targetKey))
                                 return (
                                   <button
                                     type="button"
                                     ref={selected ? selectedRowRef : undefined}
-                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
+                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${unseen ? " unseen" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
                                     data-depth={Math.min(depth, 3)}
                                     key={targetKey}
                                     onClick={() => { if (!deleting) open(item) }}
@@ -1283,7 +1360,7 @@ export function NativeSessionHome({
                                     aria-label={t("sf.openSessionAria", {
                                       title: accessibleTitle,
                                       agent: `${item.record.agentLabel}${nativeAgent ? ` · ${nativeAgent}` : ""}${restrictionCount ? ` · ${t("sf.restrictionsLabel", { count: restrictionCount })}` : ""}${depth ? ` · ${t("sf.childSession")}` : ""}`,
-                                      status: deleting ? t("sf.deleting") : operationalLabel,
+                                      status: deleting ? t("sf.deleting") : unseen ? `${operationalLabel} · ${t("sf.unseenResult")}` : operationalLabel,
                                       project: group.name,
                                       machine: group.machine.name
                                     })}
@@ -1310,7 +1387,7 @@ export function NativeSessionHome({
                                     </span>
                                     <span className="hr-native-session-meta">
                                       <span className="hr-native-session-status" data-state={deleting ? "deleting" : status.state} aria-live={selected || deleting ? "polite" : undefined}>
-                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted ? "✓ " : ""}{operationalLabel}</>}
+                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted || unseen ? "✓ " : ""}{operationalLabel}</>}
                                       </span>
                                       {deleting ? null : (
                                         <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? new Date(timestamp).toLocaleString() : undefined}>
