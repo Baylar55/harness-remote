@@ -16,6 +16,7 @@ test("defaults to a loopback-only unauthenticated listener", () => {
     roots: [],
     corsOrigins: [],
     logRequests: false,
+    verbose: false,
     stateDirectory: path.join(homedir(), ".harness-remote")
   })
 })
@@ -127,4 +128,10 @@ test("accepts authenticated LAN configuration and repeated roots", () => {
 test("enables safe request diagnostics explicitly", () => {
   assert.equal(parseConfig(["--log-requests"], {}).logRequests, true)
   assert.equal(parseConfig([], { OMP_BRIDGE_LOG_REQUESTS: "1" }).logRequests, true)
+})
+
+test("keeps harness diagnostics quiet unless verbose is requested", () => {
+  assert.equal(parseConfig([], {}).verbose, false)
+  assert.equal(parseConfig(["--verbose"], {}).verbose, true)
+  assert.equal(parseConfig([], { HARNESS_REMOTE_VERBOSE: "1" }).verbose, true)
 })

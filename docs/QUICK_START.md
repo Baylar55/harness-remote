@@ -220,6 +220,14 @@ npx --yes github:giuliastro/harness-remote --single --backend codex
 
 That is an advanced compatibility option, not the recommended onboarding path.
 
+## Harness diagnostics
+
+By default the terminal shows only errors reported by the coding agents. Add `--verbose` (or set `HARNESS_REMOTE_VERBOSE=1`) to see everything they write to stderr, including session replay timings and events the adapter does not recognise yet:
+
+```bash
+npx --yes github:giuliastro/harness-remote --verbose
+```
+
 ## Security
 
 Use Harness Remote over a trusted LAN or VPN.

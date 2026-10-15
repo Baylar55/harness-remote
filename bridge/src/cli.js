@@ -3,6 +3,7 @@ import path from "node:path"
 import { AcpClient } from "./acp-client.js"
 import { createAcpProviderRuntime } from "./acp-provider-runtime.js"
 import { parseConfig, usage } from "./config.js"
+import { createHarnessLogWriter } from "./harness-log.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { loadMachineIdentity, MachineRegistry, trackAgentHostLifecycle } from "./machine-registry.js"
 import { createBridgeServer } from "./server.js"
@@ -57,13 +58,16 @@ if (config) {
   })
   let shuttingDown = false
 
-  acp.on("stderr", (line) => process.stderr.write(`[${config.backend}] ${line}\n`))
-  acp.on("permission", ({ optionId }) => {
-    process.stderr.write(`[${config.backend}] granted tool permission (${optionId ?? "none offered"})\n`)
-  })
-  acp.on("agent-request", (message) => {
-    process.stderr.write(`[${config.backend}] handled agent request: ${message.method}\n`)
-  })
+  const writeHarnessLog = createHarnessLogWriter({ verbose: config.verbose })
+  acp.on("stderr", (line) => writeHarnessLog(config.backend, line))
+  if (config.verbose) {
+    acp.on("permission", ({ optionId }) => {
+      process.stderr.write(`[${config.backend}] granted tool permission (${optionId ?? "none offered"})\n`)
+    })
+    acp.on("agent-request", (message) => {
+      process.stderr.write(`[${config.backend}] handled agent request: ${message.method}\n`)
+    })
+  }
   acp.on("exit", (error) => {
     if (!shuttingDown) process.stderr.write(`[${config.backend}] ${error.message}\n`)
   })

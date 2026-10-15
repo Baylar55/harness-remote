@@ -361,6 +361,12 @@ npx --yes ./bridge --port 4097 --username omp --password "…" --root "$HOME/Sof
   --cors http://localhost:5173
 ```
 
+#### Harness diagnostics
+
+ACP adapters write all their diagnostics to stderr, because stdout carries the protocol. The bridge, the daemon and the launcher forward to the terminal only the lines that look like failures (`error`, `TypeError`, `failed`, `fatal`, `ENOENT`, …), always prefixed with the harness id, e.g. `[claude]`. Adapter traces such as Claude's `[session/replay]` timings, and its `Unexpected case:` lines for SDK events it does not recognise yet, stay hidden: the adapter skips those events and the session continues. Exit reasons and startup failures are always reported.
+
+Pass `--verbose` or set `HARNESS_REMOTE_VERBOSE=1` to forward the full stderr stream of every harness, including managed OpenCode. On the standalone bridge it also logs each granted tool permission and each handled agent request.
+
 #### Live synchronization scope
 
 The bridge streams `busy`, assistant chunks, todos, and completion for work started through that same bridge. Sessions created by desktop OMP or another client are listed with their persisted history and remain writable: the first prompt from the app loads that session into the bridge's ACP process and continues it there. This supports sequential hand-off between desktop and mobile, including sessions created days earlier.
