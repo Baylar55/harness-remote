@@ -1,8 +1,33 @@
 import path from "node:path"
+import { spawn } from "node:child_process"
 import { AcpClient } from "./acp-client.js"
 import { AcpAgentModelCatalog } from "./agent-model-catalog.js"
 import { acpHarnessCapabilityContract } from "./harness-capability-contract.js"
 import { resolveAcpLaunch } from "./harness-profiles.js"
+import { ProjectScopedAcpClient, acquireProjectProcessSlot } from "./project-scoped-acp-client.js"
+import { ownChildProcess, closeOwnedChildProcess } from "./managed-child-process.js"
+
+async function cleanupCatalogSession(policy, { sessionID, directory }, scoped) {
+  if (!/^[A-Za-z0-9._:-]+$/.test(sessionID)) throw new Error("Invalid technical catalog Session id")
+  const release = scoped ? await acquireProjectProcessSlot() : () => {}
+  let child
+  try {
+    return await new Promise((resolve, reject) => {
+      const shim = process.platform === "win32" && !/\.(?:exe|com)$/i.test(policy.command)
+      const command = shim ? process.env.ComSpec ?? "cmd.exe" : policy.command
+      const args = shim ? ["/d", "/s", "/c", policy.command, ...policy.args, sessionID] : [...policy.args, sessionID]
+      child = ownChildProcess(spawn(command, args, { cwd: directory, windowsHide: true, stdio: ["ignore", "ignore", "pipe"] }))
+      let stderr = ""
+      const timer = setTimeout(() => { child.kill(); reject(new Error("Catalog Session cleanup timed out")) }, 15_000)
+      child.stderr.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-1000) })
+      child.once("error", (error) => { clearTimeout(timer); reject(error) })
+      child.once("exit", (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error(stderr.trim() || `Catalog cleanup exited with code ${code}`)) })
+    })
+  } finally {
+    await closeOwnedChildProcess(child)
+    release()
+  }
+}
 
 /**
  * Return the ordered ACP provider ids a machine daemon should expose.
@@ -50,14 +75,30 @@ export async function createAcpProviderRuntime({
     authenticate: provider.authenticate,
     ...(provider.environment ? { environment: provider.environment } : {})
   }
-  const agent = new Client(clientOptions)
-  const modelCatalog = new ModelCatalog({
-    agent: new Client(clientOptions),
+  const roots = (config.roots?.length ? config.roots : [cwd]).map((root) => path.resolve(root))
+  const createRuntimeClient = (maxClients = 2) => provider.sessionListScope === "project"
+    ? new ProjectScopedAcpClient({ roots, maxClients, createClient: (directory) => new Client({ ...clientOptions, cwd: directory }) })
+    : new Client(clientOptions)
+  const agent = createRuntimeClient()
+  const modelCatalogOptions = {
+    agent: createRuntimeClient(1),
     agentID: provider.id,
     directory: config.roots?.[0] ?? cwd,
     stateDirectory: config.stateDirectory,
-    variantConfigIDs: provider.modelVariantConfigIDs
-  })
+    variantConfigIDs: provider.modelVariantConfigIDs,
+    excludedModelValuePrefixes: provider.excludedModelValuePrefixes,
+    inlineModelVariantValues: provider.inlineModelVariantValues,
+    modelProviderOrder: provider.modelProviderOrder,
+    command: launch.command,
+    environment: provider.environment,
+    releaseAfterRefresh: provider.sessionListScope === "project",
+    ...(provider.catalogSessionCleanup ? {
+      cleanupSession: (session) => cleanupCatalogSession(provider.catalogSessionCleanup, session, provider.sessionListScope === "project")
+    } : {})
+  }
+  const modelCatalog = provider.createModelCatalog
+    ? provider.createModelCatalog(modelCatalogOptions)
+    : new ModelCatalog(modelCatalogOptions)
 
   // Persisted technical Session ids must be hidden before the machine server can list Sessions.
   await modelCatalog.preloadState()
@@ -84,13 +125,26 @@ export async function createAcpProviderRuntime({
       bridgeConfig,
       serviceOptions: {
         replayAuthoritative: provider.replayAuthoritative,
+        replayUserChunksAreMessages: provider.replayUserChunksAreMessages,
+        refreshSessionListOnRead: provider.refreshSessionListOnRead,
         snapshotDirectory: path.join(config.stateDirectory, provider.id),
         historyLoader: provider.historyLoader,
         preserveListedTimestamps: provider.preserveListedTimestamps,
         hiddenSessionIDs: modelCatalog.hiddenSessionIDs,
         reloadOnHistoryRefresh: provider.reloadOnHistoryRefresh,
         replaySettleMs: provider.replaySettleMs,
-        promptSettleMs: provider.promptSettleMs
+        promptSettleMs: provider.promptSettleMs,
+        modelVariantConfigIDs: provider.modelVariantConfigIDs,
+        modelProviderID: provider.id,
+        excludedModelValuePrefixes: provider.excludedModelValuePrefixes,
+        inlineModelVariantValues: provider.inlineModelVariantValues,
+        modelProviderOrder: provider.modelProviderOrder,
+        requireAssistantResponse: provider.requireAssistantResponse,
+        ...(provider.fallbackModelSelectionMethod ? {
+          fallbackModelCatalog: modelCatalog,
+          fallbackModelSelectionMethod: provider.fallbackModelSelectionMethod,
+          fallbackModelCommand: provider.fallbackModelCommand
+        } : {})
       }
     }
   }

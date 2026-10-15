@@ -1,4 +1,4 @@
-export type BackendKind = "opencode" | "opencode2" | "omp" | "pi" | "claude" | "codex"
+export type BackendKind = "opencode" | "opencode2" | "omp" | "pi" | "claude" | "codex" | "copilot" | "mimo"
 
 export type ServerConfig = {
   backend: BackendKind
@@ -118,6 +118,10 @@ export type ModelOption = ModelSelection & {
   tools?: boolean
   attachments?: boolean
   isDefault?: boolean
+  /** Catalog-advertised group ordering; lower values sort first when provided. */
+  sortPriority?: number
+  /** Exact harness-native model value for a variant, when the adapter provides one. */
+  variantValue?: string
   /** Pricing metadata is optional because not every harness advertises it. Costs follow the
    * provider catalog's token-pricing units. `isFree` is set only when the catalog explicitly says
    * so or all advertised token costs are exactly zero; Harness Remote never guesses from a model name. */

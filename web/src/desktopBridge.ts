@@ -15,6 +15,7 @@ import type {
   DesktopResponse
 } from "../electron/ipc-contract"
 import { normalizeServerConfig } from "./serverConfig"
+import { MachineHttpError } from "./machine-request-error"
 import type { ServerConfig } from "./types"
 
 export type DesktopPlatform = { isDesktop: true; os: string; usesNativeMenu?: boolean }
@@ -275,7 +276,10 @@ export async function desktopRequestResult(config: ServerConfig, request: Deskto
 
 export async function desktopRequest(config: ServerConfig, request: DesktopRequest): Promise<DesktopResponse> {
   const result = await desktopRequestResult(config, request)
-  if (!result.ok) throw new Error(result.error.message)
+  if (!result.ok) {
+    if (result.error.code === "http") throw new MachineHttpError(result.error.message, result.error.status)
+    throw new Error(result.error.message)
+  }
   return result.response
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { continueNativeSessionAcrossMachine } from "../cross-machine-continuation"
+import { isMachineTransportFailure as transportFailure } from "../machine-request-error"
 import { reconcileCrossMachineProjectSelection } from "../cross-machine-project-selection"
 import {
   loadCrossMachineProjectRoute,
@@ -28,7 +29,7 @@ type Props = {
 }
 
 function supportedBackend(value: string | undefined, fallback: BackendKind): BackendKind {
-  return value === "opencode" || value === "opencode2" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
+  return value === "opencode" || value === "opencode2" || value === "omp" || value === "pi" || value === "claude" || value === "codex" || value === "copilot" || value === "mimo"
     ? value
     : fallback
 }
@@ -43,10 +44,6 @@ function configForAgent(base: ServerConfig, agent: MachineAgentHost): ServerConf
 
 function modelKey(model?: ModelSelection | null): string {
   return model ? modelOptionKey(model as ModelOption) : ""
-}
-
-function transportFailure(reason: unknown): boolean {
-  return /cannot reach|timed out|network|connection|failed to fetch/i.test(reason instanceof Error ? reason.message : String(reason))
 }
 
 function planSummary(plan: CrossMachineRoutePlan | null, loading: boolean): string {

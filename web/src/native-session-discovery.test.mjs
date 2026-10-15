@@ -227,7 +227,9 @@ const nonPaginatedAgents = [
   { id: "omp", label: "Oh My Pi", backend: "omp", transport: "acp" },
   { id: "pi", label: "PI", backend: "pi", transport: "acp" },
   { id: "claude", label: "Claude Code", backend: "claude", transport: "acp" },
-  { id: "codex", label: "Codex", backend: "codex", transport: "acp" }
+  { id: "codex", label: "Codex", backend: "codex", transport: "acp" },
+  { id: "copilot", label: "GitHub Copilot CLI", backend: "copilot", transport: "acp" },
+  { id: "mimo", label: "MiMo Code", backend: "mimo", transport: "acp" }
 ].map((agent) => ({
   ...agent,
   managed: true,

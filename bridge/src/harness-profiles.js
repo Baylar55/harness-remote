@@ -5,6 +5,7 @@ import { createPiHistoryLoader } from "./pi-session-history.js"
 import { OMP_EXTENSION_ACTION_PROVIDERS } from "./extension-actions.js"
 import { createAcpProviderRegistry, defineAcpProvider } from "./acp-provider-kit.js"
 import { resolveOpenCodeCommand } from "./opencode-discovery.js"
+import { CopilotModelCatalog } from "./copilot-model-catalog.js"
 
 const COMMON_ACP_LIFECYCLE_CONTRACT = {
   sessionAuthority: "native-harness",
@@ -175,11 +176,18 @@ export const HARNESS_PROFILES = {
   }),
   copilot: defineAcpProvider({
     id: "copilot",
+    // Current Copilot ACP omits model options. Its native SDK transport exposes the live catalog.
+    createModelCatalog: (options) => new CopilotModelCatalog({ ...options, includeAuto: true }),
+    modelCatalogSource: "copilot-sdk-models-list",
+    fallbackModelSelectionMethod: "session/prompt",
+    fallbackModelCommand: "model",
+    replayAuthoritative: true,
+    replayUserChunksAreMessages: true,
     label: "GitHub Copilot CLI",
     command: "copilot",
     detectCommands: ["copilot"],
     launchPriority: 50,
-    args: ["--acp", "--stdio"],
+    args: ["--acp", "--stdio", ...(process.env.HARNESS_REMOTE_COPILOT_MODEL ? ["--model", process.env.HARNESS_REMOTE_COPILOT_MODEL] : [])],
     permissionMode: "allow",
     lifecycleContract: COMMON_ACP_LIFECYCLE_CONTRACT,
     modelVariantConfigIDs: [],
@@ -194,7 +202,7 @@ export const HARNESS_PROFILES = {
     },
     capabilities: {
       ...COMMON_CAPABILITIES,
-      models: false,
+      models: true,
       todos: false,
       // Copilot ACP advertises its current slash-command set through available_commands_update.
       commands: true,
@@ -255,15 +263,22 @@ export const HARNESS_PROFILES = {
     // Current MiMo ACP advertises `opencode-login` but its authenticate RPC throws
     // "Authentication not implemented". It relies on credentials configured in the CLI itself.
     authenticate: false,
-    // Work around upstream #865 without mutating the user's config: MiMo's ACP ignores the
-    // DB-backed default set by `mimo auth login`, while inline config is honored by defaultModel().
-    // The override is process-scoped and only supplies a safe bootstrap model for session/new.
-    environment: {
-      OPENCODE_CONFIG_CONTENT: JSON.stringify({ model: "mimo/mimo-auto" })
-    },
+    // Keep the user's configured provider; the historical hosted MiMo Auto service is retired.
+    ...(process.env.HARNESS_REMOTE_MIMO_CONFIG_CONTENT
+      ? { environment: { MIMOCODE_CONFIG_CONTENT: process.env.HARNESS_REMOTE_MIMO_CONFIG_CONTENT } }
+      : {}),
+    sessionListScope: "project",
+    // MiMo replays the complete native transcript. Replacing a cached partial transcript is also
+    // required when an idle project process was retired and the Session is opened again.
+    replayAuthoritative: true,
+    refreshSessionListOnRead: false,
+    catalogSessionCleanup: { command: "mimo", args: ["session", "delete"] },
+    excludedModelValuePrefixes: ["mimo/mimo-auto"],
+    inlineModelVariantValues: ["none", "low", "medium", "high", "xhigh"],
+    modelProviderOrder: ["xiaomi", "openai"],
+    requireAssistantResponse: true,
     lifecycleContract: COMMON_ACP_LIFECYCLE_CONTRACT,
-    // MiMo Code is OpenCode-derived. Its core ACP Session lifecycle is real-machine validated,
-    // while model/command discovery stays conservative until separately exercised.
+    // Native model options include reasoning as provider/model/variant wire values.
     modelVariantConfigIDs: [],
     sessionContract: {
       authority: "native-harness",
@@ -276,7 +291,7 @@ export const HARNESS_PROFILES = {
     },
     capabilities: {
       ...COMMON_CAPABILITIES,
-      models: false,
+      models: true,
       todos: false,
       commands: false,
       permissions: true,
@@ -311,6 +326,9 @@ export const HARNESS_PROFILES = {
     // bridge does not own, so a conversation still running in Codex keeps updating without asking
     // for the replay that the sessions we do own would otherwise repeat on each refresh.
     historyLoader: createCodexHistoryLoader(),
+    // Rollout byte-offset ids differ from live ACP message ids. Seed an owned Session from its
+    // journal once, then keep the live stream authoritative while this daemon writes it.
+    journalPageWhileOwned: false,
     preserveListedTimestamps: true,
     reloadOnHistoryRefresh: false,
     // The official adapter exposes reasoning effort independently from model selection.

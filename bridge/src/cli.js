@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path"
 import { AcpClient } from "./acp-client.js"
+import { createAcpProviderRuntime } from "./acp-provider-runtime.js"
 import { parseConfig, usage } from "./config.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { loadMachineIdentity, MachineRegistry, trackAgentHostLifecycle } from "./machine-registry.js"
@@ -32,8 +33,11 @@ if (config) {
     capabilities: profile.capabilities
   })
 
+  const providerRuntime = profile.createModelCatalog || profile.sessionListScope === "project"
+    ? await createAcpProviderRuntime({ provider: profile, launch: { command: config.acpCommand, args: config.acpArgs }, config })
+    : undefined
   const acp = trackAgentHostLifecycle(
-    new AcpClient({ command: config.acpCommand, args: config.acpArgs, permissionMode: profile.permissionMode, preferredAuthMethod: profile.authMethod, authenticate: profile.authenticate, environment: profile.environment }),
+    providerRuntime?.agent ?? new AcpClient({ command: config.acpCommand, args: config.acpArgs, permissionMode: profile.permissionMode, preferredAuthMethod: profile.authMethod, authenticate: profile.authenticate, environment: profile.environment }),
     machineRegistry,
     profile.id
   )
@@ -42,6 +46,7 @@ if (config) {
     acp,
     machineRegistry,
     serviceOptions: {
+      ...providerRuntime?.registration.serviceOptions,
       snapshotDirectory: path.join(config.stateDirectory, profile.id),
       historyLoader: profile.historyLoader,
       preserveListedTimestamps: profile.preserveListedTimestamps,
@@ -73,6 +78,7 @@ if (config) {
   })
 
   const shutdown = () => {
+    providerRuntime?.modelCatalog.close?.()
     if (shuttingDown) return
     shuttingDown = true
     acp.close()

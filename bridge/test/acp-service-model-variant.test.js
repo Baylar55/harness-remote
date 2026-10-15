@@ -59,6 +59,46 @@ test("a journal-less ACP session restores its native model and variant on transc
   assert.equal(acp.calls.some(([method]) => method === "session/resume"), false)
 })
 
+test("MiMo inline variants use one exact native model value and survive transcript reads", async () => {
+  const acp = new RecordingAcp({ models: ["xiaomi/mimo-v2.6-flash", "xiaomi/mimo-v2.6-flash/high"] })
+  const service = new AcpService(acp, { inlineModelVariantValues: ["high"] })
+  await service.setModel("s1", "xiaomi/mimo-v2.6-flash", { configId: "model", value: "high" })
+  assert.deepEqual(configCalls(acp), ["model=xiaomi/mimo-v2.6-flash/high"])
+  assert.deepEqual((await service.messagePage("s1")).model, { providerID: "xiaomi", modelID: "mimo-v2.6-flash", variant: "high" })
+  await service.setModel("s1", "xiaomi/mimo-v2.6-flash", { configId: "model", value: "xiaomi/mimo-v2.6-flash/high" })
+  assert.equal(configCalls(acp).length, 1)
+})
+
+test("retired MiMo models and unadvertised inline variants never reach model switching", async () => {
+  const acp = new RecordingAcp({ models: ["xiaomi/mimo-v2.6-flash", "mimo/mimo-auto", "mimo/mimo-auto/high"] })
+  const service = new AcpService(acp, { excludedModelValuePrefixes: ["mimo/mimo-auto"], inlineModelVariantValues: ["high"] })
+  assert.deepEqual((await service.models("s1")).map((option) => option.value), ["xiaomi/mimo-v2.6-flash"])
+  await assert.rejects(service.setModel("s1", "mimo/mimo-auto"), /unavailable/)
+  await assert.rejects(service.setModel("s1", "xiaomi/mimo-v2.6-flash", { configId: "model", value: "high" }), /variant is not available/)
+  assert.deepEqual(configCalls(acp), [])
+})
+
+test("legacy ACP model state is switched with session/set_model", async () => {
+  const acp = new RecordingAcp()
+  const original = acp.request.bind(acp)
+  acp.request = async (method, params) => method === "session/load"
+    ? { models: { currentModelId: "one", availableModels: [{ modelId: "one" }, { modelId: "two" }] } }
+    : original(method, params)
+  const service = new AcpService(acp, { modelProviderID: "copilot" })
+  assert.deepEqual((await service.messagePage("s1")).model, { providerID: "copilot", modelID: "one" })
+  await service.setModel("s1", "copilot/two")
+  assert.ok(acp.calls.some(([method]) => method === "session/set_model"))
+  assert.deepEqual(configCalls(acp), [])
+})
+
+test("a provider cannot silently finish a prompt without the required assistant response", async () => {
+  const service = new AcpService(new RecordingAcp(), { requireAssistantResponse: true })
+  await assert.rejects(service.promptAndWait("s1", "Hello"), /without an assistant response/)
+  const messages = await service.messages("s1")
+  assert.match(messages.find((message) => message.info.error)?.info.error.message, /without an assistant response/)
+  assert.equal(service.status("s1").type, "idle")
+})
+
 test("setModel applies the model before its harness-advertised variant", async () => {
   const acp = new RecordingAcp()
   const service = new AcpService(acp, {})

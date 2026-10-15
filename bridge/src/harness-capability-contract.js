@@ -39,7 +39,7 @@ export function acpHarnessCapabilityContract(profile) {
       representation: "acp-session-update"
     },
     models: {
-      source: "acp-config-options",
+      source: profile?.modelCatalogSource ?? "acp-config-options",
       // The release candidate deliberately keeps the last real-machine-validated ownership model:
       // one daemon-owned technical catalog Session per harness adapter lifetime. Project-scoped ACP
       // discovery was audited in isolation but regressed PI, Codex and Claude on Windows, so it is

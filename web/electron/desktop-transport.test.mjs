@@ -227,6 +227,23 @@ test('OpenCode 2 desktop profiles validate and route requests to the selected AC
   await rm(directory, { recursive: true, force: true })
 })
 
+test('Copilot and MiMo desktop profiles retain independent identities and exact HTTP routes', async () => {
+  for (const backend of ['copilot', 'mimo']) {
+    const scoped = { ...localProfile, id: `test-${backend}`, backend, agentId: backend }
+    assert.deepEqual(validateDesktopProfile(scoped), scoped)
+    const directory = await mkdtemp(join(tmpdir(), `harness-remote-${backend}-`))
+    const registry = new ProfileRegistry(join(directory, 'profiles.json'))
+    await registry.replace([scoped])
+    assert.deepEqual(registry.get(scoped.id), scoped)
+    const routed = await executeDesktopRequest(registry.get(scoped.id), { path: '/echo/session' })
+    assert.deepEqual(routed.response.data, {
+      url: `/v1/agents/${backend}/echo/session`,
+      backend
+    })
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 test('HTTP errors expose status without matching prose', async () => {
   const missing = await executeDesktopRequest(localProfile, { path: '/missing' })
   assert.equal(missing.error.code, 'http')

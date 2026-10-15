@@ -37,11 +37,18 @@ export async function exerciseAcpProviderLifecycle(provider, {
   },
   launch = { command: "fixture-acp", args: [] }
 } = {}) {
+  const clients = []
+  class FixtureClient extends LifecycleClient {
+    constructor(options) {
+      super(options)
+      clients.push(this)
+    }
+  }
   const runtime = await createAcpProviderRuntime({
     provider,
     launch,
     config,
-    Client: LifecycleClient,
+    Client: FixtureClient,
     ModelCatalog: LifecycleCatalog,
     cwd: "/work/project"
   })
@@ -58,7 +65,7 @@ export async function exerciseAcpProviderLifecycle(provider, {
   await agent.start()
   states.push(daemon.registry.host(provider.id).state)
 
-  agent.failNext = true
+  for (const client of clients) client.failNext = true
   let restartError
   try {
     await agent.start()
@@ -67,6 +74,7 @@ export async function exerciseAcpProviderLifecycle(provider, {
   }
   states.push(daemon.registry.host(provider.id).state)
 
+  await daemon.close()
   return {
     states,
     restartError,

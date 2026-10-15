@@ -11,7 +11,9 @@ export const BACKEND_STORAGE_KEYS = {
   omp: "opencode.remote.server.omp",
   pi: "opencode.remote.server.pi",
   claude: "opencode.remote.server.claude",
-  codex: "opencode.remote.server.codex"
+  codex: "opencode.remote.server.codex",
+  copilot: "opencode.remote.server.copilot",
+  mimo: "opencode.remote.server.mimo"
 } as const
 
 export const SERVER_PROFILES_STORAGE_KEY = "opencode.remote.serverProfiles"
@@ -27,7 +29,7 @@ export type SavedServerProfile = {
   config: ServerConfig
 }
 
-const BACKENDS: BackendKind[] = ["opencode", "opencode2", "omp", "pi", "claude", "codex"]
+const BACKENDS: BackendKind[] = ["opencode", "opencode2", "omp", "pi", "claude", "codex", "copilot", "mimo"]
 
 function defaultConfig(backend: BackendKind): ServerConfig {
   return {
@@ -40,7 +42,7 @@ function defaultConfig(backend: BackendKind): ServerConfig {
 }
 
 function isBackend(value: unknown): value is BackendKind {
-  return value === "opencode" || value === "opencode2" || value === "omp" || value === "pi" || value === "claude" || value === "codex"
+  return value === "opencode" || value === "opencode2" || value === "omp" || value === "pi" || value === "claude" || value === "codex" || value === "copilot" || value === "mimo"
 }
 
 function parseConfig(value: unknown, fallbackBackend: BackendKind): ServerConfig | null {
@@ -57,7 +59,7 @@ function profileID(): string {
 }
 
 function profileName(backend: BackendKind, position: number): string {
-  const label = backend === "omp" ? "Oh My Pi" : backend === "pi" ? "PI" : backend === "claude" ? "Claude Code" : backend === "codex" ? "Codex CLI" : backend === "opencode2" ? "OpenCode 2" : "OpenCode Legacy"
+  const label = backend === "omp" ? "Oh My Pi" : backend === "pi" ? "PI" : backend === "claude" ? "Claude Code" : backend === "codex" ? "Codex CLI" : backend === "copilot" ? "GitHub Copilot CLI" : backend === "mimo" ? "MiMo Code" : backend === "opencode2" ? "OpenCode 2" : "OpenCode Legacy"
   return position === 0 ? `${label} server` : `${label} server ${position + 1}`
 }
 
