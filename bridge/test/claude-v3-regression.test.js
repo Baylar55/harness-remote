@@ -22,6 +22,8 @@ test("Claude remains a first-class v3 ACP backend", () => {
   assert.equal(profile.capabilities.prompt, true)
   assert.equal(profile.capabilities.models, true)
   assert.equal(profile.capabilities.todos, true)
+  assert.equal(profile.recoverMissingSessionOnPrompt, true)
+  assert.equal(HARNESS_PROFILES.omp.recoverMissingSessionOnPrompt, undefined)
 })
 
 test("Claude public status stops reporting a finished stale turn as Working", () => {
@@ -194,7 +196,7 @@ test("Claude reloads a Session whose agent process lost its in-memory handle", a
   }
 
   const acp = new RecoveringClaudeAcp()
-  const service = new AcpService(acp)
+  const service = new AcpService(acp, { recoverMissingSessionOnPrompt: true })
   await service.promptAndWait(ACTIVITY_SESSION, "one")
 
   acp.open = false

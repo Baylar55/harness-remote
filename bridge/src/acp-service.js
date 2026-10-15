@@ -502,6 +502,7 @@ export class AcpService {
   #inlineModelVariantValues
   #modelProviderOrder
   #requireAssistantResponse
+  #recoverMissingSessionOnPrompt
   #turnResponseObserved = new Set()
   #fallbackModelCatalog
   #fallbackModelSelectionMethod
@@ -550,6 +551,7 @@ export class AcpService {
     inlineModelVariantValues = [],
     modelProviderOrder = [],
     requireAssistantResponse = false,
+    recoverMissingSessionOnPrompt = false,
     fallbackModelCatalog,
     fallbackModelSelectionMethod,
     fallbackModelCommand,
@@ -574,6 +576,7 @@ export class AcpService {
     this.#inlineModelVariantValues = inlineModelVariantValues
     this.#modelProviderOrder = modelProviderOrder
     this.#requireAssistantResponse = requireAssistantResponse
+    this.#recoverMissingSessionOnPrompt = recoverMissingSessionOnPrompt
     this.#fallbackModelCatalog = fallbackModelCatalog
     this.#fallbackModelSelectionMethod = fallbackModelSelectionMethod
     this.#fallbackModelCommand = fallbackModelCommand
@@ -1476,7 +1479,7 @@ export class AcpService {
     try {
       return await this.#acp.request("session/prompt", params, 300_000)
     } catch (error) {
-      if (!missingAcpSession(error)) throw error
+      if (!this.#recoverMissingSessionOnPrompt || !missingAcpSession(error)) throw error
       this.#loaded.delete(sessionID)
       this.#acpOpenSessions.delete(sessionID)
       this.#configOptions.delete(sessionID)

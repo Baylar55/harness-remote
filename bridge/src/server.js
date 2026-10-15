@@ -197,7 +197,8 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     excludedModelValuePrefixes: profile.excludedModelValuePrefixes ?? [],
     inlineModelVariantValues: profile.inlineModelVariantValues ?? [],
     modelProviderOrder: profile.modelProviderOrder ?? [],
-    requireAssistantResponse: profile.requireAssistantResponse === true
+    requireAssistantResponse: profile.requireAssistantResponse === true,
+    recoverMissingSessionOnPrompt: profile.recoverMissingSessionOnPrompt === true
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
   const liveSessionActivity = new Map()

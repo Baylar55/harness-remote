@@ -140,6 +140,7 @@ export async function createAcpProviderRuntime({
         inlineModelVariantValues: provider.inlineModelVariantValues,
         modelProviderOrder: provider.modelProviderOrder,
         requireAssistantResponse: provider.requireAssistantResponse,
+        recoverMissingSessionOnPrompt: provider.recoverMissingSessionOnPrompt,
         ...(provider.fallbackModelSelectionMethod ? {
           fallbackModelCatalog: modelCatalog,
           fallbackModelSelectionMethod: provider.fallbackModelSelectionMethod,
