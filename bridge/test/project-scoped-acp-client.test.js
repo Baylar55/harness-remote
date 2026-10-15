@@ -6,7 +6,7 @@ import test from "node:test"
 import { ProjectScopedAcpClient } from "../src/project-scoped-acp-client.js"
 import { AcpService } from "../src/acp-service.js"
 import { harnessProfile } from "../src/harness-profiles.js"
-import { mkdtemp, writeFile, rm } from "node:fs/promises"
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 
 class FakeClient extends EventEmitter {
@@ -275,9 +275,21 @@ test("status handshakes do not pin the oldest idle project against eviction", as
 test("MiMo complete native replay replaces a duplicated cached transcript after a project reopens", async () => {
   const sessionID = "mimo-reopened"
   const directory = await mkdtemp(path.join(tmpdir(), "hr-mimo-replay-"))
+  const snapshotPath = path.join(directory, `${Buffer.from(sessionID).toString("base64url")}.json`)
   const message = (id, role, text) => ({ info: { id, role, sessionID }, parts: [{ type: "text", text }] })
   const poison = [message("old-user", "user", "test"), message("old-answer", "assistant", "OKOK"), message("duplicate-user", "user", "test")]
-  await writeFile(path.join(directory, `${Buffer.from(sessionID).toString("base64url")}.json`), JSON.stringify({ version: 1, messages: poison }))
+  await writeFile(snapshotPath, JSON.stringify({ version: 1, messages: poison }))
+  let service
+  const waitForSnapshotWrites = async () => {
+    if (!service) return
+    const deadline = Date.now() + 10_000
+    while (service.diagnostics().snapshotWrites > 0) {
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for MiMo snapshot writes to finish (${service.diagnostics().snapshotWrites} still pending)`)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+  }
   class Replay extends EventEmitter {
     async listSessions() { return [{ sessionId: sessionID, cwd: "/work/a" }] }
     async request(method) {
@@ -290,10 +302,19 @@ test("MiMo complete native replay replaces a duplicated cached transcript after 
     }
   }
   try {
-    const service = new AcpService(new Replay(), { snapshotDirectory: directory, replayAuthoritative: harnessProfile("mimo").replayAuthoritative })
+    service = new AcpService(new Replay(), { snapshotDirectory: directory, replayAuthoritative: harnessProfile("mimo").replayAuthoritative })
     const messages = await service.messages(sessionID)
     assert.deepEqual(messages.map((m) => [m.info.role, m.parts.map((p) => p.text).join("")]), [["user", "test"], ["assistant", "OK"]])
-  } finally { await rm(directory, { recursive: true, force: true }) }
+    await waitForSnapshotWrites()
+    const saved = JSON.parse(await readFile(snapshotPath, "utf8"))
+    assert.deepEqual(saved.messages.map((m) => [m.info.role, m.parts.map((p) => p.text).join("")]), [["user", "test"], ["assistant", "OK"]])
+  } finally {
+    try {
+      await waitForSnapshotWrites()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  }
 })
 
 test("one logical Session operation keeps its project pinned between individual RPCs", async () => {
