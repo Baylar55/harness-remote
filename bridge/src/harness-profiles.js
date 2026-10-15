@@ -149,6 +149,9 @@ export const HARNESS_PROFILES = {
     permissionMode: "allow",
     preserveListedTimestamps: true,
     reloadOnHistoryRefresh: false,
+    // session/load replays the complete native transcript, split per Anthropic API message, while
+    // a live turn is recorded as one bridge-owned message. Merging the two kept both copies.
+    replayAuthoritative: true,
     recoverMissingSessionOnPrompt: true,
     // The current adapter exposes model/mode but no low/medium/high reasoning-effort selector.
     // Keep this empty rather than fabricating OpenCode-style variants.
