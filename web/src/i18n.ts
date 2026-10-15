@@ -358,6 +358,8 @@ type TranslationKey =
   | 'sf.noSessionsOnMachine'
   | 'sf.attentionCount'
   | 'sf.liveCount'
+  | 'sf.readyCount'
+  | 'sf.unseenResult'
   | 'sf.offline'
   | 'sf.statusWorking'
   | 'sf.statusReady'
@@ -850,6 +852,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.noSessionsOnMachine': 'No native Sessions discovered on this machine.',
     'sf.attentionCount': '{count} attention',
     'sf.liveCount': '{count} live',
+    'sf.readyCount': '{count} ready',
+    'sf.unseenResult': 'new result',
     'sf.offline': 'Offline',
     'sf.statusWorking': 'Working',
     'sf.statusReady': 'Ready',
@@ -1342,6 +1346,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.noSessionsOnMachine': 'Nessuna sessione nativa trovata su questa macchina.',
     'sf.attentionCount': '{count} da vedere',
     'sf.liveCount': '{count} attive',
+    'sf.readyCount': '{count} pronte',
+    'sf.unseenResult': 'nuovo risultato',
     'sf.offline': 'Offline',
     'sf.statusWorking': 'In lavorazione',
     'sf.statusReady': 'Pronta',
@@ -1834,6 +1840,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.noSessionsOnMachine': '在這部機器上找不到原生工作階段。',
     'sf.attentionCount': '{count} 需注意',
     'sf.liveCount': '{count} 進行中',
+    'sf.readyCount': '{count} 已就緒',
+    'sf.unseenResult': '新結果',
     'sf.offline': '離線',
     'sf.statusWorking': '執行中',
     'sf.statusReady': '就緒',
@@ -2326,6 +2334,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.noSessionsOnMachine': '在该机器上未发现原生会话。',
     'sf.attentionCount': '{count} 需注意',
     'sf.liveCount': '{count} 进行中',
+    'sf.readyCount': '{count} 已就绪',
+    'sf.unseenResult': '新结果',
     'sf.offline': '离线',
     'sf.statusWorking': '执行中',
     'sf.statusReady': '就绪',
