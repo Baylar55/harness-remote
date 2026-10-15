@@ -51,13 +51,9 @@ jobs:
       - name: Build web app
         run: npm run build
         working-directory: web
-      - name: Run web regression tests
-        run: npm run test:ci:baseline
-        working-directory: web
 
-      - name: Run bridge tests
-        run: npm test
-        working-directory: bridge
+      # Web regressions and bridge tests are required checks on every pull request into main, so a
+      # commit that reaches this build has already passed them.
 
       - name: Setup JDK 21
         uses: actions/setup-java@v5
