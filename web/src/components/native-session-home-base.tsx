@@ -477,7 +477,26 @@ export function NativeSessionHome({
       snapshot?.agents.map((agent) => `${agent.id}:${agent.backend}:${agent.transport}:${agent.processID ?? ""}:${agent.state}`).join(",") || ""
     ].join(":")
   ).join("|")
-  const loaded = discoveryReady && loadedSignature === machineSignature
+  // Agent lifecycle (a lazy ACP start, a process exit or restart, a machine probe flapping) changes
+  // the signature above all the time on a perfectly healthy machine. That must re-read the Sessions,
+  // but it is not a different set of machines: treating it as one sent the rail and the workspace back
+  // to their first-load state ("Loading Sessions" in the workspace), hid the counts and disabled the
+  // open Session until the read finished. Only a changed endpoint is a new first load.
+  const endpointSignature = sources.map(({ machine }) =>
+    [
+      machine.id,
+      machine.config.host,
+      machine.config.port,
+      machine.config.username,
+      machine.config.password,
+      machine.config.agentId || ""
+    ].join(":")
+  ).join("|")
+  const loaded = discoveryReady && loadedSignature === endpointSignature
+  // Whether the read for the current snapshot has landed. Only used where showing stale emptiness
+  // would be wrong (e.g. "No Sessions on this machine" for a machine that just came back).
+  const [currentSignature, setCurrentSignature] = useState<string | null>(null)
+  const snapshotLoaded = loaded && currentSignature === machineSignature
 
   useEffect(() => {
     if (!loaded || loading || !deletingKeys?.size || !onDeletionSettled) return
@@ -526,7 +545,8 @@ export function NativeSessionHome({
       setProjectsByMachine({})
       setPresentationOverrides({})
       setOlderSessionError(null)
-      setLoadedSignature(machineSignature)
+      setLoadedSignature(endpointSignature)
+      setCurrentSignature(machineSignature)
       setLoading(false)
       onRefreshCompleteRef.current?.(refreshToken)
       return
@@ -554,6 +574,8 @@ export function NativeSessionHome({
     })).then((results) => {
       if (cancelled) return
       setProjectsByMachine(Object.fromEntries(results.map((result) => [result.machine.id, result.projects])))
+      // Unlike `loaded`, the page cache follows the agent processes: ACP cursors are bound to the
+      // connection that issued them. The visible rows survive through the reconciliation below.
       if (pageCacheSignature.current !== machineSignature) pageCache.current.clear()
       pageCacheSignature.current = machineSignature
       const activeScopes = new Set<string>()
@@ -600,10 +622,12 @@ export function NativeSessionHome({
         }
       }))
       if (authoritativeRefresh) authoritativeRefreshApplied.current = authoritativeRefreshToken
-      setLoadedSignature(machineSignature)
+      setLoadedSignature(endpointSignature)
+      setCurrentSignature(machineSignature)
     }).catch((reason) => {
       if (!cancelled) {
-        setLoadedSignature(machineSignature)
+        setLoadedSignature(endpointSignature)
+        setCurrentSignature(machineSignature)
         setDiscoveryError(reason instanceof Error ? reason.message : String(reason))
       }
     }).finally(() => {
@@ -613,7 +637,7 @@ export function NativeSessionHome({
       }
     })
     return () => { cancelled = true }
-  }, [sources, revision, refreshToken, authoritativeRefreshToken, discoveryReady, machineSignature, deletedKeys])
+  }, [sources, revision, refreshToken, authoritativeRefreshToken, discoveryReady, machineSignature, endpointSignature, deletedKeys])
 
   useEffect(() => {
     if (!loaded || document.visibilityState !== "visible") return
@@ -1290,7 +1314,7 @@ export function NativeSessionHome({
               </button>
               {machineCollapsed ? null : (
                 <>
-                  {projects.length === 0 && state !== "loading" && !(state === "online" && (!loaded || reconnecting)) ? (
+                  {projects.length === 0 && state !== "loading" && !(state === "online" && (!snapshotLoaded || reconnecting)) ? (
                     <div className="hr-native-machine-empty">
                       <ServerIcon size={15} />
                       <span>{state === "offline" ? t("sf.machineUnavailableSaved") : t("sf.noSessionsOnMachine")}</span>

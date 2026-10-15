@@ -317,6 +317,9 @@ assert.match(source, /entry\.nextCursor[\s\S]*loadOlderSessions/, "older native 
 assert.match(source, /refreshCursorPage\(authoritativeRefresh \? undefined : existing, firstRecords, page\.nextCursor/, "automatic first-page refreshes must preserve the manual pagination tail while explicit Refresh rebuilds native truth")
 assert.match(source, /authoritativeRefreshToken !== authoritativeRefreshApplied\.current/, "only an explicit Refresh token may switch the rail into authoritative pruning")
 assert.match(source, /agent\.processID/, "adapter restarts must invalidate connection-bound ACP cursors")
+assert.match(source, /pageCacheSignature\.current !== machineSignature/, "the page cache must still follow agent processes because ACP cursors are connection-bound")
+assert.match(source, /const loaded = discoveryReady && loadedSignature === endpointSignature/, "an agent starting, exiting or restarting must not send the rail and workspace back to first-load")
+assert.doesNotMatch(source, /setLoadedSignature\(machineSignature\)/, "the first-load gate must be keyed by machine endpoints, not by volatile agent lifecycle")
 
 const inboxSource = readFileSync(new URL("./components/native-session-home-attention.tsx", import.meta.url), "utf8")
 assert.match(inboxSource, /loadNativeSessionAttentionIndex/, "the global Inbox must use the capability-driven pending-request index")
