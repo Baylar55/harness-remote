@@ -5,7 +5,8 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { AcpService } from "../src/acp-service.js"
-import { HARNESS_PROFILES } from "../src/harness-profiles.js"
+import { listAcpProviderProfiles } from "../src/harness-profiles.js"
+import { createAcpProviderRuntime } from "../src/acp-provider-runtime.js"
 
 const SESSION = { sessionId: "claude-session", cwd: process.cwd(), title: "Long task" }
 
@@ -36,8 +37,20 @@ const storedTurns = async (directory) => {
   }
 }
 
-test("Claude resumes the turns a restart interrupted", () => {
-  assert.equal(HARNESS_PROFILES.claude.resumeInterruptedTurns, true)
+test("every ACP harness resumes the turns a restart interrupted", async () => {
+  // Each adapter is a child of the bridge, so a restart interrupts Codex, PI and the rest exactly as
+  // it does Claude.
+  for (const provider of listAcpProviderProfiles()) {
+    assert.notEqual(provider.resumeInterruptedTurns, false, provider.id)
+    const runtime = await createAcpProviderRuntime({
+      provider,
+      launch: { command: "adapter", args: [] },
+      config: { stateDirectory: tmpdir() },
+      Client: class { on() {} },
+      ModelCatalog: class { async preloadState() {} }
+    })
+    assert.equal(runtime.registration.serviceOptions.resumeInterruptedTurns, true, provider.id)
+  }
 })
 
 test("a turn the adapter was taken away from is prompted again by the next process", async () => {
@@ -101,7 +114,7 @@ test("a turn interrupted on every resume stops being resumed", async () => {
   assert.deepEqual(await storedTurns(directory), [])
 })
 
-test("harnesses that do not opt in keep no running-turn index", async () => {
+test("a harness that opts out keeps no running-turn index", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "resume-turn-"))
   const acp = new FakeAcp()
   const service = new AcpService(acp, { snapshotDirectory: directory })
