@@ -606,13 +606,19 @@ export class AcpService {
     this.#fallbackModelCommand = fallbackModelCommand
     this.#actionProviders = actionProviders
     acp.on("notification", (notification) => this.#handleNotification(notification))
-    acp.on("sessions-closed", (sessionIDs) => {
-      for (const sessionID of sessionIDs) {
-        this.#loaded.delete(sessionID)
-        this.#acpOpenSessions.delete(sessionID)
-        this.#configOptions.delete(sessionID)
-      }
-    })
+    acp.on("sessions-closed", (sessionIDs) => this.#forgetOpenSessions(sessionIDs))
+    // An adapter that exits takes every Session it had open with it. Still counting them as loaded
+    // sent the next prompt to a process that had never seen the Session, and the reload that its
+    // "Session not found" then forced ran in the middle of that turn.
+    acp.on?.("exit", () => this.#forgetOpenSessions([...this.#acpOpenSessions, ...this.#loaded]))
+  }
+
+  #forgetOpenSessions(sessionIDs) {
+    for (const sessionID of sessionIDs) {
+      this.#loaded.delete(sessionID)
+      this.#acpOpenSessions.delete(sessionID)
+      this.#configOptions.delete(sessionID)
+    }
   }
 
   subscribe(listener) {
@@ -1521,10 +1527,20 @@ export class AcpService {
       return await this.#acp.request("session/prompt", params, 300_000)
     } catch (error) {
       if (!this.#recoverMissingSessionOnPrompt || !missingAcpSession(error)) throw error
-      this.#loaded.delete(sessionID)
-      this.#acpOpenSessions.delete(sessionID)
-      this.#configOptions.delete(sessionID)
+      // The replay below rebuilds the transcript from what the harness stored, which does not yet
+      // include this turn's prompt: the adapter refused it. Keep the turn as recorded, and start its
+      // reply in a message of its own rather than in the last one the replay produced.
+      const messages = this.#messages.get(sessionID) ?? []
+      const promptIndex = messages.findLastIndex((message) => message.info.role === "user")
+      const turn = promptIndex >= 0 ? messages.slice(promptIndex) : []
+      this.#forgetOpenSessions([sessionID])
       await this.#load(sessionID, true)
+      const replayed = this.#messages.get(sessionID) ?? []
+      const replayedIDs = new Set(replayed.map((message) => message.info.id))
+      this.#messages.set(sessionID, [...replayed, ...turn.filter((message) => !replayedIDs.has(message.info.id))])
+      this.#chunkMessageIDs.delete(`${sessionID}:user`)
+      this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
+      this.#emit("message.updated", sessionID)
       return this.#acp.request("session/prompt", params, 300_000)
     }
   }
@@ -2032,6 +2048,9 @@ export class AcpService {
         }
       }
     }
+    // A single adapter process is not restarted by a request on its own, and the one that opened
+    // this Session may have exited since. A project-scoped client starts its own process per request.
+    if (typeof this.#acp.withSession !== "function") await this.#acp.start?.()
     if (await this.#openWithoutReplay(sessionID, session)) return
     this.#replaying.add(sessionID)
     this.#messages.set(sessionID, [])
