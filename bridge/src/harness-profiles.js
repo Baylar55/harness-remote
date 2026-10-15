@@ -149,6 +149,7 @@ export const HARNESS_PROFILES = {
     permissionMode: "allow",
     preserveListedTimestamps: true,
     reloadOnHistoryRefresh: false,
+    recoverMissingSessionOnPrompt: true,
     // The current adapter exposes model/mode but no low/medium/high reasoning-effort selector.
     // Keep this empty rather than fabricating OpenCode-style variants.
     modelVariantConfigIDs: [],

@@ -24,6 +24,13 @@ export function sameDirectory(left, right) {
   }
   return normalize(left) === normalize(right)
 }
+
+function missingAcpSession(error) {
+  if (error?.code === "session_unavailable") return true
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  return /\bsession\b.{0,180}\b(not found|unknown|unavailable|does not exist|no longer exists)\b/i.test(message)
+}
+
 function sessionView(session, status = "idle", title = session.title, external = false) {
   return {
     id: session.sessionId,
@@ -495,6 +502,7 @@ export class AcpService {
   #inlineModelVariantValues
   #modelProviderOrder
   #requireAssistantResponse
+  #recoverMissingSessionOnPrompt
   #turnResponseObserved = new Set()
   #fallbackModelCatalog
   #fallbackModelSelectionMethod
@@ -543,6 +551,7 @@ export class AcpService {
     inlineModelVariantValues = [],
     modelProviderOrder = [],
     requireAssistantResponse = false,
+    recoverMissingSessionOnPrompt = false,
     fallbackModelCatalog,
     fallbackModelSelectionMethod,
     fallbackModelCommand,
@@ -567,6 +576,7 @@ export class AcpService {
     this.#inlineModelVariantValues = inlineModelVariantValues
     this.#modelProviderOrder = modelProviderOrder
     this.#requireAssistantResponse = requireAssistantResponse
+    this.#recoverMissingSessionOnPrompt = recoverMissingSessionOnPrompt
     this.#fallbackModelCatalog = fallbackModelCatalog
     this.#fallbackModelSelectionMethod = fallbackModelSelectionMethod
     this.#fallbackModelCommand = fallbackModelCommand
@@ -1422,13 +1432,13 @@ export class AcpService {
     this.#active.add(sessionID)
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
     this.#emit("session.updated", sessionID)
-    void this.#acp.request("session/prompt", {
+    void this.#requestPromptWithRecovery(sessionID, {
       sessionId: sessionID,
       prompt: [
         ...(text ? [{ type: "text", text }] : []),
         ...attachments.map((attachment) => ({ type: "image", mimeType: attachment.mime, data: attachment.data }))
       ]
-    }, 300_000).then(async (result) => {
+    }).then(async (result) => {
       if (this.#requireAssistantResponse && !this.#turnResponseObserved.has(sessionID)) {
         await new Promise((resolve) => setTimeout(resolve, this.#promptSettleMs || 50))
       }
@@ -1463,6 +1473,19 @@ export class AcpService {
       this.#persistSnapshot(sessionID)
       void this.#runNextQueued(sessionID)
     })
+  }
+
+  async #requestPromptWithRecovery(sessionID, params) {
+    try {
+      return await this.#acp.request("session/prompt", params, 300_000)
+    } catch (error) {
+      if (!this.#recoverMissingSessionOnPrompt || !missingAcpSession(error)) throw error
+      this.#loaded.delete(sessionID)
+      this.#acpOpenSessions.delete(sessionID)
+      this.#configOptions.delete(sessionID)
+      await this.#load(sessionID, true)
+      return this.#acp.request("session/prompt", params, 300_000)
+    }
   }
 
   /**
