@@ -497,7 +497,7 @@ export class AcpService {
   // has flushed its terminal assistant error. These ids keep only that short-lived bridge copy alive.
   #transientFailureMessageIDs = new Map()
   #snapshotDirectory
-  #restoredSnapshots = new Set()
+  #restoredSnapshots = new Map()
   #dirtySnapshots = new Set()
   #dirtyStart = new Map()
   #snapshotWrites = new Map()
@@ -1756,17 +1756,34 @@ export class AcpService {
     return path.join(this.#snapshotDirectory, `${name}.json`)
   }
 
-  async #restoreSnapshot(sessionID) {
-    if (!this.#snapshotDirectory || this.#restoredSnapshots.has(sessionID)) return
-    this.#restoredSnapshots.add(sessionID)
+  /**
+   * Every caller waits for the same read. At startup the Session list reads every snapshot at once,
+   * so a long Session's file can still be in flight when that Session is opened; returning early
+   * there let the load clear the transcript and start its replay, and the read then landed on top
+   * of it. The rest of the replay was merged into the old transcript: its text doubled onto the
+   * messages it already had, and the turns that open with a tool call piled up at the end as one
+   * Activity with no reply.
+   */
+  #restoreSnapshot(sessionID) {
+    if (!this.#snapshotDirectory) return Promise.resolve()
+    let restoring = this.#restoredSnapshots.get(sessionID)
+    if (!restoring) {
+      restoring = this.#readSnapshot(sessionID)
+      this.#restoredSnapshots.set(sessionID, restoring)
+    }
+    return restoring
+  }
+
+  async #readSnapshot(sessionID) {
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
       // A freshly created Session is already loaded in this process. Its first snapshot can still
       // contain the empty pre-prompt transcript while a real prompt has since been recorded in
       // memory; restoring that stale file here would erase the visible user turn. Snapshots only
-      // seed a Session that has not been loaded yet (restart or cache eviction).
-      if (!this.#loaded.has(sessionID) && Array.isArray(snapshot.messages)) {
+      // seed a Session that has not been loaded yet (restart or cache eviction), and never one
+      // whose replay is already rebuilding it.
+      if (!this.#loaded.has(sessionID) && !this.#replaying.has(sessionID) && Array.isArray(snapshot.messages)) {
         const fragmented = mergeFragmentedPiSnapshot(snapshot.messages)
         const restored = healPoisonedSnapshot(fragmented)
         if (restored.length !== fragmented.length) {
