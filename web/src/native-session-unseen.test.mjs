@@ -1,18 +1,17 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { nextFinishedKeys } from "./native-session-unseen.ts"
+import { nextFinishedKeys, withoutFinishedKey } from "./native-session-unseen.ts"
 
 const states = (entries) => new Map(Object.entries(entries))
 const none = new Set()
 
-test("a Session the rail sees finish stays marked until it is opened", () => {
+test("a Session the rail sees finish stays marked until it is clicked", () => {
   let finished = nextFinishedKeys(none, states({ a: "working" }), states({ a: "ready" }))
   assert.deepEqual([...finished], ["a"])
   // Later updates, however many, keep it marked.
   finished = nextFinishedKeys(finished, states({ a: "ready" }), states({ a: "ready" }))
   assert.deepEqual([...finished], ["a"])
-  // Opening it clears the mark.
-  finished = nextFinishedKeys(finished, states({ a: "ready" }), states({ a: "ready" }), "a")
+  finished = withoutFinishedKey(finished, "a")
   assert.deepEqual([...finished], [])
 })
 
@@ -20,10 +19,6 @@ test("a Session that was already ready is never marked, whatever its timestamps 
   // The first update of a page load has nothing before it; an idle Session listed again is idle.
   assert.deepEqual([...nextFinishedKeys(none, states({}), states({ a: "ready", b: "ready" }))], [])
   assert.deepEqual([...nextFinishedKeys(none, states({ a: "ready" }), states({ a: "ready" }))], [])
-})
-
-test("the Session open in front of the user is not marked when it finishes", () => {
-  assert.deepEqual([...nextFinishedKeys(none, states({ a: "working" }), states({ a: "ready" }), "a")], [])
 })
 
 test("a marked Session that starts working again or asks for input loses the mark", () => {
@@ -35,4 +30,9 @@ test("a marked Session that starts working again or asks for input loses the mar
 test("a marked Session missing from an update keeps its mark", () => {
   const finished = new Set(["a"])
   assert.equal(nextFinishedKeys(finished, states({ a: "ready" }), states({})), finished)
+})
+
+test("clicking a Session that is not marked changes nothing", () => {
+  const finished = new Set(["a"])
+  assert.equal(withoutFinishedKey(finished, "b"), finished)
 })

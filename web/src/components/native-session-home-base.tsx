@@ -19,7 +19,7 @@ import {
 } from "../native-session-federation-labels"
 import type { MachineAgentHost, MachineSnapshot } from "../types"
 import { nativeSessionDisplayTitle } from "../native-session-title"
-import { nextFinishedKeys, type SessionRailState } from "../native-session-unseen"
+import { nextFinishedKeys, withoutFinishedKey, type SessionRailState } from "../native-session-unseen"
 import { useLanguage, useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
@@ -443,10 +443,7 @@ export function NativeSessionHome({
   const [agentFilter, setAgentFilter] = useState("")
   const [projectFilter, setProjectFilter] = useState("")
   const [modelFilter, setModelFilter] = useState("")
-  const [recentlyCompletedKey, setRecentlyCompletedKey] = useState<string | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
-  const previousSelectedState = useRef<{ key?: string; state?: SessionPresentationState }>({})
-  const completionTimer = useRef<number | null>(null)
   const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
   const pageCacheSignature = useRef<string | null>(null)
   const deletedKeysRef = useRef(deletedKeys)
@@ -504,26 +501,6 @@ export function NativeSessionHome({
       ? current
       : { ...current, [selectedKey]: selectedState })
   }, [selectedKey, selectedState])
-
-  useEffect(() => {
-    const previous = previousSelectedState.current
-    if (previous.key !== selectedKey) setRecentlyCompletedKey(null)
-    if (selectedKey && previous.key === selectedKey && previous.state === "working" && selectedState === "ready") {
-      setRecentlyCompletedKey(selectedKey)
-      if (completionTimer.current !== null) window.clearTimeout(completionTimer.current)
-      completionTimer.current = window.setTimeout(() => {
-        setRecentlyCompletedKey((current) => current === selectedKey ? null : current)
-        completionTimer.current = null
-      }, 5_000)
-    } else if (selectedKey && selectedState === "working") {
-      setRecentlyCompletedKey((current) => current === selectedKey ? null : current)
-    }
-    previousSelectedState.current = { key: selectedKey, state: selectedState }
-  }, [selectedKey, selectedState])
-
-  useEffect(() => () => {
-    if (completionTimer.current !== null) window.clearTimeout(completionTimer.current)
-  }, [])
 
   useEffect(() => {
     if (machineFilter && !sources.some(({ machine }) => machine.id === machineFilter)) setMachineFilter("")
@@ -651,26 +628,26 @@ export function NativeSessionHome({
     return sessionPresentation(item.record, t)
   }, [liveStateForItem, t])
 
-  // A Session the rail sees finish stays marked until it is opened (see native-session-unseen.ts).
-  // The open Session counts as viewed only while the page is visible: a reply that lands in a
-  // hidden tab is still news when the user comes back.
-  const [pageVisible, setPageVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible")
+  // A Session the rail sees finish stays marked until it is clicked, including the one already open
+  // (see native-session-unseen.ts).
   const [finishedKeys, setFinishedKeys] = useState<ReadonlySet<string>>(() => new Set())
   const railStatesRef = useRef<ReadonlyMap<string, SessionRailState>>(new Map())
 
   useEffect(() => {
-    const onVisibilityChange = () => setPageVisible(document.visibilityState === "visible")
-    document.addEventListener("visibilitychange", onVisibilityChange)
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange)
-  }, [])
-
-  const viewingKey = selectedKey && pageVisible ? selectedKey : undefined
-  useEffect(() => {
     const current = new Map(records.map((item) => [recordKey(item), presentationForItem(item).state]))
     const previous = railStatesRef.current
     railStatesRef.current = current
-    setFinishedKeys((finished) => nextFinishedKeys(finished, previous, current, viewingKey))
-  }, [records, presentationForItem, viewingKey])
+    setFinishedKeys((finished) => nextFinishedKeys(finished, previous, current))
+  }, [records, presentationForItem])
+
+  const clearFinished = useCallback((key: string) => {
+    setFinishedKeys((finished) => withoutFinishedKey(finished, key))
+  }, [])
+
+  // Opening a Session from anywhere else - a link, the search, a notification - also counts.
+  useEffect(() => {
+    if (selectedKey) clearFinished(selectedKey)
+  }, [selectedKey, clearFinished])
 
   const unseenKeys = useMemo<ReadonlySet<string>>(() => deletingKeys?.size
     ? new Set([...finishedKeys].filter((key) => !deletingKeys.has(key)))
@@ -1328,17 +1305,20 @@ export function NativeSessionHome({
                                 const icon = harnessIconUrl(item.record.backend)
                                 const targetKey = recordKey(item)
                                 const selected = targetKey === selectedKey
-                                const recentlyCompleted = targetKey === recentlyCompletedKey
                                 const unseen = unseenKeys.has(targetKey)
                                 const deleting = Boolean(deletingKeys?.has(targetKey))
                                 return (
                                   <button
                                     type="button"
                                     ref={selected ? selectedRowRef : undefined}
-                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${unseen ? " unseen" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
+                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${unseen ? " unseen" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
                                     data-depth={Math.min(depth, 3)}
                                     key={targetKey}
-                                    onClick={() => { if (!deleting) open(item) }}
+                                    onClick={() => {
+                                      if (deleting) return
+                                      clearFinished(targetKey)
+                                      open(item)
+                                    }}
                                     disabled={deleting}
                                     aria-busy={deleting || undefined}
                                     aria-current={selected ? "page" : undefined}
@@ -1372,7 +1352,7 @@ export function NativeSessionHome({
                                     </span>
                                     <span className="hr-native-session-meta">
                                       <span className="hr-native-session-status" data-state={deleting ? "deleting" : status.state} aria-live={selected || deleting ? "polite" : undefined}>
-                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted || unseen ? "✓ " : ""}{operationalLabel}</>}
+                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{unseen ? "✓ " : ""}{operationalLabel}</>}
                                       </span>
                                       {deleting ? null : (
                                         <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? new Date(timestamp).toLocaleString() : undefined}>
