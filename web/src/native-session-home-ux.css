@@ -40,37 +40,6 @@
   border-color: color-mix(in srgb, var(--td3-focus, #5b8cff) 62%, transparent);
 }
 
-.hr-native-session-row.just-finished {
-  animation: hr-native-session-finished 4.8s ease-out both;
-}
-
-.hr-native-session-row.just-finished .hr-native-session-status {
-  color: var(--td3-green, #2da44e);
-  font-weight: 700;
-}
-
-.hr-native-session-row.just-finished .hr-native-session-harness i {
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--td3-green, #2da44e) 16%, transparent);
-}
-
-@keyframes hr-native-session-finished {
-  0%, 18% {
-    border-color: color-mix(in srgb, var(--td3-green, #2da44e) 48%, transparent);
-    background: color-mix(in srgb, var(--td3-green, #2da44e) 10%, var(--tdw-card, rgba(255, 255, 255, 0.035)));
-  }
-  100% {
-    border-color: color-mix(in srgb, var(--td3-focus, #5b8cff) 42%, transparent);
-    background: color-mix(in srgb, var(--td3-focus, #5b8cff) 8%, var(--tdw-card, rgba(255, 255, 255, 0.035)));
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hr-native-session-row.just-finished {
-    animation: none;
-    border-color: color-mix(in srgb, var(--td3-green, #2da44e) 48%, transparent);
-  }
-}
-
 /* A finished Session the user has not opened yet. It stays marked until it is opened, the way an
    unread conversation does: a blue unread dot and a full-strength title, with the green Ready kept
    from the moment it finished. Input requests keep their own, stronger, attention treatment. */

@@ -19,15 +19,7 @@ import {
 } from "../native-session-federation-labels"
 import type { MachineAgentHost, MachineSnapshot } from "../types"
 import { nativeSessionDisplayTitle } from "../native-session-title"
-import {
-  adoptGraceUpdates,
-  loadSeenStore,
-  markSessionSeen,
-  saveSeenStore,
-  sessionIsUnseen,
-  withMachineBaselines,
-  type UnseenCandidate
-} from "../native-session-unseen"
+import { nextFinishedKeys, withoutFinishedKey, type SessionRailState } from "../native-session-unseen"
 import { useLanguage, useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
@@ -451,10 +443,7 @@ export function NativeSessionHome({
   const [agentFilter, setAgentFilter] = useState("")
   const [projectFilter, setProjectFilter] = useState("")
   const [modelFilter, setModelFilter] = useState("")
-  const [recentlyCompletedKey, setRecentlyCompletedKey] = useState<string | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
-  const previousSelectedState = useRef<{ key?: string; state?: SessionPresentationState }>({})
-  const completionTimer = useRef<number | null>(null)
   const pageCache = useRef<Map<string, AgentPageCache>>(new Map())
   const pageCacheSignature = useRef<string | null>(null)
   const deletedKeysRef = useRef(deletedKeys)
@@ -512,26 +501,6 @@ export function NativeSessionHome({
       ? current
       : { ...current, [selectedKey]: selectedState })
   }, [selectedKey, selectedState])
-
-  useEffect(() => {
-    const previous = previousSelectedState.current
-    if (previous.key !== selectedKey) setRecentlyCompletedKey(null)
-    if (selectedKey && previous.key === selectedKey && previous.state === "working" && selectedState === "ready") {
-      setRecentlyCompletedKey(selectedKey)
-      if (completionTimer.current !== null) window.clearTimeout(completionTimer.current)
-      completionTimer.current = window.setTimeout(() => {
-        setRecentlyCompletedKey((current) => current === selectedKey ? null : current)
-        completionTimer.current = null
-      }, 5_000)
-    } else if (selectedKey && selectedState === "working") {
-      setRecentlyCompletedKey((current) => current === selectedKey ? null : current)
-    }
-    previousSelectedState.current = { key: selectedKey, state: selectedState }
-  }, [selectedKey, selectedState])
-
-  useEffect(() => () => {
-    if (completionTimer.current !== null) window.clearTimeout(completionTimer.current)
-  }, [])
 
   useEffect(() => {
     if (machineFilter && !sources.some(({ machine }) => machine.id === machineFilter)) setMachineFilter("")
@@ -659,61 +628,46 @@ export function NativeSessionHome({
     return sessionPresentation(item.record, t)
   }, [liveStateForItem, t])
 
-  // A finished Session stays marked until it is opened (see native-session-unseen.ts). The open
-  // Session counts as seen only while the page is visible: a reply that lands in a hidden tab is
-  // still news when the user comes back.
-  const [seenStore, setSeenStore] = useState(loadSeenStore)
-  const [pageVisible, setPageVisible] = useState(() => typeof document === "undefined" || document.visibilityState === "visible")
-  const viewingRef = useRef<{ key?: string; updated: number; settled: boolean }>({ updated: 0, settled: false })
+  // A Session the rail sees finish stays marked until it is clicked (see native-session-unseen.ts).
+  // The open one is in front of the user already, so any sign of them clears it instead.
+  const [finishedKeys, setFinishedKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const railStatesRef = useRef<ReadonlyMap<string, SessionRailState>>(new Map())
 
   useEffect(() => {
-    const onVisibilityChange = () => setPageVisible(document.visibilityState === "visible")
-    document.addEventListener("visibilitychange", onVisibilityChange)
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange)
+    const current = new Map(records.map((item) => [recordKey(item), presentationForItem(item).state]))
+    const previous = railStatesRef.current
+    railStatesRef.current = current
+    setFinishedKeys((finished) => nextFinishedKeys(finished, previous, current))
+  }, [records, presentationForItem])
+
+  const clearFinished = useCallback((key: string) => {
+    setFinishedKeys((finished) => withoutFinishedKey(finished, key))
   }, [])
 
-  useEffect(() => { saveSeenStore(seenStore) }, [seenStore])
-
-  const unseenCandidates = useMemo<UnseenCandidate[]>(() => records.map((item) => ({
-    key: recordKey(item),
-    machineID: item.machineID,
-    updated: item.record.session.time?.updated || item.record.session.time?.created || 0,
-    ready: presentationForItem(item).state === "ready"
-  })), [records, presentationForItem])
-
+  // Opening a Session from anywhere else - a link, the search, a notification - also counts.
   useEffect(() => {
-    if (!loaded) return
-    setSeenStore((store) => adoptGraceUpdates(withMachineBaselines(store, unseenCandidates), unseenCandidates, Date.now()))
-  }, [loaded, unseenCandidates])
+    if (selectedKey) clearFinished(selectedKey)
+  }, [selectedKey, clearFinished])
 
-  const selectedUpdated = selectedKey ? unseenCandidates.find((candidate) => candidate.key === selectedKey)?.updated ?? 0 : 0
-  const selectedSettled = selectedState ? selectedState !== "working" : true
-
+  // The open Session's mark lasts until the first click, key, scroll or mouse movement on the page
+  // after it finished - not until a click on its own row. One that finished while the window was in
+  // the background therefore stays marked until the user is back.
+  const selectedFinished = Boolean(selectedKey && finishedKeys.has(selectedKey))
   useEffect(() => {
-    if (!selectedKey || !pageVisible) return
-    viewingRef.current = { key: selectedKey, updated: selectedUpdated, settled: selectedSettled }
-    setSeenStore((store) => markSessionSeen(store, selectedKey, selectedUpdated, Date.now(), false))
-  }, [selectedKey, selectedUpdated, selectedSettled, pageVisible])
-
-  // Looking away from a ready Session opens its grace window, so a reply the rail had not re-read
-  // yet is not reported back as unseen.
-  useEffect(() => {
-    if (!selectedKey || !pageVisible) return
-    return () => {
-      const { key, updated, settled } = viewingRef.current
-      if (key) setSeenStore((store) => markSessionSeen(store, key, updated, Date.now(), settled))
+    if (!selectedKey || !selectedFinished) return
+    const events = ["pointerdown", "pointermove", "keydown", "wheel", "touchstart"] as const
+    const acknowledge = () => {
+      if (document.visibilityState === "visible") clearFinished(selectedKey)
     }
-  }, [selectedKey, pageVisible])
+    for (const type of events) window.addEventListener(type, acknowledge, { capture: true, passive: true })
+    return () => {
+      for (const type of events) window.removeEventListener(type, acknowledge, { capture: true })
+    }
+  }, [selectedKey, selectedFinished, clearFinished])
 
-  const unseenKeys = useMemo<ReadonlySet<string>>(() => {
-    const now = Date.now()
-    return new Set(unseenCandidates
-      .filter((candidate) =>
-        !(candidate.key === selectedKey && pageVisible)
-        && !deletingKeys?.has(candidate.key)
-        && sessionIsUnseen(seenStore, candidate, now))
-      .map((candidate) => candidate.key))
-  }, [unseenCandidates, seenStore, selectedKey, pageVisible, deletingKeys])
+  const unseenKeys = useMemo<ReadonlySet<string>>(() => deletingKeys?.size
+    ? new Set([...finishedKeys].filter((key) => !deletingKeys.has(key)))
+    : finishedKeys, [finishedKeys, deletingKeys])
 
   useEffect(() => {
     onUnseenReadyCountChange?.(unseenKeys.size)
@@ -1367,17 +1321,20 @@ export function NativeSessionHome({
                                 const icon = harnessIconUrl(item.record.backend)
                                 const targetKey = recordKey(item)
                                 const selected = targetKey === selectedKey
-                                const recentlyCompleted = targetKey === recentlyCompletedKey
                                 const unseen = unseenKeys.has(targetKey)
                                 const deleting = Boolean(deletingKeys?.has(targetKey))
                                 return (
                                   <button
                                     type="button"
                                     ref={selected ? selectedRowRef : undefined}
-                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${unseen ? " unseen" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
+                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${unseen ? " unseen" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
                                     data-depth={Math.min(depth, 3)}
                                     key={targetKey}
-                                    onClick={() => { if (!deleting) open(item) }}
+                                    onClick={() => {
+                                      if (deleting) return
+                                      clearFinished(targetKey)
+                                      open(item)
+                                    }}
                                     disabled={deleting}
                                     aria-busy={deleting || undefined}
                                     aria-current={selected ? "page" : undefined}
@@ -1411,7 +1368,7 @@ export function NativeSessionHome({
                                     </span>
                                     <span className="hr-native-session-meta">
                                       <span className="hr-native-session-status" data-state={deleting ? "deleting" : status.state} aria-live={selected || deleting ? "polite" : undefined}>
-                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted || unseen ? "✓ " : ""}{operationalLabel}</>}
+                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{unseen ? "✓ " : ""}{operationalLabel}</>}
                                       </span>
                                       {deleting ? null : (
                                         <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? new Date(timestamp).toLocaleString() : undefined}>
