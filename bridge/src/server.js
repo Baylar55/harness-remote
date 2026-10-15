@@ -198,10 +198,8 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     inlineModelVariantValues: profile.inlineModelVariantValues ?? [],
     modelProviderOrder: profile.modelProviderOrder ?? [],
     requireAssistantResponse: profile.requireAssistantResponse === true,
-    recoverMissingSessionOnPrompt: profile.recoverMissingSessionOnPrompt === true,
-    resumeInterruptedTurns: profile.resumeInterruptedTurns !== false
+    recoverMissingSessionOnPrompt: profile.recoverMissingSessionOnPrompt === true
   })
-  if (profile.resumeInterruptedTurns !== false) void service.resumeInterruptedTurns().catch(() => undefined)
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
   const liveSessionActivity = new Map()
   let sseClients = 0

@@ -375,8 +375,6 @@ OMP ACP does not expose a global cross-client event feed, shared running-status 
 
 The bridge keeps its last successful message/todo snapshot and bridge-local session nicknames/archive state under `~/.harness-remote/<backend>/`. This prevents an empty or partial ACP replay from erasing the app's conversation after navigation or a bridge restart. Use `--state-dir <path>` or `HARNESS_REMOTE_STATE_DIR` to relocate this state; deleting or replacing that directory also discards bridge-local renames and hidden-session records.
 
-For every ACP harness (Claude Code, Codex, PI, OMP, Copilot, MiMo and the others), the same directory records which turns are still running. Stopping the bridge stops the harness adapter with it, so on the next start each turn that was interrupted that way is prompted once more to continue where it left off, instead of waiting for someone to open the Session and ask. Turns that finished, failed on their own, or were cancelled are not resumed. Neither is a turn interrupted more than a day earlier, nor one that has already been interrupted on three resumes in a row.
-
 Do not expose the bridge directly to the Internet. Use Tailscale, another VPN, or a TLS-terminating reverse proxy, and open port `4097` only to the network that needs it.
 
 ### PI Bridge Setup
