@@ -31,6 +31,22 @@ function missingAcpSession(error) {
   return /\bsession\b.{0,180}\b(not found|unknown|unavailable|does not exist|no longer exists)\b/i.test(message)
 }
 
+/** The adapter process went away underneath the turn, which is not the turn ending. */
+function adapterLost(error) {
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  return /^ACP adapter (closed|exited|is not running)\b/.test(message)
+}
+
+/**
+ * Sent on the user's behalf to a turn the previous bridge process was still running when it
+ * stopped. Without it the Session just sat there until someone opened it and typed "continue".
+ */
+const RESUME_INTERRUPTED_TURN_PROMPT = "Harness Remote restarted while you were working, which interrupted your previous turn. Continue where you left off."
+// A turn found long after it was interrupted is no longer work anyone is waiting on, and a turn
+// that keeps being interrupted every time it resumes must not be resumed forever.
+const RESUME_INTERRUPTED_TURN_WINDOW_MS = 24 * 60 * 60 * 1000
+const MAX_CONSECUTIVE_TURN_RESUMES = 3
+
 function sessionView(session, status = "idle", title = session.title, external = false) {
   return {
     id: session.sessionId,
@@ -503,6 +519,11 @@ export class AcpService {
   #modelProviderOrder
   #requireAssistantResponse
   #recoverMissingSessionOnPrompt
+  #resumeInterruptedTurns
+  #runningTurns = new Map()
+  #runningTurnIndexLoad
+  #runningTurnIndexWrite = Promise.resolve()
+  #resumingTurns = new Map()
   #turnResponseObserved = new Set()
   #fallbackModelCatalog
   #fallbackModelSelectionMethod
@@ -552,6 +573,8 @@ export class AcpService {
     modelProviderOrder = [],
     requireAssistantResponse = false,
     recoverMissingSessionOnPrompt = false,
+    /** Re-prompt, on the next start, a turn the previous process was still running when it stopped. */
+    resumeInterruptedTurns = false,
     fallbackModelCatalog,
     fallbackModelSelectionMethod,
     fallbackModelCommand,
@@ -577,6 +600,7 @@ export class AcpService {
     this.#modelProviderOrder = modelProviderOrder
     this.#requireAssistantResponse = requireAssistantResponse
     this.#recoverMissingSessionOnPrompt = recoverMissingSessionOnPrompt
+    this.#resumeInterruptedTurns = resumeInterruptedTurns
     this.#fallbackModelCatalog = fallbackModelCatalog
     this.#fallbackModelSelectionMethod = fallbackModelSelectionMethod
     this.#fallbackModelCommand = fallbackModelCommand
@@ -1432,6 +1456,19 @@ export class AcpService {
     this.#active.add(sessionID)
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
     this.#emit("session.updated", sessionID)
+    const resumes = this.#resumingTurns.get(sessionID) ?? 0
+    this.#resumingTurns.delete(sessionID)
+    void this.#updateRunningTurns(() => {
+      const session = this.#sessions.get(sessionID)
+      this.#runningTurns.set(sessionID, {
+        sessionId: sessionID,
+        ...(session?.cwd ? { cwd: session.cwd } : {}),
+        ...(session?.title ? { title: session.title } : {}),
+        startedAt: Date.now(),
+        resumes
+      })
+    })
+    let interrupted = false
     void this.#requestPromptWithRecovery(sessionID, {
       sessionId: sessionID,
       prompt: [
@@ -1447,6 +1484,7 @@ export class AcpService {
         throw new Error("The harness completed the turn without an assistant response. Check that the selected model and provider are available.")
       }
     }).catch((error) => {
+      interrupted = adapterLost(error)
       if (this.#turnGenerations.get(sessionID) === generation) {
         this.#recordTurnFailure(sessionID, error.message)
         this.#emit("session.error", sessionID, { message: error.message })
@@ -1461,6 +1499,9 @@ export class AcpService {
       }
       if (this.#turnGenerations.get(sessionID) !== generation) return
       this.#active.delete(sessionID)
+      // A turn the adapter was taken away from stays recorded as running, so the next start resumes
+      // it. Shutting the bridge down closes the adapter first, which is exactly this case.
+      if (!interrupted) void this.#updateRunningTurns(() => this.#runningTurns.delete(sessionID))
       this.#turnResponseObserved.delete(sessionID)
       // Older adapters intentionally deliver assistant chunks after their RPC response, so their
       // historical zero-drain behavior must stay permissive. PI opts into a real drain window above;
@@ -1562,6 +1603,7 @@ export class AcpService {
     this.#cancelledSessions.add(sessionID)
     this.#turnResponseObserved.delete(sessionID)
     this.#active.delete(sessionID)
+    void this.#updateRunningTurns(() => this.#runningTurns.delete(sessionID))
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
     // A cancelled turn gets no closing tool_call_update at all, so settle before it is published.
     this.#settleActivity(sessionID)
@@ -1630,6 +1672,83 @@ export class AcpService {
     })
     this.#deletedSessionIndexWrite = writing
     await writing
+  }
+
+  /**
+   * Prompt again every turn the previous process was still running when it stopped.
+   *
+   * The adapter process dies with the bridge, so a restart ends each running turn without the agent
+   * ever finishing it, and nothing picked it back up. Each such turn is recorded in a small index
+   * while it runs; whatever is still in that index at startup is resumed here with a prompt that
+   * says why, the same thing the user otherwise had to type by hand.
+   */
+  async resumeInterruptedTurns() {
+    if (!this.#resumeInterruptedTurns || !this.#snapshotDirectory) return []
+    await this.#updateRunningTurns(() => false)
+    if (!this.#runningTurns.size) return []
+    await this.#restoreDeletedSessionIndex().catch(() => undefined)
+    // A Session beyond the first page of the native list is still resumable from what the index
+    // remembered about it.
+    await this.#refreshSessions().catch(() => undefined)
+    const resumed = []
+    for (const turn of [...this.#runningTurns.values()]) {
+      const sessionID = turn.sessionId
+      if (this.#isBusy(sessionID)) continue
+      const resumes = (Number(turn.resumes) || 0) + 1
+      if (this.#deletedSessions.has(sessionID) || resumes > MAX_CONSECUTIVE_TURN_RESUMES
+        || !(Date.now() - Number(turn.startedAt) < RESUME_INTERRUPTED_TURN_WINDOW_MS)) {
+        await this.#updateRunningTurns(() => this.#runningTurns.delete(sessionID))
+        continue
+      }
+      if (!this.#sessions.has(sessionID) && turn.cwd) {
+        this.rememberListedSessions([{ sessionId: sessionID, cwd: turn.cwd, ...(turn.title ? { title: turn.title } : {}) }])
+      }
+      this.#resumingTurns.set(sessionID, resumes)
+      try {
+        await this.prompt(sessionID, RESUME_INTERRUPTED_TURN_PROMPT)
+        resumed.push(sessionID)
+      } catch (error) {
+        this.#resumingTurns.delete(sessionID)
+        await this.#updateRunningTurns(() => this.#runningTurns.delete(sessionID))
+        this.#emit("session.error", sessionID, { message: `The interrupted turn could not be resumed: ${error.message}` })
+      }
+    }
+    return resumed
+  }
+
+  #runningTurnIndexPath() {
+    return path.join(this.#snapshotDirectory, "running-turns.json")
+  }
+
+  /**
+   * Apply one change to the running-turn index and write it, in order with every other change.
+   * Reading the stored index is the first link of that chain, so a change made before the read
+   * finishes is never overwritten by it. `change` returns false when nothing needs writing.
+   */
+  #updateRunningTurns(change) {
+    if (!this.#resumeInterruptedTurns || !this.#snapshotDirectory) return Promise.resolve()
+    this.#runningTurnIndexLoad ??= readFile(this.#runningTurnIndexPath(), "utf8").then((content) => {
+      const state = JSON.parse(content)
+      if (state?.version !== 1 || !Array.isArray(state.turns)) return
+      for (const turn of state.turns) {
+        if (typeof turn?.sessionId === "string" && turn.sessionId) this.#runningTurns.set(turn.sessionId, turn)
+      }
+    }).catch(() => undefined)
+    const writing = Promise.all([this.#runningTurnIndexLoad, this.#runningTurnIndexWrite.catch(() => undefined)]).then(async () => {
+      if (change() === false) return
+      await mkdir(this.#snapshotDirectory, { recursive: true })
+      const target = this.#runningTurnIndexPath()
+      const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
+      try {
+        await writeFile(temporary, JSON.stringify({ version: 1, turns: [...this.#runningTurns.values()] }), { mode: 0o600 })
+        await rename(temporary, target)
+      } catch (error) {
+        unlink(temporary).catch(() => {})
+        throw error
+      }
+    })
+    this.#runningTurnIndexWrite = writing
+    return writing.catch(() => undefined)
   }
 
   #snapshotPath(sessionID) {

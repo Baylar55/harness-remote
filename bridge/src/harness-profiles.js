@@ -153,6 +153,9 @@ export const HARNESS_PROFILES = {
     // a live turn is recorded as one bridge-owned message. Merging the two kept both copies.
     replayAuthoritative: true,
     recoverMissingSessionOnPrompt: true,
+    // The adapter dies with the bridge, so a turn still running at a restart is otherwise left
+    // stopped until someone opens the Session and asks it to continue.
+    resumeInterruptedTurns: true,
     // The current adapter exposes model/mode but no low/medium/high reasoning-effort selector.
     // Keep this empty rather than fabricating OpenCode-style variants.
     modelVariantConfigIDs: [],
