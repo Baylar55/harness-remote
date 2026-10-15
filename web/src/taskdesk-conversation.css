@@ -39,6 +39,13 @@
   scroll-padding-block: 20px;
 }
 
+/* Room for the reply under a just-sent message; sized inline by the transcript. */
+.uw-transcript-reply-room {
+  flex: none;
+  height: 0;
+  pointer-events: none;
+}
+
 .tdw-work-thread-conversation .uw-message {
   width: min(1040px, 100%);
   grid-template-columns: 36px minmax(0, 1fr);

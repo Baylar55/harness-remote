@@ -1491,6 +1491,120 @@
   }
 }
 
+/* Session chrome on a wide pane: one row of identity, one row of controls.
+ *
+ * Header, outcome and harness/model used to stack four lines of chrome - eyebrow, title, directory,
+ * outcome, labelled pickers - above a transcript that is the reason the pane exists. The title now
+ * leads a single row with its machine/project path beside it, the directory moves to the heading's
+ * tooltip, the outcome is a chip in the toolbar (see native-session-outcome.css) and the picker
+ * labels sit inline. The phone layout is the complement of this query and keeps its own rows. */
+@media (min-width: 781px) and (not ((pointer: coarse) and (max-height: 640px))) {
+  .hr-native-workspace .hr-native-workspace-session-header {
+    min-height: 0;
+    padding: 6px 16px;
+  }
+
+  .hr-native-workspace .hr-native-session-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .hr-native-workspace .hr-native-session-heading > .hr-native-session-title {
+    order: -1;
+    flex: 0 1 auto;
+    min-width: 120px;
+    margin: 0;
+    font-size: 15px;
+  }
+
+  /* As a shrinkable flex item the heading is sized from its content, and the button's negative
+     start margin made that 7px narrower than the button: every title was clipped by an ellipsis.
+     The heading takes the optical pull instead, so it measures the whole button. */
+  .hr-native-workspace .hr-native-session-heading > .hr-native-session-title:not(.editing) {
+    margin-inline-start: -7px;
+  }
+
+  .hr-native-workspace .hr-native-session-heading > .hr-native-session-title:not(.editing) .hr-native-session-title-button {
+    margin-inline-start: 0;
+  }
+
+  .hr-native-workspace .hr-native-session-heading > .hr-native-session-title.editing {
+    flex: 1 1 auto;
+  }
+
+  /* Narrower panes let the path wrap under the title; beside it, it has to stay one clipped line. */
+  .hr-native-workspace .hr-native-session-heading > .hr-native-session-eyebrow {
+    flex: 0 100 auto;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .hr-native-workspace .hr-native-session-heading > small {
+    display: none;
+  }
+
+  /* The stat chips do not wrap and are end-aligned, so a squeezed group overflowed leftwards across
+     the title. The group keeps its size; the Session id gives way first, then the title. */
+  .hr-native-workspace .hr-native-workspace-session-actions {
+    min-width: min-content;
+  }
+
+  .hr-native-workspace .hr-native-workspace-session-actions .hr-native-session-stats {
+    flex: none;
+  }
+
+  .hr-native-workspace .hr-native-workspace-session-actions > code {
+    min-width: 72px;
+    flex: 0 1 auto;
+  }
+
+  /* `work-thread-detail.css` turns the toolbar into a column below 980px. Here that made the routed
+     group's 588px flex-basis a height, and a half-screen window lost most of the pane to one row of
+     pickers. The row stays one row: the pickers and the outcome chip share the shrinking. */
+  .hr-native-workspace .hr-native-session-observer .tdw-conversation-toolbar {
+    min-height: 40px;
+    flex-direction: row;
+    align-items: center;
+    padding: 4px 14px;
+  }
+
+  .hr-native-workspace .hr-native-session-observer .tdw-agent-control.routed {
+    flex: 0 1 588px;
+    grid-template-columns: minmax(120px, 220px) minmax(150px, 360px);
+  }
+
+  .hr-native-workspace .hr-native-session-observer .hr-native-outcome.compact {
+    min-width: 96px;
+  }
+
+  .hr-native-workspace .hr-native-session-observer .tdw-conversation-state {
+    position: static;
+    margin: 0;
+  }
+
+  .hr-native-workspace .hr-native-session-observer .tdw-agent-control.routed > label {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hr-native-workspace .hr-native-session-observer .tdw-agent-control.routed > label > span {
+    flex: none;
+  }
+
+  .hr-native-workspace .hr-native-session-observer .tdw-agent-control.routed > label > :not(span) {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .hr-native-workspace .hr-native-session-observer .tdw-agent-control select,
+  .hr-native-workspace .hr-native-session-observer .tdw-model-trigger {
+    min-height: 30px;
+  }
+}
+
 .hr-native-session-observer .tdw-model-control {
   width: min(320px, 100%);
 }
@@ -1559,8 +1673,9 @@
   background: transparent;
 }
 
+/* The bottom inset is the breathing room between the live tail and the composer. */
 .hr-native-session-observer .uw-transcript {
-  padding: 18px var(--hrsf-gutter) 24px;
+  padding: 18px var(--hrsf-gutter) 36px;
   background: transparent;
 }
 

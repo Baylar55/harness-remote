@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { api } from "../api"
 import type { AttachmentPart } from "../attachments"
 import { createCoalescedTailRefresh } from "../coalesced-tail-refresh"
@@ -106,6 +106,8 @@ type Props = {
     machines: NativeSessionRouteMachine[]
     onContinue: (input: NativeSessionRouteContinueInput) => Promise<void>
   }
+  /** Session-level context that shares the toolbar row instead of claiming a row of its own. */
+  toolbarAccessory?: ReactNode
 }
 
 function assistantMessageHasSignal(message: WorkThreadMessage): boolean {
@@ -334,7 +336,8 @@ export function WorkThreadConversation({
   transcriptRefreshToken = 0,
   interactionEnabled = true,
   onConnectionIssue,
-  routing
+  routing,
+  toolbarAccessory
 }: Props) {
   const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${conversation.id}`
   const initialAgentID = agentForTurn(conversation, conversation.currentTurn)
@@ -1108,6 +1111,7 @@ export function WorkThreadConversation({
             {modelError ? <small className="tdw-field-note" title={modelError}>Model catalog unavailable. Sending is paused until a model can be verified.</small> : null}
           </label>
         </div>
+        {toolbarAccessory}
         <ConversationStatePill working={working || replyPending || sending || replySettling || modelBootstrapBlocked} attention={hasAttention} workingLabel={conversationStateLabel} startedAt={sending || modelBootstrapBlocked ? undefined : conversation.currentTurn?.startedAt} status={conversation.status} detail={conversation.error?.message || undefined} />
       </div>
 
