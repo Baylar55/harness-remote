@@ -317,6 +317,8 @@ type TranslationKey =
   | 'sf.machines'
   | 'sf.refresh'
   | 'sf.refreshingMachines'
+  | 'sf.hideSessionControls'
+  | 'sf.showSessionControls'
   | 'sf.refreshingSessions'
   | 'sf.machineCount'
   | 'sf.connecting'
@@ -807,6 +809,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': 'Machines',
     'sf.refresh': 'Refresh',
     'sf.refreshingMachines': 'Refreshing machines',
+    'sf.hideSessionControls': 'Hide Session controls',
+    'sf.showSessionControls': 'Show Session controls',
     'sf.refreshingSessions': 'Refreshing Sessions',
     'sf.machineCount': '{online}/{total} machines',
     'sf.connecting': 'Connecting',
@@ -1297,6 +1301,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': 'Macchine',
     'sf.refresh': 'Aggiorna',
     'sf.refreshingMachines': 'Aggiornamento macchine',
+    'sf.hideSessionControls': 'Nascondi controlli sessione',
+    'sf.showSessionControls': 'Mostra controlli sessione',
     'sf.refreshingSessions': 'Aggiornamento sessioni',
     'sf.machineCount': '{online}/{total} macchine',
     'sf.connecting': 'Connessione',
@@ -1787,6 +1793,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': '機器',
     'sf.refresh': '重新整理',
     'sf.refreshingMachines': '正在重新整理機器',
+    'sf.hideSessionControls': '隱藏工作階段控制項',
+    'sf.showSessionControls': '顯示工作階段控制項',
     'sf.refreshingSessions': '正在重新整理工作階段',
     'sf.machineCount': '{online}/{total} 部機器',
     'sf.connecting': '連線中',
@@ -2277,6 +2285,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.machines': '机器',
     'sf.refresh': '刷新',
     'sf.refreshingMachines': '正在刷新机器',
+    'sf.hideSessionControls': '隐藏会话控件',
+    'sf.showSessionControls': '显示会话控件',
     'sf.refreshingSessions': '正在刷新会话',
     'sf.machineCount': '{online}/{total} 台机器',
     'sf.connecting': '连接中',
