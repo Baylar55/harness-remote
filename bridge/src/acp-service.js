@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { selectableAcpModelValue, modelConfigOptionFromSessionResponse, modelValueIsExcluded, normalizedAcpModelCandidates, splitInlineAcpModelVariant } from "./agent-model-catalog.js"
 import { TranscriptCache } from "./transcript-cache.js"
@@ -90,6 +90,38 @@ function messageSignature(message) {
   return `${message?.info?.role ?? ""}\u0000${visibleMessageText(message)}${error}`
 }
 
+/**
+ * Keep replayed creation times in transcript order.
+ *
+ * A replay mixes two clocks: messages this bridge already knew keep their recorded time, while
+ * the ones ACP replays without a timestamp are stamped with the moment of the reload. Clients order
+ * turns by that time, so a user-role message first seen on replay — Claude Code's interruption
+ * marker, written mid-turn and never streamed live — moved past every later prompt and appeared at
+ * the bottom of a Session that had finished normally. Walking backward, a message may not claim the
+ * time of the message after it or a later one; known times are never moved forward. A moved time is
+ * strictly earlier, because clients break equal times by id, which says nothing about order.
+ */
+export function chronologicalReplay(messages) {
+  let ceiling = Number.POSITIVE_INFINITY
+  const ordered = new Array(messages.length)
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    const created = Number(message?.info?.time?.created)
+    if (!Number.isFinite(created) || created <= 0) {
+      ordered[index] = message
+      continue
+    }
+    if (created >= ceiling) {
+      ceiling -= 1
+      ordered[index] = { ...message, info: { ...message.info, time: { ...message.info.time, created: ceiling } } }
+      continue
+    }
+    ordered[index] = message
+    ceiling = created
+  }
+  return ordered
+}
+
 function authoritativeReplay(previous, replayed) {
   // ACP replay can omit timestamps and mint fresh ids. Retain known identities for unchanged
   // occurrences, while the native replay alone decides content, membership and order.
@@ -105,7 +137,8 @@ function authoritativeReplay(previous, replayed) {
     if (!prior) return message
     return {
       ...message,
-      info: { ...message.info, id: prior.info.id, time: prior.info.time },
+      // A live Stop is recorded only here; a harness that journals no interruption must not erase it.
+      info: { ...message.info, id: prior.info.id, time: prior.info.time, ...(prior.info.interrupted ? { interrupted: true } : {}) },
       parts: message.parts.map((part) => ({ ...part, ...(part.messageID ? { messageID: prior.info.id } : {}) }))
     }
   })
@@ -365,6 +398,38 @@ export function isHarnessInjectedText(text) {
   return HARNESS_INJECTED_BLOCK.test(text)
 }
 
+/**
+ * Claude Code records a cancelled turn as a plain user-role marker: for a Stop, and for a message
+ * sent while a turn was running. Shown as is, it reads as text the user typed. It is a fact about the
+ * turn before it, so the transcript carries it as `info.interrupted` on that turn's reply instead -
+ * the same flag a live Stop and the OMP/PI journal aborts produce. Matched exactly, so a message that
+ * quotes the marker stays an ordinary message.
+ */
+const INTERRUPTION_MARKER = /^\s*\[Request interrupted by user(?: for tool use)?\]\s*$/
+
+export function isInterruptionMarker(text) {
+  return INTERRUPTION_MARKER.test(text)
+}
+
+/** Flag the reply of the newest turn as interrupted, adding an empty reply when it had none yet. */
+export function markLatestTurnInterrupted(messages, sessionID, created = Date.now()) {
+  let lastUser = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.info?.role === "user") {
+      lastUser = index
+      break
+    }
+  }
+  if (lastUser < 0) return false
+  for (let index = messages.length - 1; index > lastUser; index -= 1) {
+    if (messages[index]?.info?.role !== "assistant") continue
+    messages[index] = { ...messages[index], info: { ...messages[index].info, interrupted: true } }
+    return true
+  }
+  messages.push({ info: { id: randomUUID(), role: "assistant", sessionID, time: { created }, interrupted: true }, parts: [] })
+  return true
+}
+
 /** The two tool-call states that mean "still running" on the wire and in the transcript. */
 const UNSETTLED_TOOL_STATUSES = new Set(["pending", "running"])
 
@@ -467,6 +532,9 @@ export class AcpService {
   #acpOpenSessions = new Set()
   #promptAcknowledgements = new Map()
   #titles = new Map()
+  #titleIndexLoaded = false
+  #titleIndexLoading
+  #titleIndexWrite = Promise.resolve()
   #deletedSessions = new Set()
   #deletedSessionIndexLoaded = false
   #deletedSessionIndexWrite = Promise.resolve()
@@ -502,6 +570,7 @@ export class AcpService {
   #inlineModelVariantValues
   #modelProviderOrder
   #requireAssistantResponse
+  #requireExistingDirectory
   #recoverMissingSessionOnPrompt
   #turnResponseObserved = new Set()
   #fallbackModelCatalog
@@ -551,6 +620,7 @@ export class AcpService {
     inlineModelVariantValues = [],
     modelProviderOrder = [],
     requireAssistantResponse = false,
+    requireExistingDirectory = false,
     recoverMissingSessionOnPrompt = false,
     fallbackModelCatalog,
     fallbackModelSelectionMethod,
@@ -576,6 +646,7 @@ export class AcpService {
     this.#inlineModelVariantValues = inlineModelVariantValues
     this.#modelProviderOrder = modelProviderOrder
     this.#requireAssistantResponse = requireAssistantResponse
+    this.#requireExistingDirectory = requireExistingDirectory
     this.#recoverMissingSessionOnPrompt = recoverMissingSessionOnPrompt
     this.#fallbackModelCatalog = fallbackModelCatalog
     this.#fallbackModelSelectionMethod = fallbackModelSelectionMethod
@@ -618,6 +689,7 @@ export class AcpService {
 
   async listSessions(directory) {
     await this.#restoreDeletedSessionIndex()
+    await this.#restoreTitleIndex()
     const sessions = await this.#refreshSessions()
     await Promise.all(sessions.map((session) => this.#restoreSnapshot(session.sessionId)))
     return sessions
@@ -677,6 +749,7 @@ export class AcpService {
   }
 
   async createSession({ directory, title, model }) {
+    await this.#restoreTitleIndex()
     await this.#acp.start()
     const result = await this.#acp.request("session/new", { cwd: directory, mcpServers: [] })
     this.#acpOpenSessions.add(result.sessionId)
@@ -698,6 +771,7 @@ export class AcpService {
     if (title) {
       this.#titles.set(session.sessionId, title)
       await this.#applyNativeSessionName(session.sessionId, title)
+      await this.#persistTitleIndex()
     }
     if (model) await this.setModel(session.sessionId, model)
     this.#emit("session.created", session.sessionId)
@@ -755,6 +829,7 @@ export class AcpService {
   }
 
   async renameSession(sessionID, title) {
+    await this.#restoreTitleIndex()
     const normalized = title.trim().replace(/\s+/g, " ")
     if (!normalized) throw new Error("A session title is required")
     await this.#requireSession(sessionID)
@@ -774,6 +849,7 @@ export class AcpService {
       this.#actionStates.delete(sessionID)
       this.#authoritativeActionStates.delete(sessionID)
       this.#titles.delete(sessionID)
+      await this.#persistTitleIndex()
       await this.#refreshSessions()
       const session = this.#sessions.get(sessionID)
       if (!session) throw new Error("Harness session not found after rename")
@@ -790,6 +866,7 @@ export class AcpService {
     if (await this.#nativeRenameAvailable(sessionID)) {
       await this.#sendNativeSessionName(sessionID, normalized)
       this.#titles.delete(sessionID)
+      await this.#persistTitleIndex()
       await this.#refreshSessions()
       const session = this.#sessions.get(sessionID)
       if (!session) throw new Error("Harness session not found after rename")
@@ -804,6 +881,7 @@ export class AcpService {
     }
 
     this.#titles.set(sessionID, normalized)
+    await this.#persistTitleIndex()
     this.#persistSnapshot(sessionID)
     this.#emit("session.updated", sessionID)
     return sessionView(
@@ -871,6 +949,7 @@ export class AcpService {
       if (!await this.#nativeRenameAvailable(sessionID)) return
       await this.#sendNativeSessionName(sessionID, title)
       this.#titles.delete(sessionID)
+      await this.#persistTitleIndex()
       await this.#refreshSessions()
     } catch {
       this.#titles.set(sessionID, title)
@@ -878,6 +957,7 @@ export class AcpService {
   }
 
   async deleteSession(sessionID) {
+    await this.#restoreTitleIndex()
     // A Session deleted by a pre-index Harness Remote may already carry deleted:true only in its
     // per-Session snapshot. Restoring that snapshot must migrate the tombstone into the lightweight
     // deletion index instead of failing before the index can be written. This keeps DELETE
@@ -897,6 +977,7 @@ export class AcpService {
     this.#messages.delete(sessionID)
     this.#todos.delete(sessionID)
     this.#titles.delete(sessionID)
+    await this.#persistTitleIndex()
     this.#configOptions.delete(sessionID)
     this.#commandCatalogs.delete(sessionID)
     for (const resolve of this.#commandCatalogWaiters.get(sessionID) ?? []) resolve()
@@ -1384,6 +1465,7 @@ export class AcpService {
     } else {
       await this.#load(sessionID)
     }
+    await this.#requireSessionDirectory(this.#sessions.get(sessionID))
     this.#resetActionsForSessionChange(sessionID)
     if (this.#active.has(sessionID)) {
       const messageID = this.#recordPrompt(sessionID, text, attachments)
@@ -1574,6 +1656,7 @@ export class AcpService {
       }
       this.#emit("message.updated", sessionID)
     }
+    const wasActive = this.#active.has(sessionID)
     this.#turnGenerations.set(sessionID, (this.#turnGenerations.get(sessionID) ?? 0) + 1)
     this.#cancelledSessions.add(sessionID)
     this.#turnResponseObserved.delete(sessionID)
@@ -1581,6 +1664,12 @@ export class AcpService {
     this.#chunkMessageIDs.delete(`${sessionID}:assistant`)
     // A cancelled turn gets no closing tool_call_update at all, so settle before it is published.
     this.#settleActivity(sessionID)
+    // Live, the Stop is the only record of the interruption; replay reads it back from the harness.
+    if (wasActive) {
+      const messages = this.#messages.get(sessionID) ?? []
+      this.#messages.set(sessionID, messages)
+      if (markLatestTurnInterrupted(messages, sessionID)) this.#emit("message.updated", sessionID)
+    }
     this.#acp.notify("session/cancel", { sessionId: sessionID })
     this.#emit("session.updated", sessionID)
     this.#persistSnapshot(sessionID)
@@ -1595,6 +1684,7 @@ export class AcpService {
       await Promise.all(this.#snapshotWrites.values())
     }
     await this.#deletedSessionIndexWrite
+    await this.#titleIndexWrite
   }
 
   /**
@@ -1607,6 +1697,55 @@ export class AcpService {
   async deletedSessionIDs() {
     await this.#restoreDeletedSessionIndex()
     return new Set(this.#deletedSessions)
+  }
+
+  /** Persistent bridge-local names for lightweight index reads. */
+  async titleOverrides() {
+    await this.#restoreTitleIndex()
+    return new Map(this.#titles)
+  }
+
+  #titleIndexPath() {
+    return path.join(this.#snapshotDirectory, "session-titles.json")
+  }
+
+  async #restoreTitleIndex() {
+    if (this.#titleIndexLoading) return this.#titleIndexLoading
+    if (!this.#snapshotDirectory || this.#titleIndexLoaded) return
+    const loading = this.#readTitleIndex()
+    this.#titleIndexLoading = loading
+    try { await loading } finally { this.#titleIndexLoading = undefined }
+  }
+
+  async #readTitleIndex() {
+    this.#titleIndexLoaded = true
+    try {
+      const state = JSON.parse(await readFile(this.#titleIndexPath(), "utf8"))
+      if (state?.version !== 1 || !state.titles || typeof state.titles !== "object" || Array.isArray(state.titles)) return
+      for (const [sessionID, title] of Object.entries(state.titles)) {
+        if (sessionID && typeof title === "string" && title) this.#titles.set(sessionID, title)
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        this.#titleIndexLoaded = false
+        throw error
+      }
+    }
+  }
+
+  async #persistTitleIndex() {
+    if (!this.#snapshotDirectory) return
+    const previous = this.#titleIndexWrite
+    const writing = previous.catch(() => undefined).then(async () => {
+      await mkdir(this.#snapshotDirectory, { recursive: true })
+      const target = this.#titleIndexPath()
+      const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
+      const titles = Object.fromEntries([...this.#titles.entries()].sort(([left], [right]) => left.localeCompare(right)))
+      await writeFile(temporary, JSON.stringify({ version: 1, titles }), { mode: 0o600 })
+      await rename(temporary, target)
+    })
+    this.#titleIndexWrite = writing
+    await writing
   }
 
   #deletedSessionIndexPath() {
@@ -1672,6 +1811,7 @@ export class AcpService {
   }
 
   async #readSnapshot(sessionID) {
+    await this.#restoreTitleIndex()
     try {
       const snapshot = JSON.parse(await readFile(this.#snapshotPath(sessionID), "utf8"))
       if (snapshot?.version !== 1) return
@@ -1701,7 +1841,7 @@ export class AcpService {
         && snapshot.selectedModel.providerID === this.#modelProviderID) {
         this.#fallbackModelSelections.set(sessionID, snapshot.selectedModel)
       }
-      if (!this.#preferListedTitles && typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
+      if (!this.#preferListedTitles && !this.#titles.has(sessionID) && typeof snapshot.title === "string" && snapshot.title) this.#titles.set(sessionID, snapshot.title)
       if (snapshot?.deleted === true) this.#deletedSessions.add(sessionID)
     } catch (error) {
       if (error?.code !== "ENOENT") this.#emit("session.error", sessionID, { message: "Stored session snapshot is unreadable" })
@@ -1931,6 +2071,7 @@ export class AcpService {
     }
     // A single adapter process is not restarted by a request on its own, and the one that opened
     // this Session may have exited since. A project-scoped client starts its own process per request.
+    await this.#requireSessionDirectory(session)
     if (typeof this.#acp.withSession !== "function") await this.#acp.start?.()
     if (await this.#openWithoutReplay(sessionID, session)) return
     this.#replaying.add(sessionID)
@@ -1951,9 +2092,9 @@ export class AcpService {
       }
       this.#rememberSessionConfiguration(sessionID, result)
       const replayedMessages = mergeFragmentedPiSnapshot(this.#messages.get(sessionID) ?? [])
-      this.#messages.set(sessionID, this.#replayAuthoritative
+      this.#messages.set(sessionID, chronologicalReplay(this.#replayAuthoritative
         ? authoritativeReplay(previousMessages, replayedMessages)
-        : replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages))
+        : replaceHistory ? replayedMessages : mergeReplay(previousMessages, replayedMessages)))
       // Replayed history is finished work by definition, and the adapter does not always close the
       // tool calls in it. Settling before the signature check keeps the restored (already settled)
       // snapshot and this replay comparable, so an unchanged history still reads as unchanged.
@@ -1984,6 +2125,15 @@ export class AcpService {
    */
   #journalSeedsOwnedTranscript() {
     return this.#historyLoader?.authoritativeHistory !== true && !this.#journalPageWhileOwned
+  }
+
+  async #requireSessionDirectory(session) {
+    if (!this.#requireExistingDirectory) return
+    try {
+      if (!(await stat(session.cwd)).isDirectory()) throw new Error("Not a directory")
+    } catch (error) {
+      throw new Error(`Session project directory is missing or inaccessible: ${session.cwd}. History is still available; restore the directory before continuing this Session.`, { cause: error })
+    }
   }
 
   /**
@@ -2214,6 +2364,15 @@ export class AcpService {
     if (role === "assistant" && !replaying && !this.#active.has(sessionId) && !this.#promptedSessions.has(sessionId)) return
     if (role === "user" && !replaying && this.#isAcknowledgedPromptChunk(sessionId, update.content.text)) return
     if (role === "user" && !image && isHarnessInjectedText(update.content.text)) return
+    if (role === "user" && !image && isInterruptionMarker(update.content.text)) {
+      const messages = this.#messages.get(sessionId) ?? []
+      this.#messages.set(sessionId, messages)
+      markLatestTurnInterrupted(messages, sessionId)
+      // Whatever the adapter sends next belongs to a new reply, not to the interrupted one.
+      this.#chunkMessageIDs.delete(`${sessionId}:assistant`)
+      if (!replaying) this.#emit("message.updated", sessionId)
+      return
+    }
     if (!replaying && session) session.updatedAt = new Date().toISOString()
     const counterpartKey = `${sessionId}:${role === "user" ? "assistant" : "user"}`
     this.#chunkMessageIDs.delete(counterpartKey)
