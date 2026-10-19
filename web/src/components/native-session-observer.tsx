@@ -45,6 +45,8 @@ type Props = {
   interactionEnabled?: boolean
   /** A Session-scoped request discovered a transport outage before the machine poll did. */
   onConnectionIssue?: () => void
+  /** Bumped whenever the user explicitly opens this Session surface; retires the "getting started" label. */
+  surfaceViewRevision?: number
 }
 export type NativeSessionVisualState = "working" | "attention" | "stopped" | "ready"
 
@@ -178,16 +180,16 @@ export function NativeSessionObserver({
   onSessionRefresh,
   onStateChange,
   interactionEnabled = true,
-  onConnectionIssue
+  onConnectionIssue,
+  surfaceViewRevision = 0
 }: Props) {
   const [conversation, setConversation] = useState<ConversationRuntime | null>(null)
   const [controller, setController] = useState<ConversationController | null>(null)
   const [transcriptRefreshToken, setTranscriptRefreshToken] = useState(0)
   const [attachmentsSupported, setAttachmentsSupported] = useState(false)
   const [commands, setCommands] = useState<CommandInfo[]>([])
-  const conversationRef = useRef<ConversationRuntime | null>(null)
   const durableLifecycleRef = useRef<{ targetKey: string; status: string } | null>(null)
-  const attentionRef = useRef(false)
+  const [attention, setAttention] = useState(false)
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
   const compactLayout = useSyncExternalStore(subscribeCompactLayout, compactLayoutMatches, () => false)
@@ -213,15 +215,11 @@ export function NativeSessionObserver({
   )
 
   const handleConversationUpdate = useCallback((next: ConversationRuntime) => {
-    conversationRef.current = next
     setConversation(next)
-    onStateChangeRef.current?.(visualState(next, attentionRef.current))
   }, [])
 
   const handleAttentionChange = useCallback((attention: boolean) => {
-    attentionRef.current = attention
-    const current = conversationRef.current
-    if (current) onStateChangeRef.current?.(visualState(current, attention))
+    setAttention(attention)
   }, [])
 
   const handleTranscriptRefresh = useCallback(() => {
@@ -229,8 +227,10 @@ export function NativeSessionObserver({
   }, [])
 
   useEffect(() => {
-    if (presentedConversation) onStateChangeRef.current?.(visualState(presentedConversation, attentionRef.current))
-  }, [presentedConversation])
+    // Publish the same lifecycle-aware state that the conversation renders. Raw controller updates
+    // can still be idle while a newer streamed busy/retry edge is keeping this Session working.
+    if (presentedConversation) onStateChangeRef.current?.(visualState(presentedConversation, attention))
+  }, [presentedConversation, attention])
 
   useEffect(() => {
     if (!conversation) return
@@ -382,9 +382,8 @@ export function NativeSessionObserver({
 
     setConversation(null)
     setController(null)
-    conversationRef.current = null
     durableLifecycleRef.current = null
-    attentionRef.current = false
+    setAttention(false)
 
     // Mount the mature controller on the Session itself, before any model enrichment. Gating the
     // whole transcript on a network read left this surface stuck on "Loading Session into the v3
@@ -472,6 +471,7 @@ export function NativeSessionObserver({
         deferModelFallback
         controller={controller}
         transcriptRefreshToken={transcriptRefreshToken}
+        surfaceViewRevision={surfaceViewRevision}
         onConversationUpdate={handleConversationUpdate}
         onAttentionChange={handleAttentionChange}
         commands={commands}

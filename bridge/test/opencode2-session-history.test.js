@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -96,4 +97,76 @@ test('native export paging restores default effort as the base model and preserv
     })
     assert.equal((await loader.page('ses_test')).model.variant, variant, 'normalization must not mutate the native export')
   }
+})
+
+test('concurrent reads of one Session share a single native export', async () => {
+  let calls = 0
+  const loader = createOpenCode2HistoryLoader({
+    runExport: async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      return structuredClone(exported)
+    }
+  })
+  const [first, second, third] = await Promise.all([loader('ses_test'), loader('ses_test'), loader('ses_test')])
+  assert.equal(calls, 1, 'overlapping reads of one Session must not spawn overlapping exports')
+  assert.deepEqual(first, second)
+  assert.deepEqual(second, third)
+})
+
+test('a transient truncated export is retried before the read fails', async () => {
+  let calls = 0
+  const loader = createOpenCode2HistoryLoader({
+    runExport: async () => {
+      calls += 1
+      if (calls < 3) throw new Error('OpenCode 2 returned an invalid history export')
+      return structuredClone(exported)
+    }
+  })
+  assert.deepEqual((await loader('ses_test')).map((message) => message.info.id), ['u1', 'a1', 'a2'])
+  assert.equal(calls, 3)
+})
+
+test('an awaited export retry keeps an otherwise idle process alive', () => {
+  const moduleURL = new URL('../src/opencode2-session-history.js', import.meta.url).href
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+    import { createOpenCode2HistoryLoader } from ${JSON.stringify(moduleURL)}
+    let attempts = 0
+    const loader = createOpenCode2HistoryLoader({ runExport: async () => {
+      if (++attempts < 3) throw new Error('truncated export')
+      return { info: { id: 'isolated_retry' }, messages: [] }
+    } })
+    await loader('isolated_retry')
+    console.log('retry completed', attempts)
+  `], { encoding: 'utf8', timeout: 10_000 })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /retry completed 3/)
+})
+
+test('a non-retryable export failure is surfaced without retrying', async () => {
+  let calls = 0
+  const loader = createOpenCode2HistoryLoader({
+    runExport: async () => {
+      calls += 1
+      const error = new Error('OpenCode 2 history export timed out')
+      error.nonRetryable = true
+      throw error
+    }
+  })
+  await assert.rejects(loader('ses_test'), /timed out/)
+  assert.equal(calls, 1)
+})
+
+test('reads of different Sessions export independently', async () => {
+  const started = []
+  const loader = createOpenCode2HistoryLoader({
+    runExport: async (sessionID) => {
+      started.push(sessionID)
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      return { ...structuredClone(exported), info: { ...exported.info, id: sessionID } }
+    }
+  })
+  await Promise.all([loader('ses_one'), loader('ses_two')])
+  assert.deepEqual(started.sort(), ['ses_one', 'ses_two'])
 })
