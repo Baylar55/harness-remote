@@ -94,6 +94,8 @@ See the [Quick start guide](docs/QUICK_START.md) for advanced options and troubl
 
 - **Native Sessions** — existing Sessions remain owned by Codex, Claude, Copilot, OpenCode, MiMo, OMP or PI.
 - **Remote control** — follow activity, send prompts, Stop turns and handle supported questions/permissions.
+- **Prompt while the agent works** — a prompt sent mid-turn is never blocked: Codex takes it into the running turn, every other harness queues it in a **Queued** strip above the composer, where each waiting prompt can be withdrawn on its own.
+- **Background work that comes back** — when a Claude Code subagent, background command or monitor finishes, the agent's follow-up turn appears live in the Session, exactly as in the CLI, with no prompt from you.
 - **One workspace** — Machines → Projects → native Sessions.
 - **Cross-agent continuation** — continue a task with another coding agent without pretending their hidden contexts are the same.
 - **Cross-machine continuation** — continue work on another configured machine while preserving Project identity and lineage.
