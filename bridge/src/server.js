@@ -201,6 +201,7 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
     modelProviderOrder: profile.modelProviderOrder ?? [],
     requireAssistantResponse: profile.requireAssistantResponse === true,
     recoverMissingSessionOnPrompt: profile.recoverMissingSessionOnPrompt === true,
+    assistantMessageIDsSeparateReplies: profile.assistantMessageIDsSeparateReplies === true,
     midTurnPrompt: profile.capabilities?.midTurnPrompt
   })
   const hiddenSessionIDs = serviceOptions?.hiddenSessionIDs
@@ -219,6 +220,8 @@ export function createBridgeServer({ config, acp, serviceOptions, machineRegistr
   const publicSessionStatus = (sessionID, fallbackActivityAt = 0) => {
     const status = service.status(sessionID)
     if (backend !== "claude") return status
+    // A turn Claude started on its own has no session/prompt to corroborate it; it settles itself.
+    if (service.hasAdoptedTurn(sessionID)) return status
     const pendingRequests = acp.diagnostics?.()?.pendingRequests ?? []
     const lastActivityAt = Math.max(liveSessionActivity.get(sessionID) ?? 0, Number(fallbackActivityAt) || 0)
     const corroborated = corroborateClaudeSessionStatus(status, sessionID, pendingRequests, lastActivityAt)
