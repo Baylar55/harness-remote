@@ -170,10 +170,15 @@ export const HARNESS_PROFILES = {
       discovery: "native-list",
       transcript: "session-load",
       externalWriterObservation: "unverified-session-load",
+      // Busy for Sessions run in a terminal or the desktop app is read from Claude Code's process
+      // registry (sessions/<pid>.json, its own busy/idle), or from the transcript tail where an
+      // older Claude Code keeps no registry.
+      liveStatus: "native-runtime-state",
       continuation: "session-load",
       writerOwnership: "adapter-defined",
       stop: "owned-session-native-cancel"
     },
+    liveStatusSource: "claude-journal",
     capabilities: {
       ...COMMON_CAPABILITIES,
       // The adapter advertises a `model` config option like OMP and PI do; its values are bare ids
@@ -363,10 +368,14 @@ export const HARNESS_PROFILES = {
       discovery: "native-list",
       transcript: "native-journal",
       externalWriterObservation: "supported-via-journal",
+      // task_started / task_complete / turn_aborted markers in the rollout tail, aged by the newest
+      // record's timestamp (on Windows the open rollout's mtime does not move).
+      liveStatus: "native-runtime-state",
       continuation: "session-load",
       writerOwnership: "single-writer",
       stop: "owned-session-native-cancel"
     },
+    liveStatusSource: "codex-journal",
     capabilities: {
       ...COMMON_CAPABILITIES,
       // Codex accepts new input while it is still working: its turn keeps running and the input
