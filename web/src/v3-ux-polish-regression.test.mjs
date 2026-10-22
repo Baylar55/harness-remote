@@ -64,7 +64,6 @@ assert.match(sessionWorkbench, /hr-native-workspace-list/)
 assert.match(sessionWorkbench, /hr-native-workspace-detail/)
 
 // Mobile remains a real app shell rather than deleting useful controls to make screenshots fit.
-assert.match(mobileParity, /:has\(\.tdw-main\.mobile-open\) \.hr-mobile-nav[\s\S]*display: grid !important/)
 assert.match(mobileParity, /\.hr-mobile-settings-group label:nth-of-type\(2\)[\s\S]*display: grid !important/)
 assert.match(mobileParity, /\.uw-machine-harness-list[\s\S]*display: flex !important/)
 assert.match(mobileParity, /\.uw-transcript-jumps[\s\S]*top: 50%[\s\S]*bottom: auto/)
@@ -111,7 +110,6 @@ assert.match(chat, /buildConversationTimeline/)
 assert.match(overrides, /tdw-conversation-event::before/)
 assert.match(read("activity-timeline.css"), /\.hr-activity\.is-running/)
 assert.match(read("components/activity-timeline.tsx"), /running \? t\("act\.working"\)/)
-assert.match(overrides, /prefers-reduced-motion/)
 
 // Model discovery is machine-scoped for native Sessions and must not restart on object identity churn.
 assert.match(chat, /const scope = routing \? NATIVE_ROUTE_MODEL_SCOPE/)

@@ -29,13 +29,6 @@
   box-sizing: border-box;
 }
 
-/* Working state belongs in the compact chat chrome. Never sweep a colour animation across the
-   transcript or inject an animated block under the assistant name. */
-.tdw-work-thread-conversation .uw-thinking-shimmer,
-.tdw-work-thread-conversation .tdw-turn-working {
-  display: none !important;
-}
-
 .tdw-work-thread-conversation .tdw-conversation-state {
   min-height: 28px;
   padding: 4px 9px;

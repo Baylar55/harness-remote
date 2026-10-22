@@ -2,11 +2,6 @@
   margin-left: auto;
 }
 
-.hr-control-plane .tdw-work-thread-conversation .uw-session-empty-copy,
-.hr-control-plane .tdw-work-thread-conversation .uw-empty-copy {
-  max-width: 520px;
-}
-
 /* Keep the first-run state visually anchored to the canvas center even though the welcome block has
    an explicit reading width. The copy below is stateful without becoming another card or banner. */
 .hr-control-plane .hr-welcome {
@@ -32,17 +27,6 @@
 
 .hr-control-plane:not(:has(.tdw-presence-dot.online)):not(:has(.tdw-presence-dot.loading)) .hr-welcome > p::after {
   content: "No coding machine is connected. Open Machines to add one or reconnect an existing computer.";
-}
-
-.hr-control-plane:has(.tdw-presence-dot.loading) .hr-welcome > p::after {
-  content: "Connecting to your machines · loading projects and conversations";
-  padding-left: 29px;
-  border-color: var(--td3-blue-border-soft);
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 14px 50%, var(--td3-blue-text) 0 3px, transparent 3.5px),
-    var(--td3-raise-1);
-  animation: tdw-welcome-prepare 1.5s ease-in-out infinite;
 }
 
 /* Agent/model transitions are part of the conversation history. Keep them quiet, but make them
@@ -111,14 +95,6 @@
   display: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .hr-control-plane:has(.tdw-presence-dot.loading) .hr-welcome > p::after {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
-}
-
 @media (max-width: 780px) {
   .uw-standalone-host {
     --hr-mobile-nav-height: 64px;
@@ -141,7 +117,6 @@
 
   .hr-control-plane .tdw-context-path,
   .hr-control-plane .tdw-machine-health,
-  .hr-control-plane .tdw-tasks-toggle,
   .hr-control-plane .tdw-machines-button,
   .hr-control-plane .tdw-top-actions > .tdw-icon-button {
     display: none !important;
@@ -168,10 +143,6 @@
   .hr-control-plane .hr-new-conversation svg {
     width: 19px;
     height: 19px;
-  }
-
-  .uw-standalone-host:not(:has(.tdw-main.mobile-open)) .hr-control-plane .tdw-layout {
-    height: calc(100dvh - 56px - var(--hr-mobile-nav-height)) !important;
   }
 
   .hr-filter-chips {
@@ -264,7 +235,6 @@
 
   /* A conversation is a focused drill-in view. Hiding the global nav here gives the transcript back
      the vertical space while the explicit Conversations back button remains the escape hatch. */
-  .uw-standalone-host:has(.tdw-main.mobile-open) .hr-mobile-nav,
   .uw-standalone-host:has(.tdw-modal-backdrop) .hr-mobile-nav {
     display: none;
   }

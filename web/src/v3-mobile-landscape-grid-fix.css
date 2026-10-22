@@ -24,23 +24,4 @@
     border-right: 0 !important;
     box-shadow: none !important;
   }
-
-  .hr-control-plane .tdw-task-drawer-scrim,
-  .hr-control-plane .tdw-task-drawer-close,
-  .hr-control-plane .tdw-tasks-toggle {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-main,
-  .hr-control-plane .tdw-main.mobile-open {
-    grid-column: 1 / -1 !important;
-    grid-row: 1 / -1 !important;
-  }
-
-  .hr-control-plane .tdw-main.mobile-open {
-    width: 100% !important;
-    height: 100% !important;
-    max-width: 100% !important;
-    max-height: 100% !important;
-  }
 }

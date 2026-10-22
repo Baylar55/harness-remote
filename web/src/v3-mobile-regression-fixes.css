@@ -1,99 +1,3 @@
-/* Regression guards for the mobile shell. These rules intentionally live last in the cascade.
-   Two bugs reached a real-device candidate because mobile was inferred from width alone and the
-   machine filter rail was hidden entirely below 780px. A phone remains a phone after rotation,
-   and its configured machines must remain directly selectable. */
-
-@media (max-width: 780px), (pointer: coarse) and (max-height: 640px) {
-  /* Keep machine selection in the same horizontal navigation rail as Projects. The underlying
-     selectMachine() path is shared with desktop; this is only a responsive exposure fix. */
-  .hr-control-plane .tdw-machine-section {
-    width: max-content !important;
-    min-width: 0 !important;
-    flex: none !important;
-    display: block !important;
-    padding: 0 !important;
-    border: 0 !important;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-workspace-section-header {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-workspace-section-body,
-  .hr-control-plane .tdw-machine-section.section-collapsed .tdw-workspace-section-body,
-  .hr-control-plane.workspace-collapsed .tdw-machine-section.section-collapsed .tdw-workspace-section-body {
-    width: max-content !important;
-    min-width: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    gap: 6px !important;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-side-row,
-  .hr-control-plane.workspace-collapsed .tdw-machine-section .tdw-side-row {
-    width: auto !important;
-    min-width: max-content !important;
-    min-height: 42px !important;
-    margin: 0 !important;
-    display: grid !important;
-    grid-template-columns: 12px minmax(0, auto) !important;
-    gap: 6px !important;
-    place-items: center start !important;
-    padding: 5px 9px !important;
-    border-color: var(--td3-border-soft) !important;
-    border-radius: 11px !important;
-    background: var(--td3-raise-1) !important;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-side-row.active {
-    border-color: var(--td3-blue-border) !important;
-    color: var(--td3-text) !important;
-    background: var(--td3-blue-soft) !important;
-    box-shadow: inset 0 0 0 1px var(--td3-blue-border-soft);
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-side-row > span:last-child,
-  .hr-control-plane.workspace-collapsed .tdw-machine-section .tdw-side-row > span:last-child {
-    min-width: 0 !important;
-    display: flex !important;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-side-row strong {
-    max-width: 150px;
-    font-size: 12px;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-side-row small {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-machine-section .tdw-presence-dot {
-    width: 8px;
-    height: 8px;
-  }
-
-  .hr-control-plane .tdw-project-section {
-    width: max-content !important;
-    min-width: 0 !important;
-  }
-
-  .hr-control-plane .tdw-project-section .tdw-workspace-section-body,
-  .hr-control-plane .tdw-project-section.section-collapsed .tdw-workspace-section-body,
-  .hr-control-plane.workspace-collapsed .tdw-project-section.section-collapsed .tdw-workspace-section-body {
-    min-width: 0 !important;
-  }
-
-  .hr-control-plane .tdw-machine-section::after {
-    content: "";
-    width: 1px;
-    height: 28px;
-    display: block;
-    flex: none;
-    margin: 7px 1px 7px 7px;
-    background: var(--td3-border);
-  }
-}
-
 /* Android/phone landscape. A landscape phone is commonly 800-950 CSS px wide, which previously
    crossed the 780px desktop breakpoint and exposed a three-column desktop shell that was clipped by
    the WebView. Short coarse-pointer viewports stay in the mobile hierarchy regardless of width. */
@@ -122,7 +26,6 @@
 
   .hr-control-plane .tdw-context-path,
   .hr-control-plane .tdw-machine-health,
-  .hr-control-plane .tdw-tasks-toggle,
   .hr-control-plane .tdw-machines-button,
   .hr-control-plane .tdw-top-actions > .tdw-icon-button {
     display: none !important;
@@ -152,14 +55,6 @@
     height: 18px;
   }
 
-  .hr-control-plane .tdw-layout,
-  .hr-control-plane.workspace-collapsed .tdw-layout {
-    height: calc(100dvh - 52px - var(--hr-mobile-nav-height)) !important;
-    min-height: 0 !important;
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: 54px minmax(0, 1fr) !important;
-  }
-
   .hr-control-plane .tdw-project-column {
     grid-column: 1 !important;
     grid-row: 1 !important;
@@ -185,67 +80,11 @@
     display: none;
   }
 
-  .hr-control-plane .tdw-workspace-heading,
-  .hr-control-plane .tdw-harness-section,
-  .hr-control-plane .tdw-filter-section {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-project-section {
-    flex: none !important;
-    padding: 0 !important;
-    border: 0 !important;
-  }
-
-  .hr-control-plane .tdw-project-section .tdw-workspace-section-header {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-project-section .tdw-workspace-section-body,
-  .hr-control-plane .tdw-project-section.section-collapsed .tdw-workspace-section-body {
-    width: max-content !important;
-    min-width: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    gap: 6px !important;
-  }
-
-  .hr-control-plane .tdw-project-section .tdw-project-list {
-    min-width: max-content !important;
-    display: flex !important;
-    align-items: center !important;
-    gap: 6px !important;
-    padding: 0 !important;
-    overflow: visible !important;
-  }
-
-  .hr-control-plane .tdw-project-section .tdw-project-row {
-    width: auto !important;
-    min-width: max-content !important;
-    min-height: 42px !important;
-    margin: 0 !important;
-    display: grid !important;
-    grid-template-columns: 24px minmax(0, auto) auto !important;
-    gap: 6px !important;
-    padding: 5px 9px !important;
-    border-color: var(--td3-border-soft) !important;
-    border-radius: 11px !important;
-    background: var(--td3-raise-1) !important;
-  }
-
-  .hr-control-plane .tdw-project-section .tdw-project-row small {
-    display: none !important;
-  }
-
   .hr-control-plane .tdw-thread-column {
     grid-column: 1 !important;
     grid-row: 2 !important;
     min-width: 0 !important;
     min-height: 0 !important;
-  }
-
-  .hr-control-plane .tdw-pane-resizer {
-    display: none !important;
   }
 
   .hr-filter-chips {
@@ -260,31 +99,6 @@
     display: none;
   }
 
-  .hr-control-plane .tdw-main {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-main.mobile-open {
-    display: flex !important;
-    position: absolute !important;
-    inset: 52px 0 var(--hr-mobile-nav-height) 0 !important;
-    z-index: 20;
-    min-width: 0;
-    min-height: 0;
-  }
-
-  .hr-control-plane:has(.tdw-main.mobile-open) .tdw-topbar {
-    display: none !important;
-  }
-
-  .hr-control-plane:has(.tdw-main.mobile-open) .tdw-layout {
-    height: 100dvh !important;
-  }
-
-  .hr-control-plane:has(.tdw-main.mobile-open) .tdw-main.mobile-open {
-    inset: 0 !important;
-  }
-
   .hr-control-plane .tdw-mobile-back {
     min-height: 42px !important;
     display: flex !important;
@@ -296,27 +110,6 @@
     color: var(--td3-blue-text) !important;
     font-size: 12px !important;
     font-weight: 760 !important;
-  }
-
-  .hr-control-plane .tdw-thread-header {
-    min-height: 54px !important;
-    padding: 6px 10px !important;
-    gap: 8px !important;
-  }
-
-  .hr-control-plane .tdw-thread-heading p {
-    display: none !important;
-  }
-
-  .hr-control-plane .tdw-detail-tabs {
-    min-height: 40px !important;
-    overflow-x: auto !important;
-    scrollbar-width: none;
-  }
-
-  .hr-control-plane .tdw-detail-tabs button {
-    min-height: 40px !important;
-    flex: none !important;
   }
 
   .hr-control-plane .tdw-conversation-toolbar {
@@ -354,7 +147,6 @@
   }
 
   .hr-control-plane .tdw-work-thread-conversation,
-  .hr-control-plane .uw-session-shell,
   .hr-control-plane .uw-transcript {
     min-width: 0 !important;
     min-height: 0 !important;
@@ -447,7 +239,6 @@
     font-weight: 700 !important;
   }
 
-  .uw-standalone-host:has(.tdw-main.mobile-open) .hr-mobile-nav,
   .uw-standalone-host:has(.tdw-modal-backdrop) .hr-mobile-nav {
     display: none !important;
   }
@@ -569,13 +360,6 @@
     flex-direction: column !important;
     overflow: hidden !important;
     border-radius: 0 !important;
-  }
-
-  .tdw-modal-body {
-    min-height: 0 !important;
-    flex: 1 !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
   }
 
   .tdw-modal select,

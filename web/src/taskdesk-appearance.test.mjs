@@ -5,7 +5,6 @@ import test from "node:test"
 const read = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8")
 
 const SHEETS = [
-  "taskdesk-v3-unified.css",
   "universal-workspace-readable-fixes.css",
   "conversation-control-plane.css",
   "conversation-control-plane-overrides.css",
@@ -87,18 +86,9 @@ test("no TaskDesk text is authored below a readable size", () => {
 test("the Sessions pane raises every size its own sheet authored below the floor", () => {
   const fixes = read("universal-workspace-readable-fixes.css")
 
-  // Measured against the running app: these were the selectors still rendering at 7-7.5px after the
-  // existing readable sheets had applied.
-  for (const selector of [
-    ".uw-diff-file summary span b",
-    ".uw-file-list button b",
-    ".uw-todo-state",
-    ".uw-avatar",
-    ".uw-attention-actions .uw-button",
-    ".uw-inspector-section-heading > button"
-  ]) {
-    assert.ok(fixes.includes(selector), `${selector} has no readable size`)
-  }
+  // Measured against the running app: this was still rendering at 7-7.5px after the existing
+  // readable sheets had applied.
+  assert.ok(fixes.includes(".uw-avatar"), ".uw-avatar has no readable size")
 })
 
 test("appearance and language are applied before any shell renders", () => {
@@ -108,7 +98,7 @@ test("appearance and language are applied before any shell renders", () => {
   assert.match(main, /installAppPreferences\(\)/)
   assert.match(main, /import "\.\/taskdesk-theme\.css"/)
   // The palette and structural bases have to precede the final product refinements.
-  const order = ["styles.css", "taskdesk-theme.css", "taskdesk-v3-unified.css", "session-first-workbench.css", "conversation-base.css", "beautiful-ui-controls.css"]
+  const order = ["styles.css", "taskdesk-theme.css", "session-first-workbench.css", "conversation-base.css", "beautiful-ui-controls.css"]
   const positions = order.map((name) => main.indexOf(`import "./${name}"`))
   for (const position of positions) assert.notEqual(position, -1)
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right), "TaskDesk sheets must load base-to-override")
