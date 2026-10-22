@@ -16,7 +16,7 @@ Session ids and storage keys are not migrated between generations.
 The in-repo launcher was retired after #552 closed. Recover it from history if needed:
 
 ```bash
-git show dacb7b4:bridge/scripts/opencode2-run-test.sh > opencode2-run-test.sh
+git show fb56553:bridge/scripts/opencode2-run-test.sh > opencode2-run-test.sh
 ```
 
 Giulio's prepared local command is:
