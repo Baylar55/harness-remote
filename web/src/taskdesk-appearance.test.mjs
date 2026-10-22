@@ -5,16 +5,16 @@ import test from "node:test"
 const read = (name) => readFileSync(new URL(`./${name}`, import.meta.url), "utf8")
 
 const SHEETS = [
-  "universal-workspace-readable-fixes.css",
   "conversation-control-plane.css",
   "conversation-control-plane-overrides.css",
   "session-first-workbench.css",
   "conversation-base.css"
 ]
 
-/** Every colour literal, ignoring the black used for shadows and any hex inside a url() or var name. */
+/** Every colour literal, ignoring comments ("PR #309" is not a colour), the black used for shadows
+ *  and any hex inside a url() or var name. */
 function colourLiterals(css) {
-  return (css.match(/#[0-9a-fA-F]{3,8}\b|rgba?\([0-9.,\s]*\)/g) || [])
+  return (css.replace(/\/\*[\s\S]*?\*\//g, "").match(/#[0-9a-fA-F]{3,8}\b|rgba?\([0-9.,\s]*\)/g) || [])
     .filter((value) => !value.replace(/\s/g, "").startsWith("rgba(0,0,0"))
 }
 
@@ -84,7 +84,7 @@ test("no TaskDesk text is authored below a readable size", () => {
 })
 
 test("the Sessions pane raises every size its own sheet authored below the floor", () => {
-  const fixes = read("universal-workspace-readable-fixes.css")
+  const fixes = read("taskdesk-theme.css")
 
   // Measured against the running app: this was still rendering at 7-7.5px after the existing
   // readable sheets had applied.

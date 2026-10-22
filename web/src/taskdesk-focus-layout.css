@@ -4,29 +4,6 @@
 @media (min-width: 781px) {
   .tdw-shell { --tdw-workspace-width: 268px; }
 
-  .tdw-project-column { grid-column: 1; z-index: 3; }
-
-  .tdw-thread-column {
-    position: absolute;
-    z-index: 46;
-    top: 0;
-    bottom: 0;
-    left: var(--tdw-workspace-width);
-    width: min(var(--tdw-thread-width, 330px), calc(100% - var(--tdw-workspace-width) - 24px));
-    min-width: 280px;
-    border-right: 1px solid var(--td3-border);
-    background: var(--td3-panel-2);
-    box-shadow: 18px 0 46px rgba(0, 0, 0, .22);
-    transform: translateX(calc(-100% - 14px));
-    opacity: 0;
-    pointer-events: none;
-    /* opacity and pointer-events hide the drawer from the mouse but leave every control inside it
-       in the tab order and in the accessibility tree. On the default desktop screen that was 5 of
-       23 tab stops landing on an invisible panel. visibility removes them; delaying it by the
-       transition duration keeps the slide-out animation intact. */
-    visibility: hidden;
-    transition: transform 160ms ease, opacity 120ms ease, visibility 0s linear 160ms;
-  }
 }
 
 @keyframes tdw-connect-dot {

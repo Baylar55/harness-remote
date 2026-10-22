@@ -2,8 +2,6 @@
    product hierarchy can evolve without making the base stylesheet harder to reason about. */
 
 .tdw-shell { --tdw-workspace-width: 238px; }
-.tdw-project-column { overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
-.tdw-thread-column { position: relative; }
 .tdw-shell input:focus-visible, .tdw-shell textarea:focus-visible, .tdw-shell select:focus-visible, .tdw-shell button:focus-visible,
 .tdw-modal input:focus-visible, .tdw-modal textarea:focus-visible, .tdw-modal select:focus-visible, .tdw-modal button:focus-visible {
   outline: none; border-color: var(--td3-focus) !important; box-shadow: 0 0 0 3px var(--td3-blue-soft) !important;

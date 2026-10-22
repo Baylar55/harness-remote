@@ -115,11 +115,6 @@
 .tdw-icon-button { width: 34px; height: 34px; justify-content: center; border-radius: 9px; color: var(--td3-text-3); border: 0; background: transparent; cursor: pointer; }
 .tdw-icon-button:hover { background: var(--td3-raise-2); color: var(--tdw-text); }
 
-.tdw-project-column, .tdw-thread-column { min-width: 0; min-height: 0; }
-.tdw-project-column, .tdw-thread-column { display: flex; flex-direction: column; background: var(--td3-veil); }
-.tdw-project-column { border-right: 1px solid var(--tdw-border); }
-.tdw-thread-column { border-right: 1px solid var(--tdw-border); }
-
 .tdw-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 18px; background: rgba(0,0,0,.58); backdrop-filter: blur(5px); }
 .tdw-modal { width: min(720px, 100%); max-height: min(820px, calc(100vh - 36px)); overflow: visible; border: 1px solid var(--tdw-border); border-radius: 16px; background: var(--td3-panel-2); box-shadow: 0 28px 90px rgba(0,0,0,.38); }
 .tdw-modal > header, .tdw-modal > footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 15px 17px; }
@@ -158,8 +153,6 @@
   .tdw-topbar { height: 56px; grid-template-columns: 1fr auto; padding: 0 9px; gap: 8px; }
   .tdw-brand small, .tdw-machine-health, .tdw-context-path, .tdw-machines-button, .tdw-top-actions > .tdw-icon-button { display: none; }
   .tdw-top-actions .tdw-button { padding: 0 9px; }
-  .tdw-project-column { display: none; }
-  .tdw-thread-column { grid-column: 1; }
   .tdw-modal-backdrop { padding: 0; align-items: end; }
   .tdw-modal { width: 100%; max-height: 94vh; overflow-y: auto; overflow-x: visible; border-radius: 16px 16px 0 0; }
 }

@@ -12,24 +12,6 @@
   max-width: 280px;
 }
 
-.hr-control-plane .hr-new-conversation {
-  white-space: nowrap;
-}
-
-.hr-control-plane .tdw-thread-column {
-  min-width: 280px;
-}
-
-.hr-welcome {
-  width: min(680px, calc(100% - 40px));
-  gap: 12px;
-}
-
-.hr-welcome > p {
-  max-width: 650px;
-  line-height: 1.6;
-}
-
 .hr-welcome-mark {
   box-shadow: none;
 }
@@ -62,26 +44,6 @@
   justify-content: center;
   gap: 8px;
   margin-top: 6px;
-}
-
-.hr-workspace-note {
-  display: grid;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--td3-border);
-  border-radius: 9px;
-  background: var(--td3-raise-1);
-}
-
-.hr-workspace-note strong {
-  color: var(--td3-text);
-  font-size: 12px;
-}
-
-.hr-workspace-note span {
-  color: var(--td3-text-2);
-  font-size: 11px;
-  line-height: 1.45;
 }
 
 .hr-conversation-header {
@@ -333,10 +295,6 @@
     display: none;
   }
 
-  .hr-control-plane .tdw-thread-column {
-    min-width: 0;
-  }
-
   .hr-session-panel,
   .hr-changes-panel {
     width: min(100% - 24px, var(--hr-reading-width));
@@ -363,9 +321,6 @@
 }
 
 @media (max-width: 620px) {
-  .hr-welcome {
-    width: calc(100% - 28px);
-  }
 
   .hr-welcome-actions {
     width: 100%;
