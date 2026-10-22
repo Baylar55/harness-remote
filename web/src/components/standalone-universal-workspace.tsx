@@ -298,10 +298,12 @@ function MachineEditor({ machine, onCancel, onSave, onFoldersSaved, onBusyChange
           {folders.environmentOverride ? <p role="note">{t("settings.projectFoldersOverride", { root: folders.environmentOverride })}</p> : null}
           {folders.status !== "ready" ? <p role={folders.status === "unavailable" ? "alert" : "status"}>{t(folders.status === "loading" ? "settings.projectFoldersLoading" : "settings.projectFoldersError")}</p> : <>
             <ul className="hr-project-roots-list">
-              {draftRoots.map((root) => <li key={root}><code>{root}</code><button type="button" className="uw-manager-button" disabled={busy || Boolean(folders.environmentOverride)} onClick={() => setDraftRoots((current) => current.filter((candidate) => candidate !== root))}>{t("settings.projectFoldersRemove")}</button></li>)}
+              {draftRoots.map((root) => <li key={root}><code className="hr-path-tail" title={root}><bdi>{root}</bdi></code><button type="button" className="uw-manager-button" disabled={busy || Boolean(folders.environmentOverride)} onClick={() => setDraftRoots((current) => current.filter((candidate) => candidate !== root))}>{t("settings.projectFoldersRemove")}</button></li>)}
             </ul>
             {!draftRoots.length ? <p>{t("settings.projectFoldersHint")}</p> : null}
-            <button type="button" className="uw-manager-button" disabled={busy || Boolean(folders.environmentOverride)} onClick={() => void addProjectFolder()}>{t("settings.projectFoldersAdd")}</button>
+            <div className="hr-project-roots-add">
+              <button type="button" className="uw-manager-button" disabled={busy || Boolean(folders.environmentOverride)} onClick={() => void addProjectFolder()}>{t("settings.projectFoldersAdd")}</button>
+            </div>
           </>}
         </> : <>
           {folders.status !== "ready" && remoteConnectionChanged ? <p>{t("machine.testFoldersHint")}</p> : <MachineFolderSummary folders={folders} />}
@@ -312,7 +314,7 @@ function MachineEditor({ machine, onCancel, onSave, onFoldersSaved, onBusyChange
       {testResult ? <div className={`uw-machine-test-result ${testResult.ok ? "ok" : "error"}`} role="status">{testResult.text}</div> : null}
       <div className="uw-machine-editor-actions">
         <button type="button" className="uw-manager-button" disabled={busy} onClick={onCancel}>{t("sf.cancel")}</button>
-        {!runtimeOwned ? <button type="button" className="uw-manager-button" disabled={!valid || testing || busy} onClick={() => void testConnection()}>{testing ? t("sf.testing") : t("sf.testConnection")}</button> : null}
+        {!runtimeOwned ? <button type="button" className="uw-manager-button" data-machine-test disabled={!valid || testing || busy} onClick={() => void testConnection()}>{testing ? t("sf.testing") : t("sf.testConnection")}</button> : null}
         <button type="submit" className="uw-manager-button primary" disabled={!valid || busy || (runtimeOwned && (folders.status !== "ready" || !rootsChanged || Boolean(folders.environmentOverride)))}>{saving ? t("machine.saving") : t("sf.saveMachine")}</button>
       </div>
     </form>
@@ -488,24 +490,31 @@ function MachineManager({
             return (
               <div className="uw-machine-config-card" data-machine-state={state} data-runtime-owned={runtimeOwned || undefined} key={machine.id}>
                 <div className="uw-machine-config-main">
-                  <strong>{runtimeOwned ? snapshot?.machine.name || t("settings.thisComputer") : machine.name}</strong>
-                  {runtimeOwned ? <small className="uw-machine-runtime-owned">{t("settings.thisComputer")} · {t("machine.managedByApp")}</small> : null}
-                  <span>{machine.config.host}:{machine.config.port}</span>
-                  <small className={`uw-machine-connection-state ${state}`} aria-live="polite">
-                    <i aria-hidden="true" />
-                    {state === "checking"
-                      ? t("sf.checkingAgents")
-                      : state === "online"
-                        ? t("sf.agentsDetected", { count: snapshot?.agents.length || 0 })
-                        : t("sf.machineUnavailable")}
-                  </small>
+                  <div className="uw-machine-card-header">
+                    <strong>{runtimeOwned ? snapshot?.machine.name || t("settings.thisComputer") : machine.name}</strong>
+                    {runtimeOwned ? <small className="uw-machine-runtime-owned">{t("settings.thisComputer")} · {t("machine.managedByApp")}</small> : null}
+                    <small className={`uw-machine-connection-state ${state}`} aria-live="polite">
+                      <i aria-hidden="true" />
+                      {state === "checking"
+                        ? t("sf.checkingAgents")
+                        : state === "online"
+                          ? t("sf.agentsDetected", { count: snapshot?.agents.length || 0 })
+                          : t("sf.machineUnavailable")}
+                    </small>
+                  </div>
+                  <dl className="uw-machine-card-facts">
+                    <div>
+                      <dt>{t("pair.address")}</dt>
+                      <dd><code>{machine.config.host}:{machine.config.port}</code></dd>
+                    </div>
+                  </dl>
                   {state === "offline" ? (
                     <small className="uw-machine-connection-error" role="status">
                       {error ? machineConnectionErrorText(error, t) : t("sf.notADaemon")}
                     </small>
                   ) : null}
-                  <MachineFolderSummary folders={machineFolders[machine.id]} />
                   {snapshot?.agents.length ? <div className="uw-machine-harness-list">{snapshot.agents.map((agent) => <span className="uw-machine-harness" key={agent.id}><i className={agent.state} aria-hidden="true" /><strong>{agent.label}</strong><small>{machineAgentStateLabel(agent.state, t)}{agent.processID ? ` · PID ${agent.processID}` : ""}</small></span>)}</div> : null}
+                  <MachineFolderSummary folders={machineFolders[machine.id]} />
                 </div>
                 <div className="uw-machine-config-actions">
                   {confirmRemoveID === machine.id && !runtimeOwned ? (
@@ -1286,10 +1295,10 @@ function NativeSessionsWorkspace({
                     {selected.nativeAgent ? <><i aria-hidden="true">/</i><span>{selected.nativeAgent}</span></> : null}
                   </div>
                   <NativeSessionTitle target={selected} onRenamed={handleSessionRenamed} />
-                  <small title={selected.directory}>
-                    {selected.external ? t("sf.startedInHarness") : t("sf.createdInHarnessRemote")}
-                    {selected.directory ? ` · ${selected.directory}` : ""}
-                  </small>
+                  <small>{selected.external ? t("sf.startedInHarness") : t("sf.createdInHarnessRemote")}</small>
+                  {/* Its own element so a narrow header can give the path a full line, clipped at the
+                      start: the end of a path is the part that tells two projects apart. */}
+                  {selected.directory ? <small className="hr-native-session-directory hr-path-tail" title={selected.directory}><bdi>{selected.directory}</bdi></small> : null}
                 </div>
                 <div className="hr-native-workspace-session-actions">
                   {selected.nativeAgent || selectedPolicyLabel || selectedTokenCount || selectedHasChanges || Number(selected.cost) > 0 ? (
