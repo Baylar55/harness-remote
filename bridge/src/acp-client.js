@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
 import { stat } from "node:fs/promises"
+import { withoutGatewayCredentials } from "./child-environment.js"
 import { closeOwnedChildProcess, ownChildProcess } from "./managed-child-process.js"
 
 // An adapter launched through `npx` downloads itself on first use, which takes far longer
@@ -152,7 +153,7 @@ export class AcpClient extends EventEmitter {
     const child = this.#spawn(windowsCommand, windowsArgs, {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      env: { ...process.env, ...this.#environment },
+      env: withoutGatewayCredentials({ ...process.env, ...this.#environment }),
       ...(this.#cwd ? { cwd: this.#cwd } : {})
     })
     ownChildProcess(child)
