@@ -369,6 +369,26 @@ test("still declines agent-initiated requests it does not implement", async () =
   client.close()
 })
 
+test("answers a permission request even when its options are malformed or an observer throws", async () => {
+  const child = new FakeChild((current, request) => {
+    respondToHandshake(current, request)
+    if (request.method !== "session/prompt") return
+    current.respond({ jsonrpc: "2.0", id: 97, method: "session/request_permission", params: { options: [null, { optionId: "once", kind: "allow_once" }] } })
+    current.respond({ jsonrpc: "2.0", id: request.id, result: { stopReason: "end_turn" } })
+  })
+  const client = new AcpClient({ permissionMode: "allow", spawnProcess: () => child })
+  const protocolErrors = []
+  client.on("protocol-error", (error) => protocolErrors.push(error.message))
+  client.on("agent-request", () => { throw new Error("observer failed") })
+  client.on("permission", () => { throw new Error("observer failed") })
+  await client.start()
+  try {
+    assert.deepEqual(await client.request("session/prompt", {}), { stopReason: "end_turn" })
+    assert.deepEqual(child.writes.find((message) => message.id === 97)?.result.outcome, { outcome: "selected", optionId: "once" })
+    assert.equal(protocolErrors.length, 1)
+  } finally { await client.close() }
+})
+
 test("reports why the adapter died instead of only its exit code", async () => {
   // The PI ACP adapter requires Bun, and when it is missing the shell explains that on
   // stderr while the exit code alone says nothing. Windows wraps the message over two
@@ -431,6 +451,38 @@ test("waits for a closing child before restart and ignores its late error", asyn
   first.emit("error", new Error("late old child error"))
   assert.equal(client.processID, 4242, "an old process event must not clear the current child")
   await client.close()
+})
+
+test("malformed adapter messages, throwing listeners, and stdin EPIPE are reported instead of crashing", async () => {
+  const client = new AcpClient({
+    spawnProcess: (command, args) => {
+      const child = fakeSpawn((current, request) => {
+        respondToHandshake(current, request)
+        if (request.method === "session/list") {
+          // Bad traffic arrives ahead of the real reply, which must still be delivered.
+          current.stdout.emit("data", "null\n42\n[]\n")
+          current.respond({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "s1", update: { sessionUpdate: "plan" } } })
+          current.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))
+          current.respond({ jsonrpc: "2.0", id: request.id, result: { sessions: [] } })
+        }
+      })(command, args)
+      // A real stdin is a stream; give the fake one stream events so EPIPE has somewhere to go.
+      const stdinEvents = new EventEmitter()
+      child.stdin.on = stdinEvents.on.bind(stdinEvents)
+      child.stdin.emit = stdinEvents.emit.bind(stdinEvents)
+      return child
+    }
+  })
+  const protocolErrors = []
+  client.on("protocol-error", (error) => protocolErrors.push(error.message))
+  client.on("notification", ({ params }) => params.update.entries.map(() => undefined))
+  try {
+    assert.deepEqual(await client.listSessions(), [])
+    assert.equal(protocolErrors.length, 5)
+    assert.deepEqual(protocolErrors.slice(0, 3), Array(3).fill("ACP adapter emitted a non-object JSON-RPC message"))
+    assert.match(protocolErrors[3], /^ACP adapter message handling failed: .*map/)
+    assert.equal(protocolErrors[4], "write EPIPE")
+  } finally { await client.close() }
 })
 
 

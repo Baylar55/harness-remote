@@ -165,6 +165,9 @@ export class AcpClient extends EventEmitter {
     child.stdout.setEncoding("utf8")
     child.stderr.setEncoding("utf8")
     child.stdout.on("data", (chunk) => this.#consume(chunk))
+    // EPIPE after the adapter dies is emitted here even when the write had a callback; without a
+    // listener it is an uncaught exception that takes every Session down. Exit handling follows.
+    child.stdin.on?.("error", (error) => this.emit("protocol-error", error))
     child.stderr.on("data", (chunk) => {
       this.#stderr = `${this.#stderr}${chunk}`.slice(-STDERR_KEPT_CHARS)
       // Emit whole lines. A chunk boundary falls wherever the pipe happens to flush, so a listener
@@ -303,7 +306,14 @@ export class AcpClient extends EventEmitter {
     while (boundary !== -1) {
       const line = this.#buffer.slice(0, boundary).trim()
       this.#buffer = this.#buffer.slice(boundary + 1)
-      if (line) this.#consumeMessage(line)
+      if (line) {
+        // A listener throwing here would escape the stdout handler and crash the whole bridge.
+        try {
+          this.#consumeMessage(line)
+        } catch (error) {
+          this.emit("protocol-error", new Error(`ACP adapter message handling failed: ${error?.message ?? error}`, { cause: error }))
+        }
+      }
       boundary = this.#buffer.indexOf("\n")
     }
   }
@@ -316,6 +326,10 @@ export class AcpClient extends EventEmitter {
       this.emit("protocol-error", new Error("ACP adapter emitted invalid JSON"))
       return
     }
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      this.emit("protocol-error", new Error("ACP adapter emitted a non-object JSON-RPC message"))
+      return
+    }
 
     // A long ACP prompt is alive as long as that same Session keeps producing protocol traffic.
     // Treat its timeout as an inactivity watchdog, not a wall-clock cap on legitimate long turns.
@@ -325,9 +339,10 @@ export class AcpClient extends EventEmitter {
     // request. An unanswered request would stall the agent until the prompt
     // timeout, so always reply.
     if (message.id !== undefined && message.method) {
-      this.emit("agent-request", message)
       if (message.method === "session/request_permission") this.#respondPermission(message.id, message.params)
       else this.#respondUnsupported(message.id, message.method)
+      // Observers run after the reply so a throwing listener cannot leave the agent waiting.
+      this.emit("agent-request", message)
       return
     }
     if (message.id !== undefined) {
@@ -360,15 +375,15 @@ export class AcpClient extends EventEmitter {
     if (!this.#child?.stdin.writable) return
     const options = Array.isArray(params?.options) ? params.options : []
     const allowed = this.#permissionMode === "allow"
-      ? options.find((option) => option.kind === "allow_once")
-        ?? options.find((option) => option.kind === "allow_always")
-        ?? options.find((option) => typeof option.kind === "string" && option.kind.startsWith("allow"))
+      ? options.find((option) => option?.kind === "allow_once")
+        ?? options.find((option) => option?.kind === "allow_always")
+        ?? options.find((option) => typeof option?.kind === "string" && option.kind.startsWith("allow"))
       : undefined
     const outcome = allowed?.optionId
       ? { outcome: "selected", optionId: allowed.optionId }
       : { outcome: "cancelled" }
-    this.emit("permission", { optionId: allowed?.optionId })
     this.#child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: { outcome } })}\n`)
+    this.emit("permission", { optionId: allowed?.optionId })
   }
 
   #respondUnsupported(id, method) {
