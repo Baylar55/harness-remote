@@ -79,8 +79,6 @@ export class CopilotSdkClient extends EventEmitter {
     this.#buffer = Buffer.alloc(0)
     this.#stderr = ""
     child.stdout?.on("data", (chunk) => this.#consume(chunk))
-    // EPIPE after the CLI dies is emitted here even when the write had a callback; unhandled, it crashes the bridge.
-    child.stdin?.on?.("error", (error) => this.emit("protocol-error", error))
     child.stderr?.on("data", (chunk) => {
       this.#stderr = `${this.#stderr}${Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk)}`.slice(-STDERR_KEPT_CHARS)
     })

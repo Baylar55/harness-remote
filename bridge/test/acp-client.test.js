@@ -453,35 +453,26 @@ test("waits for a closing child before restart and ignores its late error", asyn
   await client.close()
 })
 
-test("malformed adapter messages, throwing listeners, and stdin EPIPE are reported instead of crashing", async () => {
+test("malformed adapter messages and throwing listeners are reported instead of crashing", async () => {
   const client = new AcpClient({
-    spawnProcess: (command, args) => {
-      const child = fakeSpawn((current, request) => {
-        respondToHandshake(current, request)
-        if (request.method === "session/list") {
-          // Bad traffic arrives ahead of the real reply, which must still be delivered.
-          current.stdout.emit("data", "null\n42\n[]\n")
-          current.respond({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "s1", update: { sessionUpdate: "plan" } } })
-          current.stdin.emit("error", Object.assign(new Error("write EPIPE"), { code: "EPIPE" }))
-          current.respond({ jsonrpc: "2.0", id: request.id, result: { sessions: [] } })
-        }
-      })(command, args)
-      // A real stdin is a stream; give the fake one stream events so EPIPE has somewhere to go.
-      const stdinEvents = new EventEmitter()
-      child.stdin.on = stdinEvents.on.bind(stdinEvents)
-      child.stdin.emit = stdinEvents.emit.bind(stdinEvents)
-      return child
-    }
+    spawnProcess: fakeSpawn((current, request) => {
+      respondToHandshake(current, request)
+      if (request.method === "session/list") {
+        // Bad traffic arrives ahead of the real reply, which must still be delivered.
+        current.stdout.emit("data", "null\n42\n[]\n")
+        current.respond({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "s1", update: { sessionUpdate: "plan" } } })
+        current.respond({ jsonrpc: "2.0", id: request.id, result: { sessions: [] } })
+      }
+    })
   })
   const protocolErrors = []
   client.on("protocol-error", (error) => protocolErrors.push(error.message))
   client.on("notification", ({ params }) => params.update.entries.map(() => undefined))
   try {
     assert.deepEqual(await client.listSessions(), [])
-    assert.equal(protocolErrors.length, 5)
+    assert.equal(protocolErrors.length, 4)
     assert.deepEqual(protocolErrors.slice(0, 3), Array(3).fill("ACP adapter emitted a non-object JSON-RPC message"))
     assert.match(protocolErrors[3], /^ACP adapter message handling failed: .*map/)
-    assert.equal(protocolErrors[4], "write EPIPE")
   } finally { await client.close() }
 })
 

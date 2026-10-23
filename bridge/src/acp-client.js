@@ -165,9 +165,6 @@ export class AcpClient extends EventEmitter {
     child.stdout.setEncoding("utf8")
     child.stderr.setEncoding("utf8")
     child.stdout.on("data", (chunk) => this.#consume(chunk))
-    // EPIPE after the adapter dies is emitted here even when the write had a callback; without a
-    // listener it is an uncaught exception that takes every Session down. Exit handling follows.
-    child.stdin.on?.("error", (error) => this.emit("protocol-error", error))
     child.stderr.on("data", (chunk) => {
       this.#stderr = `${this.#stderr}${chunk}`.slice(-STDERR_KEPT_CHARS)
       // Emit whole lines. A chunk boundary falls wherever the pipe happens to flush, so a listener
