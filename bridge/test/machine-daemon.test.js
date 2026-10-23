@@ -1,7 +1,13 @@
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
 import test from "node:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import { MachineDaemon, createMachineDaemonServer } from "../src/machine-daemon.js"
+
+// Handoff admits only real directories under the configured roots; with no roots that is cwd.
+const repo = process.cwd()
 
 class FakeAcp extends EventEmitter {
   closed = false
@@ -213,7 +219,7 @@ test("machine handoff checkpoints a created target before link enrichment can fa
   daemon.registerAcpHost({ id: "codex", agent: codex })
   daemon.registerAcpHost({ id: "pi", agent: pi, bridgeConfig: { backend: "pi" } })
 
-  const targetSessions = [{ id: "pi-old", directory: "/repo" }]
+  const targetSessions = [{ id: "pi-old", directory: repo }]
   let creates = 0
   let claimOptions
   createMachineDaemonServer({
@@ -230,8 +236,8 @@ test("machine handoff checkpoints a created target before link enrichment can fa
             async listSessions() { return targetSessions },
             async createSession(input) {
               creates += 1
-              assert.deepEqual(input, { directory: "/repo" }, "handoff creation must not apply title/model before target checkpoint")
-              const created = { id: "pi-new", directory: "/repo" }
+              assert.deepEqual(input, { directory: repo }, "handoff creation must not apply title/model before target checkpoint")
+              const created = { id: "pi-new", directory: repo }
               targetSessions.push(created)
               return created
             },
@@ -255,7 +261,7 @@ test("machine handoff checkpoints a created target before link enrichment can fa
   const result = await claimOptions.handoffSession(
     "codex",
     "source-native-1",
-    { targetAgentID: "pi", directory: "/repo", title: "Continue source" },
+    { targetAgentID: "pi", directory: repo, title: "Continue source" },
     { checkpoint: async (value) => checkpoints.push(structuredClone(value)) }
   )
 
@@ -272,7 +278,7 @@ test("machine handoff reconciles one ACP Session created behind a lost session/n
   daemon.registerAcpHost({ id: "codex", agent: codex })
   daemon.registerAcpHost({ id: "pi", agent: pi, bridgeConfig: { backend: "pi" } })
 
-  const targetSessions = [{ id: "pi-old", directory: "/repo" }]
+  const targetSessions = [{ id: "pi-old", directory: repo }]
   let creates = 0
   let claimOptions
   createMachineDaemonServer({
@@ -287,7 +293,7 @@ test("machine handoff reconciles one ACP Session created behind a lost session/n
             async listSessions() { return targetSessions },
             async createSession() {
               creates += 1
-              targetSessions.push({ id: "pi-recovered", directory: "/repo" })
+              targetSessions.push({ id: "pi-recovered", directory: repo })
               throw new Error("simulated lost session/new response")
             },
             async claimSession() { return true },
@@ -307,7 +313,7 @@ test("machine handoff reconciles one ACP Session created behind a lost session/n
 
   let recovery
   await assert.rejects(
-    () => claimOptions.handoffSession("codex", "source-native-1", { targetAgentID: "pi", directory: "/repo" }),
+    () => claimOptions.handoffSession("codex", "source-native-1", { targetAgentID: "pi", directory: repo }),
     (error) => {
       assert.equal(error.ambiguous, true)
       recovery = error.recovery
@@ -319,11 +325,68 @@ test("machine handoff reconciles one ACP Session created behind a lost session/n
   const reconciled = await claimOptions.reconcileHandoff(
     "codex",
     "source-native-1",
-    { targetAgentID: "pi", directory: "/repo" },
+    { targetAgentID: "pi", directory: repo },
     recovery
   )
   assert.equal(reconciled.target.sessionID, "pi-recovered")
   assert.equal(creates, 1, "read-only reconciliation must not replay session/new")
+})
+
+test("machine handoff only creates target Sessions inside the roots or managed Task worktrees", async () => {
+  const daemon = new MachineDaemon({ id: "machine_test", name: "workstation" })
+  const codex = new FakeAcp()
+  const pi = new FakeAcp()
+  daemon.registerAcpHost({ id: "codex", agent: codex })
+  daemon.registerAcpHost({ id: "pi", agent: pi, bridgeConfig: { backend: "pi" } })
+  const base = await mkdtemp(path.join(tmpdir(), "harness-handoff-root-"))
+  const root = path.join(base, "root")
+  const outside = path.join(base, "outside")
+  const stateDirectory = path.join(base, "state")
+  const worktree = path.join(stateDirectory, "worktrees", "task-1")
+  await Promise.all([mkdir(root), mkdir(outside), mkdir(worktree, { recursive: true })])
+  const created = []
+  let claimOptions
+  createMachineDaemonServer({
+    daemon,
+    config: { backend: "codex", port: 4097, roots: [root], stateDirectory },
+    primaryAcp: codex,
+    sessionOperationLedger: { marker: "ledger" },
+    sessionLinkStore: { async addHandoff() {} },
+    createServer: (options) => ({
+      acpService: options.config.backend === "pi"
+        ? {
+            async listSessions() { return [] },
+            async createSession(input) { created.push(input.directory); return { id: `pi-${created.length}` } },
+            async claimSession() { return true },
+            async prompt() {},
+            async abort() {}
+          }
+        : { async claimSession() { return true }, async prompt() {}, async abort() {} },
+      emit() {}
+    }),
+    createRouter: () => ({ marker: "router" }),
+    createClaimServer: (options) => { claimOptions = options; return { marker: "claim" } },
+    createLaunchServer: ({ innerServer }) => innerServer,
+    createModelServer: ({ innerServer }) => innerServer,
+    createFinishServer: ({ innerServer }) => innerServer,
+    createWorkThreadServerFactory: ({ innerServer }) => innerServer
+  })
+  const handoff = (directory) => claimOptions.handoffSession("codex", "source-native-1", { targetAgentID: "pi", directory })
+
+  try {
+    for (const directory of [outside, `${root}${path.sep}..${path.sep}outside`, path.join(root, "missing")]) {
+      await assert.rejects(handoff(directory), (error) => error.code === "invalid_request" && !error.ambiguous)
+    }
+    assert.deepEqual(created, [], "a rejected directory must never reach session/new")
+
+    // Unnormalized spelling: admitted by its resolved form, but passed through verbatim.
+    const rootSpelling = `${root}${path.sep}.${path.sep}`
+    await handoff(rootSpelling)
+    await handoff(worktree)
+    assert.deepEqual(created, [rootSpelling, worktree], "the caller's directory string stays the Session identity")
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
 })
 
 test("machine Session mutations acquire ACP ownership lazily and reuse it", async () => {

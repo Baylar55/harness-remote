@@ -3,6 +3,9 @@ import { EventEmitter } from "node:events"
 import test from "node:test"
 import { MachineDaemon, createMachineDaemonServer } from "../src/machine-daemon.js"
 
+// Handoff admits only real directories under the configured roots; with no roots that is cwd.
+const repo = process.cwd()
+
 class FakeAcp extends EventEmitter {
   configCalls = []
   async start() {}
@@ -236,7 +239,7 @@ test("ACP cross-agent handoff checkpoints a bare target and defers model effort 
     async listSessions() { return [] },
     async createSession(input) {
       created.push(input)
-      return { id: "pi-native-new", directory: "/repo" }
+      return { id: "pi-native-new", directory: repo }
     },
     async setModel(sessionID, model, variant) { modelCalls.push([sessionID, model, variant]) },
     async claimSession() {},
@@ -253,21 +256,21 @@ test("ACP cross-agent handoff checkpoints a bare target and defers model effort 
   const checkpoints = []
   const result = await claimOptions.handoffSession("codex", "codex-native-source", {
     targetAgentID: "pi",
-    directory: "/repo",
+    directory: repo,
     model: { providerID: "openai", modelID: "gpt-5.6" },
     variant: "high",
     title: "Continue in PI"
   }, { checkpoint: async (value) => checkpoints.push(structuredClone(value)) })
 
-  assert.deepEqual(created, [{ directory: "/repo" }])
+  assert.deepEqual(created, [{ directory: repo }])
   assert.equal(checkpoints[0].target.sessionID, "pi-native-new")
   // Model + effort are intentionally not applied during resource creation. The first prompt carries
   // both through AcpService.prompt after the target identity is already durable.
   assert.deepEqual(pi.configCalls, [])
   assert.deepEqual(modelCalls, [])
   assert.deepEqual(links, [{
-    source: { machineID: "machine-handoff-acp", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
-    target: { machineID: "machine-handoff-acp", agentID: "pi", sessionID: "pi-native-new", directory: "/repo" }
+    source: { machineID: "machine-handoff-acp", agentID: "codex", sessionID: "codex-native-source", directory: repo },
+    target: { machineID: "machine-handoff-acp", agentID: "pi", sessionID: "pi-native-new", directory: repo }
   }])
   assert.equal(result.target.sessionID, "pi-native-new")
 })
@@ -309,7 +312,7 @@ test("OpenCode cross-agent handoff snapshots Sessions then creates a bare recove
   try {
     result = await claimOptions.handoffSession("codex", "codex-native-source", {
       targetAgentID: "opencode",
-      directory: "/repo",
+      directory: repo,
       model: { providerID: "openai", modelID: "gpt-5.6" },
       variant: "high",
       title: "Continue in OpenCode"
@@ -319,15 +322,15 @@ test("OpenCode cross-agent handoff snapshots Sessions then creates a bare recove
   }
 
   assert.equal(calls.length, 2)
-  assert.match(calls[0][0], /\/session\?directory=%2Frepo$/)
+  assert.ok(calls[0][0].endsWith(`/session?directory=${encodeURIComponent(repo)}`))
   assert.equal(calls[0][1].method, "GET")
-  assert.match(calls[1][0], /\/session\?directory=%2Frepo$/)
+  assert.ok(calls[1][0].endsWith(`/session?directory=${encodeURIComponent(repo)}`))
   assert.equal(calls[1][1].method, "POST")
   assert.deepEqual(JSON.parse(calls[1][1].body), {})
   assert.equal(checkpoints[0].target.sessionID, "opencode-native-new")
   assert.deepEqual(links, [{
-    source: { machineID: "machine-handoff-http", agentID: "codex", sessionID: "codex-native-source", directory: "/repo" },
-    target: { machineID: "machine-handoff-http", agentID: "opencode", sessionID: "opencode-native-new", directory: "/repo" }
+    source: { machineID: "machine-handoff-http", agentID: "codex", sessionID: "codex-native-source", directory: repo },
+    target: { machineID: "machine-handoff-http", agentID: "opencode", sessionID: "opencode-native-new", directory: repo }
   }])
   assert.equal(result.target.sessionID, "opencode-native-new")
 })

@@ -16,8 +16,9 @@ async function isGitProject(directory) {
   }
 }
 
-function insideRoot(root, candidate) {
+export function insideRoot(root, candidate) {
   const relative = path.relative(root, candidate)
+  // On Windows another drive or UNC share makes path.relative return an absolute path, not "..\".
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
 }
 

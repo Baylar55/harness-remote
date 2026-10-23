@@ -1,10 +1,12 @@
+import { realpath } from "node:fs/promises"
+import path from "node:path"
 import { createAgentRoutingServer } from "./agent-router.js"
 import { createAgentModelServer } from "./agent-model-server.js"
 import { createCrossMachineHandoffServer } from "./cross-machine-handoff-server.js"
 import { createCrossMachineTargetRuntime } from "./cross-machine-target-runtime.js"
 import { MachineRegistry, trackAgentHostLifecycle } from "./machine-registry.js"
 import { trackManagedHostLifecycle } from "./opencode-host.js"
-import { discoverProjects } from "./project-catalog.js"
+import { discoverProjects, insideRoot } from "./project-catalog.js"
 import { createBridgeServer } from "./server.js"
 import { createSessionClaimServer } from "./session-claim-server.js"
 import { SessionLinkStore } from "./session-link-store.js"
@@ -515,12 +517,27 @@ export function createMachineDaemonServer({
     return handoffResultForTarget(sourceAgentID, sourceSessionID, input.targetAgentID, input.directory, candidates[0].id)
   }
 
+  const assertHandoffDirectory = async (directory) => {
+    const resolved = await realpath(directory).catch(() => undefined)
+    if (resolved) {
+      for (const root of [...roots, path.join(stateDirectory, "worktrees")]) {
+        const resolvedRoot = await realpath(root).catch(() => undefined)
+        if (resolvedRoot && insideRoot(resolvedRoot, resolved)) return
+      }
+    }
+    throw daemonError("invalid_request", "Native Session handoff directory is outside the configured --root boundary")
+  }
+
   const handoffSession = async (
     sourceAgentID,
     sourceSessionID,
     { targetAgentID, directory, model, variant, title },
     { checkpoint } = {}
   ) => {
+    // Handoff creates a new agent Session with this cwd, so it gets the same --root boundary as
+    // POST /session, plus this daemon's managed Task worktrees. The caller's string stays the
+    // Session identity; only its resolved form is checked.
+    await assertHandoffDirectory(directory)
     const sourceEntry = daemon.hostEntry(sourceAgentID)
     if (!sourceEntry) throw daemonError("unknown_agent", `Unknown source agent: ${sourceAgentID}`)
     const targetEntry = daemon.hostEntry(targetAgentID)

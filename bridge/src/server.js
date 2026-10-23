@@ -6,6 +6,7 @@ import { AcpPromptEchoFilter } from "./acp-prompt-echo-filter.js"
 import { AcpService } from "./acp-service.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { createLiveStatusProbe, overlayLiveStatus, probeLiveStatuses } from "./live-session-status.js"
+import { insideRoot } from "./project-catalog.js"
 import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
 
 const ATTACHMENT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
@@ -101,12 +102,6 @@ async function readBody(request) {
 
 function writeSSE(response, event, data) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-}
-
-function insideRoot(root, candidate) {
-  const relative = path.relative(root, candidate)
-  // On Windows another drive or UNC share makes path.relative return an absolute path, not "..\".
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
 }
 
 async function allowedDirectory(candidate, config) {
