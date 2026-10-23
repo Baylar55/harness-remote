@@ -1,5 +1,5 @@
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { authenticateDaemonRequest, guardRequestHandler, writeJSON } from "./http-policy.js"
 
 export const APPROVAL_DECISION_ROUTE = "/v1/approval-decisions"
 const MAX_BODY_BYTES = 64 * 1024
@@ -45,7 +45,7 @@ function queryIdentity(url) {
  * permission decision; the native harness remains the sole authorization authority.
  */
 export function createApprovalDecisionServer({ innerServer, config, store, createServer = http.createServer }) {
-  return createServer(async (request, response) => {
+  return createServer(guardRequestHandler(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     if (url.pathname !== APPROVAL_DECISION_ROUTE) {
       innerServer.emit("request", request, response)
@@ -73,5 +73,5 @@ export function createApprovalDecisionServer({ innerServer, config, store, creat
         error: error instanceof Error ? error.message : String(error)
       })
     }
-  })
+  }))
 }

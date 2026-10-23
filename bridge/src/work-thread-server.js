@@ -1,5 +1,5 @@
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { authenticateDaemonRequest, guardRequestHandler, writeJSON } from "./http-policy.js"
 
 const COLLECTION = "/v1/work-threads"
 const DETAIL_ROUTE = /^\/v1\/work-threads\/([^/]+)$/
@@ -26,7 +26,7 @@ function statusFor(error) {
 }
 
 export function createWorkThreadServer({ innerServer, config, controller, createServer = http.createServer }) {
-  return createServer(async (request, response) => {
+  return createServer(guardRequestHandler(async (request, response) => {
     const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     const detail = DETAIL_ROUTE.exec(requestURL.pathname)
     const cancel = CANCEL_ROUTE.exec(requestURL.pathname)
@@ -96,5 +96,5 @@ export function createWorkThreadServer({ innerServer, config, controller, create
     } catch (error) {
       writeJSON(response, statusFor(error), { error: error instanceof Error ? error.message : String(error), ...(error?.code ? { code: error.code } : {}) })
     }
-  })
+  }))
 }

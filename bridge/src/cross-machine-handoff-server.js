@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { authenticateDaemonRequest, guardRequestHandler, writeJSON } from "./http-policy.js"
 import { runIdempotentMutation } from "./session-operation-ledger.js"
 
 const TARGET_HANDOFF_ROUTE = "/v1/session-handoff-target"
@@ -117,7 +117,7 @@ export function createCrossMachineHandoffServer({
   reconcileTargetSession,
   createServer = http.createServer
 }) {
-  return createServer(async (request, response) => {
+  return createServer(guardRequestHandler(async (request, response) => {
     const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     if (requestURL.pathname !== TARGET_HANDOFF_ROUTE) {
       innerServer.emit("request", request, response)
@@ -160,5 +160,5 @@ export function createCrossMachineHandoffServer({
         ...(error?.code ? { code: error.code } : {})
       })
     }
-  })
+  }))
 }

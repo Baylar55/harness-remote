@@ -2,7 +2,7 @@ import http from "node:http"
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { createRequire } from "node:module"
 import { networkInterfaces } from "node:os"
-import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
+import { allowedOrigin, applyCorsHeaders, matchesCredentials, guardRequestHandler, writeJSON } from "./http-policy.js"
 
 export const PAIRING_CLAIM_PATH = "/v1/pairing/claim"
 export const PAIRING_GRANT_PATH = "/v1/pairing/grant"
@@ -218,7 +218,7 @@ export function machinePairingGrantResponse(config, grant, interfaces) {
  * byte-for-byte to the existing server stack.
  */
 export function createPairingServer({ innerServer, config, machine, grants, interfaces, createServer = http.createServer }) {
-  return createServer(async (request, response) => {
+  return createServer(guardRequestHandler(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     if (url.pathname === PAIRING_GRANT_PATH) {
       handlePairingGrant({ request, response, config, grants, interfaces })
@@ -260,7 +260,7 @@ export function createPairingServer({ innerServer, config, machine, grants, inte
       machine: { id: machine.id, name: machine.name },
       credentials: { username: config.username ?? "", password: config.password ?? "" }
     })
-  })
+  }))
 }
 
 function handlePairingGrant({ request, response, config, grants, interfaces }) {

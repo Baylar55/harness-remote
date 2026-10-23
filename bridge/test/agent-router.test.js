@@ -428,3 +428,25 @@ test("an upstream reset is isolated to the proxied request", async () => {
     await close(upstream)
   }
 })
+test("a malformed percent-escape in the agent path is a 400 for that request, not an unhandled rejection", async () => {
+  const unhandled = []
+  const onUnhandled = (reason) => unhandled.push(reason)
+  process.on("unhandledRejection", onUnhandled)
+  const server = routedServer({})
+  const port = await listen(server)
+  try {
+    const status = await new Promise((resolve, reject) => {
+      http.get({ host: "127.0.0.1", port, path: "/v1/agents/%E0%A4%A/x" }, (response) => {
+        response.resume()
+        response.on("end", () => resolve(response.statusCode))
+      }).on("error", reject)
+    })
+    assert.equal(status, 400)
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(unhandled, [])
+    assert.equal((await fetch(`http://127.0.0.1:${port}/v1/agents/missing/session`)).status, 404)
+  } finally {
+    process.off("unhandledRejection", onUnhandled)
+    await close(server)
+  }
+})

@@ -1,5 +1,5 @@
 import http from "node:http"
-import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
+import { allowedOrigin, applyCorsHeaders, matchesCredentials, guardRequestHandler, writeJSON } from "./http-policy.js"
 import { ManagedEventFanout } from "./managed-event-fanout.js"
 import { inspectGitProjectIdentity } from "./project-identity.js"
 import { inspectGitProjectOutcome } from "./project-outcome.js"
@@ -222,7 +222,7 @@ export function createAgentRoutingServer({
     eventStreams: Object.fromEntries([...eventFanouts.entries()].map(([key, fanout]) => [key, fanout.diagnostics()]))
   })
 
-  const server = createServer(async (request, response) => {
+  const server = createServer(guardRequestHandler(async (request, response) => {
     const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     let trackedRequestID
     if (requestURL.pathname !== "/v1/diagnostics") {
@@ -440,7 +440,7 @@ export function createAgentRoutingServer({
       if (!response.headersSent) writeJSON(response, 502, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy(error instanceof Error ? error : undefined)
     }
-  })
+  }))
 
   server.on("close", () => {
     for (const fanout of eventFanouts.values()) fanout.close()

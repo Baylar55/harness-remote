@@ -76,3 +76,27 @@ export function writeJSON(response, status, body) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" })
   response.end(JSON.stringify(body))
 }
+
+/**
+ * Request handlers are async and `http.Server` ignores their promise, so any throw (a malformed
+ * percent-escape in `decodeURIComponent`, an unparsable Host header, a store failure) would become an
+ * unhandled rejection and terminate the daemon. Contain it to the one request instead.
+ */
+export function guardRequestHandler(handler) {
+  return async (request, response) => {
+    try {
+      await handler(request, response)
+    } catch (error) {
+      if (response.headersSent || response.writableEnded) {
+        response.destroy()
+        return
+      }
+      if (error instanceof URIError || (error instanceof TypeError && error.code === "ERR_INVALID_URL")) {
+        writeJSON(response, 400, { error: "Malformed request URL" })
+        return
+      }
+      process.stderr.write(`[bridge] unhandled request error: ${error instanceof Error ? error.stack : String(error)}\n`)
+      writeJSON(response, 500, { error: "Internal server error" })
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { authenticateDaemonRequest, guardRequestHandler, writeJSON } from "./http-policy.js"
 import { normalizePortableHandoffState } from "./portable-handoff-state.js"
 import { runIdempotentMutation } from "./session-operation-ledger.js"
 
@@ -199,7 +199,7 @@ export function createSessionClaimServer({
   sessionLinkStore,
   createServer = http.createServer
 }) {
-  return createServer(async (request, response) => {
+  return createServer(guardRequestHandler(async (request, response) => {
     const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`)
     const match = SESSION_OPERATION_ROUTE.exec(requestURL.pathname)
     const sessionLinkRoute = requestURL.pathname === SESSION_LINK_ROUTE
@@ -328,5 +328,5 @@ export function createSessionClaimServer({
         ...(error?.code ? { code: error.code } : {})
       })
     }
-  })
+  }))
 }

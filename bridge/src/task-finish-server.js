@@ -1,5 +1,5 @@
 import http from "node:http"
-import { authenticateDaemonRequest, writeJSON } from "./http-policy.js"
+import { authenticateDaemonRequest, guardRequestHandler, writeJSON } from "./http-policy.js"
 import { inspectTaskWork } from "./task-finish.js"
 
 const resultRoute = /^\/v1\/tasks\/([^/]+)\/result$/
@@ -13,7 +13,7 @@ function status(error) {
 }
 
 export function createTaskFinishServer({ innerServer, config, taskStore, worktreeManager, taskRunController, createServer = http.createServer }) {
-  return createServer(async (request, response) => {
+  return createServer(guardRequestHandler(async (request, response) => {
     const pathname = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`).pathname
     const resultMatch = resultRoute.exec(pathname)
     const finishMatch = finishRoute.exec(pathname)
@@ -70,5 +70,5 @@ export function createTaskFinishServer({ innerServer, config, taskStore, worktre
     } catch (error) {
       writeJSON(response, status(error), { error: error instanceof Error ? error.message : String(error), ...(error?.code ? { code: error.code } : {}) })
     }
-  })
+  }))
 }
