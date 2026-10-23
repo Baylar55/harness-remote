@@ -239,9 +239,10 @@ them:
 
 - **Authentication.** Basic Auth compared in constant time. The bridge refuses to bind beyond
   loopback without credentials.
-- **The `--root` boundary.** It restricts what the bridge exposes: which directories the app may
-  browse and where a session may run. It is **not** a sandbox for the agent, which runs with full
-  user privileges — do not describe it as one.
+- **The `--root` filter.** It is a picker filter for the bridge's own surface: which directories
+  the app may browse and where a *new* session may start. Any existing session the adapter knows
+  about stays reachable by id wherever it lives, and it is **not** a sandbox for the agent, which
+  runs with full user privileges — do not describe it as either.
 - **CORS.** Off by default; each origin must be listed explicitly, because credentialed CORS cannot
   use a wildcard.
 

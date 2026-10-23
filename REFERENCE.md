@@ -272,7 +272,7 @@ Harness Remote connects to OMP through the bridge included in this repository. T
 - a working `omp` command in `PATH`;
 - a checkout of this repository on the computer that runs OMP.
 
-Start the bridge from the repository root. Restrict every worktree that the phone may access with `--root`; repeat the option to allow more than one root.
+Start the bridge from the repository root. Use `--root` to choose which directories the phone may browse and start new sessions in; repeat the option to allow more than one root. It is not an access boundary; see "What `--root` does and does not restrict" below.
 
 ```bash
 npx --yes ./bridge \
@@ -366,7 +366,7 @@ Codex CLI — hide the paperclip, and the bridge refuses an attachment sent to t
 
 #### What `--root` does and does not restrict
 
-`--root` restricts the bridge's own surface: which directories the app may browse (`/file`, `/path`) and which working directory a new session may use. It is not a sandbox for the agent. Once a session is running, OMP executes with your full user privileges and approves its own tool calls, so it can read and write outside the configured roots exactly as it would on the desktop. Point the bridge only at machines and accounts where you would already let OMP work unattended.
+`--root` restricts the bridge's own surface: which directories the app may browse (`/file`, `/path`) and which working directory a new session may use. It does not restrict existing sessions: any session the adapter knows about can be listed, read, prompted, renamed, deleted or have harness actions run on it by id, and prompting it starts work in that session's own directory, which may be outside every root. Nor does it restrict the OpenCode API that a machine daemon forwards in full under `/v1/agents/<id>/`. It is not a sandbox for the agent. Once a session is running, OMP executes with your full user privileges and approves its own tool calls, so it can read and write outside the configured roots exactly as it would on the desktop. Treat the bridge credentials as full access to that user account, and point the bridge only at machines and accounts where you would already let OMP work unattended.
 
 #### Browser access
 

@@ -321,6 +321,9 @@ export class ProjectScopedAcpClient extends EventEmitter {
     // MiMo can enumerate a historical Session from a parent/global index while refusing to load it
     // in that same process. session/load succeeds only when the adapter itself starts in the
     // Session's native cwd. Bind the returned id to that process so prompt/model/cancel stay on it.
+    // load/resume cwd comes from the adapter's own index. session/new cwd is trusted as given, so a
+    // caller must pass a --root-checked directory (POST /session, handoff) or a daemon-made one
+    // (Task worktree, catalog root).
     if (["session/new", "session/load", "session/resume"].includes(method)
       && typeof params?.cwd === "string" && params.cwd) {
       return normalizedDirectory(params.cwd)
