@@ -103,10 +103,16 @@ function writeSSE(response, event, data) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
+function insideRoot(root, candidate) {
+  const relative = path.relative(root, candidate)
+  // On Windows another drive or UNC share makes path.relative return an absolute path, not "..\".
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+}
+
 async function allowedDirectory(candidate, config) {
   const resolved = await realpath(candidate)
   const roots = await Promise.all((config.roots.length ? config.roots : [process.cwd()]).map((root) => realpath(root)))
-  if (!roots.some((root) => resolved === root || !path.relative(root, resolved).startsWith(`..${path.sep}`) && path.relative(root, resolved) !== "..")) {
+  if (!roots.some((root) => insideRoot(root, resolved))) {
     throw new Error("Directory is outside the configured --root boundary")
   }
   return resolved

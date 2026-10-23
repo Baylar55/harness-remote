@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { EventEmitter } from "node:events"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -983,6 +983,52 @@ test("confines file browsing to configured roots", async () => {
     const outside = await fetch(`${bridge.baseURL}/file?path=${encodeURIComponent(path.dirname(process.cwd()))}`, { headers: authHeaders() })
     assert.equal(outside.status, 400)
     assert.match((await outside.json()).error, /configured --root boundary/)
+  } finally {
+    await bridge.close()
+  }
+})
+
+test("rejects a sibling directory whose name extends the root name", async () => {
+  const base = await mkdtemp(path.join(tmpdir(), "harness-root-prefix-"))
+  const root = path.join(base, "work")
+  const sibling = path.join(base, "workx")
+  try {
+    await mkdir(root)
+    await mkdir(sibling)
+    const bridge = await startServer({ roots: [root] })
+    try {
+      const outside = await fetch(`${bridge.baseURL}/file?path=${encodeURIComponent(sibling)}`, { headers: authHeaders() })
+      assert.equal(outside.status, 400)
+      assert.match((await outside.json()).error, /configured --root boundary/)
+      const created = await fetch(`${bridge.baseURL}/session?directory=${encodeURIComponent(sibling)}`, { method: "POST", headers: jsonHeaders(), body: "{}" })
+      assert.equal(created.status, 400)
+      assert.match((await created.json()).error, /configured --root boundary/)
+    } finally {
+      await bridge.close()
+    }
+  } finally {
+    await rm(base, { recursive: true, force: true })
+  }
+})
+
+test("rejects --root escapes through a Windows UNC share", { skip: process.platform !== "win32" }, async (t) => {
+  // Admin share of the parent directory: path.relative returns an absolute UNC path, not "..\".
+  const parent = path.dirname(process.cwd())
+  const unc = `\\\\localhost\\${parent[0]}$${parent.slice(2)}`
+  try {
+    await realpath(unc)
+  } catch {
+    t.skip("administrative share unavailable")
+    return
+  }
+  const bridge = await startServer()
+  try {
+    const outside = await fetch(`${bridge.baseURL}/file?path=${encodeURIComponent(unc)}`, { headers: authHeaders() })
+    assert.equal(outside.status, 400)
+    assert.match((await outside.json()).error, /configured --root boundary/)
+    const created = await fetch(`${bridge.baseURL}/session?directory=${encodeURIComponent(unc)}`, { method: "POST", headers: jsonHeaders(), body: "{}" })
+    assert.equal(created.status, 400)
+    assert.match((await created.json()).error, /configured --root boundary/)
   } finally {
     await bridge.close()
   }
